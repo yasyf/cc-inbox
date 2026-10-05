@@ -1,0 +1,118 @@
+package inbox
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"regexp"
+	"time"
+
+	"github.com/yasyf/cc-inbox/internal/render"
+	"github.com/yasyf/cc-inbox/internal/store"
+)
+
+const (
+	pageRows     = 500
+	DigestWindow = 24 * time.Hour
+	FreshCursor  = time.Hour
+)
+
+type TailOptions struct {
+	Filter store.Filter
+	Cursor string
+	Budget int
+	JSON   bool
+}
+
+type TailResult struct {
+	Printed int
+	Last    int64
+	More    int
+}
+
+func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (TailResult, error) {
+	f := opts.Filter
+	if opts.Cursor != "" {
+		seq, ok, err := st.Cursor(ctx, opts.Cursor, f.Drive)
+		if err != nil {
+			return TailResult{}, err
+		}
+		f.After = seq
+		if !ok {
+			f.Since = st.Now().Add(-FreshCursor)
+		}
+	}
+	f.Limit = pageRows
+	records, err := st.Query(ctx, f)
+	if err != nil {
+		return TailResult{}, err
+	}
+	b := render.NewBudget(w, opts.Budget)
+	now := st.Now()
+	res := TailResult{Last: f.After}
+	for _, r := range records {
+		line := render.Line(r, now)
+		if opts.JSON {
+			line = render.JSON(r)
+		}
+		if !b.Line(line) {
+			break
+		}
+		res.Printed++
+		res.Last = r.Seq
+	}
+	rest := f
+	rest.Limit = 0
+	rest.After = res.Last
+	if res.More, err = st.Count(ctx, rest); err != nil {
+		return TailResult{}, err
+	}
+	if res.More > 0 && !opts.JSON {
+		resume := fmt.Sprintf("--since %d", res.Last)
+		if opts.Cursor != "" {
+			resume = "cci tail"
+		}
+		b.Trailer(fmt.Sprintf("... %d more; resume with %s", res.More, resume))
+	}
+	if opts.Cursor != "" && res.Printed > 0 {
+		if err := st.SetCursor(ctx, opts.Cursor, f.Drive, res.Last); err != nil {
+			return TailResult{}, err
+		}
+	}
+	return res, nil
+}
+
+func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, budget int, asJSON bool, w io.Writer) error {
+	b := render.NewBudget(w, budget)
+	now := st.Now()
+	matched, printed := 0, 0
+	f.Descending = true
+	f.Limit = pageRows
+	for {
+		records, err := st.Query(ctx, f)
+		if err != nil {
+			return err
+		}
+		for _, r := range records {
+			if !pattern.MatchString(r.Text) {
+				continue
+			}
+			matched++
+			line := render.Line(r, now)
+			if asJSON {
+				line = render.JSON(r)
+			}
+			if b.Line(line) {
+				printed++
+			}
+		}
+		if len(records) < pageRows {
+			break
+		}
+		f.Before = records[len(records)-1].Seq
+	}
+	if matched > printed && !asJSON {
+		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
+	}
+	return nil
+}

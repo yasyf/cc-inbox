@@ -1,0 +1,247 @@
+package importer
+
+import (
+	"bufio"
+	"io"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/yasyf/cc-inbox/internal/kinds"
+)
+
+type Clock struct {
+	Hour, Minute int
+	UTC          bool
+}
+
+type Entry struct {
+	Start string
+	Lane  string
+	Kind  kinds.Kind
+	Text  string
+	To    []string
+	PR    int
+	Clock *Clock
+}
+
+var (
+	timeParen = regexp.MustCompile(`\(([^()]*?)\b(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?\b([^()]*)\)`)
+	zulu      = regexp.MustCompile(`\b(\d{1,2}):(\d{2})Z\b`)
+	runner    = regexp.MustCompile(`^(\d{1,2}):(\d{2})(Z)?\s+([A-Z][A-Z0-9_-]+)\s+(.*)$`)
+	ruling    = regexp.MustCompile(`^R\d+[a-z]?$`)
+	kindWord  = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)*:?$`)
+	laneWord  = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*:?$`)
+	prRef     = regexp.MustCompile(`(?:#|/pull/)(\d{4,6})\b`)
+	bullet    = regexp.MustCompile(`^(?:[-*]\s+|#{1,4}\s+)`)
+)
+
+func Parse(r io.Reader, fallbackLane string) ([]Entry, error) {
+	var (
+		out  []Entry
+		cur  *Entry
+		scan = bufio.NewScanner(r)
+	)
+	scan.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	flush := func() {
+		if cur != nil {
+			cur.Text = strings.Join(strings.Fields(cur.Text), " ")
+			out = append(out, *cur)
+			cur = nil
+		}
+	}
+	for scan.Scan() {
+		line := strings.TrimRight(scan.Text(), " \t\r")
+		if strings.TrimSpace(line) == "" {
+			flush()
+			continue
+		}
+		if e, ok := start(line, fallbackLane); ok {
+			flush()
+			cur = &e
+			continue
+		}
+		if cur == nil {
+			e := plain(line, fallbackLane)
+			cur = &e
+			continue
+		}
+		cur.Text += " " + strings.TrimSpace(line)
+	}
+	flush()
+	return out, scan.Err()
+}
+
+func plain(line, lane string) Entry {
+	body := strings.TrimSpace(line)
+	return Entry{Start: line, Lane: lane, Kind: kinds.Note, Text: body, PR: pr(body)}
+}
+
+func start(line, fallbackLane string) (Entry, bool) {
+	marked := bullet.MatchString(line)
+	body := strings.TrimSpace(bullet.ReplaceAllString(line, ""))
+	if m := runner.FindStringSubmatch(body); m != nil {
+		return runnerEntry(line, body, m, fallbackLane), true
+	}
+	toks := strings.Fields(body)
+	if len(toks) > 0 && ruling.MatchString(toks[0]) {
+		return rulingEntry(line, body, toks), true
+	}
+	e := Entry{Start: line, Lane: fallbackLane, Kind: kinds.Note, PR: pr(body)}
+	var head, tail []string
+	parenLane := ""
+	timed := false
+	if loc := timeParen.FindStringSubmatchIndex(body); loc != nil && len(strings.Fields(body[:loc[0]])) <= 3 {
+		m := timeParen.FindStringSubmatch(body)
+		e.Clock = clock(m[2], m[3], m[4], m[5])
+		head = strings.Fields(body[:loc[0]])
+		tail = strings.Fields(body[loc[1]:])
+		parenLane = strings.TrimRight(firstField(m[1]), ",:")
+		timed = true
+	} else {
+		if m := zulu.FindStringSubmatch(body); m != nil {
+			e.Clock = clock(m[1], m[2], "", "Z")
+		}
+		head = firstN(toks, 3)
+		tail = toks[len(head):]
+	}
+	kindFound, laneFound := false, false
+	var rest []string
+	for _, tok := range head {
+		switch {
+		case !kindFound && isKind(tok):
+			e.Kind, _ = kinds.Lookup(strings.TrimSuffix(tok, ":"))
+			kindFound = true
+		case !laneFound && isLane(tok, timed || kindFound):
+			e.Lane = strings.TrimSuffix(tok, ":")
+			laneFound = true
+		default:
+			rest = append(rest, tok)
+		}
+	}
+	if !kindFound && timed && len(tail) > 0 && isKind(tail[0]) {
+		e.Kind, _ = kinds.Lookup(strings.TrimSuffix(tail[0], ":"))
+		kindFound = true
+		tail = tail[1:]
+	}
+	if !laneFound && parenLane != "" && isLane(parenLane, true) {
+		e.Lane = parenLane
+	}
+	e.Text = strings.Join(append(rest, tail...), " ")
+	if e.Text == "" {
+		e.Text = body
+	}
+	return e, marked || kindFound || timed || laneFound && strings.HasSuffix(firstField(body), ":")
+}
+
+func isKind(tok string) bool {
+	if !kindWord.MatchString(tok) {
+		return false
+	}
+	_, ok := kinds.Lookup(strings.TrimSuffix(tok, ":"))
+	return ok
+}
+
+func isLane(tok string, loose bool) bool {
+	if !laneWord.MatchString(tok) || len(strings.TrimSuffix(tok, ":")) < 3 {
+		return false
+	}
+	return loose || strings.HasSuffix(tok, ":") || strings.Contains(tok, "-")
+}
+
+func runnerEntry(line, body string, m []string, fallbackLane string) Entry {
+	e := Entry{Start: line, Lane: fallbackLane, Kind: kinds.Note, Clock: clock(m[1], m[2], "", m[3])}
+	if k, ok := kinds.Lookup(m[4]); ok {
+		e.Kind = k
+		e.Text = m[5]
+	} else {
+		e.Text = m[4] + " " + m[5]
+	}
+	for _, tok := range firstN(strings.Fields(m[5]), 3) {
+		if strings.HasSuffix(tok, ":") && laneWord.MatchString(tok) {
+			e.Lane = strings.TrimSuffix(tok, ":")
+			break
+		}
+	}
+	e.PR = pr(body)
+	return e
+}
+
+func rulingEntry(line, body string, fields []string) Entry {
+	e := Entry{Start: line, Lane: "root", Kind: kinds.Go, Text: body, PR: pr(body)}
+	if m := timeParen.FindStringSubmatch(body); m != nil {
+		e.Clock = clock(m[2], m[3], m[4], m[5])
+	}
+	for _, tok := range firstN(fields[1:], 5) {
+		if strings.HasSuffix(tok, ":") && laneWord.MatchString(tok) {
+			e.To = []string{strings.TrimSuffix(tok, ":")}
+			break
+		}
+	}
+	return e
+}
+
+func firstField(s string) string {
+	f := strings.Fields(s)
+	if len(f) == 0 {
+		return ""
+	}
+	return f[0]
+}
+
+func firstN(s []string, n int) []string {
+	return s[:min(n, len(s))]
+}
+
+func pr(s string) int {
+	m := prRef.FindStringSubmatch(s)
+	if m == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(m[1])
+	return n
+}
+
+func clock(h, m, ampm, zone string) *Clock {
+	hour, _ := strconv.Atoi(h)
+	minute, _ := strconv.Atoi(m)
+	switch strings.ToUpper(ampm) {
+	case "PM":
+		if hour < 12 {
+			hour += 12
+		}
+	case "AM":
+		if hour == 12 {
+			hour = 0
+		}
+	}
+	if hour > 23 || minute > 59 {
+		return nil
+	}
+	return &Clock{Hour: hour, Minute: minute, UTC: zone == "Z" || zone == "UTC"}
+}
+
+func Date(entries []Entry, end time.Time) []time.Time {
+	out := make([]time.Time, len(entries))
+	cur := end
+	for i := len(entries) - 1; i >= 0; i-- {
+		c := entries[i].Clock
+		if c == nil {
+			out[i] = cur
+			continue
+		}
+		loc := time.Local
+		if c.UTC {
+			loc = time.UTC
+		}
+		ref := cur.In(loc)
+		t := time.Date(ref.Year(), ref.Month(), ref.Day(), c.Hour, c.Minute, 0, 0, loc)
+		if t.After(cur.Add(5 * time.Minute)) {
+			t = t.AddDate(0, 0, -1)
+		}
+		out[i] = t
+		cur = t
+	}
+	return out
+}
