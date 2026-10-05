@@ -117,7 +117,7 @@ func TestReadsClipRecordsToWidth(t *testing.T) {
 			return err
 		},
 		"grep": func(b *bytes.Buffer) error {
-			return inbox.Grep(ctx, st, store.Filter{Drive: "d"}, regexp.MustCompile("^059"), 0, false, b)
+			return inbox.Grep(ctx, st, store.Filter{Drive: "d"}, regexp.MustCompile("059 z"), 0, false, b)
 		},
 		"state": func(b *bytes.Buffer) error {
 			records, err := inbox.State(ctx, st, store.Filter{Drive: "d"})

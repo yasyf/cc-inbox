@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Match grep patterns literally and case-insensitively by default. Use
+  `--regex` for regular expressions, including `|` alternation. Keep
+  newest-first ordering and the existing byte budgets.
+
+### Fixed
+
+- Search the whole rendered record line in `cci grep`, including kind,
+  lane, recipients, topic, and refs, so queries such as `STATE census`
+  match records whose kind and lane are stored outside their text.
+
 ## [0.4.0] - 2026-10-05
 
 ### Fixed

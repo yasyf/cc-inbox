@@ -87,6 +87,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	matched, printed := 0, 0
 	f.Descending = true
 	f.Limit = pageRows
+	now := st.Now()
 	for {
 		records, err := st.Query(ctx, f)
 		if err != nil {
@@ -94,7 +95,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		}
 		var hits []store.Record
 		for _, r := range records {
-			if pattern.MatchString(r.Text) {
+			if pattern.MatchString(render.Line(r, now)) {
 				hits = append(hits, r)
 			}
 		}

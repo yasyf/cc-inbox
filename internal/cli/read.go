@@ -96,13 +96,20 @@ func newDigestCmd() *cobra.Command {
 }
 
 func newGrepCmd() *cobra.Command {
-	var rf readFlags
+	var (
+		rf    readFlags
+		regex bool
+	)
 	cmd := &cobra.Command{
 		Use:   "grep PATTERN",
-		Short: "Search record text with a regular expression, newest first",
+		Short: "Search whole record lines (kind, lane, topic, text, refs) case-insensitively, newest first",
 		Args:  cobra.ExactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
-			pattern, err := regexp.Compile("(?i)" + args[0])
+			expr := args[0]
+			if !regex {
+				expr = regexp.QuoteMeta(expr)
+			}
+			pattern, err := regexp.Compile("(?i)" + expr)
 			if err != nil {
 				return fmt.Errorf("pattern: %w", err)
 			}
@@ -115,6 +122,7 @@ func newGrepCmd() *cobra.Command {
 		}),
 	}
 	rf.register(cmd, "", true)
+	cmd.Flags().BoolVar(&regex, "regex", false, "treat PATTERN as a regular expression, so | alternates; the default matches it literally")
 	return cmd
 }
 

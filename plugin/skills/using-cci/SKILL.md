@@ -116,8 +116,12 @@ and `resolves #n` to itself, naming the target.
 decision requests. `open blockers` (`open_blockers`) contains `blocker` and
 `blocked`; `open defects` (`open_defects`) contains defects. Holds and incidents
 have their own sections, followed by a count of older open items. `grep` searches
-newest first and includes expired records. Tail, grep, state, and text digest
-default to 6,144 bytes, capped at 16,000 with `--budget`.
+whole rendered record lines, including sequence number, time, kind, lane,
+recipients, topic, text, and rendered refs. Patterns are literal and
+case-insensitive by default; use `--regex` for regular expressions such as
+`HOLD|DEFECT`. It searches all matching records newest first, including expired
+records. Tail, grep, state, and text digest default to 6,144 bytes, capped at
+16,000 with `--budget`.
 
 Use `--width N` on tail, watch, and digest to set the width of each rendered
 record line. The default is 400 characters, including a final `…` when

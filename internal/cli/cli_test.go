@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -60,5 +62,46 @@ func TestPostTailDigest(t *testing.T) {
 	}
 	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "#2 ") {
 		t.Fatalf("grep = %q, %v", out, err)
+	}
+}
+
+func TestGrepMatchesWholeRecordLinesLiterally(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
+	lines := []string{
+		"RELEASE merge-walker-r2 (12:30 AM PT) receiver/core-usw2-auto at 29322a28c8 PASSED",
+		"STATE census (2:14 AM PT, cycle 1:54): 234/293 0/0 at 5bc4ece07e; 0 drift",
+		"CLAIM merge-walker-r2 (2:04 AM PT) #30541 receiver release",
+		"GREEN runner-protocol-idle-tenant (2:40 AM PT) #30568 approved",
+	}
+	if err := os.WriteFile(inbox, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "import", "--drive", "release-v3", inbox); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"STATE census"}, []string{"STATE census"}},
+		{[]string{"CLAIM merge-walker-r2"}, []string{"CLAIM merge-walker-r2 #30541"}},
+		{[]string{"runner-protocol-idle-tenant"}, []string{"runner-protocol-idle-tenant GREEN #30568"}},
+		{[]string{"census|GREEN"}, nil},
+		{[]string{"--regex", "census|GREEN"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
+	}
+	for _, tt := range tests {
+		out, err := run(t, append([]string{"grep", "--drive", "release-v3"}, tt.args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := strings.Count(out, "\n"); got != len(tt.want) {
+			t.Errorf("grep %v printed %d lines, want %d:\n%s", tt.args, got, len(tt.want), out)
+		}
+		for _, w := range tt.want {
+			if !strings.Contains(out, w) {
+				t.Errorf("grep %v = %q, want %q", tt.args, out, w)
+			}
+		}
 	}
 }
