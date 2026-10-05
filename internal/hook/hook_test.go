@@ -4,13 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/yasyf/cc-inbox/internal/hook"
-	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
@@ -89,27 +86,5 @@ func TestPromptRecordsOwnerRulingsOnlyForRoot(t *testing.T) {
 	}
 	if len(all) != 1 || all[0].Kind != kinds.Owner || all[0].Lane != "owner" || all[0].Text != "ship the wave fix now" || all[0].Source != "hook" {
 		t.Fatalf("records = %+v", all)
-	}
-}
-
-func TestPostToolRefreshesImportedFiles(t *testing.T) {
-	st, _ := testutil.Store(t)
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "deploy-go.md")
-	if err := os.WriteFile(path, []byte("GO root (9:00 PM PT) first\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := importer.Import(ctx, st, path, "d", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("GO root (9:00 PM PT) first\nGO root (9:01 PM PT) second\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := hook.PostTool(ctx, st); err != nil {
-		t.Fatal(err)
-	}
-	n, err := st.Count(ctx, store.Filter{Drive: "d"})
-	if err != nil || n != 2 {
-		t.Fatalf("Count() = %d, %v; want 2", n, err)
 	}
 }

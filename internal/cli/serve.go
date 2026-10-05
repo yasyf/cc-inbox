@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -20,24 +21,32 @@ func newServeCmd() *cobra.Command {
 		Short: "Start or reuse the cci daemon, which serves read-only JSON over HTTP from a hot store",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			d, err := daemon.Definition()
+			ensured, err := ensureDaemon(cmd.Context(), 60*time.Second)
 			if err != nil {
 				return err
-			}
-			client, err := daemonkit.Open(d)
-			if err != nil {
-				return fmt.Errorf("open cci daemon: %w", err)
-			}
-			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
-			defer cancel()
-			ensured, err := client.Ensure(ctx)
-			if err != nil {
-				return fmt.Errorf("ensure cci daemon: %w", err)
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "cci daemon pid %d serving http://%s/v1\n", ensured.After.PID, daemon.Addr)
 			return err
 		},
 	}
+}
+
+func ensureDaemon(ctx context.Context, timeout time.Duration) (daemonkit.Ensured, error) {
+	d, err := daemon.Definition()
+	if err != nil {
+		return daemonkit.Ensured{}, err
+	}
+	client, err := daemonkit.Open(d)
+	if err != nil {
+		return daemonkit.Ensured{}, fmt.Errorf("open cci daemon: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ensured, err := client.Ensure(ctx)
+	if err != nil {
+		return daemonkit.Ensured{}, fmt.Errorf("ensure cci daemon: %w", err)
+	}
+	return ensured, nil
 }
 
 func newDaemonCmd() *cobra.Command {
@@ -58,8 +67,9 @@ func newDaemonCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("listen %s: %w", daemon.Addr, err)
 			}
-			_, err = daemonkit.Serve(cmd.Context(), d, daemon.Start(home, ln))
-			return err
+			rt := daemon.New(home, ln)
+			_, err = daemonkit.Serve(cmd.Context(), d, rt.Start)
+			return cmp.Or(err, rt.Err())
 		},
 	})
 	return cmd
@@ -76,7 +86,11 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return hook.SessionStart(cmd.Context(), st, p, cmd.OutOrStdout())
+				if err := hook.SessionStart(cmd.Context(), st, p, cmd.OutOrStdout()); err != nil {
+					return err
+				}
+				_, err = ensureDaemon(cmd.Context(), 10*time.Second)
+				return err
 			}),
 		},
 		&cobra.Command{
@@ -88,13 +102,6 @@ func newHookCmd() *cobra.Command {
 					return err
 				}
 				return hook.Prompt(cmd.Context(), st, p)
-			}),
-		},
-		&cobra.Command{
-			Use:  "post-tool",
-			Args: cobra.NoArgs,
-			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-				return hook.PostTool(cmd.Context(), st)
 			}),
 		},
 	)

@@ -155,23 +155,25 @@ $ cci tail --drive migration --cursor root
 #1 <time> GO root Deploy after the checks pass.
 ```
 
-The plugin's `PostToolUse` hook imports new content after a Bash, Write, Edit, or
-`MultiEdit` call changes a registered file. This shell run invokes that same hook
-entry point after an append:
+The daemon refreshes registered imports every second. Run `cci serve` to start
+or reuse it, or start any Claude Code session with the plugin installed.
+Append another record:
 
-```console
-$ printf '%s\n' 'STATE api Checks passed.' >> legacy.md
-$ cci hook post-tool
-$ cci tail --drive migration --cursor root
-#2 <time> STATE api Checks passed.
-$ cci import legacy.md --drive migration
-<cwd>/legacy.md: 0 entries, 0 new
+```bash
+cci serve
+printf '%s\n' 'STATE api Checks passed.' >> legacy.md
+```
+
+After the next refresh, read the new record with the same cursor:
+
+```bash
+cci tail --drive migration --cursor root
 ```
 
 `cci import` tracks offsets and inodes, rereads files from the start when they
 shrink or rotation replaces them, and deduplicates source lines within a drive.
-The `PostToolUse` hook also imports new `<inbox>.md.archive/*.md` files with the
-inbox's drive and lane; archive files default to the inbox name.
+The daemon also imports new `<inbox>.md.archive/*.md` files with the inbox's
+drive and lane; direct archive imports default to the inbox name.
 
 Import extracts all matching PR references (`#30440` or `/pull/30440`), Buildkite
 build URLs, and stack tokens such as `api/plat-usw2-prod` and
@@ -400,8 +402,8 @@ problems and the records addressing them, including whether each opener is close
 the daemonkit supervisor for `Ensure`. It runs a copy of `cci` at
 `~/.daemonkit/bin/com.yasyf.cc-inbox`, with state under
 `~/.daemonkit/a/com.yasyf.cc-inbox`. It restarts on failure. When a different
-`cci` build calls `Ensure` through `cci serve`, daemonkit drains and replaces
-the running daemon.
+`cci` build calls `Ensure` through `cci serve` or the `SessionStart` hook,
+daemonkit drains and replaces the running daemon.
 
 The daemon keeps one SQLite store open with a 256 MiB memory map and a 64 MiB
 page cache. HTTP readers and the `digest` business operation reuse that store;
@@ -417,13 +419,15 @@ Each entry invokes the plugin's `bin/cci`;
 
 | Claude Code event | Entry point | Behavior |
 | --- | --- | --- |
-| `SessionStart` | `cci hook session-start` | Inject the bound drive's digest and unseen session tail into model context, including after conversation compaction. |
+| `SessionStart` | `cci hook session-start` | Inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. |
 | `UserPromptSubmit` | `cci hook prompt` | In a session bound with `--root`, record ordinary user prompts as `owner` records. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
-| `PostToolUse` | `cci hook post-tool` | After Bash, Write, Edit, or `MultiEdit`, refresh registered imports whose size or inode changed and discover archive markdown files. |
 
 `SessionStart` and `UserPromptSubmit` read the session ID from the hook payload
-and stay silent for unbound sessions. `PostToolUse` refreshes registered imports
-in the store, independent of the current session's binding.
+and emit no context or owner records for unbound sessions. `SessionStart` still
+starts or reuses the daemon for unbound sessions. If that fails, the hook reports
+a non-blocking error after any bound drive context has been written. The daemon
+refreshes registered imports every second, independent of session bindings and
+tool calls.
 
 ## Store, budgets, and caps
 

@@ -1,25 +1,29 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/yasyf/daemonkit"
 
+	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 const (
-	Label  daemonkit.Label  = "com.yasyf.cc-inbox"
-	Schema daemonkit.Schema = "cci.v1"
-	Addr                    = "127.0.0.1:7377"
+	Label          daemonkit.Label  = "com.yasyf.cc-inbox"
+	Schema         daemonkit.Schema = "cci.v1"
+	Addr                            = "127.0.0.1:7377"
+	ImportInterval                  = time.Second
 )
 
 func Definition() (daemonkit.Daemon, error) {
@@ -39,30 +43,78 @@ func Definition() (daemonkit.Daemon, error) {
 }
 
 type Product struct {
-	st   *store.Store
-	http *http.Server
-	done chan error
+	st       *store.Store
+	http     *http.Server
+	done     chan error
+	stopSync context.CancelFunc
+	synced   chan struct{}
 }
 
-func Start(home string, ln net.Listener) daemonkit.Start {
-	return func(c daemonkit.Ctx) (daemonkit.Product, error) {
-		st, err := store.Open(c.Context, home)
-		if err != nil {
-			return nil, err
+type Runtime struct {
+	home   string
+	ln     net.Listener
+	mu     sync.Mutex
+	failed error
+}
+
+func New(home string, ln net.Listener) *Runtime {
+	return &Runtime{home: home, ln: ln}
+}
+
+func (r *Runtime) Err() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.failed
+}
+
+func (r *Runtime) fail(c daemonkit.Ctx, err error) {
+	r.mu.Lock()
+	r.failed = cmp.Or(r.failed, err)
+	r.mu.Unlock()
+	c.Stop(err)
+}
+
+func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
+	st, err := store.Open(c.Context, r.home)
+	if err != nil {
+		return nil, err
+	}
+	p := &Product{
+		st:     st,
+		http:   &http.Server{Handler: server.New(st, time.Second).Handler(), ReadHeaderTimeout: 5 * time.Second},
+		done:   make(chan error, 1),
+		synced: make(chan struct{}),
+	}
+	var syncCtx context.Context
+	syncCtx, p.stopSync = context.WithCancel(context.Background())
+	go func() {
+		defer close(p.synced)
+		if err := p.syncImports(syncCtx); err != nil {
+			r.fail(c, err)
 		}
-		p := &Product{
-			st:   st,
-			http: &http.Server{Handler: server.New(st, time.Second).Handler(), ReadHeaderTimeout: 5 * time.Second},
-			done: make(chan error, 1),
+	}()
+	go func() {
+		err := p.http.Serve(r.ln)
+		if !errors.Is(err, http.ErrServerClosed) {
+			r.fail(c, fmt.Errorf("http listener: %w", err))
 		}
-		go func() {
-			err := p.http.Serve(ln)
-			if !errors.Is(err, http.ErrServerClosed) {
-				c.Stop(fmt.Errorf("http listener: %w", err))
-			}
-			p.done <- nil
-		}()
-		return p, nil
+		p.done <- nil
+	}()
+	return p, nil
+}
+
+func (p *Product) syncImports(ctx context.Context) error {
+	tick := time.NewTicker(ImportInterval)
+	defer tick.Stop()
+	for {
+		if _, err := importer.Refresh(ctx, p.st); err != nil && ctx.Err() == nil {
+			return fmt.Errorf("refresh imports: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
 	}
 }
 
@@ -94,13 +146,19 @@ func (p *Product) Handle(ctx context.Context, req daemonkit.Request) (daemonkit.
 }
 
 func (p *Product) Drain(b daemonkit.Budget) error {
+	p.stopSync()
 	ctx, cancel := b.Context(context.Background())
 	defer cancel()
 	if err := p.http.Shutdown(ctx); err != nil {
 		return fmt.Errorf("drain http: %w", err)
 	}
 	<-p.done
-	return nil
+	select {
+	case <-p.synced:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("drain imports: %w", ctx.Err())
+	}
 }
 
 func (p *Product) Close(daemonkit.Budget) error {
