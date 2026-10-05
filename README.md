@@ -112,8 +112,8 @@ an explicit time window starts at the current head.
 ### Move a drive off markdown inbox files
 
 Existing desks may still append to inbox files while the root moves to `cci`.
-Import only append-only inbox files; the long-running runner's `runner-state.md`
-is a rendered view rewritten in place, not an inbox.
+Import inbox files that lanes append to; the long-running runner's
+`runner-state.md` is a rendered view rewritten in place, not an inbox.
 Import a file once to register it, then read its records through a cursor:
 
 ```console
@@ -137,9 +137,12 @@ $ cci import legacy.md --drive migration
 <cwd>/legacy.md: 0 entries, 0 new
 ```
 
-Import remembers file offsets and deduplicates source lines across files. A file
-that shrinks is reread from the start. At cutover, change lane instructions to
-post records directly and stop appending to the markdown files.
+`cci import` tracks offsets and inodes, rereads files from the start when they
+shrink or rotation replaces them, and deduplicates source lines within a drive.
+The `PostToolUse` hook also imports new `<inbox>.md.archive/*.md` files with the
+inbox's drive and lane; archive files default to the inbox name.
+At cutover, change lane instructions to post records directly and stop appending
+to the markdown files.
 
 ---
 
@@ -294,7 +297,7 @@ Each entry invokes the plugin's `bin/cci`;
 | --- | --- | --- |
 | `SessionStart` | `cci hook session-start` | Inject the bound drive's digest and unseen session tail into model context, including after conversation compaction. |
 | `UserPromptSubmit` | `cci hook prompt` | In a session bound with `--root`, record ordinary user prompts as `owner` records. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
-| `PostToolUse` | `cci hook post-tool` | After Bash, Write, Edit, or `MultiEdit`, refresh registered imports whose file size changed. |
+| `PostToolUse` | `cci hook post-tool` | After Bash, Write, Edit, or `MultiEdit`, refresh registered imports whose size or inode changed and discover archive markdown files. |
 
 `SessionStart` and `UserPromptSubmit` read the session ID from the hook payload
 and stay silent for unbound sessions. `PostToolUse` refreshes registered imports
