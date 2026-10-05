@@ -2,8 +2,10 @@ package store_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -267,5 +269,35 @@ func TestBindingSurvivesReopen(t *testing.T) {
 	}
 	if !errors.Is(store.Validate(store.Record{}), store.ErrNoDrive) {
 		t.Fatal("Validate on an empty record did not report ErrNoDrive")
+	}
+}
+
+func TestMigratesSchemaOneStores(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	st, err := store.Open(ctx, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "inbox.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "ALTER TABLE imports DROP COLUMN inode; PRAGMA user_version = 1"); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	st, err = store.Open(ctx, dir)
+	if err != nil {
+		t.Fatalf("reopen schema-1 store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.SaveSource(ctx, store.Source{Path: "/x.md", Drive: "d", Lane: "x", Offset: 3, Inode: 42}); err != nil {
+		t.Fatal(err)
+	}
+	src, ok, err := st.Source(ctx, "/x.md")
+	if err != nil || !ok || src.Inode != 42 {
+		t.Fatalf("Source() = %+v %v %v", src, ok, err)
 	}
 }

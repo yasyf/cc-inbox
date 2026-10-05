@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -40,7 +41,7 @@ func Import(ctx context.Context, st *store.Store, path, drive, lane string) (Res
 		src.Lane = lane
 	}
 	if src.Lane == "" {
-		src.Lane = strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
+		src.Lane = DefaultLane(abs)
 	}
 	if src.Drive == "" {
 		return Result{}, store.ErrNoDrive
@@ -54,9 +55,11 @@ func Import(ctx context.Context, st *store.Store, path, drive, lane string) (Res
 	if err != nil {
 		return Result{}, fmt.Errorf("stat %s: %w", abs, err)
 	}
-	if info.Size() < src.Offset {
+	inode := info.Sys().(*syscall.Stat_t).Ino
+	if inode != src.Inode || info.Size() < src.Offset {
 		src.Offset = 0
 	}
+	src.Inode = inode
 	if _, err := f.Seek(src.Offset, io.SeekStart); err != nil {
 		return Result{}, fmt.Errorf("seek %s: %w", abs, err)
 	}
@@ -103,8 +106,27 @@ func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	known := map[string]bool{}
+	for _, src := range sources {
+		known[src.Path] = true
+	}
 	var out []Result
 	for _, src := range sources {
+		archives, err := filepath.Glob(src.Path + ".archive/*.md")
+		if err != nil {
+			return nil, fmt.Errorf("list archives of %s: %w", src.Path, err)
+		}
+		for _, archive := range archives {
+			if known[archive] {
+				continue
+			}
+			known[archive] = true
+			res, err := Import(ctx, st, archive, src.Drive, src.Lane)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, res)
+		}
 		info, err := os.Stat(src.Path)
 		if os.IsNotExist(err) {
 			continue
@@ -112,7 +134,7 @@ func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
 		if err != nil {
 			return nil, fmt.Errorf("stat %s: %w", src.Path, err)
 		}
-		if info.Size() == src.Offset {
+		if info.Size() == src.Offset && info.Sys().(*syscall.Stat_t).Ino == src.Inode {
 			continue
 		}
 		res, err := Import(ctx, st, src.Path, "", "")
@@ -122,6 +144,14 @@ func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
 		out = append(out, res)
 	}
 	return out, nil
+}
+
+func DefaultLane(path string) string {
+	if dir := filepath.Base(filepath.Dir(path)); strings.HasSuffix(dir, ".archive") {
+		path = strings.TrimSuffix(dir, ".archive")
+	}
+	base := filepath.Base(path)
+	return strings.TrimSuffix(base, filepath.Ext(base))
 }
 
 func lineHash(drive, line string) string {

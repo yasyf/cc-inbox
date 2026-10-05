@@ -23,8 +23,49 @@ import (
 const (
 	MaxText     = 400
 	DedupWindow = 10 * time.Minute
-	schema      = 1
 )
+
+var migrations = []string{
+	`CREATE TABLE IF NOT EXISTS records (
+	seq INTEGER PRIMARY KEY AUTOINCREMENT,
+	drive TEXT NOT NULL,
+	lane TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	at INTEGER NOT NULL,
+	text TEXT NOT NULL,
+	topic TEXT NOT NULL DEFAULT '',
+	recipients TEXT NOT NULL DEFAULT '[]',
+	re INTEGER NOT NULL DEFAULT 0,
+	refs TEXT NOT NULL DEFAULT '{}',
+	fields TEXT NOT NULL DEFAULT '{}',
+	expires_at INTEGER,
+	source TEXT NOT NULL,
+	hash TEXT NOT NULL,
+	line_hash TEXT
+);
+CREATE INDEX IF NOT EXISTS records_drive_seq ON records(drive, seq);
+CREATE INDEX IF NOT EXISTS records_drive_kind ON records(drive, kind, seq);
+CREATE INDEX IF NOT EXISTS records_hash ON records(hash, at);
+CREATE UNIQUE INDEX IF NOT EXISTS records_line_hash ON records(line_hash) WHERE line_hash IS NOT NULL;
+CREATE TABLE IF NOT EXISTS cursors (
+	name TEXT NOT NULL,
+	drive TEXT NOT NULL,
+	seq INTEGER NOT NULL,
+	PRIMARY KEY (name, drive)
+);
+CREATE TABLE IF NOT EXISTS sessions (
+	session TEXT PRIMARY KEY,
+	drive TEXT NOT NULL,
+	root INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS imports (
+	path TEXT PRIMARY KEY,
+	drive TEXT NOT NULL,
+	lane TEXT NOT NULL,
+	offset INTEGER NOT NULL
+);`,
+	`ALTER TABLE imports ADD COLUMN inode INTEGER NOT NULL DEFAULT 0`,
+}
 
 var (
 	ErrTextTooLong = errors.New("text exceeds 400 characters; put the body in a file and pass --path")
@@ -126,53 +167,19 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version == schema {
+	if version == len(migrations) {
 		return nil
 	}
-	if version > schema {
-		return fmt.Errorf("store schema %d is newer than this cci (%d); upgrade cci", version, schema)
+	if version > len(migrations) {
+		return fmt.Errorf("store schema %d is newer than this cci (%d); upgrade cci", version, len(migrations))
 	}
-	if _, err := tx.ExecContext(ctx, `
-CREATE TABLE IF NOT EXISTS records (
-	seq INTEGER PRIMARY KEY AUTOINCREMENT,
-	drive TEXT NOT NULL,
-	lane TEXT NOT NULL,
-	kind TEXT NOT NULL,
-	at INTEGER NOT NULL,
-	text TEXT NOT NULL,
-	topic TEXT NOT NULL DEFAULT '',
-	recipients TEXT NOT NULL DEFAULT '[]',
-	re INTEGER NOT NULL DEFAULT 0,
-	refs TEXT NOT NULL DEFAULT '{}',
-	fields TEXT NOT NULL DEFAULT '{}',
-	expires_at INTEGER,
-	source TEXT NOT NULL,
-	hash TEXT NOT NULL,
-	line_hash TEXT
-);
-CREATE INDEX IF NOT EXISTS records_drive_seq ON records(drive, seq);
-CREATE INDEX IF NOT EXISTS records_drive_kind ON records(drive, kind, seq);
-CREATE INDEX IF NOT EXISTS records_hash ON records(hash, at);
-CREATE UNIQUE INDEX IF NOT EXISTS records_line_hash ON records(line_hash) WHERE line_hash IS NOT NULL;
-CREATE TABLE IF NOT EXISTS cursors (
-	name TEXT NOT NULL,
-	drive TEXT NOT NULL,
-	seq INTEGER NOT NULL,
-	PRIMARY KEY (name, drive)
-);
-CREATE TABLE IF NOT EXISTS sessions (
-	session TEXT PRIMARY KEY,
-	drive TEXT NOT NULL,
-	root INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS imports (
-	path TEXT PRIMARY KEY,
-	drive TEXT NOT NULL,
-	lane TEXT NOT NULL,
-	offset INTEGER NOT NULL
-);
-PRAGMA user_version = 1;`); err != nil {
-		return fmt.Errorf("migrate store: %w", err)
+	for i, step := range migrations[version:] {
+		if _, err := tx.ExecContext(ctx, step); err != nil {
+			return fmt.Errorf("migrate store to schema %d: %w", version+i+1, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
+		return fmt.Errorf("record schema version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit migration: %w", err)

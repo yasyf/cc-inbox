@@ -105,3 +105,55 @@ func TestImportStoresLongLinesAsBlobs(t *testing.T) {
 		t.Fatalf("blob = %q", body)
 	}
 }
+
+func TestRefreshFollowsRenameRotationIntoArchives(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	inbox := filepath.Join(dir, "deploy-go.md")
+	write(t, inbox, "GO root (9:00 PM PT) one\nGO root (9:01 PM PT) two\n")
+	if _, err := importer.Import(ctx, st, inbox, "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	appendTo(t, inbox, "GO root (9:02 PM PT) three, written before rotation and never imported\n")
+	archive := filepath.Join(inbox+".archive", "2026-10-04.md")
+	if err := os.MkdirAll(filepath.Dir(archive), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, archive, "GO root (9:00 PM PT) one\nGO root (9:01 PM PT) two\nGO root (9:02 PM PT) three, written before rotation and never imported\n")
+	staged := inbox + ".new"
+	write(t, staged, "GO root (9:30 PM PT) four, after rotation "+strings.Repeat("x", 200)+"\n")
+	if err := os.Rename(staged, inbox); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.Refresh(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	all, err := st.Query(ctx, store.Filter{Drive: "drive"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(all))
+	for _, r := range all {
+		got = append(got, r.Lane+":"+strings.Fields(r.Text)[0])
+	}
+	if want := "root:one root:two root:three, root:four,"; strings.Join(got, " ") != want {
+		t.Fatalf("records = %v, want %s", got, want)
+	}
+	if results, err := importer.Refresh(ctx, st); err != nil || len(results) != 0 {
+		t.Fatalf("second refresh = %+v, %v; want nothing to do", results, err)
+	}
+}
+
+func TestDefaultLane(t *testing.T) {
+	tests := map[string]string{
+		"/inbox/deploy-go.md":                       "deploy-go",
+		"/inbox/deploy-go.md.archive/2026-10-04.md": "deploy-go",
+		"/inbox/runner.md":                          "runner",
+	}
+	for path, want := range tests {
+		if got := importer.DefaultLane(path); got != want {
+			t.Errorf("DefaultLane(%s) = %s, want %s", path, got, want)
+		}
+	}
+}
