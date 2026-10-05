@@ -70,7 +70,7 @@ func newDigestCmd() *cobra.Command {
 	var rf readFlags
 	cmd := &cobra.Command{
 		Use:   "digest",
-		Short: "One-screen summary: counts, open asks, holds, incidents, latest line per lane",
+		Short: "One-screen summary: counts, open asks, blockers, holds, incidents, latest line per lane",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			f, err := rf.filter(cmd.Context(), st)
@@ -109,6 +109,29 @@ func newGrepCmd() *cobra.Command {
 			}
 			f.IncludeExpired = true
 			return inbox.Grep(cmd.Context(), st, f, pattern, rf.budget, rf.json, cmd.OutOrStdout())
+		}),
+	}
+	rf.register(cmd, "", true)
+	return cmd
+}
+
+func newStateCmd() *cobra.Command {
+	var rf readFlags
+	cmd := &cobra.Command{
+		Use:   "state",
+		Short: "Latest head and contract per lane and topic, minus withdrawn ones",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			f, err := rf.filter(cmd.Context(), st)
+			if err != nil {
+				return err
+			}
+			records, err := inbox.State(cmd.Context(), st, f)
+			if err != nil {
+				return err
+			}
+			inbox.WriteState(cmd.OutOrStdout(), records, st.Now(), rf.budget, rf.json)
+			return nil
 		}),
 	}
 	rf.register(cmd, "", true)

@@ -13,6 +13,7 @@ const (
 	Go         Kind = "go"
 	Owner      Kind = "owner"
 	Decide     Kind = "decide"
+	Decision   Kind = "decision"
 	Ask        Kind = "ask"
 	Answer     Kind = "answer"
 	Hold       Kind = "hold"
@@ -53,6 +54,7 @@ var specs = map[Kind]Spec{
 	Go:         {},
 	Owner:      {},
 	Decide:     {},
+	Decision:   {},
 	Ask:        {},
 	Answer:     {NeedsRef: true},
 	Hold:       {},
@@ -87,7 +89,6 @@ var aliases = map[string]Kind{
 	"registered":    State,
 	"reclaim":       Note,
 	"launch-failed": Defect,
-	"decision":      Decide,
 	"fixlive":       FixLive,
 	"fix_live":      FixLive,
 	"open":          Opened,
@@ -101,6 +102,7 @@ var openers = map[Kind][]Kind{
 	Decide:   {Answer, Go, Withdraw},
 	Hold:     {Lift},
 	Incident: {FixLive, Done},
+	Blocker:  {Withdraw, Answer, Done},
 }
 
 func Parse(s string) (Kind, error) {
