@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Default text `digest` to a 32,000-byte budget, so every section prints
+  whole at its record limit. Tail, grep, and state keep 6,144 bytes, and
+  `--budget` still overrides either default.
+
 ## [0.6.0] - 2026-10-05
 
 ### Added
