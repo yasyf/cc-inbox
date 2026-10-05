@@ -158,9 +158,12 @@ TTL means time to live; `--ttl` overrides defaults.
 Import appended inbox files, not the runner's rewritten `runner-state.md` view.
 `cci import` registers files, restarts after inode changes or shrinkage, and
 deduplicates lines within the drive. It extracts PRs, Buildkite build URLs, and
-stack tokens such as `api/plat-usw2-prod`. `PostToolUse` imports later appends and
-new `<inbox>.md.archive/*.md` files with the inbox's drive and lane; direct
-archive imports default to the inbox name.
+stack tokens such as `api/plat-usw2-prod`. The daemon refreshes registered imports
+every second, importing later appends and new `<inbox>.md.archive/*.md` files
+with the inbox's drive and lane; direct archive imports default to the inbox
+name. Run `cci serve` or start any Claude Code session with the plugin installed
+to start or reuse the daemon. Allow the next refresh to finish before reading
+appended records.
 
 Once lanes post directly, stop writing markdown inboxes. Compaction folds old
 records into daily counts and keeps open items. Open-item tracking skips

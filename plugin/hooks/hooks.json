@@ -13,14 +13,6 @@
           { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook prompt", "timeout": 10 }
         ]
       }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Bash|Write|Edit|MultiEdit",
-        "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook post-tool", "timeout": 10 }
-        ]
-      }
     ]
   }
 }
