@@ -121,6 +121,9 @@ or `re` pointing to the opener. TTL means time to live; `--ttl` overrides defaul
 | `digest` | None | Written only by compaction. |
 | `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
 
+Import only append-only inbox files; the long-running runner's `runner-state.md`
+is a rendered view rewritten in place, not an inbox.
+
 Use `cci post` for new coordination. During a markdown cutover, `cci import`
 registers old inbox files and the `PostToolUse` hook imports later appends. Once
 lanes post directly, stop writing the markdown inboxes. Compaction folds old

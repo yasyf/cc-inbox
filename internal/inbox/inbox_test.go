@@ -86,6 +86,31 @@ func TestTailBudgetIsClamped(t *testing.T) {
 	}
 }
 
+func TestDigestLatestIsByTimeNotSeq(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	imported := []store.Ingestion{
+		{Record: store.Record{Drive: "d", Lane: "old-import", Kind: kinds.Note, At: c.Now().Add(-2 * time.Hour), Text: "older", Source: "import:/x.md"}, LineHash: "a"},
+		{Record: store.Record{Drive: "d", Lane: "new-import", Kind: kinds.Note, At: c.Now().Add(-time.Minute), Text: "newer", Source: "import:/x.md"}, LineHash: "b"},
+	}
+	if _, err := st.IngestAll(ctx, imported); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: "new-import", Kind: kinds.State, Text: "latest"})
+	c.Advance(time.Second)
+	v, err := inbox.Digest(ctx, st, "d", c.Now().Add(-inbox.DigestWindow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(v.Latest))
+	for _, r := range v.Latest {
+		got = append(got, r.Lane+":"+r.Text)
+	}
+	if strings.Join(got, ",") != "new-import:latest,old-import:older" {
+		t.Fatalf("latest = %v", got)
+	}
+}
+
 func TestGrep(t *testing.T) {
 	st, _ := testutil.Store(t)
 	testutil.Post(t, st, store.Record{Kind: kinds.Landed, Text: "landed #30427", Refs: store.Refs{PR: 30427}})
