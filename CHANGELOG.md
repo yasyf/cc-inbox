@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `root` and parse `:5x` minutes as `:50`.
 - Date imported stamps within 12 hours of the dating cursor and only
   move it backward, keeping out-of-order stamps on their day.
+- Parse time-first inbox lines such as `1:43 AM PT <lane>: MECHANISM ...`
+  without treating `AM` or `PM` as runner kinds. Preserve the full clock,
+  lane, and kind, and reparse existing imports with parser version 2.
 
 ### Changed
 

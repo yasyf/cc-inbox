@@ -31,6 +31,7 @@ type Entry struct {
 
 var (
 	timeParen = regexp.MustCompile(`\(([^()]*?)\b(\d{1,2}):(\d[\dx])(?::\d{2})?\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?\b([^()]*)\)`)
+	bareClock = regexp.MustCompile(`\b(\d{1,2}):(\d[\dx])\s*([AaPp][Mm])\b(?:\s*(?:PT|PDT|PST)\b)?`)
 	zulu      = regexp.MustCompile(`\b(\d{1,2}):(\d{2})Z\b`)
 	runner    = regexp.MustCompile(`^(\d{1,2}):(\d{2})(Z)?\s+([A-Z][A-Z0-9_-]+)\s+(.*)$`)
 	ruling    = regexp.MustCompile(`^R\d+[a-z]?$`)
@@ -87,7 +88,7 @@ func plain(line, lane string) Entry {
 func start(line, fallbackLane string) (Entry, bool) {
 	marked := bullet.MatchString(line)
 	body := strings.TrimSpace(bullet.ReplaceAllString(line, ""))
-	if m := runner.FindStringSubmatch(body); m != nil {
+	if m := runner.FindStringSubmatch(body); m != nil && !strings.EqualFold(m[4], "AM") && !strings.EqualFold(m[4], "PM") {
 		return runnerEntry(line, body, m, fallbackLane), true
 	}
 	toks := strings.Fields(body)
@@ -97,13 +98,23 @@ func start(line, fallbackLane string) (Entry, bool) {
 	e := Entry{Start: line, Lane: fallbackLane, Kind: kinds.Note}
 	var head, tail []string
 	parenLane := ""
-	timed := false
+	timed, promoted := false, false
 	if loc := timeParen.FindStringSubmatchIndex(body); loc != nil && len(strings.Fields(body[:loc[0]])) <= 3 {
 		m := timeParen.FindStringSubmatch(body)
 		e.Clock = clock(m[2], m[3], m[4], m[5])
 		head = strings.Fields(body[:loc[0]])
 		tail = strings.Fields(body[loc[1]:])
 		parenLane = strings.TrimRight(firstField(m[1]), ",:")
+		timed = true
+	} else if loc := bareClock.FindStringSubmatchIndex(body); loc != nil && len(strings.Fields(body[:loc[0]])) <= 1 {
+		m := bareClock.FindStringSubmatch(body)
+		e.Clock = clock(m[1], m[2], m[3], "")
+		head = strings.Fields(body[:loc[0]])
+		tail = strings.Fields(body[loc[1]:])
+		if len(head) == 0 {
+			head, tail = firstN(tail, 2), tail[min(2, len(tail)):]
+			promoted = true
+		}
 		timed = true
 	} else {
 		if m := zulu.FindStringSubmatch(body); m != nil {
@@ -119,7 +130,7 @@ func start(line, fallbackLane string) (Entry, bool) {
 		case !kindFound && isKind(tok):
 			e.Kind, _ = kinds.Lookup(strings.TrimSuffix(tok, ":"))
 			kindFound = true
-		case !laneFound && isLane(tok, timed || kindFound):
+		case !laneFound && (!promoted || e.Kind != kinds.Owner) && isLane(tok, !promoted && (timed || kindFound)):
 			e.Lane = strings.TrimSuffix(tok, ":")
 			laneFound = true
 		default:
