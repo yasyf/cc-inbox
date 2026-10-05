@@ -110,6 +110,8 @@ an explicit time window starts at the current head.
 ### Move a drive off markdown inbox files
 
 Existing desks may still append to inbox files while the root moves to `cci`.
+Import only append-only inbox files; the long-running runner's `runner-state.md`
+is a rendered view rewritten in place, not an inbox.
 Import a file once to register it, then read its records through a cursor:
 
 ```console
