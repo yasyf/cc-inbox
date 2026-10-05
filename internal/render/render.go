@@ -12,17 +12,8 @@ import (
 
 const (
 	DefaultBudget  = 6144
-	MaxBudget      = 16000
-	DefaultWidth   = 400
 	trailerReserve = 96
 )
-
-func Clamp(budget int) int {
-	if budget <= 0 {
-		return DefaultBudget
-	}
-	return min(budget, MaxBudget)
-}
 
 func Stamp(t, now time.Time) string {
 	local := t.In(time.Local)
@@ -93,7 +84,10 @@ type Budget struct {
 }
 
 func NewBudget(w io.Writer, budget int) *Budget {
-	return &Budget{w: w, left: Clamp(budget) - trailerReserve}
+	if budget <= 0 {
+		budget = DefaultBudget
+	}
+	return &Budget{w: w, left: budget - trailerReserve}
 }
 
 func Clip(s string, width int) string {

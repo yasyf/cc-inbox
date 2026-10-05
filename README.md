@@ -266,8 +266,8 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
-| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes and caps at 16,000. |
-| `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width; defaults to 400. `0` prints whole records. JSON ignores it. |
+| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes and honors any larger value. |
+| `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width. Records print whole by default. JSON ignores it. |
 
 Broadcasts have an empty `to` list. With `--reader`, kind, lane, and topic filters
 apply only to broadcasts; records addressed only to other lanes are excluded.
@@ -514,8 +514,8 @@ sessions write to the same SQLite store without a daemon.
 | --- | --- |
 | Posted text | 400 characters. Put longer bodies in a file and attach it with `--path`. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
-| `tail`, `grep`, `state`, and text `digest` | Default 6,144-byte budget, capped at 16,000 bytes. Output stops at a whole line. |
-| Text record lines in `tail`, `watch`, and digest sections | Clip to `--width` characters, default 400, including a final `…` when clipped. `--width 0` prints whole records. The limit excludes digest indentation and appended reply marks. |
+| `tail`, `grep`, `state`, and text `digest` | Default 6,144-byte budget; `--budget` sets any other size. Output stops at a whole line. |
+| Text record lines in `tail`, `watch`, and digest sections | Print whole records by default. `--width N` clips to N characters, including a final `…`. The limit excludes digest indentation and appended reply marks. |
 | Text record lines in `grep` and `state` | Print whole records within the byte budget. |
 | `tail` | At most 500 records per call. Repeat the same cursor read to continue. |
 | Text `watch` | Output continues for the watch lifetime; `--budget` does not limit it. |
