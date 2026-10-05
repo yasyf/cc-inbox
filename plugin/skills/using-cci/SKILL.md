@@ -166,8 +166,16 @@ TTL means time to live; `--ttl` overrides defaults.
 | `opened`, `landed` | None | Require `--pr`. |
 | `review` | None | A rules-review verdict. |
 | `owner`, `mechanism`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
+| `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
+| `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
+| `delete-list`, `skew`, `not-live`, `urgent` | None | Unpaired. |
 | `digest` | None | Written only by compaction. |
 | `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
+
+`refused` is an alias for `refuse`; `failed` is an alias for `fail`.
+Imported uppercase lead tokens map to their corresponding kinds. The 16 kinds
+from `retro` through `urgent` above have no default expiry. They do not open
+or close items through kind pairing.
 
 Import appended inbox files, not the runner's rewritten `runner-state.md` view.
 `cci import` registers files, restarts after inode changes or shrinkage, and

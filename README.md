@@ -317,8 +317,16 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `opened`, `landed` | None | Require `--pr`. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
 | `owner`, `mechanism`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
+| `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
+| `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
+| `delete-list`, `skew`, `not-live`, `urgent` | None | Unpaired. |
 | `digest` | None | Written only by compaction. |
 | `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
+
+`refused` is an alias for `refuse`; `failed` is an alias for `fail`.
+Imported uppercase lead tokens map to their corresponding kinds. The 16 kinds
+from `retro` through `urgent` above have no default expiry. They do not open
+or close items through kind pairing.
 
 `decide` requests a decision and stays open until closed. `decision` records a
 call already made, and imported `DECISION` lines use this kind.

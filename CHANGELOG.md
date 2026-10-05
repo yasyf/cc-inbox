@@ -6,11 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `retro`, `posted`, `design`, `serving`, `ready`, `duplicate`,
+  `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered`,
+  `delete-list`, `skew`, `not-live`, and `urgent` kinds. They have no
+  default expiry or kind pairing. Accept `refused` as `refuse` and
+  `failed` as `fail`.
+
 ### Changed
 
 - Match grep patterns literally and case-insensitively by default. Use
   `--regex` for regular expressions, including `|` alternation. Keep
   newest-first ordering and the existing byte budgets.
+- Reparse existing imports with parser version 4 so watched lead tokens
+  gain their corresponding kinds without changing stored timestamps.
 
 ### Fixed
 
