@@ -150,7 +150,7 @@ Import a file once to register it, then read its records through a cursor:
 ```console
 $ printf '%s\n' 'GO root Deploy after the checks pass.' > legacy.md
 $ cci import legacy.md --drive migration
-<cwd>/legacy.md: 1 entries, 1 new
+<cwd>/legacy.md: 1 entries, 1 new, 0 reparsed
 $ cci tail --drive migration --cursor root
 #1 <time> GO root Deploy after the checks pass.
 ```
@@ -170,8 +170,15 @@ After the next refresh, read the new record with the same cursor:
 cci tail --drive migration --cursor root
 ```
 
-`cci import` tracks offsets and inodes, rereads files from the start when they
-shrink or rotation replaces them, and deduplicates source lines within a drive.
+`cci import` tracks offsets, inodes, and the parser version. It rereads files
+from the start when they shrink or rotation replaces them, and deduplicates
+source lines within a drive. After a parser version change, the next import
+or daemon refresh reparses already-consumed lines, even if the file's size
+and inode are unchanged. Matching records get updated parsed fields and
+expiry based on their stored time. Their timestamps stay unchanged, and
+records folded away by `cci compact` stay gone. The import output reports
+the number reparsed.
+
 The daemon also imports new `<inbox>.md.archive/*.md` files with the inbox's
 drive and lane; direct archive imports default to the inbox name.
 

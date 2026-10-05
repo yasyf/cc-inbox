@@ -30,7 +30,7 @@ type Entry struct {
 }
 
 var (
-	timeParen = regexp.MustCompile(`\(([^()]*?)\b(\d{1,2}):(\d{2})(?::\d{2})?\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?\b([^()]*)\)`)
+	timeParen = regexp.MustCompile(`\(([^()]*?)\b(\d{1,2}):(\d[\dx])(?::\d{2})?\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?\b([^()]*)\)`)
 	zulu      = regexp.MustCompile(`\b(\d{1,2}):(\d{2})Z\b`)
 	runner    = regexp.MustCompile(`^(\d{1,2}):(\d{2})(Z)?\s+([A-Z][A-Z0-9_-]+)\s+(.*)$`)
 	ruling    = regexp.MustCompile(`^R\d+[a-z]?$`)
@@ -126,13 +126,24 @@ func start(line, fallbackLane string) (Entry, bool) {
 			rest = append(rest, tok)
 		}
 	}
-	if !kindFound && timed && len(tail) > 0 && isKind(tail[0]) {
-		e.Kind, _ = kinds.Lookup(strings.TrimSuffix(tail[0], ":"))
-		kindFound = true
-		tail = tail[1:]
-	}
 	if !laneFound && parenLane != "" && isLane(parenLane, true) {
 		e.Lane = parenLane
+		laneFound = true
+	}
+	for timed && len(tail) > 0 {
+		if !kindFound && isKind(tail[0]) {
+			e.Kind, _ = kinds.Lookup(strings.TrimSuffix(tail[0], ":"))
+			kindFound = true
+		} else if !laneFound && e.Kind != kinds.Owner && namesLane(tail) {
+			e.Lane = strings.TrimSuffix(tail[0], ":")
+			laneFound = true
+		} else {
+			break
+		}
+		tail = tail[1:]
+	}
+	if !laneFound && e.Kind == kinds.Owner {
+		e.Lane = "root"
 	}
 	e.Text = strings.Join(append(rest, tail...), " ")
 	if e.Text == "" {
@@ -154,6 +165,14 @@ func isLane(tok string, loose bool) bool {
 		return false
 	}
 	return loose || strings.HasSuffix(tok, ":") || strings.Contains(tok, "-")
+}
+
+func namesLane(toks []string) bool {
+	tok := toks[0]
+	if !isLane(tok, false) || !strings.Contains(tok, "-") {
+		return false
+	}
+	return strings.HasSuffix(tok, ":") || len(toks) > 1 && kindWord.MatchString(toks[1])
 }
 
 func runnerEntry(line, body string, m []string, fallbackLane string) Entry {
@@ -220,7 +239,7 @@ func (e *Entry) refs(body string) {
 
 func clock(h, m, ampm, zone string) *Clock {
 	hour, _ := strconv.Atoi(h)
-	minute, _ := strconv.Atoi(m)
+	minute, _ := strconv.Atoi(strings.ReplaceAll(m, "x", "0"))
 	switch strings.ToUpper(ampm) {
 	case "PM":
 		if hour < 12 {
@@ -252,11 +271,16 @@ func Date(entries []Entry, end time.Time) []time.Time {
 		}
 		ref := cur.In(loc)
 		t := time.Date(ref.Year(), ref.Month(), ref.Day(), c.Hour, c.Minute, 0, 0, loc)
-		if t.After(cur.Add(5 * time.Minute)) {
+		switch {
+		case t.Sub(cur) > 12*time.Hour:
 			t = t.AddDate(0, 0, -1)
+		case cur.Sub(t) > 12*time.Hour:
+			t = t.AddDate(0, 0, 1)
 		}
 		out[i] = t
-		cur = t
+		if t.Before(cur) {
+			cur = t
+		}
 	}
 	return out
 }

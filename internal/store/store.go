@@ -72,6 +72,7 @@ UPDATE records SET refs = json_set(json_remove(refs, '$.pr'), '$.prs', json_arra
 UPDATE records SET refs = json_set(json_remove(refs, '$.build'), '$.builds', json_array(json_extract(refs, '$.build'))) WHERE json_extract(refs, '$.build') IS NOT NULL;
 UPDATE records SET refs = json_set(refs, '$.prs', (SELECT json_group_array(value) FROM (SELECT value FROM json_each(records.refs, '$.prs') UNION SELECT value FROM json_each(records.fields, '$.stack') ORDER BY value))), fields = json_remove(fields, '$.stack') WHERE json_extract(fields, '$.stack') IS NOT NULL;
 UPDATE records SET fields = json_set(json_remove(fields, '$.env'), '$.envs', json_array(json_extract(fields, '$.env'))) WHERE json_extract(fields, '$.env') IS NOT NULL`,
+	`ALTER TABLE imports ADD COLUMN parser INTEGER NOT NULL DEFAULT 0`,
 }
 
 var (
@@ -310,6 +311,7 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 type Ingestion struct {
 	Record   Record
 	LineHash string
+	Line     string
 }
 
 func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
@@ -338,6 +340,71 @@ func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
 	return inserted, nil
 }
 
+func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (updated, inserted int, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("begin reparse: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var (
+		parentAt   time.Time
+		parentText string
+	)
+	for _, it := range items {
+		r := it.Record
+		var (
+			at  int64
+			old string
+		)
+		err := tx.QueryRowContext(ctx, "SELECT at, text FROM records WHERE line_hash = ?", it.LineHash).Scan(&at, &old)
+		switch {
+		case err == nil:
+			if _, err := tx.ExecContext(ctx, reparseSQL, reparseArgs(r, it.LineHash)...); err != nil {
+				return 0, 0, fmt.Errorf("reparse record: %w", err)
+			}
+			parentAt, parentText = time.UnixMilli(at).UTC(), old
+			updated++
+			continue
+		case !errors.Is(err, sql.ErrNoRows):
+			return 0, 0, fmt.Errorf("reparse record: %w", err)
+		case fresh:
+		case parentText != "" && strings.Contains(parentText, strings.Join(strings.Fields(it.Line), " ")):
+			r.At = parentAt
+		default:
+			parentText = ""
+			continue
+		}
+		r.ExpiresAt = expiry(r, 0)
+		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", args(r, Hash(r), &it.LineHash)...)
+		if err != nil {
+			return 0, 0, fmt.Errorf("reparse record: %w", err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return 0, 0, fmt.Errorf("reparse record: %w", err)
+		}
+		inserted += int(n)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, 0, fmt.Errorf("commit reparse: %w", err)
+	}
+	return updated, inserted, nil
+}
+
+func reparseArgs(r Record, lineHash string) []any {
+	to := r.To
+	if to == nil {
+		to = []string{}
+	}
+	recipients, _ := json.Marshal(to)
+	refs, _ := json.Marshal(r.Refs)
+	var ttl any
+	if t := r.Kind.Spec().TTL; t > 0 {
+		ttl = t.Milliseconds()
+	}
+	return []any{r.Lane, string(r.Kind), r.Text, r.Topic, string(recipients), string(refs), Hash(r), ttl, lineHash}
+}
+
 func expiry(r Record, ttl time.Duration) *time.Time {
 	if ttl == 0 {
 		ttl = r.Kind.Spec().TTL
@@ -351,6 +418,9 @@ func expiry(r Record, ttl time.Duration) *time.Time {
 
 const insertSQL = `INSERT INTO records (drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+
+const reparseSQL = `UPDATE records SET lane = ?, kind = ?, text = ?, topic = ?, recipients = ?, refs = ?, hash = ?, expires_at = at + ?
+WHERE line_hash = ?`
 
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)

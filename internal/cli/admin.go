@@ -33,7 +33,7 @@ func newImportCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s: %d entries, %d new\n", res.Path, res.Entries, res.Inserted); err != nil {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s: %d entries, %d new, %d reparsed\n", res.Path, res.Entries, res.Inserted, res.Reparsed); err != nil {
 					return err
 				}
 			}

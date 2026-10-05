@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Attribute stamped inbox lines to their writing lane, including lanes
+  after parenthesized timestamps. Assign `OWNER` lines without a lane to
+  `root` and parse `:5x` minutes as `:50`.
+- Date imported stamps within 12 hours of the dating cursor and only
+  move it backward, keeping out-of-order stamps on their day.
+
+### Changed
+
+- Track the import parser version in schema migration 5. On a parser
+  change, the next import or refresh reparses consumed lines and updates
+  matching records without changing stored timestamps or restoring
+  compacted records. `cci import` reports the number reparsed.
+
 ## [0.3.0] - 2026-10-05
 
 ### Changed
