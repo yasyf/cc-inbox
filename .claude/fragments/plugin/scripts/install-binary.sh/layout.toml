@@ -1,0 +1,4 @@
+fragments = [{ use = "cc-skills:binrun-shim", args = { binary = "cci" } }]
+
+[sources.cc-skills]
+source = "github:yasyf/cc-skills@main"
