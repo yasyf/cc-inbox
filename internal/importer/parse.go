@@ -34,6 +34,7 @@ type Entry struct {
 var (
 	timeParen = regexp.MustCompile(`\(([^()]*?)\b(\d{1,2}):(\d[\dx])(?::\d{2})?\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?\b([^()]*)\)`)
 	bareClock = regexp.MustCompile(`\b(\d{1,2}):(\d[\dx])\s*([AaPp][Mm])\b(?:\s*(?:PT|PDT|PST)\b)?`)
+	clockOnly = regexp.MustCompile(`^(\d{1,2}):(\d[\dx])\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?$`)
 	zulu      = regexp.MustCompile(`\b(\d{1,2}):(\d{2})Z\b`)
 	runner    = regexp.MustCompile(`^(\d{1,2}):(\d{2})(Z)?\s+([A-Z][A-Z0-9_-]+)\s+(.*)$`)
 	dispatch  = regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)=ctx_`)
@@ -295,6 +296,30 @@ func clock(h, m, ampm, zone string) *Clock {
 	return &Clock{Hour: hour, Minute: minute, UTC: zone == "Z" || zone == "UTC"}
 }
 
+func ParseClock(s string) *Clock {
+	m := clockOnly.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return nil
+	}
+	return clock(m[1], m[2], m[3], m[4])
+}
+
+func (c Clock) location() *time.Location {
+	if c.UTC {
+		return time.UTC
+	}
+	return time.Local
+}
+
+func (c Clock) Latest(now time.Time) time.Time {
+	ref := now.In(c.location())
+	t := time.Date(ref.Year(), ref.Month(), ref.Day(), c.Hour, c.Minute, 0, 0, ref.Location())
+	if t.After(now) {
+		t = t.AddDate(0, 0, -1)
+	}
+	return t
+}
+
 func Date(entries []Entry, end time.Time) []time.Time {
 	out := make([]time.Time, len(entries))
 	cur := end
@@ -304,12 +329,8 @@ func Date(entries []Entry, end time.Time) []time.Time {
 			out[i] = cur
 			continue
 		}
-		loc := time.Local
-		if c.UTC {
-			loc = time.UTC
-		}
-		ref := cur.In(loc)
-		t := time.Date(ref.Year(), ref.Month(), ref.Day(), c.Hour, c.Minute, 0, 0, loc)
+		ref := cur.In(c.location())
+		t := time.Date(ref.Year(), ref.Month(), ref.Day(), c.Hour, c.Minute, 0, 0, ref.Location())
 		latest := end.Add(5 * time.Minute)
 		switch {
 		case t.Sub(cur) > 12*time.Hour || t.After(latest):

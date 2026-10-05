@@ -24,10 +24,23 @@ func newPostCmd() *cobra.Command {
 		asJSON                  bool
 	)
 	cmd := &cobra.Command{
-		Use:   "post",
+		Use:   "post [TEXT]",
 		Short: "Append one record",
-		Args:  cobra.NoArgs,
-		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+		Args: func(cmd *cobra.Command, args []string) error {
+			switch {
+			case len(args) > 1:
+				return fmt.Errorf("post takes its text as one quoted argument or --text; got %d arguments", len(args))
+			case len(args) == 1 && cmd.Flags().Changed("text"):
+				return fmt.Errorf("post takes its text once: as an argument or --text, not both")
+			case len(args) == 0 && !cmd.Flags().Changed("text"):
+				return fmt.Errorf("post needs its text, as one quoted argument or --text")
+			}
+			return nil
+		},
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			if len(args) == 1 {
+				text = args[0]
+			}
 			k, err := kinds.Parse(kind)
 			if err != nil {
 				return err
@@ -72,7 +85,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
 	f.StringVar(&lane, "lane", "", "the writing lane (required)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "at most 400 characters; longer bodies go in a file passed with --path")
+	f.StringVar(&text, "text", "", "at most 400 characters, also accepted as the one argument; longer bodies go in a file passed with --path")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable)")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
@@ -94,7 +107,7 @@ func newPostCmd() *cobra.Command {
 	f.StringToStringVar(&counts, "count", nil, "named counts, e.g. --count deletes=0")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
-	for _, name := range []string{"lane", "kind", "text"} {
+	for _, name := range []string{"lane", "kind"} {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd

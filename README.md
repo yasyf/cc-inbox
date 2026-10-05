@@ -86,8 +86,9 @@ survives conversation compaction. Reads advance it only through printed records;
 rebinding resets it to the drive's latest record. Named lane cursors are
 unchanged, and one with no saved position reads the past hour.
 
-An explicit `--since` accepts a sequence number, duration, or RFC 3339 time
-and leaves the cursor untouched, even when `--cursor` is also set. Use
+An explicit `--since` accepts a sequence number, duration, local clock time
+such as `09:00` or `9:00 AM` (the latest one at or before now), or RFC 3339
+time, and leaves the cursor untouched, even when `--cursor` is also set. Use
 `--since 0` to replay older records. `--kind` accepts repeated flags or
 comma-separated kinds, such as `--kind hold,defect`.
 
@@ -225,7 +226,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 
 | Command | Behavior |
 | --- | --- |
-| `cci post` | Append one typed record. Requires lane, kind, and text; prints its sequence number. |
+| `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument; prints its sequence number. |
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
@@ -256,7 +257,8 @@ Commands that select a drive accept `--drive` or use the current session binding
 
 | Read option | Commands | Behavior |
 | --- | --- | --- |
-| `--regex` | `grep` | Interpret the pattern as a case-insensitive regular expression; `a\|b` matches either alternative. The default matches the pattern literally. |
+| `--regex` | `grep` | Interpret the pattern as a regular expression; `a\|b` matches either alternative. The default matches the pattern literally. |
+| `-i`, `--ignore-case` | `grep` | Match case-insensitively, the default; `--ignore-case=false` matches case exactly. |
 | `--kind <kind>` | `tail`, `watch`, `grep` | Select kinds; repeat the flag or separate kinds with commas. |
 | `--lane <lane>` | `tail`, `watch`, `grep`, `state` | Select posting lanes; repeat for multiple lanes. |
 | `--topic <topic>` | `tail`, `watch`, `grep`, `state` | Select topics; repeat for multiple topics. |
@@ -265,7 +267,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--pr <number>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.prs`. |
 | `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts. |
-| `--since <point>` | `tail` | Read from a sequence number, duration, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
+| `--since <point>` | `tail` | Read from a sequence number, duration, local clock time such as `9:00 AM`, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
 | `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. |
 | `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width. Records print whole by default. JSON ignores it. |
 

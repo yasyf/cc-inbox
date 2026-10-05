@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Accept `-i` and `--ignore-case` on `grep`. Matching stays case-insensitive
+  by default, and `--ignore-case=false` matches case exactly.
+- Accept a clock time for `--since`, such as `09:00`, `9:00 AM`, or `12:0x PM`,
+  read in local (Pacific) time, the zone every record is displayed in. It
+  resolves to the latest such time at or before now; a `Z` or `UTC` suffix
+  reads it in UTC.
+- Take the text of `post` as its one positional argument, the same as
+  `--text`. Two arguments, or an argument plus `--text`, fail with an error
+  that names `--text`.
+
 ## [0.6.2] - 2026-10-05
 
 ### Fixed
