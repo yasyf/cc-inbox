@@ -147,7 +147,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", home, err)
 	}
-	dsn := "file:" + filepath.Join(home, "inbox.db") + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_txlock=immediate"
+	dsn := "file:" + filepath.Join(home, "inbox.db") + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)

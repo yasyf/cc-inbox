@@ -1,39 +1,67 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/yasyf/daemonkit"
 
+	"github.com/yasyf/cc-inbox/internal/daemon"
 	"github.com/yasyf/cc-inbox/internal/hook"
-	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 func newServeCmd() *cobra.Command {
-	var (
-		addr     string
-		interval time.Duration
-	)
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:   "serve",
-		Short: "Serve read-only JSON over HTTP for dashboards",
+		Short: "Start or reuse the cci daemon, which serves read-only JSON over HTTP from a hot store",
 		Args:  cobra.NoArgs,
-		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			ln, err := net.Listen("tcp", addr)
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			d, err := daemon.Definition()
 			if err != nil {
-				return fmt.Errorf("listen %s: %w", addr, err)
-			}
-			if _, err := fmt.Fprintf(cmd.OutOrStdout(), "cci serving http://%s/v1\n", ln.Addr()); err != nil {
 				return err
 			}
-			return server.New(st, interval).Serve(cmd.Context(), ln)
-		}),
+			client, err := daemonkit.Open(d)
+			if err != nil {
+				return fmt.Errorf("open cci daemon: %w", err)
+			}
+			ctx, cancel := context.WithTimeout(cmd.Context(), 60*time.Second)
+			defer cancel()
+			ensured, err := client.Ensure(ctx)
+			if err != nil {
+				return fmt.Errorf("ensure cci daemon: %w", err)
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "cci daemon pid %d serving http://%s/v1\n", ensured.After.PID, daemon.Addr)
+			return err
+		},
 	}
-	cmd.Flags().StringVar(&addr, "addr", "127.0.0.1:7377", "listen address")
-	cmd.Flags().DurationVar(&interval, "interval", time.Second, "poll interval for /v1/stream")
+}
+
+func newDaemonCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "daemon", Short: "The daemonkit-managed cci daemon", Hidden: true}
+	cmd.AddCommand(&cobra.Command{
+		Use:  "run",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			d, err := daemon.Definition()
+			if err != nil {
+				return err
+			}
+			home, err := store.Home()
+			if err != nil {
+				return err
+			}
+			ln, err := net.Listen("tcp", daemon.Addr)
+			if err != nil {
+				return fmt.Errorf("listen %s: %w", daemon.Addr, err)
+			}
+			_, err = daemonkit.Serve(cmd.Context(), d, daemon.Start(home, ln))
+			return err
+		},
+	})
 	return cmd
 }
 
