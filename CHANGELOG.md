@@ -38,6 +38,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   name stacks, at least one stack must match; otherwise, a shared
   target is enough. A native hold still needs `lift`. Imports from
   older archives cannot close newer regressions by ref.
+- Include `state` records in `cci state` alongside `head` and `contract`,
+  keeping the latest non-withdrawn record per kind, lane, and topic.
+  Empty text reads say `no head, contract, or state records on <drive>`.
 
 ## [0.4.0] - 2026-10-05
 

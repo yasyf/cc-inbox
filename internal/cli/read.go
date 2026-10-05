@@ -130,7 +130,7 @@ func newStateCmd() *cobra.Command {
 	var rf readFlags
 	cmd := &cobra.Command{
 		Use:   "state",
-		Short: "Latest head and contract per lane and topic, minus withdrawn ones",
+		Short: "Latest head, contract, and state record per lane and topic, minus withdrawn ones",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			f, err := rf.filter(cmd.Context(), st)
@@ -139,6 +139,10 @@ func newStateCmd() *cobra.Command {
 			}
 			records, err := inbox.State(cmd.Context(), st, f)
 			if err != nil {
+				return err
+			}
+			if len(records) == 0 && !rf.json {
+				_, err := fmt.Fprintf(cmd.OutOrStdout(), "no head, contract, or state records on %s\n", f.Drive)
 				return err
 			}
 			inbox.WriteState(cmd.OutOrStdout(), records, st.Now(), rf.budget, rf.json)

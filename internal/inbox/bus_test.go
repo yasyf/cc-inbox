@@ -114,3 +114,22 @@ func TestDigestOpenBlockers(t *testing.T) {
 		t.Fatalf("blockers = %+v asks = %+v", v.Blockers, v.Asks)
 	}
 }
+
+func TestStateKeepsTheLatestStatePerLane(t *testing.T) {
+	st, c := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "census", Kind: kinds.State, Text: "234/293 0/0"})
+	c.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "census", Kind: kinds.State, Text: "235/293 0/0"})
+	testutil.Post(t, st, store.Record{Lane: "api", Kind: kinds.Head, Topic: "#1", Text: "aaa"})
+	got, err := inbox.State(context.Background(), st, store.Filter{Drive: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := make([]string, 0, len(got))
+	for _, r := range got {
+		lines = append(lines, fmt.Sprintf("%s/%s=%s", r.Lane, r.Kind, r.Text))
+	}
+	if want := "api/head=aaa census/state=235/293 0/0"; strings.Join(lines, " ") != want {
+		t.Fatalf("state = %v, want %s", lines, want)
+	}
+}

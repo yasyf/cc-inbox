@@ -105,3 +105,13 @@ func TestGrepMatchesWholeRecordLinesLiterally(t *testing.T) {
 		}
 	}
 }
+
+func TestStateSaysWhenADriveHasNothingToShow(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--text", "ship it"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "state", "--drive", "release-v3"); err != nil || out != "no head, contract, or state records on release-v3\n" {
+		t.Fatalf("state = %q, %v", out, err)
+	}
+}

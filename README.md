@@ -217,7 +217,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
 | `cci grep` | Search whole rendered record lines literally and case-insensitively, newest first, including expired records. `--regex` enables regular expressions. |
-| `cci state` | Show the latest `head` and `contract` per lane and topic, skipping withdrawn records, within a byte budget. |
+| `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
 | `cci drive use` | Bind the current Claude Code session to a drive. `--root` enables owner-prompt capture. |
@@ -275,10 +275,13 @@ reply kinds. A resolver adds `[RESOLVED #n]` to its target's line and
 `resolves #n` to its own line. The first number identifies the resolver; the
 second identifies the target. JSON records have no text marks.
 
-Read `cci state` before asking a lane for its head or contract. Publish `head`
-on every push and `contract` for interfaces other lanes consume. State selects
-the latest non-withdrawn record for each kind, lane, and topic; withdrawing it
-with `--re` reveals the previous non-withdrawn record, if any.
+Read `cci state` before asking a lane for its head, contract, or status. Publish
+`head` on every push, `contract` for interfaces other lanes consume, and `state`
+for lane status. The command selects the latest non-withdrawn record for each
+kind, lane, and topic among `head`, `contract`, and `state`. Withdrawing one
+with `--re` reveals its previous non-withdrawn record, if any. When no records
+match, text output says `no head, contract, or state records on <drive>`.
+An empty JSON read emits no records.
 
 The digest groups open items from its window: asks and decision requests
 (`decide`) in `open asks` (JSON `open_asks`), `blocker` and `blocked` records in
