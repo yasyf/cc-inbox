@@ -82,7 +82,7 @@ func Import(ctx context.Context, st *store.Store, path, drive, lane string) (Res
 			At:     times[i].UTC(),
 			Text:   e.Text,
 			To:     e.To,
-			Refs:   store.Refs{PR: e.PR},
+			Refs:   store.Refs{PRs: e.PRs, Builds: e.Builds, Stacks: e.Stacks},
 			Source: "import:" + abs,
 		}
 		if r.Text, r.Refs.Path, err = st.Fit(e.Text); err != nil {

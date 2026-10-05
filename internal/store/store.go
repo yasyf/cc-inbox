@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"time"
@@ -65,6 +66,12 @@ CREATE TABLE IF NOT EXISTS imports (
 	offset INTEGER NOT NULL
 );`,
 	`ALTER TABLE imports ADD COLUMN inode INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE records ADD COLUMN resolves INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX records_resolves ON records(drive, resolves) WHERE resolves != 0;
+UPDATE records SET refs = json_set(json_remove(refs, '$.pr'), '$.prs', json_array(json_extract(refs, '$.pr'))) WHERE json_extract(refs, '$.pr') IS NOT NULL;
+UPDATE records SET refs = json_set(json_remove(refs, '$.build'), '$.builds', json_array(json_extract(refs, '$.build'))) WHERE json_extract(refs, '$.build') IS NOT NULL;
+UPDATE records SET refs = json_set(refs, '$.prs', (SELECT json_group_array(value) FROM (SELECT value FROM json_each(records.refs, '$.prs') UNION SELECT value FROM json_each(records.fields, '$.stack') ORDER BY value))), fields = json_remove(fields, '$.stack') WHERE json_extract(fields, '$.stack') IS NOT NULL;
+UPDATE records SET fields = json_set(json_remove(fields, '$.env'), '$.envs', json_array(json_extract(fields, '$.env'))) WHERE json_extract(fields, '$.env') IS NOT NULL`,
 }
 
 var (
@@ -73,17 +80,32 @@ var (
 )
 
 type Refs struct {
-	Path  string `json:"path,omitempty"`
-	CCN   string `json:"ccn,omitempty"`
-	PR    int    `json:"pr,omitempty"`
-	Build string `json:"build,omitempty"`
-	URL   string `json:"url,omitempty"`
+	Path    string   `json:"path,omitempty"`
+	CCN     string   `json:"ccn,omitempty"`
+	URL     string   `json:"url,omitempty"`
+	Board   string   `json:"board,omitempty"`
+	PRs     []int    `json:"prs,omitempty"`
+	Builds  []string `json:"builds,omitempty"`
+	Stacks  []string `json:"stacks,omitempty"`
+	Targets []string `json:"targets,omitempty"`
+	Lanes   []string `json:"lanes,omitempty"`
+}
+
+type Census struct {
+	N           int      `json:"n"`
+	Denominator int      `json:"denominator"`
+	Head        string   `json:"head,omitempty"`
+	Drift       int      `json:"drift"`
+	StacksClean []string `json:"stacks_clean,omitempty"`
 }
 
 type Fields struct {
-	Stack  []int          `json:"stack,omitempty"`
-	Env    string         `json:"env,omitempty"`
-	Counts map[string]int `json:"counts,omitempty"`
+	Envs    []string       `json:"envs,omitempty"`
+	Mode    string         `json:"mode,omitempty"`
+	Outcome string         `json:"outcome,omitempty"`
+	Commit  string         `json:"commit,omitempty"`
+	Census  *Census        `json:"census,omitempty"`
+	Counts  map[string]int `json:"counts,omitempty"`
 }
 
 type Record struct {
@@ -96,10 +118,12 @@ type Record struct {
 	Topic     string     `json:"topic,omitempty"`
 	To        []string   `json:"to,omitempty"`
 	Re        int64      `json:"re,omitempty"`
+	Resolves  int64      `json:"resolves,omitempty"`
 	Refs      Refs       `json:"refs"`
 	Fields    Fields     `json:"fields"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	Source    string     `json:"source"`
+	Status    string     `json:"status,omitempty"`
 }
 
 type Store struct {
@@ -206,11 +230,34 @@ func Validate(r Record) error {
 		return ErrTextTooLong
 	}
 	spec := r.Kind.Spec()
-	if spec.NeedsPR && r.Refs.PR == 0 {
+	if spec.NeedsPR && len(r.Refs.PRs) == 0 {
 		return fmt.Errorf("kind %s requires --pr", r.Kind)
 	}
-	if spec.NeedsRef && r.Re == 0 && r.Topic == "" {
-		return fmt.Errorf("kind %s requires --re or --topic", r.Kind)
+	if spec.NeedsRef && r.Re == 0 && r.Topic == "" && r.Resolves == 0 {
+		return fmt.Errorf("kind %s requires --re, --resolves or --topic", r.Kind)
+	}
+	if err := validateFields(r.Fields); err != nil {
+		return err
+	}
+	for _, stack := range r.Refs.Stacks {
+		if project, env, ok := strings.Cut(stack, "/"); !ok || project == "" || env == "" || strings.Contains(env, "/") {
+			return fmt.Errorf("stack %q is not <project>/<env>", stack)
+		}
+	}
+	return nil
+}
+
+var (
+	modes    = []string{"platy", "cli", "manual", "walker"}
+	outcomes = []string{"passed", "failed", "pending", "cancelled"}
+)
+
+func validateFields(f Fields) error {
+	if f.Mode != "" && !slices.Contains(modes, f.Mode) {
+		return fmt.Errorf("mode %q is not one of %s", f.Mode, strings.Join(modes, ", "))
+	}
+	if f.Outcome != "" && !slices.Contains(outcomes, f.Outcome) {
+		return fmt.Errorf("outcome %q is not one of %s", f.Outcome, strings.Join(outcomes, ", "))
 	}
 	return nil
 }
@@ -221,6 +268,15 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 	}
 	if err := Validate(r); err != nil {
 		return Record{}, false, err
+	}
+	if r.Resolves != 0 {
+		target, err := s.Get(ctx, r.Resolves)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && target.Drive != r.Drive {
+			return Record{}, false, fmt.Errorf("--resolves #%d names no record in drive %s", r.Resolves, r.Drive)
+		}
+		if err != nil {
+			return Record{}, false, err
+		}
 	}
 	r.At = s.Now().UTC()
 	r.ExpiresAt = expiry(r, ttl)
@@ -293,8 +349,8 @@ func expiry(r Record, ttl time.Duration) *time.Time {
 	return &t
 }
 
-const insertSQL = `INSERT INTO records (drive, lane, kind, at, text, topic, recipients, re, refs, fields, expires_at, source, hash, line_hash)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+const insertSQL = `INSERT INTO records (drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
@@ -328,10 +384,10 @@ func args(r Record, hash string, lineHash *string) []any {
 	if lineHash != nil {
 		line = *lineHash
 	}
-	return []any{r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), r.Text, r.Topic, string(recipients), r.Re, string(refs), string(fields), expires, r.Source, hash, line}
+	return []any{r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), r.Text, r.Topic, string(recipients), r.Re, r.Resolves, string(refs), string(fields), expires, r.Source, hash, line}
 }
 
-const columns = "seq, drive, lane, kind, at, text, topic, recipients, re, refs, fields, expires_at, source"
+const columns = "seq, drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source"
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -344,7 +400,7 @@ func scan(row scanner) (Record, error) {
 		at                         int64
 		expires                    sql.NullInt64
 	)
-	if err := row.Scan(&r.Seq, &r.Drive, &r.Lane, &kind, &at, &r.Text, &r.Topic, &recipients, &r.Re, &refs, &fs, &expires, &r.Source); err != nil {
+	if err := row.Scan(&r.Seq, &r.Drive, &r.Lane, &kind, &at, &r.Text, &r.Topic, &recipients, &r.Re, &r.Resolves, &refs, &fs, &expires, &r.Source); err != nil {
 		return Record{}, fmt.Errorf("scan record: %w", err)
 	}
 	r.Kind = kinds.Kind(kind)

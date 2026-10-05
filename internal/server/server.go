@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/records", s.records)
 	mux.HandleFunc("GET /v1/digest", s.digest)
 	mux.HandleFunc("GET /v1/stream", s.stream)
+	mux.HandleFunc("GET /v1/lanes", s.lanes)
 	return mux
 }
 
@@ -57,7 +58,7 @@ type badRequest struct{ error }
 
 func (s *Server) filter(r *http.Request) (store.Filter, error) {
 	q := r.URL.Query()
-	f := store.Filter{Drive: q.Get("drive"), Lanes: q["lane"], To: q.Get("to"), For: q.Get("reader"), Topics: q["topic"]}
+	f := store.Filter{Drive: q.Get("drive"), Lanes: q["lane"], To: q.Get("to"), For: q.Get("reader"), Topics: q["topic"], Stack: q.Get("stack"), Target: q.Get("target")}
 	if f.Drive == "" {
 		return store.Filter{}, badRequest{errors.New("drive is required")}
 	}
@@ -90,6 +91,13 @@ func (s *Server) filter(r *http.Request) (store.Filter, error) {
 		}
 		f.Limit = min(n, maxLimit)
 	}
+	if v := q.Get("pr"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return store.Filter{}, badRequest{errors.New("pr must be a number")}
+		}
+		f.PR = n
+	}
 	f.IncludeExpired = q.Get("expired") == "1"
 	return f, nil
 }
@@ -106,6 +114,22 @@ func (s *Server) records(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	records, err := s.st.Query(r.Context(), f)
+	if err == nil {
+		err = inbox.Annotate(r.Context(), s.st, records)
+	}
+	if records == nil {
+		records = []store.Record{}
+	}
+	respond(w, records, err)
+}
+
+func (s *Server) lanes(w http.ResponseWriter, r *http.Request) {
+	f, err := s.filter(r)
+	if err != nil {
+		respond(w, nil, err)
+		return
+	}
+	records, err := s.st.LatestPerLane(r.Context(), store.Filter{Drive: f.Drive, IncludeExpired: true}, maxLimit)
 	if records == nil {
 		records = []store.Record{}
 	}

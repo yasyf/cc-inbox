@@ -3,6 +3,7 @@ package importer_test
 import (
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,8 +50,8 @@ func TestParseShapes(t *testing.T) {
 	for i, tt := range tests {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			e := entries[i]
-			if e.Lane != tt.lane || e.Kind != tt.kind || e.Text != tt.text || e.PR != tt.pr {
-				t.Errorf("entry = lane %q kind %q pr %d text %q\nwant lane %q kind %q pr %d text %q", e.Lane, e.Kind, e.PR, e.Text, tt.lane, tt.kind, tt.pr, tt.text)
+			if e.Lane != tt.lane || e.Kind != tt.kind || e.Text != tt.text || firstPR(e) != tt.pr {
+				t.Errorf("entry = lane %q kind %q pr %d text %q\nwant lane %q kind %q pr %d text %q", e.Lane, e.Kind, firstPR(e), e.Text, tt.lane, tt.kind, tt.pr, tt.text)
 			}
 			if got := clockString(e.Clock); got != tt.clock {
 				t.Errorf("clock = %q, want %q", got, tt.clock)
@@ -59,6 +60,24 @@ func TestParseShapes(t *testing.T) {
 				t.Errorf("to = %s, want [%s]", got, tt.to)
 			}
 		})
+	}
+}
+
+func firstPR(e importer.Entry) int {
+	if len(e.PRs) == 0 {
+		return 0
+	}
+	return e.PRs[0]
+}
+
+func TestParseExtractsRefs(t *testing.T) {
+	entries, err := importer.Parse(strings.NewReader("APPLIED merge-walker (10:25 PM PT) dns/tnt-usw2-26qmqm1 and api/plat-usw2-prod at 3c5c016fbd, #30374 and #30375, release https://buildkite.com/forge/release/builds/1253 . infra/lib is a path\n"), "deploy-go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := entries[0]
+	if fmt.Sprint(e.Stacks) != "[dns/tnt-usw2-26qmqm1 api/plat-usw2-prod]" || fmt.Sprint(e.PRs) != "[30374 30375]" || fmt.Sprint(e.Builds) != "[https://buildkite.com/forge/release/builds/1253]" {
+		t.Fatalf("refs = stacks %v prs %v builds %v", e.Stacks, e.PRs, e.Builds)
 	}
 }
 

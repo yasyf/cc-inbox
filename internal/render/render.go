@@ -46,14 +46,26 @@ func Line(r store.Record, now time.Time) string {
 	}
 	b.WriteString(" ")
 	b.WriteString(strings.Join(strings.Fields(r.Text), " "))
-	if r.Refs.PR != 0 {
-		fmt.Fprintf(&b, " pr#%d", r.Refs.PR)
+	for _, pr := range r.Refs.PRs {
+		fmt.Fprintf(&b, " pr#%d", pr)
+	}
+	for _, stack := range r.Refs.Stacks {
+		fmt.Fprintf(&b, " stack:%s", stack)
+	}
+	for _, target := range r.Refs.Targets {
+		fmt.Fprintf(&b, " target:%s", target)
+	}
+	if r.Resolves != 0 {
+		fmt.Fprintf(&b, " resolves #%d", r.Resolves)
 	}
 	if r.Refs.CCN != "" {
 		fmt.Fprintf(&b, " ccn:%s", r.Refs.CCN)
 	}
-	if r.Refs.Build != "" {
-		fmt.Fprintf(&b, " build:%s", r.Refs.Build)
+	for _, build := range r.Refs.Builds {
+		fmt.Fprintf(&b, " build:%s", build)
+	}
+	if r.Refs.Board != "" {
+		fmt.Fprintf(&b, " board:%s", r.Refs.Board)
 	}
 	if r.Refs.URL != "" {
 		fmt.Fprintf(&b, " %s", r.Refs.URL)

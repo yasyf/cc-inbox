@@ -24,8 +24,15 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	resolved, err := s.Resolvers(ctx, drive)
+	if err != nil {
+		return nil, err
+	}
 	var open []Record
 	for _, o := range openers {
+		if by, ok := resolved[o.Seq]; ok && by > o.Seq {
+			continue
+		}
 		if strings.HasPrefix(o.Source, "import:") {
 			continue
 		}

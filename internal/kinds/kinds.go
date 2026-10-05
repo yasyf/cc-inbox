@@ -39,6 +39,9 @@ const (
 	State      Kind = "state"
 	Matrix     Kind = "matrix"
 	Report     Kind = "report"
+	Blocked    Kind = "blocked"
+	Unblock    Kind = "unblock"
+	Review     Kind = "review"
 )
 
 const EphemeralTTL = 24 * time.Hour
@@ -80,6 +83,9 @@ var specs = map[Kind]Spec{
 	State:      {TTL: EphemeralTTL},
 	Matrix:     {TTL: EphemeralTTL},
 	Report:     {TTL: EphemeralTTL},
+	Blocked:    {},
+	Unblock:    {NeedsRef: true},
+	Review:     {},
 }
 
 var aliases = map[string]Kind{
@@ -103,6 +109,8 @@ var openers = map[Kind][]Kind{
 	Hold:     {Lift},
 	Incident: {FixLive, Done},
 	Blocker:  {Withdraw, Answer, Done},
+	Blocked:  {Unblock},
+	Defect:   {FixLive, Done},
 }
 
 func Parse(s string) (Kind, error) {

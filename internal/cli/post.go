@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -17,8 +18,8 @@ func newPostCmd() *cobra.Command {
 	var (
 		drive, lane, kind, text string
 		r                       store.Record
-		stack                   []int
 		counts                  map[string]string
+		census                  string
 		ttl                     time.Duration
 		asJSON                  bool
 	)
@@ -35,7 +36,12 @@ func newPostCmd() *cobra.Command {
 				return err
 			}
 			r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
-			r.Fields.Stack = stack
+			if census != "" {
+				r.Fields.Census = &store.Census{}
+				if err := json.Unmarshal([]byte(census), r.Fields.Census); err != nil {
+					return fmt.Errorf("--census: %w", err)
+				}
+			}
 			if len(counts) > 0 {
 				r.Fields.Counts = map[string]int{}
 				for key, v := range counts {
@@ -70,13 +76,21 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable)")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
+	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
-	f.IntVar(&r.Refs.PR, "pr", 0, "pull request number")
-	f.StringVar(&r.Refs.Build, "build", "", "build URL or id")
+	f.IntSliceVar(&r.Refs.PRs, "pr", nil, "pull request numbers (repeatable)")
+	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")
+	f.StringSliceVar(&r.Refs.Stacks, "stack", nil, "deploy stacks as <project>/<env> (repeatable)")
+	f.StringSliceVar(&r.Refs.Targets, "target", nil, "release targets (repeatable)")
+	f.StringSliceVar(&r.Refs.Lanes, "lane-ref", nil, "lanes this record is about (repeatable)")
 	f.StringVar(&r.Refs.URL, "url", "", "any other URL")
-	f.IntSliceVar(&stack, "stack", nil, "PR numbers of a stack")
-	f.StringVar(&r.Fields.Env, "env", "", "environment or cluster")
+	f.StringVar(&r.Refs.Board, "board", "", "cc-present board URL")
+	f.StringSliceVar(&r.Fields.Envs, "env", nil, "environments or clusters (repeatable)")
+	f.StringVar(&r.Fields.Mode, "mode", "", "how a release or apply started: platy, cli, manual, walker")
+	f.StringVar(&r.Fields.Outcome, "outcome", "", "passed, failed, pending, cancelled")
+	f.StringVar(&r.Fields.Commit, "commit", "", "full commit sha")
+	f.StringVar(&census, "census", "", `census JSON: {"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["<project>/<env>"]}`)
 	f.StringToStringVar(&counts, "count", nil, "named counts, e.g. --count deletes=0")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
