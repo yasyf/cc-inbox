@@ -234,3 +234,37 @@ func TestDateNeverPlacesAStampAfterTheFileWasWritten(t *testing.T) {
 		}
 	}
 }
+
+func TestParseClockResolvesToTheLatestPastInstant(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 40, 0, 0, time.Local)
+	tests := []struct {
+		in   string
+		want time.Time
+	}{
+		{"09:00", time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)},
+		{"9:00 AM", time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)},
+		{"12:0x PM", time.Date(2026, 10, 5, 12, 0, 0, 0, time.Local)},
+		{"11:30pm", time.Date(2026, 10, 4, 23, 30, 0, 0, time.Local)},
+		{"13:15", time.Date(2026, 10, 4, 13, 15, 0, 0, time.Local)},
+		{"12:40 PT", now},
+	}
+	for _, tt := range tests {
+		c := importer.ParseClock(tt.in)
+		if c == nil {
+			t.Errorf("ParseClock(%q) = nil", tt.in)
+			continue
+		}
+		if got := c.Latest(now); !got.Equal(tt.want) {
+			t.Errorf("ParseClock(%q).Latest = %v, want %v", tt.in, got, tt.want)
+		}
+	}
+	nowUTC := time.Date(2026, 10, 5, 19, 40, 0, 0, time.UTC)
+	if got, want := importer.ParseClock("19:00Z").Latest(nowUTC), time.Date(2026, 10, 5, 19, 0, 0, 0, time.UTC); !got.Equal(want) {
+		t.Errorf("ParseClock(19:00Z).Latest = %v, want %v", got, want)
+	}
+	for _, in := range []string{"2h", "#123", "25:00", "9:00 tomorrow", "2026-10-05T09:00:00Z"} {
+		if c := importer.ParseClock(in); c != nil {
+			t.Errorf("ParseClock(%q) = %+v, want nil", in, c)
+		}
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 )
@@ -89,6 +90,9 @@ func TestGrepMatchesWholeRecordLinesLiterally(t *testing.T) {
 		{[]string{"runner-protocol-idle-tenant"}, []string{"runner-protocol-idle-tenant GREEN #30568"}},
 		{[]string{"census|GREEN"}, []string{"no records on release-v3 match; store head #4"}},
 		{[]string{"--regex", "census|GREEN"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
+		{[]string{"-i", "--regex", "census|green"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
+		{[]string{"--ignore-case=false", "green"}, []string{"no records on release-v3 match; store head #4"}},
+		{[]string{"--ignore-case=false", "GREEN"}, []string{"runner-protocol-idle-tenant GREEN"}},
 	}
 	for _, tt := range tests {
 		out, err := run(t, append([]string{"grep", "--drive", "release-v3"}, tt.args...)...)
@@ -141,5 +145,44 @@ func TestBindingStartsTheSessionCursorAtTheHead(t *testing.T) {
 	}
 	if out, err := run(t, "tail"); err != nil || !strings.Contains(out, "after the bind") || strings.Contains(out, "backlog") {
 		t.Fatalf("tail after a new record = %q, %v", out, err)
+	}
+}
+
+func TestGrepSinceTakesAClockTime(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--text", "ship it"); err != nil {
+		t.Fatal(err)
+	}
+	soon := time.Now().Add(2 * time.Minute)
+	for _, since := range []string{soon.Format("15:04"), soon.Format("3:04 PM")} {
+		if out, err := run(t, "grep", "--drive", "release-v3", "--since", since, "ship"); err != nil || !strings.Contains(out, "ship it") {
+			t.Errorf("grep --since %q = %q, %v", since, out, err)
+		}
+	}
+	if _, err := run(t, "grep", "--drive", "release-v3", "--since", "9 o'clock", "ship"); err == nil || !strings.Contains(err.Error(), "clock time") {
+		t.Errorf("grep --since 9 o'clock: %v", err)
+	}
+}
+
+func TestPostTakesItsTextAsOneArgument(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--to", "cci-fix-4"}
+	if out, err := run(t, append(post, "land the fix")...); err != nil || out != "#1\n" {
+		t.Fatalf("post with a text argument = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, "GO root -> cci-fix-4 land the fix") {
+		t.Fatalf("tail = %q, %v", out, err)
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{append(post, "land", "the fix"), "one quoted argument or --text; got 2 arguments"},
+		{append(post, "--text", "a", "b"), "as an argument or --text, not both"},
+		{post, "post needs its text, as one quoted argument or --text"},
+	} {
+		if _, err := run(t, tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Errorf("%v: %v, want %q", tt.args, err, tt.want)
+		}
 	}
 }

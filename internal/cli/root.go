@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
@@ -97,7 +98,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringVar(&f.target, "target", "", "only records about this release target")
 		cmd.Flags().IntVar(&f.pr, "pr", 0, "only records about this pull request")
 	}
-	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), or an RFC3339 time")
+	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), a Pacific clock time (9:00 AM, 21:30, 12:0x), or an RFC3339 time")
 	cmd.Flags().IntVar(&f.budget, "budget", budget, "output budget in bytes")
 	cmd.Flags().BoolVar(&f.json, "json", false, "one JSON record per line")
 }
@@ -135,10 +136,13 @@ func parseSince(s string, now time.Time) (int64, time.Time, error) {
 	if d, err := time.ParseDuration(s); err == nil {
 		return 0, now.Add(-d), nil
 	}
+	if c := importer.ParseClock(s); c != nil {
+		return 0, c.Latest(now), nil
+	}
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return 0, t, nil
 	}
-	return 0, time.Time{}, fmt.Errorf("--since %q is not a seq, a duration, or an RFC3339 time", s)
+	return 0, time.Time{}, fmt.Errorf("--since %q is not a seq, a duration, a clock time (9:00 AM, 21:30), or an RFC3339 time", s)
 }
 
 func withStore(fn func(cmd *cobra.Command, st *store.Store, args []string) error) func(*cobra.Command, []string) error {

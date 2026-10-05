@@ -66,6 +66,8 @@ above returned `#1`, close it with:
 cci post --drive demo --lane walker --kind unblock --re 1 --stack api/plat-usw2-prod --target api --text 'Platy can deploy this stack.'
 ```
 
+The text can also be the one quoted argument after the flags, in place of
+`--text`.
 Repeat `--pr`, `--build`, `--stack`, `--target`, and `--lane-ref` to attach refs.
 `--lane-ref` names lanes the record is about; `--lane` names its writer.
 `--path`, `--ccn`, `--url`, and `--board` also set refs. Put long bodies in a file
@@ -108,7 +110,8 @@ tail starts with records posted after the bind; rebinding resets that cursor
 to the drive's latest record. Named lane cursors are unchanged, and one with
 no saved position reads the past hour. Reads advance cursors only through
 printed records. If capped, repeat with the same drive, cursor, and filters.
-Explicit `--since` accepts a sequence number, duration, or RFC 3339 time and
+Explicit `--since` accepts a sequence number, duration, local clock time such
+as `09:00` or `9:00 AM` (the latest one at or before now), or RFC 3339 time, and
 leaves the cursor untouched, even with `--cursor`; use `--since 0` to replay.
 
 `SessionStart` shares the root's cursor and injects the digest plus unseen
@@ -143,7 +146,8 @@ no `stack:<project>/<env>` or `target:<name>` ref; no later imported line can cl
 post with `--resolves <seq>`, or a `lift` with `--re <seq>`, does. `grep` searches
 whole rendered record lines, including sequence number, time, kind, lane,
 recipients, topic, text, and rendered refs. Patterns are literal and
-case-insensitive by default; use `--regex` for regular expressions such as
+case-insensitive by default (`-i` is accepted; `--ignore-case=false` matches
+case exactly); use `--regex` for regular expressions such as
 `HOLD|DEFECT`. It searches all matching records newest first, including expired
 records. A text grep with no match prints `no records on <drive> match; store
 head #<seq>`. Tail, grep, and state default to 6,144 bytes, and text digest
