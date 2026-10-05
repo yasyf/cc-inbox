@@ -179,3 +179,24 @@ func TestDateKeepsOutOfOrderStampsOnTheirDay(t *testing.T) {
 		}
 	}
 }
+
+func TestParseFilesRunnerEventsUnderTheRunner(t *testing.T) {
+	tests := []struct {
+		line, lane, topic string
+		kind              kinds.Kind
+	}{
+		{"01:38 STALE-MAIL stale:msg_d665a83f50f6 alerts-api-0024-fix: msg_d665a83f50f6 unread by a completed dispatch", "runner", "alerts-api-0024-fix", kinds.Note},
+		{"01:41 RECLAIM reclaim:ctx_c575b3459b82 runner: 1 settled dispatch(es) still hold their terminal: sandsql-handoff-0027-fix=ctx_c575b3459b82:term_47717eed", "runner", "sandsql-handoff-0027-fix", kinds.Note},
+		{"00:34 LAUNCHED R1089 hsbc-routing-revert: dispatch ctx_9ac9b5ebe8a0 terminal term_6ba9da32", "runner", "hsbc-routing-revert", kinds.Note},
+		{"01:33 OUTCOME msg_ed92a2d3755c alerts-api-0024-fix: worker_done succeeded dispatch=ctx_699ec468f4a1", "alerts-api-0024-fix", "", kinds.Report},
+		{"17:47 QUEUED sprawl-retro: #29607 enqueued via stack-enqueue", "sprawl-retro", "", kinds.Note},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lane+"/"+tt.topic, func(t *testing.T) {
+			e := parseOne(t, tt.line)
+			if e.Lane != tt.lane || e.Topic != tt.topic || e.Kind != tt.kind {
+				t.Errorf("entry = lane %q topic %q kind %q, want lane %q topic %q kind %q", e.Lane, e.Topic, e.Kind, tt.lane, tt.topic, tt.kind)
+			}
+		})
+	}
+}

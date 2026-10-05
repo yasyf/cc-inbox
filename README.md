@@ -189,6 +189,12 @@ must have four to six digits. Stack extraction recognizes region-shaped
 environments; it skips ordinary paths such as `infra/lib` and short environments
 such as `api/staging`, even though `--stack api/staging` is valid when posting.
 
+In keyed runner lines (`HH:MM KIND <key> <lane>: ...`), a `msg_<id>` key
+keeps the worker as the lane. Other keys put the event under `runner` with
+the subject lane as `topic`. When the subject is `runner:`, the first
+`<lane>=ctx_` token supplies the topic. These runner event kinds do not
+close native open items.
+
 At cutover, change lane instructions to post records directly and stop appending
 to the markdown files.
 
@@ -264,13 +270,14 @@ with `--re` reveals the previous non-withdrawn record, if any.
 The digest groups open items from its window: asks and decision requests
 (`decide`) in `open asks` (JSON `open_asks`), `blocker` and `blocked` records in
 `open blockers` (`open_blockers`), and defects in `open defects` (`open_defects`).
-Holds and incidents have their own sections. The digest counts older open items
-on one line and shows the latest record per lane. Use a longer window or a
-targeted read for older records.
+Holds and incidents have their own sections. The digest counts older open
+items on one line and selects each lane's latest record by time. Text
+sections and the latest-per-lane list use sequence number order, newest
+first. Use a longer window or a targeted read for older records.
 
 Digest open-item tracking and compaction's keep-open rule skip records whose
-source is `import:<file>`. Imported markdown inbox lines lack the
-`--re`/`--topic` pairing needed to close them.
+source is `import:<file>`. Imported markdown inbox lines do not reliably
+carry the closure links needed for open-item tracking.
 
 ## Kinds and pairing
 
@@ -393,7 +400,7 @@ The listener is fixed at `127.0.0.1:7377`.
 | `GET /v1/drives` | Array of drives with record counts and latest activity. |
 | `GET /v1/records?drive=D` | Array of records with computed opener `status`. Accepts repeatable `kind`, `lane`, and `topic`, plus `stack=<project>/<env>`, `target=<name>`, and `pr=<number>`. `to=<lane>` selects addressed records; `reader=<lane>` selects deliveries. `since` is a sequence number, `since_time` is an RFC 3339 timestamp, and `expired=1` includes expired records. `limit` defaults to 100 and caps at 500. |
 | `GET /v1/digest?drive=D` | Digest for the last 24 hours. Set `since_time` to an RFC 3339 timestamp to change the window. |
-| `GET /v1/lanes?drive=D` | Latest record per lane by time, newest first, for liveness. Includes expired records, excludes compaction digests, and returns at most 500 lanes. Use each record's `at` timestamp to measure age. |
+| `GET /v1/lanes?drive=D` | Select each lane's latest record by time and list the results by sequence number, newest first, for liveness. Includes expired records, excludes compaction digests, and returns at most 500 lanes. Use each record's `at` timestamp to measure age. |
 | `GET /v1/stream?drive=D` | Server-sent events with a record JSON payload and sequence number as the event ID. Starts at the current head; pass `since` to resume after a sequence number. Accepts repeatable `kind`, `lane`, and `topic`, plus `to`, `reader`, `stack`, `target`, and `pr`. |
 
 On both records and stream endpoints, `reader=<lane>` delivers records addressed

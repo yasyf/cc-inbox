@@ -16,7 +16,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const ParserVersion = 2
+const ParserVersion = 3
 
 type Result struct {
 	Path     string `json:"path"`
@@ -121,6 +121,7 @@ func ingestions(st *store.Store, src store.Source, abs string, chunk []byte, end
 		r := store.Record{
 			Drive:  src.Drive,
 			Lane:   e.Lane,
+			Topic:  e.Topic,
 			Kind:   e.Kind,
 			At:     times[i].UTC(),
 			Text:   e.Text,

@@ -227,3 +227,31 @@ func TestWatchEmitsOnlyNewMatchingRecords(t *testing.T) {
 		t.Fatalf("watch cursor = %d %v %v, want %d", seq, ok, err, want.Seq)
 	}
 }
+
+func TestDigestListsLatestNewestSeqFirst(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	imported := []store.Ingestion{
+		{Record: store.Record{Drive: "d", Lane: "merge-walker-r2", Kind: kinds.Note, At: c.Now().Add(-time.Minute), Text: "stamped 1:46", Source: "import:/x.md"}, LineHash: "a"},
+		{Record: store.Record{Drive: "d", Lane: "landing-sweep-16", Kind: kinds.Note, At: c.Now().Add(-2 * time.Minute), Text: "stamped 1:45", Source: "import:/x.md"}, LineHash: "b"},
+	}
+	if _, err := st.IngestAll(ctx, imported); err != nil {
+		t.Fatal(err)
+	}
+	v, err := inbox.Digest(ctx, st, "d", c.Now().Add(-inbox.DigestWindow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(v.Latest))
+	for _, r := range v.Latest {
+		got = append(got, r.Lane)
+	}
+	if strings.Join(got, ",") != "landing-sweep-16,merge-walker-r2" {
+		t.Fatalf("latest = %v, want the higher seq first", got)
+	}
+	var out bytes.Buffer
+	v.Write(&out, c.Now(), 0)
+	if i, j := strings.Index(out.String(), "#2 "), strings.Index(out.String(), "#1 "); i < 0 || j < i {
+		t.Fatalf("digest prints #1 before #2:\n%s", out.String())
+	}
+}
