@@ -114,7 +114,17 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		}
 		f.Before = records[len(records)-1].Seq
 	}
-	if matched > printed && !asJSON {
+	if asJSON {
+		return nil
+	}
+	if matched == 0 {
+		head, err := st.MaxSeq(ctx)
+		if err != nil {
+			return err
+		}
+		b.Trailer(fmt.Sprintf("no records on %s match; store head #%d", f.Drive, head))
+	}
+	if matched > printed {
 		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
 	}
 	return nil

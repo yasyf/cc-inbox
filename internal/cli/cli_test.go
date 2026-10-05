@@ -87,7 +87,7 @@ func TestGrepMatchesWholeRecordLinesLiterally(t *testing.T) {
 		{[]string{"STATE census"}, []string{"STATE census"}},
 		{[]string{"CLAIM merge-walker-r2"}, []string{"CLAIM merge-walker-r2 #30541"}},
 		{[]string{"runner-protocol-idle-tenant"}, []string{"runner-protocol-idle-tenant GREEN #30568"}},
-		{[]string{"census|GREEN"}, nil},
+		{[]string{"census|GREEN"}, []string{"no records on release-v3 match; store head #4"}},
 		{[]string{"--regex", "census|GREEN"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
 	}
 	for _, tt := range tests {
