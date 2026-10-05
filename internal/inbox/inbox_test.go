@@ -12,7 +12,6 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
-	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
@@ -73,21 +72,28 @@ func TestTailFreshCursorStartsAnHourBack(t *testing.T) {
 	}
 }
 
-func TestTailBudgetIsClamped(t *testing.T) {
+func TestTailBudgetGovernsWholeRecords(t *testing.T) {
 	st, _ := testutil.Store(t)
-	for i := range 200 {
-		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("%03d %s", i, strings.Repeat("y", 300))})
+	text := strings.Repeat("y", 390)
+	for i := range 160 {
+		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("%03d %s", i, text)})
 	}
 	var out bytes.Buffer
-	if _, err := inbox.Tail(context.Background(), st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1 << 30}, &out); err != nil {
+	if _, err := inbox.Tail(context.Background(), st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 60000}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if out.Len() > 16000 {
-		t.Fatalf("tail wrote %d bytes past the 16000-byte cap", out.Len())
+	if out.Len() > 60000 || out.Len() < 55000 {
+		t.Fatalf("tail wrote %d bytes, want just under the 60000-byte budget", out.Len())
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if !strings.HasPrefix(line, "...") && !strings.Contains(line, text) {
+			t.Fatalf("tail clipped a record within a 60000-byte budget: %s", line)
+		}
 	}
 }
 
 func TestReadsClipRecordsToWidth(t *testing.T) {
+	const width = 400
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
 	text := strings.Repeat("z", 390)
@@ -96,15 +102,15 @@ func TestReadsClipRecordsToWidth(t *testing.T) {
 	}
 	testutil.Post(t, st, store.Record{Kind: kinds.Head, Text: "head " + text})
 	var out bytes.Buffer
-	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Width: render.DefaultWidth}, &out); err != nil {
+	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Width: width}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.Len() > 6144 || out.Len() < 5000 {
 		t.Fatalf("default tail wrote %d bytes, want just under 6144", out.Len())
 	}
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-		if n := len([]rune(line)); n != render.DefaultWidth && !strings.HasPrefix(line, "...") {
-			t.Fatalf("line of %d characters, want clipped to %d: %s", n, render.DefaultWidth, line)
+		if n := len([]rune(line)); n != width && !strings.HasPrefix(line, "...") {
+			t.Fatalf("line of %d characters, want clipped to %d: %s", n, width, line)
 		}
 	}
 	whole := map[string]func(*bytes.Buffer) error{
@@ -113,7 +119,7 @@ func TestReadsClipRecordsToWidth(t *testing.T) {
 			return err
 		},
 		"tail --json": func(b *bytes.Buffer) error {
-			_, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000, Width: render.DefaultWidth, JSON: true}, b)
+			_, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000, Width: width, JSON: true}, b)
 			return err
 		},
 		"grep": func(b *bytes.Buffer) error {
@@ -192,7 +198,7 @@ func TestDigest(t *testing.T) {
 		t.Fatalf("digest counts total=%d kinds=%v lanes=%v", v.Total, v.Kinds, v.Lanes)
 	}
 	var out bytes.Buffer
-	v.Write(&out, st.Now(), 0, render.DefaultWidth)
+	v.Write(&out, st.Now(), 0, 0)
 	for _, want := range []string{"open asks (1, newest first):", "open holds (1, newest first):", "1 older open items", "latest per lane (2, newest first):", "STATE lane-b green"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("digest missing %q:\n%s", want, out.String())
@@ -274,7 +280,7 @@ func TestDigestListsLatestNewestSeqFirst(t *testing.T) {
 		t.Fatalf("latest = %v, want the higher seq first", got)
 	}
 	var out bytes.Buffer
-	v.Write(&out, c.Now(), 0, render.DefaultWidth)
+	v.Write(&out, c.Now(), 0, 0)
 	if i, j := strings.Index(out.String(), "#2 "), strings.Index(out.String(), "#1 "); i < 0 || j < i {
 		t.Fatalf("digest prints #1 before #2:\n%s", out.String())
 	}

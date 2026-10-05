@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Honor `--budget` as given instead of capping it at 16,000 bytes, and
+  print whole records in tail, watch, and digest unless `--width N` is
+  set. `SessionStart` keeps its 400-character width, 2,500-byte digest
+  budget, and 1,500-byte tail budget.
+
 ## [0.5.0] - 2026-10-05
 
 ### Added

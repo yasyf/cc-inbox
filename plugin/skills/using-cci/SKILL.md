@@ -142,13 +142,13 @@ whole rendered record lines, including sequence number, time, kind, lane,
 recipients, topic, text, and rendered refs. Patterns are literal and
 case-insensitive by default; use `--regex` for regular expressions such as
 `HOLD|DEFECT`. It searches all matching records newest first, including expired
-records. Tail, grep, state, and text digest default to 6,144 bytes, capped at
-16,000 with `--budget`.
+records. Tail, grep, state, and text digest default to 6,144 bytes; `--budget` sets
+any other size.
 
-Use `--width N` on tail, watch, and digest to set the width of each rendered
-record line. The default is 400 characters, including a final `…` when
-clipped; `--width 0` prints whole records. The width excludes digest
-indentation and appended reply marks. Grep and state print whole records.
+Tail, watch, and digest print whole records by default. Use `--width N` to
+clip each rendered record line to N characters, including a final `…`. The
+width excludes digest indentation and appended reply marks. Grep and state
+always print whole records.
 
 JSON ignores `--width` and keeps record text whole. Tail, grep, and state
 still apply their byte budgets in both formats. Wider lines can leave room
@@ -166,8 +166,8 @@ It polls once a second and exits after 29 minutes. Re-arm with the same cursor.
 Without a saved cursor or explicit window, it starts at the current head.
 Use one cursor per filtered watch.
 
-Text record lines clip at `--width`
-characters, default 400, before reply marks. Use `--width 0` for whole records.
+Text record lines print whole unless `--width N` clips them before reply
+marks.
 Watch has no total byte budget in text or JSON form.
 
 ## Choose a kind

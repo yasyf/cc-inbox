@@ -10,13 +10,13 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
-	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 const (
 	digestBudget = 2500
 	tailBudget   = 1500
+	recordWidth  = 400
 )
 
 type Payload struct {
@@ -44,9 +44,9 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, w io.Writer) 
 	if err != nil {
 		return err
 	}
-	v.Write(&out, st.Now(), digestBudget, render.DefaultWidth)
+	v.Write(&out, st.Now(), digestBudget, recordWidth)
 	out.WriteString("unseen since this session's cursor (cci tail for more):\n")
-	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive}, Cursor: p.SessionID, Budget: tailBudget, Width: render.DefaultWidth}, &out); err != nil {
+	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive}, Cursor: p.SessionID, Budget: tailBudget, Width: recordWidth}, &out); err != nil {
 		return err
 	}
 	return json.NewEncoder(w).Encode(map[string]any{
