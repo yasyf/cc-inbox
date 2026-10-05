@@ -188,6 +188,10 @@ func TestOpenItems(t *testing.T) {
 	decide := post(t, st, store.Record{Kind: kinds.Decide, Text: "A or B", Topic: "#30427"})
 	hold := post(t, st, store.Record{Kind: kinds.Hold, Text: "hold the queue", Topic: "#30431"})
 	incident := post(t, st, store.Record{Kind: kinds.Incident, Text: "sanddb down", Topic: "hsbc-2147"})
+	imported := []store.Ingestion{{Record: store.Record{Drive: "d", Lane: "runner", Kind: kinds.Decide, At: st.Now(), Text: "imported question", Source: "import:/inbox/runner.md"}, LineHash: "h1"}}
+	if _, err := st.IngestAll(ctx, imported); err != nil {
+		t.Fatal(err)
+	}
 	post(t, st, store.Record{Lane: "root", Kind: kinds.Answer, Text: "seeded bucket", Re: ask.Seq})
 	post(t, st, store.Record{Lane: "root", Kind: kinds.Go, Text: "pick A", Topic: "#30427"})
 	post(t, st, store.Record{Lane: "root", Kind: kinds.Lift, Text: "unrelated", Topic: "#99999"})

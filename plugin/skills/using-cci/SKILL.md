@@ -87,6 +87,10 @@ incidents from that window, then counts older open items on one line. `grep`
 searches newest first and includes expired records. Tail, grep, and text digest
 default to 4,000 bytes, capped at 16,000. Long bodies stay behind their file refs.
 
+Digest open-item tracking and compaction's keep-open rule skip records whose
+source is `import:<file>`. Imported markdown inbox lines lack the
+`--re`/`--topic` pairing needed to close them.
+
 ## Watch GO lines with a Monitor
 
 Run the watch as the Monitor's command:

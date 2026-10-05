@@ -167,6 +167,10 @@ The digest lists open asks and decisions, holds, and incidents from its window.
 It counts older open items on one line. Its latest-per-lane section includes any
 kind. Use a longer time window or a targeted read to inspect older records.
 
+Digest open-item tracking and compaction's keep-open rule skip records whose
+source is `import:<file>`. Imported markdown inbox lines lack the
+`--re`/`--topic` pairing needed to close them.
+
 ## Kinds and pairing
 
 Pair records within a drive using a shared `--topic` or a closing record's

@@ -26,6 +26,9 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 	}
 	var open []Record
 	for _, o := range openers {
+		if strings.HasPrefix(o.Source, "import:") {
+			continue
+		}
 		if !closed(o, closers) {
 			open = append(open, o)
 		}
