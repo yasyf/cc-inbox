@@ -10,8 +10,11 @@ in `cc-notes`, linked with `--ccn`. Use `decision` for a call already made and
 `decide` to request one. A decision has no default expiry and is not an open item.
 
 Use the task's drive and lane names. Pass `--drive` or bind the current Claude
-Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`. A root binding also
-enables owner-prompt capture through the plugin:
+Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`; subagents share their
+parent's value. Each `cci drive use` sets the session's cursor to the selected
+drive's latest record, including when rebinding the same drive. An empty drive
+starts at sequence 0. A root binding also enables owner-prompt capture through
+the plugin:
 
 ```bash
 cci drive use release-demo --root
@@ -95,14 +98,18 @@ On `tail`, `watch`, `grep`, and `state`, `--reader` delivers records addressed
 to the lane regardless of kind, lane, or topic filters, plus other lanes'
 broadcasts matching those filters. Broadcasts have empty `to`; your own never
 come back. Repeat `--topic` or `--lane` to select topics or posting lanes.
-Use `--kind` on tail, watch, or grep to select broadcast kinds; `--to` selects
+Use `--kind` on tail, watch, or grep to select broadcast kinds. Repeat the flag
+or separate kinds with commas, such as `--kind hold,defect`. `--to` selects
 addressed records only. Stack, target, and PR filters apply to all deliveries.
 
 The root reads drive coordination through `cci digest`, `cci tail`, and
-`cci watch`. Use `cci tail` with the session's default cursor. A new cursor reads
-the past hour and advances only through printed records. If capped, repeat
-with the same drive, cursor, and filters. Explicit `--since` leaves the cursor
-untouched, even with `--cursor`; use `--since 0` to replay.
+`cci watch`. Use `cci tail` with the session's default cursor. After `drive use`,
+tail starts with records posted after the bind; rebinding resets that cursor
+to the drive's latest record. Named lane cursors are unchanged, and one with
+no saved position reads the past hour. Reads advance cursors only through
+printed records. If capped, repeat with the same drive, cursor, and filters.
+Explicit `--since` accepts a sequence number, duration, or RFC 3339 time and
+leaves the cursor untouched, even with `--cursor`; use `--since 0` to replay.
 
 `SessionStart` shares the root's cursor and injects the digest plus unseen
 records after compaction. Both reads use a 400-character width, with a

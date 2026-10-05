@@ -61,7 +61,10 @@ The root reads drive coordination through `cci digest`, `cci tail`, and
 so later reads skip those records after conversation compaction.
 
 Inside Claude Code, bind the root to a drive. `cci drive use` requires
-`CLAUDE_CODE_SESSION_ID`; keep the value supplied by the session.
+`CLAUDE_CODE_SESSION_ID`; keep the value supplied by the session. Each bind
+sets that session's cursor to the drive's latest record, including when you
+bind the same drive again. An empty drive starts at sequence 0. Subagents
+share the parent's session ID, so give each lane a named cursor for its reads.
 
 ```console
 $ cci drive use release-demo --root
@@ -77,11 +80,16 @@ $ cci tail
 $ cci tail
 ```
 
-Only the new record appears after the next post; another read prints nothing.
-The cursor survives conversation compaction and advances only through printed
-records. A named cursor with no saved position reads the past hour.
-An explicit `--since` reads from that point and leaves the cursor untouched,
-even when `--cursor` is also set.
+After binding, tail starts with records posted after the bind. Only the new
+record appears after the next post; another read prints nothing. The cursor
+survives conversation compaction. Reads advance it only through printed records;
+rebinding resets it to the drive's latest record. Named lane cursors are
+unchanged, and one with no saved position reads the past hour.
+
+An explicit `--since` accepts a sequence number, duration, or RFC 3339 time
+and leaves the cursor untouched, even when `--cursor` is also set. Use
+`--since 0` to replay older records. `--kind` accepts repeated flags or
+comma-separated kinds, such as `--kind hold,defect`.
 
 Lanes read their deliveries with `cci tail --cursor api --reader api`, so their
 reads do not advance the root's position. This delivers records addressed to
@@ -218,14 +226,14 @@ Commands that select a drive accept `--drive` or use the current session binding
 | Command | Behavior |
 | --- | --- |
 | `cci post` | Append one typed record. Requires lane, kind, and text; prints its sequence number. |
-| `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`. |
+| `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
 | `cci grep` | Search whole rendered record lines literally and case-insensitively, newest first, including expired records. `--regex` enables regular expressions. |
 | `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
-| `cci drive use` | Bind the current Claude Code session to a drive. `--root` enables owner-prompt capture. |
+| `cci drive use` | Bind the current Claude Code session and reset its cursor to the drive's latest record in one transaction. `--root` enables owner-prompt capture. |
 | `cci drive ls` | List drives by their most recent activity. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
 | `cci hook` | Run a plugin hook entry point. |
@@ -249,7 +257,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | Read option | Commands | Behavior |
 | --- | --- | --- |
 | `--regex` | `grep` | Interpret the pattern as a case-insensitive regular expression; `a\|b` matches either alternative. The default matches the pattern literally. |
-| `--kind <kind>` | `tail`, `watch`, `grep` | Select kinds; repeat for multiple kinds. |
+| `--kind <kind>` | `tail`, `watch`, `grep` | Select kinds; repeat the flag or separate kinds with commas. |
 | `--lane <lane>` | `tail`, `watch`, `grep`, `state` | Select posting lanes; repeat for multiple lanes. |
 | `--topic <topic>` | `tail`, `watch`, `grep`, `state` | Select topics; repeat for multiple topics. |
 | `--stack <project>/<env>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.stacks`. |

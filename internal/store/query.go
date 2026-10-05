@@ -167,9 +167,20 @@ type Binding struct {
 }
 
 func (s *Store) Bind(ctx context.Context, session, drive string, root bool) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (session, drive, root) VALUES (?, ?, ?)
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root`, session, drive, root)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return fmt.Errorf("bind session: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root) VALUES (?, ?, ?)
+ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root`, session, drive, root); err != nil {
+		return fmt.Errorf("bind session: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(MAX(seq), 0) FROM records WHERE drive = ?
+ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, session, drive, drive); err != nil {
+		return fmt.Errorf("start session cursor: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("bind session: %w", err)
 	}
 	return nil

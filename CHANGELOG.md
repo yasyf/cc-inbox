@@ -44,6 +44,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Include `state` records in `cci state` alongside `head` and `contract`,
   keeping the latest non-withdrawn record per kind, lane, and topic.
   Empty text reads say `no head, contract, or state records on <drive>`.
+- Set the session's tail cursor to the drive's latest record in the
+  same transaction as `cci drive use`, including on rebind. Named
+  cursors and explicit `--since` reads keep their existing behavior.
 
 ## [0.4.0] - 2026-10-05
 
