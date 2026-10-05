@@ -21,6 +21,7 @@ type TailOptions struct {
 	Filter store.Filter
 	Cursor string
 	Budget int
+	Width  int
 	JSON   bool
 }
 
@@ -47,7 +48,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if err != nil {
 		return TailResult{}, err
 	}
-	rendered, err := lines(ctx, st, records, opts.JSON)
+	rendered, err := lines(ctx, st, records, opts.JSON, opts.Width)
 	if err != nil {
 		return TailResult{}, err
 	}
@@ -97,7 +98,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 				hits = append(hits, r)
 			}
 		}
-		rendered, err := lines(ctx, st, hits, asJSON)
+		rendered, err := lines(ctx, st, hits, asJSON, 0)
 		if err != nil {
 			return err
 		}

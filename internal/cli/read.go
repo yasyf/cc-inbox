@@ -31,11 +31,12 @@ func newTailCmd() *cobra.Command {
 			if cmd.Flags().Changed("since") {
 				name = ""
 			}
-			_, err = inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Budget: rf.budget, JSON: rf.json}, cmd.OutOrStdout())
+			_, err = inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Budget: rf.budget, Width: rf.width, JSON: rf.json}, cmd.OutOrStdout())
 			return err
 		}),
 	}
 	rf.register(cmd, "", true)
+	rf.registerWidth(cmd)
 	cmd.Flags().StringVar(&cursor, "cursor", os.Getenv(sessionEnv), "cursor name, read and advanced when --since is absent")
 	return cmd
 }
@@ -56,10 +57,11 @@ func newWatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, JSON: rf.json}, cmd.OutOrStdout())
+			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, cmd.OutOrStdout())
 		}),
 	}
 	rf.register(cmd, "", true)
+	rf.registerWidth(cmd)
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor")
 	cmd.Flags().DurationVar(&interval, "interval", time.Second, "poll interval")
 	cmd.Flags().DurationVar(&limit, "for", 29*time.Minute, "exit after this long so a Monitor re-arms")
@@ -84,11 +86,12 @@ func newDigestCmd() *cobra.Command {
 			if rf.json {
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(v)
 			}
-			v.Write(cmd.OutOrStdout(), st.Now(), rf.budget)
+			v.Write(cmd.OutOrStdout(), st.Now(), rf.budget, rf.width)
 			return nil
 		}),
 	}
 	rf.register(cmd, "24h", false)
+	rf.registerWidth(cmd)
 	return cmd
 }
 

@@ -13,7 +13,7 @@ import (
 const (
 	DefaultBudget  = 6144
 	MaxBudget      = 16000
-	LineCap        = 200
+	DefaultWidth   = 400
 	trailerReserve = 96
 )
 
@@ -96,12 +96,12 @@ func NewBudget(w io.Writer, budget int) *Budget {
 	return &Budget{w: w, left: Clamp(budget) - trailerReserve}
 }
 
-func Clip(s string) string {
+func Clip(s string, width int) string {
 	r := []rune(s)
-	if len(r) <= LineCap {
+	if width <= 0 || len(r) <= width {
 		return s
 	}
-	return string(r[:LineCap-1]) + "…"
+	return string(r[:width-1]) + "…"
 }
 
 func (b *Budget) Line(s string) bool {

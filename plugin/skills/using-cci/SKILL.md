@@ -88,10 +88,12 @@ addressed records only. Stack, target, and PR filters apply to all deliveries.
 The root reads drive coordination through `cci digest`, `cci tail`, and
 `cci watch`. Use `cci tail` with the session's default cursor. A new cursor reads
 the past hour and advances only through printed records. If capped, repeat
-with the same drive, cursor, and filters. `SessionStart` shares the root's cursor
-and injects the digest plus unseen records after compaction, with its own
-2,500-byte digest budget and 1,500-byte tail budget. Explicit `--since` leaves
-the cursor untouched, even with `--cursor`; use `--since 0` to replay.
+with the same drive, cursor, and filters. Explicit `--since` leaves the cursor
+untouched, even with `--cursor`; use `--since 0` to replay.
+
+`SessionStart` shares the root's cursor and injects the digest plus unseen
+records after compaction. Both reads use a 400-character width, with a
+2,500-byte digest budget and 1,500-byte tail budget.
 
 Read a stack's problems and fixes, or search records about a target or PR:
 
@@ -103,8 +105,9 @@ cci tail --drive demo --pr 30440 --since 0
 
 Read filters `--stack`, `--target`, and `--pr` each take one value and combine
 with AND. JSON tail, grep, and watch reads add `status` to opener kinds: `open`,
-`closed`, or `imported`. Text tail, grep, and watch reads append reply marks
-after clipping, so the marks stay visible. These include `[ANSWERED #12]`,
+`closed`, or `imported`. Text tail and watch reads append reply marks after
+clipping; grep prints whole record lines with reply marks. These include
+`[ANSWERED #12]`,
 `[WITHDRAWN #14]`, `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or
 `[RE #n]`. A resolver adds `[RESOLVED #n]` to the target, naming the resolver,
 and `resolves #n` to itself, naming the target.
@@ -116,10 +119,14 @@ have their own sections, followed by a count of older open items. `grep` searche
 newest first and includes expired records. Tail, grep, state, and text digest
 default to 6,144 bytes, capped at 16,000 with `--budget`.
 
-Text record lines in tail, grep, watch, state, and digest sections clip at 200
-characters, including a final `…` when clipped. The limit excludes digest
-indentation and appended reply marks. JSON record text is never clipped;
-JSON tail, grep, and state still apply their byte budgets.
+Use `--width N` on tail, watch, and digest to set the width of each rendered
+record line. The default is 400 characters, including a final `…` when
+clipped; `--width 0` prints whole records. The width excludes digest
+indentation and appended reply marks. Grep and state print whole records.
+
+JSON ignores `--width` and keeps record text whole. Tail, grep, and state
+still apply their byte budgets in both formats. Wider lines can leave room
+for fewer records within a budget.
 
 ## Watch GO lines with a Monitor
 
@@ -131,8 +138,11 @@ cci watch --drive monitor-demo --kind go --cursor monitor
 
 It polls once a second and exits after 29 minutes. Re-arm with the same cursor.
 Without a saved cursor or explicit window, it starts at the current head.
-Use one cursor per filtered watch. Text record lines clip at 200 characters
-before reply marks. Watch has no total byte budget in text or JSON form.
+Use one cursor per filtered watch.
+
+Text record lines clip at `--width`
+characters, default 400, before reply marks. Use `--width 0` for whole records.
+Watch has no total byte budget in text or JSON form.
 
 ## Choose a kind
 

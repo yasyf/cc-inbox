@@ -46,7 +46,7 @@ func Annotate(ctx context.Context, st *store.Store, records []store.Record) erro
 	return nil
 }
 
-func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON bool) ([]string, error) {
+func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON bool, width int) ([]string, error) {
 	out := make([]string, len(records))
 	if asJSON {
 		if err := Annotate(ctx, st, records); err != nil {
@@ -70,7 +70,7 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON 
 	}
 	now := st.Now()
 	for i, r := range records {
-		out[i] = render.Clip(render.Line(r, now)) + marks(r.Seq, replies[r.Seq])
+		out[i] = render.Clip(render.Line(r, now), width) + marks(r.Seq, replies[r.Seq])
 	}
 	return out, nil
 }

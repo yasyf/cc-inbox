@@ -248,14 +248,17 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
 | `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes and caps at 16,000. |
+| `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width; defaults to 400. `0` prints whole records. JSON ignores it. |
 
 Broadcasts have an empty `to` list. With `--reader`, kind, lane, and topic filters
 apply only to broadcasts; records addressed only to other lanes are excluded.
 Stack, target, and PR filters apply to addressed records too. Each takes one
 value per read; when combined, all must match.
 
-Tail, watch, and grep text lines append reply marks after clipping, so the marks
-stay visible. A reply names the record's sequence number with `--re`.
+Tail and watch text lines append reply marks after clipping, so the marks stay
+visible. Grep prints whole record lines with reply marks.
+
+A reply names the record's sequence number with `--re`.
 The marks are `[ANSWERED #12]`, `[WITHDRAWN #14]`,
 `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or `[RE #n]` for other
 reply kinds. A resolver adds `[RESOLVED #n]` to its target's line and
@@ -454,14 +457,16 @@ sessions write to the same SQLite store without a daemon.
 | Posted text | 400 characters. Put longer bodies in a file and attach it with `--path`. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
 | `tail`, `grep`, `state`, and text `digest` | Default 6,144-byte budget, capped at 16,000 bytes. Output stops at a whole line. |
-| Text record lines in `tail`, `grep`, `watch`, `state`, and digest sections | Clip to 200 characters, including a final `…` when clipped. The limit excludes digest indentation and appended reply marks. |
+| Text record lines in `tail`, `watch`, and digest sections | Clip to `--width` characters, default 400, including a final `…` when clipped. `--width 0` prints whole records. The limit excludes digest indentation and appended reply marks. |
+| Text record lines in `grep` and `state` | Print whole records within the byte budget. |
 | `tail` | At most 500 records per call. Repeat the same cursor read to continue. |
 | Text `watch` | Output continues for the watch lifetime; `--budget` does not limit it. |
-| JSON output | Record text is never clipped. `tail`, `grep`, and `state` still apply their byte budgets. |
+| JSON output | Record text is never clipped; `--width` has no effect. `tail`, `grep`, and `state` still apply their byte budgets. |
 | JSON `watch` and `digest` | No byte-budget cap. |
 | Text digest sections | Up to 8 asks and decision requests combined; 6 blockers and deployment blocks combined; 6 defects; 6 holds; 6 incidents; and 15 latest lane records, subject to the byte budget. |
-| `SessionStart` context | Digest budget of 2,500 bytes and tail budget of 1,500 bytes. |
+| `SessionStart` context | Width 400 for both reads, with a digest budget of 2,500 bytes and a tail budget of 1,500 bytes. |
 
+Wider record lines leave the byte budgets unchanged, so fewer records may fit.
 Capped text tail and grep reads report omitted records; capped text digest
 and state reads report truncation. Their JSON forms omit that trailer. Narrow
 state output with `--lane` or `--topic`.

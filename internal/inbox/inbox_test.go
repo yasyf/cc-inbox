@@ -12,6 +12,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
@@ -86,29 +87,52 @@ func TestTailBudgetIsClamped(t *testing.T) {
 	}
 }
 
-func TestTailMatchesInboxDigestBudgets(t *testing.T) {
+func TestReadsClipRecordsToWidth(t *testing.T) {
 	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	text := strings.Repeat("z", 390)
 	for i := range 60 {
-		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("%03d %s", i, strings.Repeat("z", 380))})
+		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("%03d %s", i, text)})
 	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Head, Text: "head " + text})
 	var out bytes.Buffer
-	if _, err := inbox.Tail(context.Background(), st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}}, &out); err != nil {
+	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Width: render.DefaultWidth}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if out.Len() > 6144 || out.Len() < 5000 {
 		t.Fatalf("default tail wrote %d bytes, want just under 6144", out.Len())
 	}
 	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
-		if n := len([]rune(line)); n > 200 && !strings.HasPrefix(line, "...") {
-			t.Fatalf("line of %d characters past the 200 cap: %s", n, line)
+		if n := len([]rune(line)); n != render.DefaultWidth && !strings.HasPrefix(line, "...") {
+			t.Fatalf("line of %d characters, want clipped to %d: %s", n, render.DefaultWidth, line)
 		}
 	}
-	var asJSON bytes.Buffer
-	if _, err := inbox.Tail(context.Background(), st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000, JSON: true}, &asJSON); err != nil {
-		t.Fatal(err)
+	whole := map[string]func(*bytes.Buffer) error{
+		"tail --width 0": func(b *bytes.Buffer) error {
+			_, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000}, b)
+			return err
+		},
+		"tail --json": func(b *bytes.Buffer) error {
+			_, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000, Width: render.DefaultWidth, JSON: true}, b)
+			return err
+		},
+		"grep": func(b *bytes.Buffer) error {
+			return inbox.Grep(ctx, st, store.Filter{Drive: "d"}, regexp.MustCompile("^059"), 0, false, b)
+		},
+		"state": func(b *bytes.Buffer) error {
+			records, err := inbox.State(ctx, st, store.Filter{Drive: "d"})
+			inbox.WriteState(b, records, st.Now(), 0, false)
+			return err
+		},
 	}
-	if !strings.Contains(asJSON.String(), strings.Repeat("z", 380)) {
-		t.Fatalf("JSON tail clipped record text:\n%s", asJSON.String())
+	for name, read := range whole {
+		var b bytes.Buffer
+		if err := read(&b); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(b.String(), text) {
+			t.Errorf("%s clipped record text:\n%s", name, b.String())
+		}
 	}
 }
 
@@ -168,7 +192,7 @@ func TestDigest(t *testing.T) {
 		t.Fatalf("digest counts total=%d kinds=%v lanes=%v", v.Total, v.Kinds, v.Lanes)
 	}
 	var out bytes.Buffer
-	v.Write(&out, st.Now(), 0)
+	v.Write(&out, st.Now(), 0, render.DefaultWidth)
 	for _, want := range []string{"open asks (1, newest first):", "open holds (1, newest first):", "1 older open items", "latest per lane (2, newest first):", "STATE lane-b green"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("digest missing %q:\n%s", want, out.String())
@@ -250,7 +274,7 @@ func TestDigestListsLatestNewestSeqFirst(t *testing.T) {
 		t.Fatalf("latest = %v, want the higher seq first", got)
 	}
 	var out bytes.Buffer
-	v.Write(&out, c.Now(), 0)
+	v.Write(&out, c.Now(), 0, render.DefaultWidth)
 	if i, j := strings.Index(out.String(), "#2 "), strings.Index(out.String(), "#1 "); i < 0 || j < i {
 		t.Fatalf("digest prints #1 before #2:\n%s", out.String())
 	}
