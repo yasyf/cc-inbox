@@ -1,18 +1,17 @@
 ---
 name: using-cci
-description: Load when posting or reading drive coordination records, inbox lines, lane status, GO lines, holds, or asks; when resuming a root or lane after compaction; when watching a drive with a Monitor; or when replacing appends to inbox markdown files or ephemeral cc-notes status with cci. Covers choosing a kind, pairing replies and closures, attaching references, reading with cursors, and keeping durable knowledge in cc-notes.
+description: Load when posting or reading drive coordination records, inbox lines, lane status, GO lines, holds, asks, or blocked deploys; when resuming after compaction; when watching a drive with a Monitor; or when replacing markdown inbox appends or ephemeral cc-notes status with cci. Covers kinds, closures, stack and target references, cursors, and durable knowledge in cc-notes.
 ---
 
 # Using cci
 
 Put drive coordination in `cci`. Keep durable rulings, runbooks, and design docs
-in `cc-notes`, linked with `--ccn`. Use `decision` for a call a lane made that
-others build on. It has no default expiry and is not an open item. Use `decide`
-to request a decision; it stays open until answered, approved, or withdrawn.
+in `cc-notes`, linked with `--ccn`. Use `decision` for a call already made and
+`decide` to request one. A decision has no default expiry and is not an open item.
 
-Use the drive and lane names from the task. Pass `--drive` explicitly or bind the
-current Claude Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`. A root
-binding also enables owner-prompt capture through the plugin:
+Use the task's drive and lane names. Pass `--drive` or bind the current Claude
+Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`. A root binding also
+enables owner-prompt capture through the plugin:
 
 ```bash
 cci drive use release-demo --root
@@ -21,45 +20,59 @@ cci drive use release-demo --root
 ## Post one event
 
 Write one record per event, with text under 400 characters. Use `state` for
-current status, `ask` for a question, `hold` for
-a stop, `go` for permission, and `opened` or `landed` for a pull request event.
+status, `ask` for a question, `hold` for a stop, `go` for permission, and `opened`
+or `landed` for a PR event. Use `review` with `--outcome` for a rules-review verdict.
+Address lanes with `--to`; when an action needs the owner, use `--to owner`.
 
-Give related events a stable `--topic`. An answer or closure uses that topic or
-`--re` with the opener's returned sequence number. `answer`, `lift`, and
-`withdraw` require one of those links. This ask returns its sequence number:
+Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
+`--resolves <seq>` must name an existing record in the same drive. Only a later
+record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`.
+`go`, `opened`, `landed`, and `fix-live` can all carry `--resolves`.
+`answer`, `lift`, `withdraw`, and `unblock` require `--re`, `--topic`, or `--resolves`.
+
+Every `defect`, `matrix`, `hold`, `go`, or `opened` record about a stack carries
+`--stack <project>/<env>`, `--target <name>`, or both. Attach them to related records
+too, so a stack or target query finds both the problem and the work addressing it.
+`--stack` names a deploy stack, such as `api/plat-usw2-prod`. Use repeated `--pr`
+flags for pull requests; `opened` and `landed` require at least one.
+
+Use `blocked` when a stack or target cannot deploy. It remains open until
+`unblock` names it with `--re` or the same `--topic`, or a resolver closes it.
+Resolving a defect does not close a separate `blocked` record. For a new drive:
 
 ```bash
-cci post --drive demo --lane api --kind ask --topic rollout --text 'Approve the rollout?'
+cci post --drive demo --lane walker --kind blocked --stack api/plat-usw2-prod --target api --text 'Platy cannot deploy: wave cycle.'
+cci post --drive demo --lane root --kind ask --to owner --topic rollout --stack api/plat-usw2-prod --text 'Approve the repair?'
 ```
 
-Use `--pr` for pull request references. `opened` and `landed` require it:
+Use the returned sequence number when the stack can deploy again. If the block
+above returned `#1`, close it with:
 
 ```bash
-cci post --drive demo --lane api --kind opened --pr 42 --text 'Fix ready for review.'
+cci post --drive demo --lane walker --kind unblock --re 1 --stack api/plat-usw2-prod --target api --text 'Platy can deploy this stack.'
 ```
 
-Put a long body in a file and pass `--path` with a short summary:
+Repeat `--pr`, `--build`, `--stack`, `--target`, and `--lane-ref` to attach refs.
+`--lane-ref` names lanes the record is about; `--lane` names its writer.
+`--path`, `--ccn`, `--url`, and `--board` also set refs. Put long bodies in a file
+and attach it with `--path` and a short summary.
 
-```bash
-printf '%s\n' 'Deployment plan and review evidence.' > rollout.txt
-cci post --drive demo --lane api --kind report --text 'Review evidence attached.' --path rollout.txt
-```
-
-Use `--to` to address lanes. Keep `--pr`, `--build`, `--ccn`, `--url`, and `--path`
-in references; structured fields are stack, environment, and named counts.
+Structured fields use repeatable `--env`, `--mode` (`platy`, `cli`, `manual`,
+`walker`), `--outcome` (`passed`, `failed`, `pending`, `cancelled`), `--commit`,
+`--census` JSON, and `--count name=integer`. Census carries `n`, `denominator`,
+`head`, `drift`, and `stacks_clean`. PRs, builds, and deploy stacks live in refs.
 Repeating the same drive, lane, kind, and normalized text within ten minutes
 returns the original record, even if its references differ.
 
 Publish `head` on every push, with the full commit SHA as text and the PR or
 branch as topic. Publish `contract` for interfaces other lanes consume; withdraw
 it with `--re` before changing the interface. Broadcast both by omitting `--to`.
-Read `cci state` before asking a lane for its head or contract. It returns the
-latest of each per lane and topic, skipping withdrawn records.
+Read `cci state` before asking for a head or contract. It returns the latest of
+each per lane and topic, skipping withdrawn records.
 
 ## Read without repeating context
 
-Give each lane its own cursor and read with `cci tail --cursor <lane> --reader <lane>`.
-For the bound drive, the `api` lane reads:
+Give each lane its own cursor. For the bound drive, the `api` lane reads:
 
 ```bash
 cci tail --cursor api --reader api
@@ -68,45 +81,37 @@ cci tail --cursor api --reader api
 On `tail`, `watch`, `grep`, and `state`, `--reader` delivers records addressed
 to the lane regardless of kind, lane, or topic filters, plus other lanes'
 broadcasts matching those filters. Broadcasts have empty `to`; your own never
-come back. Repeat `--topic` to select topics or `--lane` to select posting lanes.
-Use `--kind` on tail, watch, or grep to select broadcast kinds.
-Use `--to <lane>` for addressed records only.
+come back. Repeat `--topic` or `--lane` to select topics or posting lanes.
+Use `--kind` on tail, watch, or grep to select broadcast kinds; `--to` selects
+addressed records only. Stack, target, and PR filters apply to all deliveries.
 
-The root uses the session default:
+The root uses `cci tail` with the session's default cursor. A new cursor reads
+the past hour and advances only through printed records. If capped, repeat
+with the same drive, cursor, and filters. `SessionStart` shares the root's cursor
+and injects the digest plus unseen records after compaction. Explicit `--since`
+leaves the cursor untouched, even with `--cursor`; use `--since 0` to replay.
 
-```bash
-cci tail
-```
-
-A tail cursor with no saved position reads the past hour. It advances only
-through printed records. If the read is capped, repeat the same command with the
-same drive, cursor, and filters. The plugin's `SessionStart` hook shares the root's
-session cursor and injects the digest plus unseen records after compaction.
-An explicit `--since` reads from that point and leaves the cursor untouched,
-even when `--cursor` is also set. `cci tail --cursor api --reader api --since 0`
-replays `api`'s deliveries without changing its position.
-
-Read the drive summary or search a specific issue:
+Read a stack's problems and fixes, or search records about a target or PR:
 
 ```bash
-cci digest
-cci grep 'checks|review'
+cci tail --drive demo --stack api/plat-usw2-prod --since 0 --json
+cci grep 'Platy' --drive demo --target api
+cci tail --drive demo --pr 30440 --since 0
 ```
 
-The digest defaults to 24 hours. It lists open asks and decision requests,
-blockers, holds, and incidents, then counts older open items on one line.
-Blockers have their own section and JSON `open_blockers` array. `grep` searches
+Read filters `--stack`, `--target`, and `--pr` each take one value and combine
+with AND. JSON tail, grep, and watch reads add `status` to opener kinds: `open`,
+`closed`, or `imported`. Text reads append reply marks such as `[ANSWERED #12]`,
+`[WITHDRAWN #14]`, `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or
+`[RE #n]`. A resolver adds `[RESOLVED #n]` to the target, naming the resolver,
+and `resolves #n` to itself, naming the target.
+
+`cci digest` defaults to 24 hours. `open asks` (JSON `open_asks`) contains asks and
+decision requests. `open blockers` (`open_blockers`) contains `blocker` and
+`blocked`; `open defects` (`open_defects`) contains defects. Holds and incidents
+have their own sections, followed by a count of older open items. `grep` searches
 newest first and includes expired records. Tail, grep, state, and text digest
 default to 4,000 bytes, capped at 16,000 with `--budget`.
-
-Tail, watch, and grep text append reply marks such as `[ANSWERED #12]` and
-`[WITHDRAWN #14]` when another record names the original with `--re`. The number
-is the reply's sequence. Other marks are `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`,
-`[FIX-LIVE #n]`, and `[RE #n]` for other reply kinds.
-
-Digest open-item tracking and compaction's keep-open rule skip records whose
-source is `import:<file>`. Imported markdown inbox lines lack the
-`--re`/`--topic` pairing needed to close them.
 
 ## Watch GO lines with a Monitor
 
@@ -116,37 +121,39 @@ Run the watch as the Monitor's command:
 cci watch --drive monitor-demo --kind go --cursor monitor
 ```
 
-The watch polls once a second and exits after 29 minutes. Re-arm the same command
-with the same cursor. Without a saved cursor or explicit time window, its first
-run starts at the current head. Use a dedicated cursor for each filtered watch.
-Text lines cap at 600 characters; the watch has no total byte budget.
+It polls once a second and exits after 29 minutes. Re-arm with the same cursor.
+Without a saved cursor or explicit window, it starts at the current head.
+Use one cursor per filtered watch. Text lines cap at 600 characters with no total
+byte budget.
 
 ## Choose a kind
 
-Pairing requires a later closing record in the same drive, using the same topic
-or `re` pointing to the opener. TTL means time to live; `--ttl` overrides defaults.
+Pair kinds with a later record using `--re` or the same `--topic` in the drive.
+TTL means time to live; `--ttl` overrides defaults.
 
 | Kinds | Default TTL | Pairing or requirement |
 | --- | --- | --- |
 | `ask`, `decide` | None | Open until `answer`, `go`, or `withdraw`. |
-| `decision` | None | A call already made; not an open item. Imported `DECISION` uses this kind. |
-| `blocker` | None | Open until `withdraw`, `answer`, or `done` with `--re` or the same `--topic`. |
-| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re` or `--topic`. |
-| `go` | None | Closes a matching `ask` or `decide`. |
-| `hold` / `lift` | None | Lift closes hold; lift requires `--re` or `--topic`. |
-| `incident` / `fix-live`, `done` | None | Fix-live or done closes the incident. |
+| `decision` | None | A call already made; not open. Imported `DECISION` uses it. |
+| `blocker` | None | Open until `withdraw`, `answer`, or `done`. |
+| `blocked` / `unblock` | None | A deploy block stays open until unblock or a resolver. |
+| `answer`, `withdraw` | None | Close asks, decision requests, or blockers; require a link. |
+| `go` | None | Closes a matching ask or decision request. |
+| `hold` / `lift` | None | Lift closes hold and requires a link. |
+| `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
-| `owner`, `mechanism`, `defect`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
+| `review` | None | A rules-review verdict. |
+| `owner`, `mechanism`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `digest` | None | Written only by compaction. |
 | `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
 
-Import inbox files that lanes append to; the long-running runner's
-`runner-state.md` is a rendered view rewritten in place, not an inbox.
+Import appended inbox files, not the runner's rewritten `runner-state.md` view.
+`cci import` registers files, restarts after inode changes or shrinkage, and
+deduplicates lines within the drive. It extracts PRs, Buildkite build URLs, and
+stack tokens such as `api/plat-usw2-prod`. `PostToolUse` imports later appends and
+new `<inbox>.md.archive/*.md` files with the inbox's drive and lane; direct
+archive imports default to the inbox name.
 
-Use `cci post` for new coordination. During a markdown cutover, `cci import`
-registers inbox files and rereads them from the start when their inode changes
-or they shrink, deduplicating lines within the drive.
-The `PostToolUse` hook imports later appends and new `<inbox>.md.archive/*.md`
-files with the inbox's drive and lane; archive files default to the inbox name.
-Once lanes post directly, stop writing the markdown inboxes. Compaction folds
-old records into daily counts while preserving still-open items.
+Once lanes post directly, stop writing markdown inboxes. Compaction folds old
+records into daily counts and keeps open items. Open-item tracking skips
+`import:<file>` records because legacy lines lack closure links.

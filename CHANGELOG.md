@@ -8,7 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Deploy stack, target, lane, board, PR, and build references; repeatable
+  environments; release mode, outcome, commit, and census fields.
+- `blocked`, `unblock`, and `review` kinds, plus `--resolves` to close an open
+  item from any later record. Defects now remain open until closed.
+- Stack, target, and PR filters for CLI reads and HTTP records and streams;
+  computed opener status on JSON tail, grep, watch, and HTTP records reads.
+- `/v1/lanes?drive=` for each lane's latest record by time, including expired
+  records, and import extraction of stack tokens, PRs, and Buildkite build URLs.
 - Initial scaffolding for the Go CLI and Claude Code plugin.
+
+### Changed
+
+- Schema 3 migrates `refs.pr` to `refs.prs`, `refs.build` to `refs.builds`, and
+  `fields.env` to `fields.envs`, and merges the old `fields.stack` PR list into
+  `refs.prs`. `--stack` now takes `<project>/<env>`; use repeated `--pr` for PRs.
+- README and plugin guidance cover stack queries, explicit resolution, and
+  `--to owner` for work that needs the owner.
 
 ## [0.1.0] - 2026-10-05
 
