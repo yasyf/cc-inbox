@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- List imported holds that name no `stack:<project>/<env>` or
+  `target:<name>` ref on one `untracked holds` line in text digest, and
+  as `untracked_holds` in JSON digest. No later line can close them, so
+  writers can add the ref.
+
 ### Changed
 
 - Honor `--budget` as given instead of capping it at 16,000 bytes, and

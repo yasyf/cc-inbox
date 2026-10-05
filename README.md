@@ -310,7 +310,10 @@ Digest open-item tracking includes imported openers with a stack or target ref.
 Imported `hold`, `defect`, `blocker`, and `blocked` records with either ref appear
 in the digest's open sections and the dashboard's blocked view. Compaction
 preserves tracked openers while open. Imported openers without either ref
-remain untracked, with status `imported`.
+remain untracked, with status `imported`. Text digest lists untracked imported
+holds from its window on one `untracked holds` line after `open holds`, newest
+first, so writers can add a `stack:<project>/<env>` or `target:<name>` ref.
+JSON digest carries them as `untracked_holds`.
 
 A record in the same drive closes a tracked open item by shared deployment
 ref when it is later in recorded time, with sequence number breaking a tie.
@@ -523,7 +526,7 @@ sessions write to the same SQLite store without a daemon.
 | Text `watch` | Output continues for the watch lifetime; `--budget` does not limit it. |
 | JSON output | Record text is never clipped; `--width` has no effect. `tail`, `grep`, and `state` still apply their byte budgets. |
 | JSON `watch` and `digest` | No byte-budget cap. |
-| Text digest sections | Up to 8 asks and decision requests combined; 6 blockers and deployment blocks combined; 6 defects; 6 holds; 6 incidents; and 15 latest lane records, subject to the byte budget. |
+| Text digest sections | Up to 8 asks and decision requests combined; 6 blockers and deployment blocks combined; 6 defects; 6 holds; 8 untracked holds on one line; 6 incidents; and 15 latest lane records, subject to the byte budget. |
 | `SessionStart` context | Width 400 for both reads, with a digest budget of 2,500 bytes and a tail budget of 1,500 bytes. |
 
 Wider record lines leave the byte budgets unchanged, so fewer records may fit.
