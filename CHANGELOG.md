@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial scaffolding for the Go CLI and Claude Code plugin.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-10-05
 
 ### Added
 
