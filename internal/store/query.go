@@ -16,6 +16,8 @@ type Filter struct {
 	Kinds          []kinds.Kind
 	Lanes          []string
 	To             string
+	For            string
+	Topics         []string
 	After          int64
 	Before         int64
 	Since          time.Time
@@ -28,17 +30,33 @@ type Filter struct {
 func (f Filter) where(now time.Time) (string, []any) {
 	clauses := []string{"drive = ?"}
 	params := []any{f.Drive}
+	var selectors []string
+	var selected []any
 	if len(f.Kinds) > 0 {
-		clauses = append(clauses, "kind IN ("+placeholders(len(f.Kinds))+")")
+		selectors = append(selectors, "kind IN ("+placeholders(len(f.Kinds))+")")
 		for _, k := range f.Kinds {
-			params = append(params, string(k))
+			selected = append(selected, string(k))
 		}
 	}
 	if len(f.Lanes) > 0 {
-		clauses = append(clauses, "lane IN ("+placeholders(len(f.Lanes))+")")
+		selectors = append(selectors, "lane IN ("+placeholders(len(f.Lanes))+")")
 		for _, l := range f.Lanes {
-			params = append(params, l)
+			selected = append(selected, l)
 		}
+	}
+	if len(f.Topics) > 0 {
+		selectors = append(selectors, "topic IN ("+placeholders(len(f.Topics))+")")
+		for _, t := range f.Topics {
+			selected = append(selected, t)
+		}
+	}
+	if f.For != "" {
+		broadcast := append([]string{"recipients = '[]'", "lane != ?"}, selectors...)
+		clauses = append(clauses, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?) OR ("+strings.Join(broadcast, " AND ")+"))")
+		params = append(append(params, f.For, f.For), selected...)
+	} else {
+		clauses = append(clauses, selectors...)
+		params = append(params, selected...)
 	}
 	if f.To != "" {
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?)")
@@ -240,6 +258,30 @@ func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, e
 			return nil, err
 		}
 		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Replies(ctx context.Context, drive string, seqs []int64) (map[int64][]Record, error) {
+	out := map[int64][]Record{}
+	if len(seqs) == 0 {
+		return out, nil
+	}
+	params := []any{drive}
+	for _, seq := range seqs {
+		params = append(params, seq)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE drive = ? AND re IN ("+placeholders(len(seqs))+") ORDER BY seq", params...)
+	if err != nil {
+		return nil, fmt.Errorf("read replies: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		r, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out[r.Re] = append(out[r.Re], r)
 	}
 	return out, rows.Err()
 }

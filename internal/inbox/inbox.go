@@ -47,15 +47,14 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if err != nil {
 		return TailResult{}, err
 	}
+	rendered, err := lines(ctx, st, records, opts.JSON)
+	if err != nil {
+		return TailResult{}, err
+	}
 	b := render.NewBudget(w, opts.Budget)
-	now := st.Now()
 	res := TailResult{Last: f.After}
-	for _, r := range records {
-		line := render.Line(r, now)
-		if opts.JSON {
-			line = render.JSON(r)
-		}
-		if !b.Line(line) {
+	for i, r := range records {
+		if !b.Line(rendered[i]) {
 			break
 		}
 		res.Printed++
@@ -84,7 +83,6 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 
 func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, budget int, asJSON bool, w io.Writer) error {
 	b := render.NewBudget(w, budget)
-	now := st.Now()
 	matched, printed := 0, 0
 	f.Descending = true
 	f.Limit = pageRows
@@ -93,15 +91,18 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		if err != nil {
 			return err
 		}
+		var hits []store.Record
 		for _, r := range records {
-			if !pattern.MatchString(r.Text) {
-				continue
+			if pattern.MatchString(r.Text) {
+				hits = append(hits, r)
 			}
+		}
+		rendered, err := lines(ctx, st, hits, asJSON)
+		if err != nil {
+			return err
+		}
+		for _, line := range rendered {
 			matched++
-			line := render.Line(r, now)
-			if asJSON {
-				line = render.JSON(r)
-			}
 			if b.Line(line) {
 				printed++
 			}

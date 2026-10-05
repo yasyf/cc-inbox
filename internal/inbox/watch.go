@@ -6,7 +6,6 @@ import (
 	"io"
 	"time"
 
-	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -31,14 +30,23 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer)
 	for {
 		f.Limit = pageRows
 		records, err := st.Query(ctx, f)
+		if ctx.Err() != nil {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
-		now := st.Now()
-		for _, r := range records {
-			line := clip(render.Line(r, now), 600)
-			if opts.JSON {
-				line = render.JSON(r)
+		rendered, err := lines(ctx, st, records, opts.JSON)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		for i, r := range records {
+			line := rendered[i]
+			if !opts.JSON {
+				line = clip(line, 600)
 			}
 			if _, err := fmt.Fprintln(w, line); err != nil {
 				return fmt.Errorf("write watch line: %w", err)
@@ -46,7 +54,7 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer)
 			f.After = r.Seq
 		}
 		if len(records) > 0 && opts.Cursor != "" {
-			if err := st.SetCursor(ctx, opts.Cursor, f.Drive, f.After); err != nil {
+			if err := st.SetCursor(context.WithoutCancel(ctx), opts.Cursor, f.Drive, f.After); err != nil {
 				return err
 			}
 		}

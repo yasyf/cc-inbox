@@ -169,14 +169,14 @@ func (b *syncBuffer) String() string {
 
 func TestWatchEmitsOnlyNewMatchingRecords(t *testing.T) {
 	st, _ := testutil.Store(t)
-	testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "before the watch"})
+	before := testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "before the watch"})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	var out syncBuffer
 	done := make(chan error, 1)
 	go func() {
 		done <- inbox.Watch(ctx, st, inbox.WatchOptions{
-			Filter:   store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Go}},
+			Filter:   store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Go}, After: before.Seq},
 			Cursor:   "monitor",
 			Interval: 5 * time.Millisecond,
 			For:      time.Minute,

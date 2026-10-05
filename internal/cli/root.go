@@ -32,6 +32,7 @@ func NewRootCmd() *cobra.Command {
 		newWatchCmd(),
 		newDigestCmd(),
 		newGrepCmd(),
+		newStateCmd(),
 		newImportCmd(),
 		newCompactCmd(),
 		newDriveCmd(),
@@ -72,6 +73,8 @@ type readFlags struct {
 	kinds  []string
 	lanes  []string
 	to     string
+	reader string
+	topics []string
 	since  string
 	budget int
 	json   bool
@@ -83,6 +86,8 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool) {
 		cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "only these kinds (repeatable)")
 		cmd.Flags().StringSliceVar(&f.lanes, "lane", nil, "only these lanes (repeatable)")
 		cmd.Flags().StringVar(&f.to, "to", "", "only records addressed to this lane")
+		cmd.Flags().StringVar(&f.reader, "reader", "", "deliver to this lane: records addressed to it, plus other lanes' broadcasts that match --kind, --lane and --topic")
+		cmd.Flags().StringSliceVar(&f.topics, "topic", nil, "only these topics (repeatable)")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), or an RFC3339 time")
 	cmd.Flags().IntVar(&f.budget, "budget", 0, "output budget in bytes (default 4000, capped at 16000)")
@@ -94,7 +99,7 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 	if err != nil {
 		return store.Filter{}, err
 	}
-	out := store.Filter{Drive: drive, Lanes: f.lanes, To: f.to}
+	out := store.Filter{Drive: drive, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics}
 	for _, k := range f.kinds {
 		kind, err := kinds.Parse(k)
 		if err != nil {
