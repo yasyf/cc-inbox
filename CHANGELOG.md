@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change, the next import or refresh reparses consumed lines and updates
   matching records without changing stored timestamps or restoring
   compacted records. `cci import` reports the number reparsed.
+- Add `--width` to tail, watch, and digest, defaulting to 400 characters
+  per rendered record line. `0` prints whole records. Include an ellipsis
+  when clipping, then append reply marks. Grep, state, and JSON records
+  stay whole. `SessionStart` uses width 400 for both reads and keeps its
+  2,500-byte digest budget and 1,500-byte tail budget. Wider lines can
+  leave room for fewer records within the unchanged byte budgets.
 
 ## [0.3.0] - 2026-10-05
 

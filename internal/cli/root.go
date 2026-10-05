@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
 )
@@ -81,6 +82,7 @@ type readFlags struct {
 	pr     int
 	since  string
 	budget int
+	width  int
 	json   bool
 }
 
@@ -97,8 +99,12 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool) {
 		cmd.Flags().IntVar(&f.pr, "pr", 0, "only records about this pull request")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), or an RFC3339 time")
-	cmd.Flags().IntVar(&f.budget, "budget", 0, "output budget in bytes (default 6144, capped at 16000); text lines clip at 200 characters")
+	cmd.Flags().IntVar(&f.budget, "budget", 0, "output budget in bytes (default 6144, capped at 16000)")
 	cmd.Flags().BoolVar(&f.json, "json", false, "one JSON record per line")
+}
+
+func (f *readFlags) registerWidth(cmd *cobra.Command) {
+	cmd.Flags().IntVar(&f.width, "width", render.DefaultWidth, "clip each text record line to this many characters; 0 prints whole records")
 }
 
 func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, error) {

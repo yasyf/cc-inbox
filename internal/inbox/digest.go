@@ -77,26 +77,26 @@ func Digest(ctx context.Context, st *store.Store, drive string, since time.Time)
 	return v, nil
 }
 
-func (v DigestView) Write(w io.Writer, now time.Time, budget int) {
+func (v DigestView) Write(w io.Writer, now time.Time, budget, width int) {
 	b := render.NewBudget(w, budget)
 	b.Line(fmt.Sprintf("cci digest %s since %s: %d records, max seq #%d", v.Drive, render.Stamp(v.Since, now), v.Total, v.MaxSeq))
 	b.Line("kinds: " + ranked(v.Kinds, 12))
 	b.Line("lanes: " + ranked(v.Lanes, 12))
-	section(b, "open asks", v.Asks, 8, now)
-	section(b, "open blockers", v.Blockers, 6, now)
-	section(b, "open defects", v.Defects, 6, now)
-	section(b, "open holds", v.Holds, 6, now)
-	section(b, "open incidents", v.Incidents, 6, now)
+	section(b, "open asks", v.Asks, 8, now, width)
+	section(b, "open blockers", v.Blockers, 6, now, width)
+	section(b, "open defects", v.Defects, 6, now, width)
+	section(b, "open holds", v.Holds, 6, now, width)
+	section(b, "open incidents", v.Incidents, 6, now, width)
 	if v.OlderOpen > 0 {
 		b.Line(fmt.Sprintf("%d older open items (cci tail --kind ask --kind decide --kind blocker --kind blocked --kind defect --kind hold --kind incident --since 0)", v.OlderOpen))
 	}
-	section(b, "latest per lane", v.Latest, latestLanes, now)
+	section(b, "latest per lane", v.Latest, latestLanes, now, width)
 	if b.Full() {
 		b.Trailer("... digest truncated; read more with cci tail or cci grep")
 	}
 }
 
-func section(b *render.Budget, title string, records []store.Record, limit int, now time.Time) {
+func section(b *render.Budget, title string, records []store.Record, limit int, now time.Time, width int) {
 	if len(records) == 0 {
 		return
 	}
@@ -111,7 +111,7 @@ func section(b *render.Budget, title string, records []store.Record, limit int, 
 			b.Line(fmt.Sprintf("  +%d more", len(newest)-limit))
 			return
 		}
-		if !b.Line("  " + render.Clip(render.Line(r, now))) {
+		if !b.Line("  " + render.Clip(render.Line(r, now), width)) {
 			return
 		}
 	}

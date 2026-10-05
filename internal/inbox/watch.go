@@ -14,6 +14,7 @@ type WatchOptions struct {
 	Cursor   string
 	Interval time.Duration
 	For      time.Duration
+	Width    int
 	JSON     bool
 }
 
@@ -36,7 +37,7 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer)
 		if err != nil {
 			return err
 		}
-		rendered, err := lines(ctx, st, records, opts.JSON)
+		rendered, err := lines(ctx, st, records, opts.JSON, opts.Width)
 		if ctx.Err() != nil {
 			return nil
 		}
