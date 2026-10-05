@@ -47,7 +47,8 @@ claude plugin install cc-inbox@cc-inbox
 
 The plugin includes the [using-cci skill](plugin/skills/using-cci/SKILL.md) and
 [hooks](#plugin-hooks). Drive coordination goes to `cci`. Durable rulings,
-decisions, runbooks, and design docs stay in `cc-notes`.
+runbooks, and design docs stay in `cc-notes`. Use `decision` for a call a lane
+made that other lanes build on; use `decide` to request a decision.
 
 ---
 
@@ -81,8 +82,9 @@ records. A named cursor with no saved position reads the past hour.
 An explicit `--since` reads from that point and leaves the cursor untouched,
 even when `--cursor` is also set.
 
-Lanes use their own cursor, such as `cci tail --cursor api`, so their reads do not
-advance the root's position.
+Lanes read their deliveries with `cci tail --cursor api --reader api`, so their
+reads do not advance the root's position. This delivers records addressed to
+`api` and broadcasts from other lanes, excluding `api`'s own broadcasts.
 
 ### Watch only GO lines in a Monitor
 
@@ -153,6 +155,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
 | `cci grep` | Search text with a case-insensitive regular expression, newest first, including expired records. |
+| `cci state` | Show the latest `head` and `contract` per lane and topic, skipping withdrawn records, within a byte budget. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
 | `cci drive use` | Bind the current Claude Code session to a drive. `--root` enables owner-prompt capture. |
@@ -162,12 +165,31 @@ Commands that select a drive accept `--drive` or use the current session binding
 
 | Read option | Commands | Behavior |
 | --- | --- | --- |
-| `--to <lane>` | `tail`, `watch`, `grep` | Keep only records whose `to` list contains the lane. `--lane` filters the posting lane instead. |
+| `--kind <kind>` | `tail`, `watch`, `grep` | Select kinds; repeat for multiple kinds. |
+| `--lane <lane>` | `tail`, `watch`, `grep`, `state` | Select posting lanes; repeat for multiple lanes. |
+| `--topic <topic>` | `tail`, `watch`, `grep`, `state` | Select topics; repeat for multiple topics. |
+| `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
+| `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
+| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 4,000 bytes and caps at 16,000. |
 
-The digest lists open asks and decisions, holds, and incidents from its window.
-It counts older open items on one line. Its latest-per-lane section includes any
-kind. Use a longer time window or a targeted read to inspect older records.
+Broadcasts have an empty `to` list. With `--reader`, kind, lane, and topic filters
+apply only to broadcasts; records addressed only to other lanes are excluded.
+
+Tail, watch, and grep text lines append reply marks when another record names
+their sequence number with `--re`. The marks are `[ANSWERED #12]`, `[WITHDRAWN #14]`,
+`[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or `[RE #n]` for other
+reply kinds. Each number identifies the reply. JSON records have no reply marks.
+
+Read `cci state` before asking a lane for its head or contract. Publish `head`
+on every push and `contract` for interfaces other lanes consume. State selects
+the latest non-withdrawn record for each kind, lane, and topic; withdrawing it
+with `--re` reveals the previous non-withdrawn record, if any.
+
+The digest lists open asks and decision requests (`decide`), blockers, holds,
+and incidents from its window. It lists blockers in an `open blockers` section
+and counts older open items on one line. Its latest-per-lane section includes
+any kind. Use a longer time window or a targeted read to inspect older records.
 
 Digest open-item tracking and compaction's keep-open rule skip records whose
 source is `import:<file>`. Imported markdown inbox lines lack the
@@ -182,16 +204,22 @@ after the opener. TTL means time to live; `--ttl` overrides the default.
 | Kind | Default TTL | Pairing or requirement |
 | --- | --- | --- |
 | `ask`, `decide` | None | Open until `answer`, `go`, or `withdraw`. |
-| `answer`, `withdraw` | None | Close `ask` or `decide`; require `--re` or `--topic`. |
+| `decision` | None | A call a lane made that others build on. Durable, with no default expiry; not an open item. |
+| `blocker` | None | Open until `withdraw`, `answer`, or `done` with `--re` or the same `--topic`. |
+| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re` or `--topic`. A withdrawal can also retract another kind of record using `--re`. |
 | `go` | None | Closes a matching `ask` or `decide`. |
 | `hold` | None | Open until `lift`. |
 | `lift` | None | Closes `hold`; requires `--re` or `--topic`. |
 | `incident` | None | Open until `fix-live` or `done`. |
-| `fix-live`, `done` | None | Close a matching `incident`. |
+| `fix-live` | None | Closes a matching `incident`. |
+| `done` | None | Closes a matching `incident` or `blocker`. |
 | `opened`, `landed` | None | Require `--pr`. |
-| `owner`, `mechanism`, `defect`, `correction`, `release`, `applied`, `handoff`, `head`, `contract`, `blocker` | None | Unpaired. |
+| `owner`, `mechanism`, `defect`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `digest` | None | Written only by compaction. |
 | `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
+
+`decide` requests a decision and stays open until closed. `decision` records a
+call already made, and imported `DECISION` lines use this kind.
 
 Posts require a known kind. A duplicate with the same drive, lane, kind, and
 whitespace-normalized text within ten minutes returns the existing sequence
@@ -199,8 +227,8 @@ number. Refs and pairing fields do not distinguish duplicates.
 
 ## Record JSON
 
-`post`, `tail`, `watch`, and `grep` can emit records with `--json`. The following
-record was captured from a post and indented for readability:
+`post`, `tail`, `watch`, `grep`, and `state` can emit records with `--json`.
+The following record was captured from a post and indented for readability:
 
 ```json
 {
@@ -236,7 +264,8 @@ objects, with `pr` and `build` only under `refs`.
 
 `source` is `post`, `hook`, `import:<file>`, or `compact`. Record reads emit one
 JSON object per line; `digest --json` emits one summary object with counts,
-open-item arrays, `latest`, `older_open`, and `max_seq`.
+`open_asks` (including `decide`), `open_blockers`, `open_holds`, `open_incidents`,
+`latest`, `older_open`, and `max_seq`.
 
 ---
 
@@ -248,9 +277,13 @@ open-item arrays, `latest`, `older_open`, and `max_seq`.
 | Endpoint | Response |
 | --- | --- |
 | `GET /v1/drives` | Array of drives with record counts and latest activity. |
-| `GET /v1/records?drive=D` | Array of records. Optional `kind` and `lane` filters repeat; `to=<lane>` keeps only records whose `to` list contains the lane. `since` is a sequence number, `since_time` is an RFC 3339 timestamp, and `expired=1` includes expired records. `limit` defaults to 100 and caps at 500. |
+| `GET /v1/records?drive=D` | Array of records with repeatable `kind`, `lane`, and `topic` filters. `to=<lane>` selects addressed records; `reader=<lane>` selects deliveries. `since` is a sequence number, `since_time` is an RFC 3339 timestamp, and `expired=1` includes expired records. `limit` defaults to 100 and caps at 500. |
 | `GET /v1/digest?drive=D` | Digest for the last 24 hours. Set `since_time` to an RFC 3339 timestamp to change the window. |
-| `GET /v1/stream?drive=D` | Server-sent events with a record JSON payload and sequence number as the event ID. Starts at the current head; pass `since` to resume after a sequence number. `to=<lane>` keeps only records whose `to` list contains the lane. |
+| `GET /v1/stream?drive=D` | Server-sent events with a record JSON payload and sequence number as the event ID. Starts at the current head; pass `since` to resume after a sequence number. Accepts repeatable `kind`, `lane`, and `topic` filters, plus `to=<lane>` and `reader=<lane>`. |
+
+On both records and stream endpoints, `reader=<lane>` delivers records addressed
+to that lane regardless of `kind`, `lane`, or `topic` filters, plus other lanes'
+broadcasts that match those filters. The reader's own broadcasts are excluded.
 
 ## Plugin hooks
 
@@ -277,18 +310,19 @@ sessions write to the same SQLite store without a daemon.
 | --- | --- |
 | Posted text | 400 characters. Put longer bodies in a file and attach it with `--path`. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
-| `tail`, `grep`, and text `digest` | Default 4,000-byte budget, capped at 16,000 bytes. Output stops at a whole line. |
+| `tail`, `grep`, `state`, and text `digest` | Default 4,000-byte budget, capped at 16,000 bytes. Output stops at a whole line. |
 | `tail` | At most 500 records per call. Repeat the same cursor read to continue. |
 | Text `watch` | Each line is capped at 600 characters. Output continues for the watch lifetime; `--budget` does not limit it. |
 | JSON `watch` and `digest` | No byte-budget cap. JSON watch records are not clipped. |
-| Text digest sections | Up to 8 open asks, 6 holds, 6 incidents, and 15 latest lane records, subject to the byte budget. |
+| Text digest sections | Up to 8 open asks and decision requests, 6 blockers, 6 holds, 6 incidents, and 15 latest lane records, subject to the byte budget. |
 | `SessionStart` context | Digest budget of 2,500 bytes and tail budget of 1,500 bytes. |
 
-Capped text tail and grep reads report omitted records; a capped text digest
-reports truncation. Their JSON forms omit that trailer.
+Capped text tail and grep reads report omitted records; capped text digest
+and state reads report truncation. Their JSON forms omit that trailer. Narrow
+state output with `--lane` or `--topic`.
 
-Tail and watch reads hide expired records; `grep` includes them. Compaction also
-folds old records that have no expiry into daily counts, preserving still-open
-items.
+Tail and watch reads hide expired records; `grep` and `state` include them.
+Compaction also folds old records that have no expiry into daily counts,
+preserving still-open items.
 
 Early, built for one long-running drive.
