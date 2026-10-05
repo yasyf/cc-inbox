@@ -72,12 +72,12 @@ func Digest(ctx context.Context, st *store.Store, drive string, since time.Time)
 			v.Asks = append(v.Asks, r)
 		}
 	}
-	holds, err := st.Query(ctx, store.Filter{Drive: drive, Since: since, Kinds: []kinds.Kind{kinds.Hold}, IncludeExpired: true})
+	untracked, err := st.UntrackedHolds(ctx, drive)
 	if err != nil {
 		return DigestView{}, err
 	}
-	for _, r := range holds {
-		if !r.Tracked() {
+	for _, r := range untracked {
+		if !r.At.Before(since) {
 			v.Untracked = append(v.Untracked, r)
 		}
 	}

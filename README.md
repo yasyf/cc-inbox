@@ -313,7 +313,9 @@ preserves tracked openers while open. Imported openers without either ref
 remain untracked, with status `imported`. Text digest lists untracked imported
 holds from its window on one `untracked holds` line after `open holds`, newest
 first, so writers can add a `stack:<project>/<env>` or `target:<name>` ref.
-JSON digest carries them as `untracked_holds`.
+JSON digest carries them as `untracked_holds`. A post with `--resolves <seq>`,
+or a `lift` with `--re <seq>`, closes an untracked hold and drops it from that
+line.
 
 A record in the same drive closes a tracked open item by shared deployment
 ref when it is later in recorded time, with sequence number breaking a tie.

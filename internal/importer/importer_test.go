@@ -13,6 +13,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
@@ -345,5 +346,45 @@ func TestDigestNamesImportedHoldsNoRefCanClose(t *testing.T) {
 	want := fmt.Sprintf("untracked holds (2; name stack:<project>/<env> or target:<name> to track them): #%d reco-target, #%d reco-box-accounts", v.MaxSeq, v.MaxSeq-1)
 	if !strings.Contains(out.String(), want) {
 		t.Fatalf("digest missing %q:\n%s", want, out.String())
+	}
+}
+
+func TestDigestDropsUntrackedHoldsAResolverCloses(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "deploy-go.md")
+	write(t, path, strings.Join([]string{
+		"HOLD merge-walker (10:07 PM PT) plan #1234 waits on the walker",
+		"HOLD slack-release-sweep-7 (10:08 PM PT) 7-box re-roll waits on the owner",
+		"HOLD slack-release-sweep-8 (10:09 PM PT) reco-e2e rerun re-rolls all 7 boxes",
+	}, "\n")+"\n")
+	written := time.Date(2026, 10, 4, 23, 0, 0, 0, time.Local)
+	if err := os.Chtimes(path, written, written); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.Import(ctx, st, path, "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	since := c.Now().Add(-48 * time.Hour)
+	v, err := inbox.Digest(ctx, st, "drive", since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Untracked) != 3 {
+		t.Fatalf("untracked before resolvers = %+v", v.Untracked)
+	}
+	testutil.Post(t, st, store.Record{Drive: "drive", Lane: "unblock-sweep", Kind: kinds.Done, Text: "stale walker hold", Resolves: v.Untracked[0].Seq})
+	testutil.Post(t, st, store.Record{Drive: "drive", Lane: "unblock-sweep", Kind: kinds.Lift, Text: "stale sweep-7 hold", Resolves: v.Untracked[1].Seq})
+	testutil.Post(t, st, store.Record{Drive: "drive", Lane: "unblock-sweep", Kind: kinds.Lift, Text: "stale sweep-8 hold", Re: v.Untracked[2].Seq})
+	if v, err = inbox.Digest(ctx, st, "drive", since); err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Untracked) != 0 {
+		t.Fatalf("untracked after resolvers = %+v", v.Untracked)
+	}
+	var out bytes.Buffer
+	v.Write(&out, c.Now(), 0, 0)
+	if strings.Contains(out.String(), "untracked holds") {
+		t.Fatalf("digest still lists untracked holds:\n%s", out.String())
 	}
 }

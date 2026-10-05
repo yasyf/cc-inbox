@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Drop an untracked hold from digest once a post with `--resolves <seq>`, or
+  a `lift` with `--re <seq>`, closes it. The `untracked holds` line used to
+  list every untracked hold in the window, closed or not.
+
 ## [0.6.1] - 2026-10-05
 
 ### Fixed
