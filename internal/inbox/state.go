@@ -14,7 +14,7 @@ import (
 )
 
 func State(ctx context.Context, st *store.Store, f store.Filter) ([]store.Record, error) {
-	allowed := []kinds.Kind{kinds.Head, kinds.Contract}
+	allowed := []kinds.Kind{kinds.Head, kinds.Contract, kinds.State}
 	if len(f.Kinds) > 0 {
 		allowed = slices.DeleteFunc(slices.Clone(allowed), func(k kinds.Kind) bool { return !slices.Contains(f.Kinds, k) })
 	}

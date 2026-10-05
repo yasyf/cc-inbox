@@ -78,8 +78,10 @@ returns the original record, even if its references differ.
 Publish `head` on every push, with the full commit SHA as text and the PR or
 branch as topic. Publish `contract` for interfaces other lanes consume; withdraw
 it with `--re` before changing the interface. Broadcast both by omitting `--to`.
-Read `cci state` before asking for a head or contract. It returns the latest of
-each per lane and topic, skipping withdrawn records.
+Read `cci state` before asking for a head, contract, or lane status. It returns
+the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn
+records. With no matches, text output says
+`no head, contract, or state records on <drive>`; JSON emits no records.
 
 ## Read without repeating context
 
