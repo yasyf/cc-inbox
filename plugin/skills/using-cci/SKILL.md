@@ -5,9 +5,10 @@ description: Load when posting or reading drive coordination records, inbox line
 
 # Using cci
 
-Put drive coordination in `cci`. Keep durable rulings, decisions, runbooks, and
-design docs in `cc-notes`. A `decide` record requests a drive decision; the durable
-decision belongs in `cc-notes` and can be linked with `--ccn`.
+Put drive coordination in `cci`. Keep durable rulings, runbooks, and design docs
+in `cc-notes`, linked with `--ccn`. Use `decision` for a call a lane made that
+others build on. It has no default expiry and is not an open item. Use `decide`
+to request a decision; it stays open until answered, approved, or withdrawn.
 
 Use the drive and lane names from the task. Pass `--drive` explicitly or bind the
 current Claude Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`. A root
@@ -49,17 +50,27 @@ in references; structured fields are stack, environment, and named counts.
 Repeating the same drive, lane, kind, and normalized text within ten minutes
 returns the original record, even if its references differ.
 
+Publish `head` on every push, with the full commit SHA as text and the PR or
+branch as topic. Publish `contract` for interfaces other lanes consume; withdraw
+it with `--re` before changing the interface. Broadcast both by omitting `--to`.
+Read `cci state` before asking a lane for its head or contract. It returns the
+latest of each per lane and topic, skipping withdrawn records.
+
 ## Read without repeating context
 
-Give each desk its own cursor. A desk reads what is addressed to it with
-`cci tail --cursor <desk> --to <desk>`. For the bound drive, the `api` desk reads:
+Give each lane its own cursor and read with `cci tail --cursor <lane> --reader <lane>`.
+For the bound drive, the `api` lane reads:
 
 ```bash
-cci tail --cursor api --to api
+cci tail --cursor api --reader api
 ```
 
-On `tail`, `watch`, and `grep`, `--to <lane>` keeps only records whose `to` list
-contains that lane. `--lane` selects the posting lane.
+On `tail`, `watch`, `grep`, and `state`, `--reader` delivers records addressed
+to the lane regardless of kind, lane, or topic filters, plus other lanes'
+broadcasts matching those filters. Broadcasts have empty `to`; your own never
+come back. Repeat `--topic` to select topics or `--lane` to select posting lanes.
+Use `--kind` on tail, watch, or grep to select broadcast kinds.
+Use `--to <lane>` for addressed records only.
 
 The root uses the session default:
 
@@ -72,8 +83,8 @@ through printed records. If the read is capped, repeat the same command with the
 same drive, cursor, and filters. The plugin's `SessionStart` hook shares the root's
 session cursor and injects the digest plus unseen records after compaction.
 An explicit `--since` reads from that point and leaves the cursor untouched,
-even when `--cursor` is also set. `cci tail --cursor api --to api --since 0`
-replays records addressed to `api` without changing its position.
+even when `--cursor` is also set. `cci tail --cursor api --reader api --since 0`
+replays `api`'s deliveries without changing its position.
 
 Read the drive summary or search a specific issue:
 
@@ -82,10 +93,16 @@ cci digest
 cci grep 'checks|review'
 ```
 
-The digest defaults to 24 hours. It lists open asks and decisions, holds, and
-incidents from that window, then counts older open items on one line. `grep`
-searches newest first and includes expired records. Tail, grep, and text digest
-default to 4,000 bytes, capped at 16,000. Long bodies stay behind their file refs.
+The digest defaults to 24 hours. It lists open asks and decision requests,
+blockers, holds, and incidents, then counts older open items on one line.
+Blockers have their own section and JSON `open_blockers` array. `grep` searches
+newest first and includes expired records. Tail, grep, state, and text digest
+default to 4,000 bytes, capped at 16,000 with `--budget`.
+
+Tail, watch, and grep text append reply marks such as `[ANSWERED #12]` and
+`[WITHDRAWN #14]` when another record names the original with `--re`. The number
+is the reply's sequence. Other marks are `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`,
+`[FIX-LIVE #n]`, and `[RE #n]` for other reply kinds.
 
 Digest open-item tracking and compaction's keep-open rule skip records whose
 source is `import:<file>`. Imported markdown inbox lines lack the
@@ -112,12 +129,14 @@ or `re` pointing to the opener. TTL means time to live; `--ttl` overrides defaul
 | Kinds | Default TTL | Pairing or requirement |
 | --- | --- | --- |
 | `ask`, `decide` | None | Open until `answer`, `go`, or `withdraw`. |
-| `answer`, `withdraw` | None | Close asks or decisions; require `--re` or `--topic`. |
-| `go` | None | Closes a matching ask or decision. |
+| `decision` | None | A call already made; not an open item. Imported `DECISION` uses this kind. |
+| `blocker` | None | Open until `withdraw`, `answer`, or `done` with `--re` or the same `--topic`. |
+| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re` or `--topic`. |
+| `go` | None | Closes a matching `ask` or `decide`. |
 | `hold` / `lift` | None | Lift closes hold; lift requires `--re` or `--topic`. |
 | `incident` / `fix-live`, `done` | None | Fix-live or done closes the incident. |
 | `opened`, `landed` | None | Require `--pr`. |
-| `owner`, `mechanism`, `defect`, `correction`, `release`, `applied`, `handoff`, `head`, `contract`, `blocker` | None | Unpaired. |
+| `owner`, `mechanism`, `defect`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `digest` | None | Written only by compaction. |
 | `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
 
