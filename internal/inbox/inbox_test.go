@@ -86,6 +86,32 @@ func TestTailBudgetIsClamped(t *testing.T) {
 	}
 }
 
+func TestTailMatchesInboxDigestBudgets(t *testing.T) {
+	st, _ := testutil.Store(t)
+	for i := range 60 {
+		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("%03d %s", i, strings.Repeat("z", 380))})
+	}
+	var out bytes.Buffer
+	if _, err := inbox.Tail(context.Background(), st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Len() > 6144 || out.Len() < 5000 {
+		t.Fatalf("default tail wrote %d bytes, want just under 6144", out.Len())
+	}
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		if n := len([]rune(line)); n > 200 && !strings.HasPrefix(line, "...") {
+			t.Fatalf("line of %d characters past the 200 cap: %s", n, line)
+		}
+	}
+	var asJSON bytes.Buffer
+	if _, err := inbox.Tail(context.Background(), st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000, JSON: true}, &asJSON); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(asJSON.String(), strings.Repeat("z", 380)) {
+		t.Fatalf("JSON tail clipped record text:\n%s", asJSON.String())
+	}
+}
+
 func TestDigestLatestIsByTimeNotSeq(t *testing.T) {
 	st, c := testutil.Store(t)
 	ctx := context.Background()

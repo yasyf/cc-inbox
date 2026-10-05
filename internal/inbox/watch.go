@@ -44,11 +44,7 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer)
 			return err
 		}
 		for i, r := range records {
-			line := rendered[i]
-			if !opts.JSON {
-				line = clip(line, 600)
-			}
-			if _, err := fmt.Fprintln(w, line); err != nil {
+			if _, err := fmt.Fprintln(w, rendered[i]); err != nil {
 				return fmt.Errorf("write watch line: %w", err)
 			}
 			f.After = r.Seq

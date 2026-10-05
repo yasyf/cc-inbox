@@ -70,7 +70,7 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON 
 	}
 	now := st.Now()
 	for i, r := range records {
-		out[i] = render.Line(r, now) + marks(r.Seq, replies[r.Seq])
+		out[i] = render.Clip(render.Line(r, now)) + marks(r.Seq, replies[r.Seq])
 	}
 	return out, nil
 }
