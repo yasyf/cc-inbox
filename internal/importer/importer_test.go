@@ -1,8 +1,10 @@
 package importer_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -312,5 +314,36 @@ func TestImportedDeploymentBlocksStayOpenUntilClosedByRef(t *testing.T) {
 	appendTo(t, path, "FIX-LIVE merge-walker-r2 (10:20 PM PT) storage/tnt-usw2-buckets import landed\nLIFT root (10:21 PM PT) stack:tunnel/tnt-usw2-1frg9c7 creates approved\n")
 	if got := open(); got != "defect slack-release-sweep-8" {
 		t.Fatalf("open after closers = %s", got)
+	}
+}
+
+func TestDigestNamesImportedHoldsNoRefCanClose(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "deploy-go.md")
+	write(t, path, strings.Join([]string{
+		"HOLD merge-walker (10:07 PM PT) stack:tunnel/tnt-usw2-1frg9c7 has 21 creates on HSBC",
+		"HOLD reco-box-accounts (10:08 PM PT) tunnel/T apply waits on the box bake",
+		"HOLD reco-target (10:09 PM PT) reco-box-1 replace pending",
+	}, "\n")+"\n")
+	written := time.Date(2026, 10, 4, 23, 0, 0, 0, time.Local)
+	if err := os.Chtimes(path, written, written); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.Import(ctx, st, path, "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	v, err := inbox.Digest(ctx, st, "drive", c.Now().Add(-48*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(v.Holds) != 1 || v.Holds[0].Lane != "merge-walker" {
+		t.Fatalf("open holds = %+v", v.Holds)
+	}
+	var out bytes.Buffer
+	v.Write(&out, c.Now(), 0, 0)
+	want := fmt.Sprintf("untracked holds (2; name stack:<project>/<env> or target:<name> to track them): #%d reco-target, #%d reco-box-accounts", v.MaxSeq, v.MaxSeq-1)
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("digest missing %q:\n%s", want, out.String())
 	}
 }

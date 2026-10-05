@@ -25,6 +25,7 @@ type DigestView struct {
 	Lanes     map[string]int `json:"lanes"`
 	Asks      []store.Record `json:"open_asks"`
 	Holds     []store.Record `json:"open_holds"`
+	Untracked []store.Record `json:"untracked_holds"`
 	Incidents []store.Record `json:"open_incidents"`
 	Blockers  []store.Record `json:"open_blockers"`
 	Defects   []store.Record `json:"open_defects"`
@@ -68,6 +69,15 @@ func Digest(ctx context.Context, st *store.Store, drive string, since time.Time)
 			v.Asks = append(v.Asks, r)
 		}
 	}
+	holds, err := st.Query(ctx, store.Filter{Drive: drive, Since: since, Kinds: []kinds.Kind{kinds.Hold}, IncludeExpired: true})
+	if err != nil {
+		return DigestView{}, err
+	}
+	for _, r := range holds {
+		if !r.Tracked() {
+			v.Untracked = append(v.Untracked, r)
+		}
+	}
 	if v.Latest, err = st.LatestPerLane(ctx, f, latestLanes); err != nil {
 		return DigestView{}, err
 	}
@@ -86,6 +96,7 @@ func (v DigestView) Write(w io.Writer, now time.Time, budget, width int) {
 	section(b, "open blockers", v.Blockers, 6, now, width)
 	section(b, "open defects", v.Defects, 6, now, width)
 	section(b, "open holds", v.Holds, 6, now, width)
+	untracked(b, v.Untracked)
 	section(b, "open incidents", v.Incidents, 6, now, width)
 	if v.OlderOpen > 0 {
 		b.Line(fmt.Sprintf("%d older open items (cci tail --kind ask --kind decide --kind blocker --kind blocked --kind defect --kind hold --kind incident --since 0)", v.OlderOpen))
@@ -115,6 +126,20 @@ func section(b *render.Budget, title string, records []store.Record, limit int, 
 			return
 		}
 	}
+}
+
+func untracked(b *render.Budget, holds []store.Record) {
+	if len(holds) == 0 {
+		return
+	}
+	names := make([]string, 0, len(holds))
+	for _, r := range slices.Backward(holds) {
+		names = append(names, fmt.Sprintf("#%d %s", r.Seq, r.Lane))
+	}
+	if len(names) > 8 {
+		names = append(names[:8], fmt.Sprintf("+%d more", len(holds)-8))
+	}
+	b.Line(fmt.Sprintf("untracked holds (%d; name stack:<project>/<env> or target:<name> to track them): %s", len(holds), strings.Join(names, ", ")))
 }
 
 func ranked(counts map[string]int, n int) string {

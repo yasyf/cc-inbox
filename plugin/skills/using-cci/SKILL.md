@@ -137,7 +137,9 @@ and `resolves #n` to itself, naming the target.
 `cci digest` defaults to 24 hours. `open asks` (JSON `open_asks`) contains asks and
 decision requests. `open blockers` (`open_blockers`) contains `blocker` and
 `blocked`; `open defects` (`open_defects`) contains defects. Holds and incidents
-have their own sections, followed by a count of older open items. `grep` searches
+have their own sections, followed by a count of older open items. An
+`untracked holds` line (JSON `untracked_holds`) lists imported holds that name
+no `stack:<project>/<env>` or `target:<name>` ref; no later line can close them. `grep` searches
 whole rendered record lines, including sequence number, time, kind, lane,
 recipients, topic, text, and rendered refs. Patterns are literal and
 case-insensitive by default; use `--regex` for regular expressions such as
