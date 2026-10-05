@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-05
+
 ### Added
 
 - Deploy stack, target, lane, board, PR, and build references; repeatable
@@ -16,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   computed opener status on JSON tail, grep, watch, and HTTP records reads.
 - `/v1/lanes?drive=` for each lane's latest record by time, including expired
   records, and import extraction of stack tokens, PRs, and Buildkite build URLs.
-- Initial scaffolding for the Go CLI and Claude Code plugin.
+- `cci serve` now ensures a daemonkit daemon (`com.yasyf.cc-inbox`) that serves
+  the HTTP API at `127.0.0.1:7377` from a long-lived store, and returns. Writes
+  and CLI reads stay direct to SQLite and need no daemon.
 
 ### Changed
 
@@ -45,5 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/commits/main
-[0.1.0]: https://github.com/yasyf/cc-inbox/commits/main
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/yasyf/cc-inbox/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/yasyf/cc-inbox/releases/tag/v0.1.0
