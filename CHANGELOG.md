@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Print `no records on <drive> match; store head #<seq>` when a text
   grep matches nothing, so an empty result reads differently from a
   stale store. JSON output stays empty.
+- Name the running version and the command that upgrades it when the
+  store schema is newer than the binary: `brew upgrade --cask
+  yasyf/tap/cci` for the cask, `claude plugin update cc-inbox@cc-inbox`
+  for the plugin build, and a `gh release download` into the binary's
+  directory for any other copy.
 
 ## [0.5.0] - 2026-10-05
 
