@@ -1,0 +1,110 @@
+package render
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"github.com/yasyf/cc-inbox/internal/store"
+)
+
+const (
+	DefaultBudget  = 4000
+	MaxBudget      = 16000
+	trailerReserve = 96
+)
+
+func Clamp(budget int) int {
+	if budget <= 0 {
+		return DefaultBudget
+	}
+	return min(budget, MaxBudget)
+}
+
+func Stamp(t, now time.Time) string {
+	local := t.In(time.Local)
+	n := now.In(time.Local)
+	if local.Year() == n.Year() && local.YearDay() == n.YearDay() {
+		return local.Format("3:04 PM")
+	}
+	return local.Format("Jan 2 3:04 PM")
+}
+
+func Line(r store.Record, now time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
+	if len(r.To) > 0 {
+		fmt.Fprintf(&b, " -> %s", strings.Join(r.To, ","))
+	}
+	if r.Re != 0 {
+		fmt.Fprintf(&b, " re #%d", r.Re)
+	}
+	if r.Topic != "" {
+		fmt.Fprintf(&b, " [%s]", r.Topic)
+	}
+	b.WriteString(" ")
+	b.WriteString(strings.Join(strings.Fields(r.Text), " "))
+	if r.Refs.PR != 0 {
+		fmt.Fprintf(&b, " pr#%d", r.Refs.PR)
+	}
+	if r.Refs.CCN != "" {
+		fmt.Fprintf(&b, " ccn:%s", r.Refs.CCN)
+	}
+	if r.Refs.Build != "" {
+		fmt.Fprintf(&b, " build:%s", r.Refs.Build)
+	}
+	if r.Refs.URL != "" {
+		fmt.Fprintf(&b, " %s", r.Refs.URL)
+	}
+	if r.Refs.Path != "" {
+		fmt.Fprintf(&b, " %s", r.Refs.Path)
+	}
+	return b.String()
+}
+
+func JSON(r store.Record) string {
+	out, err := json.Marshal(r)
+	if err != nil {
+		panic(fmt.Sprintf("marshal record #%d: %v", r.Seq, err))
+	}
+	return string(out)
+}
+
+type Budget struct {
+	w     io.Writer
+	left  int
+	full  bool
+	wrote int
+}
+
+func NewBudget(w io.Writer, budget int) *Budget {
+	return &Budget{w: w, left: Clamp(budget) - trailerReserve}
+}
+
+func (b *Budget) Line(s string) bool {
+	if b.full {
+		return false
+	}
+	if len(s)+1 > b.left {
+		b.full = true
+		return false
+	}
+	b.left -= len(s) + 1
+	b.wrote++
+	_, _ = fmt.Fprintln(b.w, s)
+	return true
+}
+
+func (b *Budget) Full() bool {
+	return b.full
+}
+
+func (b *Budget) Wrote() int {
+	return b.wrote
+}
+
+func (b *Budget) Trailer(s string) {
+	_, _ = fmt.Fprintln(b.w, s)
+}

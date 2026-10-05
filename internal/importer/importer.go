@@ -1,0 +1,130 @@
+package importer
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/yasyf/cc-inbox/internal/store"
+)
+
+type Result struct {
+	Path     string `json:"path"`
+	Entries  int    `json:"entries"`
+	Inserted int    `json:"inserted"`
+	Offset   int64  `json:"offset"`
+}
+
+func Import(ctx context.Context, st *store.Store, path, drive, lane string) (Result, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return Result{}, fmt.Errorf("resolve %s: %w", path, err)
+	}
+	src, known, err := st.Source(ctx, abs)
+	if err != nil {
+		return Result{}, err
+	}
+	if !known {
+		src = store.Source{Path: abs, Drive: drive, Lane: lane}
+	}
+	if drive != "" {
+		src.Drive = drive
+	}
+	if lane != "" {
+		src.Lane = lane
+	}
+	if src.Lane == "" {
+		src.Lane = strings.TrimSuffix(filepath.Base(abs), filepath.Ext(abs))
+	}
+	if src.Drive == "" {
+		return Result{}, store.ErrNoDrive
+	}
+	f, err := os.Open(filepath.Clean(abs))
+	if err != nil {
+		return Result{}, fmt.Errorf("open %s: %w", abs, err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return Result{}, fmt.Errorf("stat %s: %w", abs, err)
+	}
+	if info.Size() < src.Offset {
+		src.Offset = 0
+	}
+	if _, err := f.Seek(src.Offset, io.SeekStart); err != nil {
+		return Result{}, fmt.Errorf("seek %s: %w", abs, err)
+	}
+	chunk, err := io.ReadAll(f)
+	if err != nil {
+		return Result{}, fmt.Errorf("read %s: %w", abs, err)
+	}
+	chunk = chunk[:bytes.LastIndexByte(chunk, '\n')+1]
+	entries, err := Parse(bytes.NewReader(chunk), src.Lane)
+	if err != nil {
+		return Result{}, fmt.Errorf("parse %s: %w", abs, err)
+	}
+	times := Date(entries, info.ModTime())
+	items := make([]store.Ingestion, 0, len(entries))
+	for i, e := range entries {
+		r := store.Record{
+			Drive:  src.Drive,
+			Lane:   e.Lane,
+			Kind:   e.Kind,
+			At:     times[i].UTC(),
+			Text:   e.Text,
+			To:     e.To,
+			Refs:   store.Refs{PR: e.PR},
+			Source: "import:" + abs,
+		}
+		if r.Text, r.Refs.Path, err = st.Fit(e.Text); err != nil {
+			return Result{}, err
+		}
+		items = append(items, store.Ingestion{Record: r, LineHash: lineHash(src.Drive, e.Start)})
+	}
+	inserted, err := st.IngestAll(ctx, items)
+	if err != nil {
+		return Result{}, err
+	}
+	src.Offset += int64(len(chunk))
+	if err := st.SaveSource(ctx, src); err != nil {
+		return Result{}, err
+	}
+	return Result{Path: abs, Entries: len(entries), Inserted: inserted, Offset: src.Offset}, nil
+}
+
+func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
+	sources, err := st.Sources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []Result
+	for _, src := range sources {
+		info, err := os.Stat(src.Path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", src.Path, err)
+		}
+		if info.Size() == src.Offset {
+			continue
+		}
+		res, err := Import(ctx, st, src.Path, "", "")
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, res)
+	}
+	return out, nil
+}
+
+func lineHash(drive, line string) string {
+	sum := sha256.Sum256([]byte(drive + "\x00" + strings.TrimSpace(line)))
+	return hex.EncodeToString(sum[:])
+}
