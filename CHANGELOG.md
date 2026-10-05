@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Parse time-first inbox lines such as `1:43 AM PT <lane>: MECHANISM ...`
   without treating `AM` or `PM` as runner kinds. Preserve the full clock,
   lane, and kind, and reparse existing imports with parser version 2.
+- List digest sections and `/v1/lanes` by sequence number descending while
+  still selecting each lane's latest record by time.
+- Attribute keyed runner events to `runner`, with the subject lane as
+  `topic`. Preserve worker attribution for `msg_<id>` relays and unkeyed
+  worker lines. For a `runner:` subject, use the first `<lane>=ctx_`
+  token as the topic. Reparse existing imports with parser version 3.
 
 ### Changed
 

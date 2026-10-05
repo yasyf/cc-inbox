@@ -20,6 +20,7 @@ type Clock struct {
 type Entry struct {
 	Start  string
 	Lane   string
+	Topic  string
 	Kind   kinds.Kind
 	Text   string
 	To     []string
@@ -34,6 +35,7 @@ var (
 	bareClock = regexp.MustCompile(`\b(\d{1,2}):(\d[\dx])\s*([AaPp][Mm])\b(?:\s*(?:PT|PDT|PST)\b)?`)
 	zulu      = regexp.MustCompile(`\b(\d{1,2}):(\d{2})Z\b`)
 	runner    = regexp.MustCompile(`^(\d{1,2}):(\d{2})(Z)?\s+([A-Z][A-Z0-9_-]+)\s+(.*)$`)
+	dispatch  = regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)=ctx_`)
 	ruling    = regexp.MustCompile(`^R\d+[a-z]?$`)
 	kindWord  = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)*:?$`)
 	laneWord  = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*:?$`)
@@ -89,7 +91,7 @@ func start(line, fallbackLane string) (Entry, bool) {
 	marked := bullet.MatchString(line)
 	body := strings.TrimSpace(bullet.ReplaceAllString(line, ""))
 	if m := runner.FindStringSubmatch(body); m != nil && !strings.EqualFold(m[4], "AM") && !strings.EqualFold(m[4], "PM") {
-		return runnerEntry(line, body, m, fallbackLane), true
+		return runnerEntry(line, m, fallbackLane), true
 	}
 	toks := strings.Fields(body)
 	if len(toks) > 0 && ruling.MatchString(toks[0]) {
@@ -186,7 +188,7 @@ func namesLane(toks []string) bool {
 	return strings.HasSuffix(tok, ":") || len(toks) > 1 && kindWord.MatchString(toks[1])
 }
 
-func runnerEntry(line, body string, m []string, fallbackLane string) Entry {
+func runnerEntry(line string, m []string, fallbackLane string) Entry {
 	e := Entry{Start: line, Lane: fallbackLane, Kind: kinds.Note, Clock: clock(m[1], m[2], "", m[3])}
 	if k, ok := kinds.Lookup(m[4]); ok {
 		e.Kind = k
@@ -194,10 +196,23 @@ func runnerEntry(line, body string, m []string, fallbackLane string) Entry {
 	} else {
 		e.Text = m[4] + " " + m[5]
 	}
-	for _, tok := range firstN(strings.Fields(m[5]), 3) {
-		if strings.HasSuffix(tok, ":") && laneWord.MatchString(tok) {
-			e.Lane = strings.TrimSuffix(tok, ":")
-			break
+	toks := strings.Fields(m[5])
+	for i, tok := range firstN(toks, 3) {
+		if !strings.HasSuffix(tok, ":") || !laneWord.MatchString(tok) {
+			continue
+		}
+		subject := strings.TrimSuffix(tok, ":")
+		if i == 0 || strings.HasPrefix(toks[0], "msg_") {
+			e.Lane = subject
+		} else {
+			e.Lane, e.Topic = "runner", subject
+		}
+		break
+	}
+	if e.Topic == "runner" {
+		e.Topic = ""
+		if d := dispatch.FindStringSubmatch(m[5]); d != nil {
+			e.Topic = d[1]
 		}
 	}
 	return e

@@ -101,7 +101,7 @@ func section(b *render.Budget, title string, records []store.Record, limit int, 
 		return
 	}
 	newest := slices.SortedFunc(slices.Values(records), func(x, y store.Record) int {
-		return cmp.Or(y.At.Compare(x.At), cmp.Compare(y.Seq, x.Seq))
+		return cmp.Compare(y.Seq, x.Seq)
 	})
 	if !b.Line(fmt.Sprintf("%s (%d, newest first):", title, len(records))) {
 		return

@@ -260,7 +260,7 @@ func (s *Store) CountBy(ctx context.Context, f Filter, column string) (map[strin
 
 func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, error) {
 	where, params := f.where(s.Now())
-	q := "SELECT " + columns + " FROM records WHERE seq IN (SELECT seq FROM (SELECT seq, MAX(at * 1000000 + seq) FROM records WHERE " + where + " AND kind != 'digest' GROUP BY lane)) ORDER BY at DESC, seq DESC LIMIT ?"
+	q := "SELECT " + columns + " FROM records WHERE seq IN (SELECT seq FROM (SELECT seq, MAX(at * 1000000 + seq) FROM records WHERE " + where + " AND kind != 'digest' GROUP BY lane)) ORDER BY seq DESC LIMIT ?"
 	rows, err := s.db.QueryContext(ctx, q, append(params, n)...)
 	if err != nil {
 		return nil, fmt.Errorf("latest per lane: %w", err)
