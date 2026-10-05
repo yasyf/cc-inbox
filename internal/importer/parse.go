@@ -310,10 +310,11 @@ func Date(entries []Entry, end time.Time) []time.Time {
 		}
 		ref := cur.In(loc)
 		t := time.Date(ref.Year(), ref.Month(), ref.Day(), c.Hour, c.Minute, 0, 0, loc)
+		latest := end.Add(5 * time.Minute)
 		switch {
-		case t.Sub(cur) > 12*time.Hour:
+		case t.Sub(cur) > 12*time.Hour || t.After(latest):
 			t = t.AddDate(0, 0, -1)
-		case cur.Sub(t) > 12*time.Hour:
+		case cur.Sub(t) > 12*time.Hour && !t.AddDate(0, 0, 1).After(latest):
 			t = t.AddDate(0, 0, 1)
 		}
 		out[i] = t

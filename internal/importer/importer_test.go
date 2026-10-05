@@ -286,8 +286,12 @@ func TestImportedDeploymentBlocksStayOpenUntilClosedByRef(t *testing.T) {
 		"DEFECT slack-release-sweep-8 (10:09 PM PT) target:api preview red on every plan",
 		"HOLD root (10:10 PM PT) names no deployment",
 	}, "\n")+"\n")
+	written := time.Date(2026, 10, 4, 23, 0, 0, 0, time.Local)
 	open := func() string {
 		t.Helper()
+		if err := os.Chtimes(path, written, written); err != nil {
+			t.Fatal(err)
+		}
 		if _, err := importer.Import(ctx, st, path, "drive", ""); err != nil {
 			t.Fatal(err)
 		}

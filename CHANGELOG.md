@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Limit imported stamps to five minutes after the file's modification
+  time. Move later stamps to the previous day and allow a one-day forward
+  correction only within that limit. Keep out-of-order stamps on their day.
 - Search the whole rendered record line in `cci grep`, including kind,
   lane, recipients, topic, and refs, so queries such as `STATE census`
   match records whose kind and lane are stored outside their text.
