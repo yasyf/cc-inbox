@@ -173,6 +173,10 @@ func (k Kind) Opens() bool {
 	return ok
 }
 
+func (k Kind) ClosesByRef() bool {
+	return k == FixLive || k == Lift || k == Done
+}
+
 func (k Kind) Closes(opener Kind) bool {
 	return slices.Contains(openers[opener], k)
 }

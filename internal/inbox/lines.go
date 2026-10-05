@@ -35,7 +35,7 @@ func Annotate(ctx context.Context, st *store.Store, records []store.Record) erro
 	for i, r := range records {
 		switch {
 		case !r.Kind.Opens():
-		case strings.HasPrefix(r.Source, "import:"):
+		case !r.Tracked():
 			records[i].Status = "imported"
 		case live[r.Seq]:
 			records[i].Status = "open"

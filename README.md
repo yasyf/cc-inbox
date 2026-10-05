@@ -183,11 +183,16 @@ The daemon also imports new `<inbox>.md.archive/*.md` files with the inbox's
 drive and lane; direct archive imports default to the inbox name.
 
 Import extracts all matching PR references (`#30440` or `/pull/30440`), Buildkite
-build URLs, and stack tokens such as `api/plat-usw2-prod` and
-`dns/tnt-usw2-26qmqm1`. Repeated references appear once per record. PR numbers
-must have four to six digits. Stack extraction recognizes region-shaped
-environments; it skips ordinary paths such as `infra/lib` and short environments
-such as `api/staging`, even though `--stack api/staging` is valid when posting.
+build URLs, bare stack names such as `api/plat-usw2-prod`, and explicit
+`stack:<project>/<env>` and `target:<name>` tokens. Repeated references appear
+once per record. PR numbers must have four to six digits. Bare stack names
+require region-shaped environments; ordinary paths such as `infra/lib` and
+short environments such as `api/staging` are skipped. An explicit
+`stack:api/staging` token supplies a stack ref without that region restriction.
+Use lowercase letters, digits, and hyphens in explicit names; projects and
+targets start with a letter, and environments start with a letter or digit.
+Labels such as `tunnel/T`, `k8s/T`, and box names do not supply a stack ref.
+Name the full stack, for example `stack:tunnel/tnt-usw2-1frg9c7`.
 
 In keyed runner lines (`HH:MM KIND <key> <lane>: ...`), a `msg_<id>` key
 keeps the worker as the lane. Other keys put the event under `runner` with
@@ -283,15 +288,38 @@ items on one line and selects each lane's latest record by time. Text
 sections and the latest-per-lane list use sequence number order, newest
 first. Use a longer window or a targeted read for older records.
 
-Digest open-item tracking and compaction's keep-open rule skip records whose
-source is `import:<file>`. Imported markdown inbox lines do not reliably
-carry the closure links needed for open-item tracking.
+Digest open-item tracking includes imported openers with a stack or target ref.
+Imported `hold`, `defect`, `blocker`, and `blocked` records with either ref appear
+in the digest's open sections and the dashboard's blocked view. Compaction
+preserves tracked openers while open. Imported openers without either ref
+remain untracked, with status `imported`.
+
+A record in the same drive closes a tracked open item by shared deployment
+ref when it is later in recorded time, with sequence number breaking a tie.
+It must be one of the opener's normal closers. A `hold` accepts `lift`;
+`defect` accepts `fix-live` or `done`; `blocker` accepts `withdraw`, `answer`,
+or `done`; `blocked` accepts `unblock`. Imported openers also accept
+`fix-live`, `lift`, or `done`. A native hold still needs `lift`.
+
+When both records name stacks, at least one stack must match. When either
+names no stack, a shared target is enough. No matching topic or `--re` is
+needed. A fix on `api/tnt-usw2-bbbb` does not close a defect on
+`api/tnt-usw2-aaaa`, even when both name target `api`. Imports from older
+archives cannot close newer regressions because closure compares recorded
+time.
 
 ## Kinds and pairing
 
 Pair records within a drive using a shared `--topic` or a closing record's
-`--re` pointing to the opener's sequence number. The closing record must come
-after the opener. TTL means time to live; `--ttl` overrides the default.
+`--re` pointing to the opener's sequence number. Those links require a later
+sequence number and use the table's kind pairs.
+
+A shared deployment ref also closes a tracked opener with one of its normal
+closers. Imported openers also accept `fix-live`, `lift`, or `done`. Ref
+closure requires a later recorded time; sequence number breaks a tie.
+When both records name stacks, at least one stack must match. When either
+names no stack, a shared target is enough. TTL means time to live; `--ttl`
+overrides the default.
 
 Use `--resolves <seq>` on a later record of any kind to close a specific `ask`,
 `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`. The target must
@@ -389,7 +417,8 @@ even when zero; `head` and `stacks_clean` are optional.
 
 JSON reads from `tail`, `grep`, `watch`, and `/v1/records` add a computed `status`
 to opener kinds: `open`, `closed`, or `imported`. Other kinds omit it. Imported
-openers use `imported` because they are excluded from open-item tracking.
+openers with a stack or target ref use `open` or `closed`; those without either
+ref use `imported` and remain outside open-item tracking.
 `post --json`, `/v1/lanes`, and `/v1/stream` return records without computed status.
 
 Schema 3 upgrades existing stores on open: `refs.pr` becomes `refs.prs`,

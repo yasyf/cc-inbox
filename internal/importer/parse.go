@@ -18,16 +18,17 @@ type Clock struct {
 }
 
 type Entry struct {
-	Start  string
-	Lane   string
-	Topic  string
-	Kind   kinds.Kind
-	Text   string
-	To     []string
-	PRs    []int
-	Builds []string
-	Stacks []string
-	Clock  *Clock
+	Start   string
+	Lane    string
+	Topic   string
+	Kind    kinds.Kind
+	Text    string
+	To      []string
+	PRs     []int
+	Builds  []string
+	Stacks  []string
+	Targets []string
+	Clock   *Clock
 }
 
 var (
@@ -41,6 +42,8 @@ var (
 	laneWord  = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*:?$`)
 	prRef     = regexp.MustCompile(`(?:#|/pull/)(\d{4,6})\b`)
 	buildRef  = regexp.MustCompile(`https://buildkite\.com/[\w.-]+/[\w.-]+/builds/\d+`)
+	stackTag  = regexp.MustCompile(`\bstack:([a-z][a-z0-9-]*/[a-z0-9][a-z0-9-]*)`)
+	targetTag = regexp.MustCompile(`\btarget:([a-z][a-z0-9-]*)`)
 	stackRef  = regexp.MustCompile(`\b[a-z][a-z0-9-]*/[a-z]+-(?:us|eu|ap|ca|sa|me|af)[a-z]+\d-[a-z0-9]+\b`)
 	bullet    = regexp.MustCompile(`^(?:[-*]\s+|#{1,4}\s+)`)
 )
@@ -259,6 +262,16 @@ func (e *Entry) refs(body string) {
 	for _, st := range stackRef.FindAllString(body, -1) {
 		if !slices.Contains(e.Stacks, st) {
 			e.Stacks = append(e.Stacks, st)
+		}
+	}
+	for _, m := range stackTag.FindAllStringSubmatch(body, -1) {
+		if !slices.Contains(e.Stacks, m[1]) {
+			e.Stacks = append(e.Stacks, m[1])
+		}
+	}
+	for _, m := range targetTag.FindAllStringSubmatch(body, -1) {
+		if !slices.Contains(e.Targets, m[1]) {
+			e.Targets = append(e.Targets, m[1])
 		}
 	}
 }

@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Match grep patterns literally and case-insensitively by default. Use
   `--regex` for regular expressions, including `|` alternation. Keep
   newest-first ordering and the existing byte budgets.
-- Reparse existing imports with parser version 4 so watched lead tokens
+- Reparse existing imports with parser version 5 so watched lead tokens
   gain their corresponding kinds without changing stored timestamps.
 
 ### Fixed
@@ -27,6 +27,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search the whole rendered record line in `cci grep`, including kind,
   lane, recipients, topic, and refs, so queries such as `STATE census`
   match records whose kind and lane are stored outside their text.
+- Extract explicit `stack:<project>/<env>` and `target:<name>` refs
+  from inbox lines and reparse existing imports with parser version 5.
+  Track imported openers with either ref in digest open sections and
+  preserve them through compaction. Imported openers without either
+  ref remain untracked. Shared deployment refs close tracked items
+  in the same drive using the opener's normal closers; imported
+  openers also accept `fix-live`, `lift`, or `done`. Ref closure requires
+  a later recorded time, with sequence number breaking a tie. If both records
+  name stacks, at least one stack must match; otherwise, a shared
+  target is enough. A native hold still needs `lift`. Imports from
+  older archives cannot close newer regressions by ref.
 
 ## [0.4.0] - 2026-10-05
 

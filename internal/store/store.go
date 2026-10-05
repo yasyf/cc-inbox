@@ -127,6 +127,10 @@ type Record struct {
 	Status    string     `json:"status,omitempty"`
 }
 
+func (r Record) Tracked() bool {
+	return !strings.HasPrefix(r.Source, "import:") || len(r.Refs.Stacks) > 0 || len(r.Refs.Targets) > 0
+}
+
 type Store struct {
 	db   *sql.DB
 	home string
