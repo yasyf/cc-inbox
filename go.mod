@@ -6,11 +6,13 @@ toolchain go1.26.6
 
 require (
 	github.com/spf13/cobra v1.10.2
+	github.com/yasyf/daemonkit v0.32.3
 	modernc.org/sqlite v1.60.1
 )
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/ebitengine/purego v0.10.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
