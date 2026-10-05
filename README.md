@@ -280,6 +280,8 @@ kind, lane, recipients, topic, text, and rendered refs. It searches all matching
 records newest first, including expired records, and prints whole lines with
 reply marks within the byte budget. Patterns are literal and case-insensitive
 by default; `--regex` enables regular expressions such as `HOLD|DEFECT`.
+When nothing matches, text output prints `no records on <drive> match; store
+head #<seq>`, so an empty result reads differently from a stale store.
 
 A reply names the record's sequence number with `--re`.
 The marks are `[ANSWERED #12]`, `[WITHDRAWN #14]`,

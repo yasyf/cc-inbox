@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set. `SessionStart` keeps its 400-character width, 2,500-byte digest
   budget, and 1,500-byte tail budget.
 
+### Fixed
+
+- Print `no records on <drive> match; store head #<seq>` when a text
+  grep matches nothing, so an empty result reads differently from a
+  stale store. JSON output stays empty.
+
 ## [0.5.0] - 2026-10-05
 
 ### Added

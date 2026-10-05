@@ -142,7 +142,8 @@ whole rendered record lines, including sequence number, time, kind, lane,
 recipients, topic, text, and rendered refs. Patterns are literal and
 case-insensitive by default; use `--regex` for regular expressions such as
 `HOLD|DEFECT`. It searches all matching records newest first, including expired
-records. Tail, grep, state, and text digest default to 6,144 bytes; `--budget` sets
+records. A text grep with no match prints `no records on <drive> match; store
+head #<seq>`. Tail, grep, state, and text digest default to 6,144 bytes; `--budget` sets
 any other size.
 
 Tail, watch, and digest print whole records by default. Use `--width N` to
