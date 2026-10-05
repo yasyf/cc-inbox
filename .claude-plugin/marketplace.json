@@ -1,0 +1,24 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "cc-inbox",
+  "owner": {
+    "name": "Yasyf Mohamedali",
+    "email": "yasyf@poetic.com"
+  },
+  "plugins": [
+    {
+      "name": "cc-inbox",
+      "source": "./plugin",
+      "description": "Local, typed, append-only inbox CLI (cci) and Claude Code plugin for multi-agent drive coordination with bounded reads",
+      "category": "development",
+      "tags": [
+        "agents",
+        "coordination",
+        "inbox"
+      ],
+      "author": {
+        "name": "yasyf"
+      }
+    }
+  ]
+}
