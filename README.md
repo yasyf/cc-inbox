@@ -154,8 +154,9 @@ $ cci tail --drive migration --cursor root
 #1 <time> GO root Deploy after the checks pass.
 ```
 
-The plugin's `PostToolUse` hook imports new content after a Bash, Write, Edit, or
-`MultiEdit` call changes a registered file. This shell run invokes that same hook
+While the daemon started by `cci serve` runs, it keeps registered imports
+current every 2 seconds. The plugin's `PostToolUse` hook does the same after each
+Bash, Write, Edit, or `MultiEdit` call. This shell run invokes that same hook
 entry point after an append:
 
 ```console
@@ -169,8 +170,8 @@ $ cci import legacy.md --drive migration
 
 `cci import` tracks offsets and inodes, rereads files from the start when they
 shrink or rotation replaces them, and deduplicates source lines within a drive.
-The `PostToolUse` hook also imports new `<inbox>.md.archive/*.md` files with the
-inbox's drive and lane; archive files default to the inbox name.
+The daemon and `PostToolUse` hook also import new `<inbox>.md.archive/*.md` files
+with the inbox's drive and lane; archive files default to the inbox name.
 
 Import extracts all matching PR references (`#30440` or `/pull/30440`), Buildkite
 build URLs, and stack tokens such as `api/plat-usw2-prod` and
@@ -400,6 +401,10 @@ the daemonkit supervisor for `Ensure`. It runs a copy of `cci` at
 `~/.daemonkit/a/com.yasyf.cc-inbox`. It restarts on failure. When a different
 `cci` build calls `Ensure` through `cci serve`, daemonkit drains and replaces
 the running daemon.
+
+While running, the daemon keeps registered imports current every 2 seconds,
+including new archive files. The `PostToolUse` hook does the same after each
+Bash, Write, Edit, or `MultiEdit` call.
 
 The daemon keeps one SQLite store open with a 256 MiB memory map and a 64 MiB
 page cache. HTTP readers and the `digest` business operation reuse that store;

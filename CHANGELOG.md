@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The running daemon refreshes registered markdown imports and new archive
+  files every 2 seconds, so ingestion no longer depends on plugin tool calls.
+  The `PostToolUse` hook continues to refresh imports after each matching call.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added
