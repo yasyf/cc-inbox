@@ -115,3 +115,31 @@ func TestStateSaysWhenADriveHasNothingToShow(t *testing.T) {
 		t.Fatalf("state = %q, %v", out, err)
 	}
 }
+
+func TestBindingStartsTheSessionCursorAtTheHead(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "root-session")
+	for _, text := range []string{"Oct 2 backlog one", "Oct 2 backlog two"} {
+		if _, err := run(t, "post", "--drive", "release-v3", "--lane", "merge-walker", "--kind", "state", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := run(t, "tail", "--drive", "release-v3"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "merge-walker", "--kind", "state", "--text", "read before the bind"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "tail"); err != nil || out != "" {
+		t.Fatalf("tail right after the bind = %q, %v; want nothing", out, err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--text", "after the bind"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "tail"); err != nil || !strings.Contains(out, "after the bind") || strings.Contains(out, "backlog") {
+		t.Fatalf("tail after a new record = %q, %v", out, err)
+	}
+}
