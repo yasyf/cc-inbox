@@ -57,7 +57,7 @@ func WriteState(w io.Writer, records []store.Record, now time.Time, budget int, 
 	for _, r := range records {
 		line := render.JSON(r)
 		if !asJSON {
-			line = render.Line(r, now)
+			line = render.Clip(render.Line(r, now))
 		}
 		if !b.Line(line) {
 			if !asJSON {

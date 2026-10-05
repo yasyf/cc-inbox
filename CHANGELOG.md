@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Raise the default read budget from 4,000 to 6,144 bytes, matching the
+  long-running skill's `inbox-digest.py`. The cap remains 16,000 bytes.
+- Clip text record lines in tail, grep, watch, state, and digest sections to
+  200 characters, including an ellipsis. Append reply marks after clipping so
+  they stay visible. JSON record text is never clipped. `SessionStart` keeps
+  its 2,500-byte digest budget and 1,500-byte tail budget.
+
 ## [0.2.0] - 2026-10-05
 
 ### Added

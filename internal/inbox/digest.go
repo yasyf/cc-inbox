@@ -111,18 +111,10 @@ func section(b *render.Budget, title string, records []store.Record, limit int, 
 			b.Line(fmt.Sprintf("  +%d more", len(newest)-limit))
 			return
 		}
-		if !b.Line("  " + clip(render.Line(r, now), 220)) {
+		if !b.Line("  " + render.Clip(render.Line(r, now))) {
 			return
 		}
 	}
-}
-
-func clip(s string, n int) string {
-	r := []rune(s)
-	if len(r) <= n {
-		return s
-	}
-	return string(r[:n-1]) + "…"
 }
 
 func ranked(counts map[string]int, n int) string {

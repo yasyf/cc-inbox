@@ -11,8 +11,9 @@ import (
 )
 
 const (
-	DefaultBudget  = 4000
+	DefaultBudget  = 6144
 	MaxBudget      = 16000
+	LineCap        = 200
 	trailerReserve = 96
 )
 
@@ -93,6 +94,14 @@ type Budget struct {
 
 func NewBudget(w io.Writer, budget int) *Budget {
 	return &Budget{w: w, left: Clamp(budget) - trailerReserve}
+}
+
+func Clip(s string) string {
+	r := []rune(s)
+	if len(r) <= LineCap {
+		return s
+	}
+	return string(r[:LineCap-1]) + "…"
 }
 
 func (b *Budget) Line(s string) bool {

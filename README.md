@@ -56,8 +56,9 @@ made that other lanes build on; use `decide` to request a decision.
 
 ### Resume after compaction without rereading the inbox
 
-A root reading a markdown tail after every conversation compaction sees the same
-lines again. `cci tail` saves what it printed under the current session's cursor.
+The root reads drive coordination through `cci digest`, `cci tail`, and
+`cci watch`. `cci tail` saves what it printed under the current session's cursor,
+so later reads skip those records after conversation compaction.
 
 Inside Claude Code, bind the root to a drive. `cci drive use` requires
 `CLAUDE_CODE_SESSION_ID`; keep the value supplied by the session.
@@ -231,15 +232,16 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
-| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 4,000 bytes and caps at 16,000. |
+| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes and caps at 16,000. |
 
 Broadcasts have an empty `to` list. With `--reader`, kind, lane, and topic filters
 apply only to broadcasts; records addressed only to other lanes are excluded.
 Stack, target, and PR filters apply to addressed records too. Each takes one
 value per read; when combined, all must match.
 
-Tail, watch, and grep text lines append reply marks when another record names
-their sequence number with `--re`. The marks are `[ANSWERED #12]`, `[WITHDRAWN #14]`,
+Tail, watch, and grep text lines append reply marks after clipping, so the marks
+stay visible. A reply names the record's sequence number with `--re`.
+The marks are `[ANSWERED #12]`, `[WITHDRAWN #14]`,
 `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or `[RE #n]` for other
 reply kinds. A resolver adds `[RESOLVED #n]` to its target's line and
 `resolves #n` to its own line. The first number identifies the resolver; the
@@ -433,10 +435,12 @@ sessions write to the same SQLite store without a daemon.
 | --- | --- |
 | Posted text | 400 characters. Put longer bodies in a file and attach it with `--path`. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
-| `tail`, `grep`, `state`, and text `digest` | Default 4,000-byte budget, capped at 16,000 bytes. Output stops at a whole line. |
+| `tail`, `grep`, `state`, and text `digest` | Default 6,144-byte budget, capped at 16,000 bytes. Output stops at a whole line. |
+| Text record lines in `tail`, `grep`, `watch`, `state`, and digest sections | Clip to 200 characters, including a final `…` when clipped. The limit excludes digest indentation and appended reply marks. |
 | `tail` | At most 500 records per call. Repeat the same cursor read to continue. |
-| Text `watch` | Each line is capped at 600 characters. Output continues for the watch lifetime; `--budget` does not limit it. |
-| JSON `watch` and `digest` | No byte-budget cap. JSON watch records are not clipped. |
+| Text `watch` | Output continues for the watch lifetime; `--budget` does not limit it. |
+| JSON output | Record text is never clipped. `tail`, `grep`, and `state` still apply their byte budgets. |
+| JSON `watch` and `digest` | No byte-budget cap. |
 | Text digest sections | Up to 8 asks and decision requests combined; 6 blockers and deployment blocks combined; 6 defects; 6 holds; 6 incidents; and 15 latest lane records, subject to the byte budget. |
 | `SessionStart` context | Digest budget of 2,500 bytes and tail budget of 1,500 bytes. |
 
