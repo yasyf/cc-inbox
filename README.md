@@ -201,7 +201,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
 | `cci drive use` | Bind the current Claude Code session to a drive. `--root` enables owner-prompt capture. |
 | `cci drive ls` | List drives by their most recent activity. |
-| `cci serve` | Serve the read-only HTTP API. |
+| `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
 | `cci hook` | Run a plugin hook entry point. |
 
 | Post option | Stored value or behavior |
@@ -373,8 +373,9 @@ JSON object per line; `digest --json` emits one summary object with counts,
 
 ## HTTP endpoints
 
-`cci serve` exposes these read-only endpoints on `127.0.0.1:7377` by default;
-`--addr` changes the listener.
+`cci serve` starts or reuses the daemon, prints `http://127.0.0.1:7377/v1`, and
+returns. The daemon serves these read-only endpoints from its hot SQLite store.
+The listener is fixed at `127.0.0.1:7377`.
 
 | Endpoint | Response |
 | --- | --- |
@@ -390,6 +391,22 @@ broadcasts that match those filters. The reader's own broadcasts are excluded.
 Stack, target, and PR filters apply to every returned record and combine with
 AND. Query `/v1/records?drive=D&stack=api/plat-usw2-prod` to read a stack's
 problems and the records addressing them, including whether each opener is closed.
+
+### Daemon
+
+`daemonkit` manages `com.yasyf.cc-inbox` through launchd on macOS. Linux requires
+the daemonkit supervisor for `Ensure`. It runs a copy of `cci` at
+`~/.daemonkit/bin/com.yasyf.cc-inbox`, with state under
+`~/.daemonkit/a/com.yasyf.cc-inbox`. It restarts on failure. When a different
+`cci` build calls `Ensure` through `cci serve`, daemonkit drains and replaces
+the running daemon.
+
+The daemon keeps one SQLite store open with a 256 MiB memory map and a 64 MiB
+page cache. HTTP readers and the `digest` business operation reuse that store;
+the `addr` operation returns the HTTP address. Each CLI process still writes
+directly to SQLite's write-ahead log. CLI reads, including `tail`, `digest`,
+`grep`, and `watch`, also stay direct and use the same reader code as the daemon.
+Posting and CLI reads work without the daemon.
 
 ## Plugin hooks
 
