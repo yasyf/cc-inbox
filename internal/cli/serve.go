@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"net"
@@ -66,8 +67,9 @@ func newDaemonCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("listen %s: %w", daemon.Addr, err)
 			}
-			_, err = daemonkit.Serve(cmd.Context(), d, daemon.Start(home, ln))
-			return err
+			rt := daemon.New(home, ln)
+			_, err = daemonkit.Serve(cmd.Context(), d, rt.Start)
+			return cmp.Or(err, rt.Err())
 		},
 	})
 	return cmd

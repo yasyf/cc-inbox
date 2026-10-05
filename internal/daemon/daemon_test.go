@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,7 +134,7 @@ func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener) {
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() {
-		_, err := daemonkit.Serve(ctx, d, daemon.Start(home, ln))
+		_, err := daemonkit.Serve(ctx, d, daemon.New(home, ln).Start)
 		served <- err
 	}()
 	t.Cleanup(func() {
@@ -143,4 +144,32 @@ func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener) {
 		}
 	})
 	return d, ln
+}
+
+func TestDaemonReportsAListenerFailure(t *testing.T) {
+	kit, err := os.MkdirTemp("/tmp", "cci-dk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(kit) })
+	t.Setenv("DAEMONKIT_HOME", kit)
+	d, err := daemon.Definition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Label = daemonkit.Label(fmt.Sprintf("com.yasyf.cc-inbox.test%d.fail", os.Getpid()))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = ln.Close()
+	rt := daemon.New(t.TempDir(), ln)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if _, err := daemonkit.Serve(ctx, d, rt.Start); err != nil {
+		t.Fatalf("Serve() = %v", err)
+	}
+	if err := rt.Err(); err == nil || !strings.Contains(err.Error(), "http listener") {
+		t.Fatalf("Err() = %v, want the listener failure", err)
+	}
 }
