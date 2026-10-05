@@ -16,6 +16,14 @@ import (
 )
 
 func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
+	return s.open(ctx, drive, Record.Tracked)
+}
+
+func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, error) {
+	return s.open(ctx, drive, func(r Record) bool { return r.Kind == kinds.Hold && !r.Tracked() })
+}
+
+func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
 	openers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Openers(), IncludeExpired: true})
 	if err != nil {
 		return nil, err
@@ -30,10 +38,10 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 	}
 	var open []Record
 	for _, o := range openers {
-		if by, ok := resolved[o.Seq]; ok && by > o.Seq {
+		if !keep(o) {
 			continue
 		}
-		if !o.Tracked() {
+		if by, ok := resolved[o.Seq]; ok && by > o.Seq {
 			continue
 		}
 		if !closed(o, closers) {

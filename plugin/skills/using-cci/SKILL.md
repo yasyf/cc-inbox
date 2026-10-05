@@ -139,7 +139,8 @@ decision requests. `open blockers` (`open_blockers`) contains `blocker` and
 `blocked`; `open defects` (`open_defects`) contains defects. Holds and incidents
 have their own sections, followed by a count of older open items. An
 `untracked holds` line (JSON `untracked_holds`) lists imported holds that name
-no `stack:<project>/<env>` or `target:<name>` ref; no later line can close them. `grep` searches
+no `stack:<project>/<env>` or `target:<name>` ref; no later imported line can close them, but a
+post with `--resolves <seq>`, or a `lift` with `--re <seq>`, does. `grep` searches
 whole rendered record lines, including sequence number, time, kind, lane,
 recipients, topic, text, and rendered refs. Patterns are literal and
 case-insensitive by default; use `--regex` for regular expressions such as
