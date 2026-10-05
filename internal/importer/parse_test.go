@@ -37,7 +37,7 @@ func TestParseShapes(t *testing.T) {
 		{"applied-from-pulumi", kinds.Opened, "#30431 release: read published versions from Pulumi state", 30431, "22:23", ""},
 		{"root", kinds.Go, "R1081 (3:36 PM PT) orca-desk: launch exec-pending-333-fix NOW sol xhigh brief=/x/fix-brief.md", 0, "15:36", "orca-desk"},
 		{"hsbc-sanddb-2147-fix", kinds.Report, "msg_27ab68e4bfed hsbc-sanddb-2147-fix: worker_done succeeded dispatch=ctx_65c99a29432f", 0, "22:16", ""},
-		{"hsbc-bring-up", kinds.Note, "READY 18:13Z #29952 green + approved at 264975f3f5", 29952, "18:13Z", ""},
+		{"hsbc-bring-up", kinds.Ready, "18:13Z #29952 green + approved at 264975f3f5", 29952, "18:13Z", ""},
 		{"root", kinds.Note, "P65 ALL GREEN does not wait on AIG artifact-storage artifact-storage is an AIG-proof setting, not a deploy target; AIG runs no sanddb pods. Every deploy target row is in.", 0, "12:28Z", ""},
 		{"deploy-go", kinds.Note, "a stray line with no shape", 0, "", ""},
 	}
@@ -123,7 +123,7 @@ func TestParseNamesTheWritingLane(t *testing.T) {
 		{"DONE (1:44 AM PT) tooling-ccx-5: defect 14 fixed. #30533 (landed b5a74c0c) makes stack-enqueue name a parent", "tooling-ccx-5", kinds.Done, "01:44", "defect 14 fixed. #30533 (landed b5a74c0c) makes stack-enqueue name a parent"},
 		{"MECHANISM test-slow-41463 (1:45 AM PT) IaC check release-pr-check: #30518's env-spec yaml edits reach all 289 stacks", "test-slow-41463", kinds.Mechanism, "01:45", "IaC check release-pr-check: #30518's env-spec yaml edits reach all 289 stacks"},
 		{"OPENED release-simplify-3 (1:42 AM PT) #30541 6fa7fefac1 merge-now release: use stack grants for local state access", "release-simplify-3", kinds.Opened, "01:42", "#30541 6fa7fefac1 merge-now release: use stack grants for local state access"},
-		{"READY (9:27 PM PT) tenant-parity-retro-2: #30378 43b022becd J green + approved, landable", "tenant-parity-retro-2", kinds.Note, "21:27", "READY #30378 43b022becd J green + approved, landable"},
+		{"READY (9:27 PM PT) tenant-parity-retro-2: #30378 43b022becd J green + approved, landable", "tenant-parity-retro-2", kinds.Ready, "21:27", "#30378 43b022becd J green + approved, landable"},
 		{"R (1:06 AM PT) hsbc-routing-revert FIX-LIVE: plat api rollouts restarted 1:00-1:02 AM", "hsbc-routing-revert", kinds.FixLive, "01:06", "R plat api rollouts restarted 1:00-1:02 AM"},
 		{"OPENED (9:5x PM PT) platy-ux-promises-3: #30414 release: Fix Platy release messages", "platy-ux-promises-3", kinds.Opened, "21:50", "#30414 release: Fix Platy release messages"},
 		{"OWNER (1:33 AM PT) tailscale: live policy file delivered", "root", kinds.Owner, "01:33", "tailscale: live policy file delivered"},
@@ -196,6 +196,22 @@ func TestParseFilesRunnerEventsUnderTheRunner(t *testing.T) {
 			e := parseOne(t, tt.line)
 			if e.Lane != tt.lane || e.Topic != tt.topic || e.Kind != tt.kind {
 				t.Errorf("entry = lane %q topic %q kind %q, want lane %q topic %q kind %q", e.Lane, e.Topic, e.Kind, tt.lane, tt.topic, tt.kind)
+			}
+		})
+	}
+}
+
+func TestParseMapsEveryWatchedLeadTokenToAKind(t *testing.T) {
+	watched := "FIX-LIVE|MECHANISM|NOT-OURS|STOPPED|BLOCKED|REFUSE|FAIL|APPLIED|RELEASE|RECOVERED|READY|HOLD|DECIDE|INCIDENT|STATE|MATRIX|DELETE-LIST|STAND-DOWN|LIFT|SKEW|NOT-LIVE|CORRECTION|URGENT|DONE|HANDOFF|DEFECT|DESIGN|DUPLICATE|SERVING|REPORT|RETRO|POSTED"
+	for _, word := range strings.Split(watched, "|") {
+		t.Run(word, func(t *testing.T) {
+			e := parseOne(t, word+" merge-walker (2:04 AM PT) #30541 receiver")
+			want, ok := kinds.Lookup(word)
+			if !ok || e.Kind != want || e.Kind == kinds.Note || e.Lane != "merge-walker" {
+				t.Errorf("%s imports as kind %q lane %q, want its own kind", word, e.Kind, e.Lane)
+			}
+			if _, err := kinds.Parse(string(e.Kind)); err != nil {
+				t.Errorf("--kind %s: %v", e.Kind, err)
 			}
 		})
 	}

@@ -42,6 +42,22 @@ const (
 	Blocked    Kind = "blocked"
 	Unblock    Kind = "unblock"
 	Review     Kind = "review"
+	Retro      Kind = "retro"
+	Posted     Kind = "posted"
+	Design     Kind = "design"
+	Serving    Kind = "serving"
+	Ready      Kind = "ready"
+	Duplicate  Kind = "duplicate"
+	StandDown  Kind = "stand-down"
+	NotOurs    Kind = "not-ours"
+	Stopped    Kind = "stopped"
+	Refuse     Kind = "refuse"
+	Fail       Kind = "fail"
+	Recovered  Kind = "recovered"
+	DeleteList Kind = "delete-list"
+	Skew       Kind = "skew"
+	NotLive    Kind = "not-live"
+	Urgent     Kind = "urgent"
 )
 
 const EphemeralTTL = 24 * time.Hour
@@ -86,6 +102,22 @@ var specs = map[Kind]Spec{
 	Blocked:    {},
 	Unblock:    {NeedsRef: true},
 	Review:     {},
+	Retro:      {},
+	Posted:     {},
+	Design:     {},
+	Serving:    {},
+	Ready:      {},
+	Duplicate:  {},
+	StandDown:  {},
+	NotOurs:    {},
+	Stopped:    {},
+	Refuse:     {},
+	Fail:       {},
+	Recovered:  {},
+	DeleteList: {},
+	Skew:       {},
+	NotLive:    {},
+	Urgent:     {},
 }
 
 var aliases = map[string]Kind{
@@ -101,6 +133,8 @@ var aliases = map[string]Kind{
 	"land":          Landed,
 	"apply":         Applied,
 	"ruling":        Owner,
+	"refused":       Refuse,
+	"failed":        Fail,
 }
 
 var openers = map[Kind][]Kind{
