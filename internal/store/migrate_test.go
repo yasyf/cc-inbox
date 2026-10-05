@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 func TestMigratesSchemaOneStores(t *testing.T) {
@@ -41,5 +44,23 @@ func TestMigratesSchemaOneStores(t *testing.T) {
 	src, ok, err := st.Source(ctx, "/x.md")
 	if err != nil || !ok || src.Inode != 0 || src.Offset != 3 {
 		t.Fatalf("migrated source = %+v %v %v", src, ok, err)
+	}
+}
+
+func TestNewerSchemaNamesTheUpgradeCommand(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "inbox.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations)+1)); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+	_, err = Open(ctx, dir)
+	want := fmt.Sprintf("store schema %d is newer than this cci %s (schema %d); upgrade it with: %s", len(migrations)+1, version.String(), len(migrations), version.UpgradeCommand())
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("open newer store error = %v, want %q", err, want)
 	}
 }

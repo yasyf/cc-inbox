@@ -19,6 +19,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 const (
@@ -192,19 +193,19 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("begin migration: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	var version int
-	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+	var schema int
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
 		return fmt.Errorf("read schema version: %w", err)
 	}
-	if version == len(migrations) {
+	if schema == len(migrations) {
 		return nil
 	}
-	if version > len(migrations) {
-		return fmt.Errorf("store schema %d is newer than this cci (%d); upgrade cci", version, len(migrations))
+	if schema > len(migrations) {
+		return fmt.Errorf("store schema %d is newer than this cci %s (schema %d); upgrade it with: %s", schema, version.String(), len(migrations), version.UpgradeCommand())
 	}
-	for i, step := range migrations[version:] {
+	for i, step := range migrations[schema:] {
 		if _, err := tx.ExecContext(ctx, step); err != nil {
-			return fmt.Errorf("migrate store to schema %d: %w", version+i+1, err)
+			return fmt.Errorf("migrate store to schema %d: %w", schema+i+1, err)
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
