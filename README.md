@@ -179,6 +179,11 @@ expiry based on their stored time. Their timestamps stay unchanged, and
 records folded away by `cci compact` stay gone. The import output reports
 the number reparsed.
 
+Import dates stamps relative to the file's modification time. A stamp
+more than five minutes after that time moves to the previous day. A one-day
+forward correction must stay within the same limit. Out-of-order stamps
+stay on their day.
+
 The daemon also imports new `<inbox>.md.archive/*.md` files with the inbox's
 drive and lane; direct archive imports default to the inbox name.
 

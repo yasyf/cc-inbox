@@ -160,19 +160,19 @@ func parseOne(t *testing.T, line string) importer.Entry {
 
 func TestDateKeepsOutOfOrderStampsOnTheirDay(t *testing.T) {
 	loc := time.Local
-	end := time.Date(2026, 10, 5, 1, 30, 0, 0, loc)
+	end := time.Date(2026, 10, 5, 1, 50, 0, 0, loc)
 	entries := []importer.Entry{
 		{Clock: &importer.Clock{Hour: 1, Minute: 0}},
 		{Clock: &importer.Clock{Hour: 1, Minute: 46}},
+		{Clock: &importer.Clock{Hour: 1, Minute: 20}},
 		{Clock: &importer.Clock{Hour: 1, Minute: 45}},
-		{Clock: &importer.Clock{Hour: 1, Minute: 10}},
 	}
 	got := importer.Date(entries, end)
 	for i, want := range []time.Time{
 		time.Date(2026, 10, 5, 1, 0, 0, 0, loc),
 		time.Date(2026, 10, 5, 1, 46, 0, 0, loc),
+		time.Date(2026, 10, 5, 1, 20, 0, 0, loc),
 		time.Date(2026, 10, 5, 1, 45, 0, 0, loc),
-		time.Date(2026, 10, 5, 1, 10, 0, 0, loc),
 	} {
 		if !got[i].Equal(want) {
 			t.Errorf("Date()[%d] = %v, want %v", i, got[i], want)
@@ -214,5 +214,23 @@ func TestParseMapsEveryWatchedLeadTokenToAKind(t *testing.T) {
 				t.Errorf("--kind %s: %v", e.Kind, err)
 			}
 		})
+	}
+}
+
+func TestDateNeverPlacesAStampAfterTheFileWasWritten(t *testing.T) {
+	loc := time.Local
+	end := time.Date(2026, 10, 5, 10, 10, 0, 0, loc)
+	entries := []importer.Entry{
+		{Clock: &importer.Clock{Hour: 22, Minute: 7}},
+		{Clock: &importer.Clock{Hour: 10, Minute: 12}},
+	}
+	got := importer.Date(entries, end)
+	for i, want := range []time.Time{
+		time.Date(2026, 10, 4, 22, 7, 0, 0, loc),
+		time.Date(2026, 10, 5, 10, 12, 0, 0, loc),
+	} {
+		if !got[i].Equal(want) {
+			t.Errorf("Date()[%d] = %v, want %v", i, got[i], want)
+		}
 	}
 }
