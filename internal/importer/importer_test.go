@@ -76,7 +76,7 @@ func TestImportIsIncrementalAndSurvivesRotation(t *testing.T) {
 	if got := strings.Join(lines, "|"); got != want {
 		t.Fatalf("records = %s\nwant      %s", got, want)
 	}
-	if all[0].Source != "import:"+inbox || all[0].Refs.PR != 30001 {
+	if all[0].Source != "import:"+inbox || len(all[0].Refs.PRs) != 1 || all[0].Refs.PRs[0] != 30001 {
 		t.Fatalf("first record = %+v", all[0])
 	}
 }

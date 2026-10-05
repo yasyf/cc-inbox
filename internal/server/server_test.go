@@ -34,7 +34,7 @@ func get(t *testing.T, srv *httptest.Server, path string, want int, into any) {
 
 func TestReadEndpoints(t *testing.T) {
 	st, _ := testutil.Store(t)
-	first := testutil.Post(t, st, store.Record{Kind: kinds.Opened, Text: "opened", Refs: store.Refs{PR: 30431}})
+	first := testutil.Post(t, st, store.Record{Kind: kinds.Opened, Text: "opened", Refs: store.Refs{PRs: []int{30431}}})
 	testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Hold, Text: "hold", Topic: "#30431"})
 	srv := httptest.NewServer(server.New(st, 10*time.Millisecond).Handler())
 	defer srv.Close()
@@ -103,4 +103,20 @@ func TestStream(t *testing.T) {
 		return
 	}
 	t.Fatalf("stream ended without a record: %v", scanner.Err())
+}
+
+func TestLanesEndpoint(t *testing.T) {
+	st, c := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.State, Text: "old"})
+	c.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "b", Kind: kinds.State, Text: "b"})
+	c.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.State, Text: "new"})
+	srv := httptest.NewServer(server.New(st, 10*time.Millisecond).Handler())
+	defer srv.Close()
+	var lanes []store.Record
+	get(t, srv, "/v1/lanes?drive=d", http.StatusOK, &lanes)
+	if len(lanes) != 2 || lanes[0].Lane != "a" || lanes[0].Text != "new" || lanes[1].Lane != "b" {
+		t.Fatalf("lanes = %+v", lanes)
+	}
 }

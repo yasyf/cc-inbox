@@ -113,7 +113,7 @@ func TestDigestLatestIsByTimeNotSeq(t *testing.T) {
 
 func TestGrep(t *testing.T) {
 	st, _ := testutil.Store(t)
-	testutil.Post(t, st, store.Record{Kind: kinds.Landed, Text: "landed #30427", Refs: store.Refs{PR: 30427}})
+	testutil.Post(t, st, store.Record{Kind: kinds.Landed, Text: "landed #30427", Refs: store.Refs{PRs: []int{30427}}})
 	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "unrelated"})
 	var out bytes.Buffer
 	if err := inbox.Grep(context.Background(), st, store.Filter{Drive: "d"}, regexp.MustCompile("30427"), 0, false, &out); err != nil {

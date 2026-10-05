@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,13 +18,15 @@ type Clock struct {
 }
 
 type Entry struct {
-	Start string
-	Lane  string
-	Kind  kinds.Kind
-	Text  string
-	To    []string
-	PR    int
-	Clock *Clock
+	Start  string
+	Lane   string
+	Kind   kinds.Kind
+	Text   string
+	To     []string
+	PRs    []int
+	Builds []string
+	Stacks []string
+	Clock  *Clock
 }
 
 var (
@@ -34,6 +37,8 @@ var (
 	kindWord  = regexp.MustCompile(`^[A-Z][A-Z0-9]*(?:[-_][A-Z0-9]+)*:?$`)
 	laneWord  = regexp.MustCompile(`^[a-z][a-z0-9]*(?:-[a-z0-9]+)*:?$`)
 	prRef     = regexp.MustCompile(`(?:#|/pull/)(\d{4,6})\b`)
+	buildRef  = regexp.MustCompile(`https://buildkite\.com/[\w.-]+/[\w.-]+/builds/\d+`)
+	stackRef  = regexp.MustCompile(`\b[a-z][a-z0-9-]*/[a-z]+-(?:us|eu|ap|ca|sa|me|af)[a-z]+\d-[a-z0-9]+\b`)
 	bullet    = regexp.MustCompile(`^(?:[-*]\s+|#{1,4}\s+)`)
 )
 
@@ -47,6 +52,7 @@ func Parse(r io.Reader, fallbackLane string) ([]Entry, error) {
 	flush := func() {
 		if cur != nil {
 			cur.Text = strings.Join(strings.Fields(cur.Text), " ")
+			cur.refs(cur.Start + " " + cur.Text)
 			out = append(out, *cur)
 			cur = nil
 		}
@@ -75,7 +81,7 @@ func Parse(r io.Reader, fallbackLane string) ([]Entry, error) {
 
 func plain(line, lane string) Entry {
 	body := strings.TrimSpace(line)
-	return Entry{Start: line, Lane: lane, Kind: kinds.Note, Text: body, PR: pr(body)}
+	return Entry{Start: line, Lane: lane, Kind: kinds.Note, Text: body}
 }
 
 func start(line, fallbackLane string) (Entry, bool) {
@@ -88,7 +94,7 @@ func start(line, fallbackLane string) (Entry, bool) {
 	if len(toks) > 0 && ruling.MatchString(toks[0]) {
 		return rulingEntry(line, body, toks), true
 	}
-	e := Entry{Start: line, Lane: fallbackLane, Kind: kinds.Note, PR: pr(body)}
+	e := Entry{Start: line, Lane: fallbackLane, Kind: kinds.Note}
 	var head, tail []string
 	parenLane := ""
 	timed := false
@@ -164,12 +170,11 @@ func runnerEntry(line, body string, m []string, fallbackLane string) Entry {
 			break
 		}
 	}
-	e.PR = pr(body)
 	return e
 }
 
 func rulingEntry(line, body string, fields []string) Entry {
-	e := Entry{Start: line, Lane: "root", Kind: kinds.Go, Text: body, PR: pr(body)}
+	e := Entry{Start: line, Lane: "root", Kind: kinds.Go, Text: body}
 	if m := timeParen.FindStringSubmatch(body); m != nil {
 		e.Clock = clock(m[2], m[3], m[4], m[5])
 	}
@@ -194,13 +199,23 @@ func firstN(s []string, n int) []string {
 	return s[:min(n, len(s))]
 }
 
-func pr(s string) int {
-	m := prRef.FindStringSubmatch(s)
-	if m == nil {
-		return 0
+func (e *Entry) refs(body string) {
+	for _, m := range prRef.FindAllStringSubmatch(body, -1) {
+		n, _ := strconv.Atoi(m[1])
+		if !slices.Contains(e.PRs, n) {
+			e.PRs = append(e.PRs, n)
+		}
 	}
-	n, _ := strconv.Atoi(m[1])
-	return n
+	for _, b := range buildRef.FindAllString(body, -1) {
+		if !slices.Contains(e.Builds, b) {
+			e.Builds = append(e.Builds, b)
+		}
+	}
+	for _, st := range stackRef.FindAllString(body, -1) {
+		if !slices.Contains(e.Stacks, st) {
+			e.Stacks = append(e.Stacks, st)
+		}
+	}
 }
 
 func clock(h, m, ampm, zone string) *Clock {

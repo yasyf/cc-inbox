@@ -27,6 +27,7 @@ type DigestView struct {
 	Holds     []store.Record `json:"open_holds"`
 	Incidents []store.Record `json:"open_incidents"`
 	Blockers  []store.Record `json:"open_blockers"`
+	Defects   []store.Record `json:"open_defects"`
 	Latest    []store.Record `json:"latest"`
 	OlderOpen int            `json:"older_open"`
 	MaxSeq    int64          `json:"max_seq"`
@@ -59,8 +60,10 @@ func Digest(ctx context.Context, st *store.Store, drive string, since time.Time)
 			v.Holds = append(v.Holds, r)
 		case kinds.Incident:
 			v.Incidents = append(v.Incidents, r)
-		case kinds.Blocker:
+		case kinds.Blocker, kinds.Blocked:
 			v.Blockers = append(v.Blockers, r)
+		case kinds.Defect:
+			v.Defects = append(v.Defects, r)
 		default:
 			v.Asks = append(v.Asks, r)
 		}
@@ -81,10 +84,11 @@ func (v DigestView) Write(w io.Writer, now time.Time, budget int) {
 	b.Line("lanes: " + ranked(v.Lanes, 12))
 	section(b, "open asks", v.Asks, 8, now)
 	section(b, "open blockers", v.Blockers, 6, now)
+	section(b, "open defects", v.Defects, 6, now)
 	section(b, "open holds", v.Holds, 6, now)
 	section(b, "open incidents", v.Incidents, 6, now)
 	if v.OlderOpen > 0 {
-		b.Line(fmt.Sprintf("%d older open items (cci tail --kind ask --kind decide --kind blocker --kind hold --kind incident --since 0)", v.OlderOpen))
+		b.Line(fmt.Sprintf("%d older open items (cci tail --kind ask --kind decide --kind blocker --kind blocked --kind defect --kind hold --kind incident --since 0)", v.OlderOpen))
 	}
 	section(b, "latest per lane", v.Latest, latestLanes, now)
 	if b.Full() {

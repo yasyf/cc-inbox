@@ -18,6 +18,9 @@ type Filter struct {
 	To             string
 	For            string
 	Topics         []string
+	Stack          string
+	Target         string
+	PR             int
 	After          int64
 	Before         int64
 	Since          time.Time
@@ -57,6 +60,16 @@ func (f Filter) where(now time.Time) (string, []any) {
 	} else {
 		clauses = append(clauses, selectors...)
 		params = append(params, selected...)
+	}
+	for _, ref := range []struct {
+		path  string
+		value any
+		set   bool
+	}{{"$.stacks", f.Stack, f.Stack != ""}, {"$.targets", f.Target, f.Target != ""}, {"$.prs", f.PR, f.PR != 0}} {
+		if ref.set {
+			clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(refs, '"+ref.path+"') WHERE value = ?)")
+			params = append(params, ref.value)
+		}
 	}
 	if f.To != "" {
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?)")
@@ -272,7 +285,8 @@ func (s *Store) Replies(ctx context.Context, drive string, seqs []int64) (map[in
 	for _, seq := range seqs {
 		params = append(params, seq)
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE drive = ? AND re IN ("+placeholders(len(seqs))+") ORDER BY seq", params...)
+	params = append(params, params[1:]...)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE drive = ? AND (re IN ("+placeholders(len(seqs))+") OR resolves IN ("+placeholders(len(seqs))+")) ORDER BY seq", params...)
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
@@ -282,7 +296,29 @@ func (s *Store) Replies(ctx context.Context, drive string, seqs []int64) (map[in
 		if err != nil {
 			return nil, err
 		}
-		out[r.Re] = append(out[r.Re], r)
+		if r.Re != 0 {
+			out[r.Re] = append(out[r.Re], r)
+		}
+		if r.Resolves != 0 && r.Resolves != r.Re {
+			out[r.Resolves] = append(out[r.Resolves], r)
+		}
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT resolves, seq FROM records WHERE drive = ? AND resolves != 0", drive)
+	if err != nil {
+		return nil, fmt.Errorf("read resolvers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]int64{}
+	for rows.Next() {
+		var target, seq int64
+		if err := rows.Scan(&target, &seq); err != nil {
+			return nil, fmt.Errorf("scan resolver: %w", err)
+		}
+		out[target] = seq
 	}
 	return out, rows.Err()
 }
