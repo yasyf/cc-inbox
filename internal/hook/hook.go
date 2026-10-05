@@ -8,7 +8,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -78,10 +77,5 @@ func Prompt(ctx context.Context, st *store.Store, p Payload) error {
 		Refs:   store.Refs{Path: path},
 		Source: "hook",
 	}, 0)
-	return err
-}
-
-func PostTool(ctx context.Context, st *store.Store) error {
-	_, err := importer.Refresh(ctx, st)
 	return err
 }

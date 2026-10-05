@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Refresh registered markdown inboxes and discover archives every second in
+  the daemon. `cci serve` or any plugin `SessionStart` starts or reuses it.
+  Session start injects bound drive context before ensuring the daemon;
+  ensure failures surface as non-blocking hook errors. Remove the `PostToolUse`
+  hook and `cci hook post-tool` command. CLI reads stay direct to SQLite.
 - Raise the default read budget from 4,000 to 6,144 bytes, matching the
   long-running skill's `inbox-digest.py`. The cap remains 16,000 bytes.
 - Clip text record lines in tail, grep, watch, state, and digest sections to
