@@ -2,10 +2,12 @@ package importer_test
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -155,5 +157,120 @@ func TestDefaultLane(t *testing.T) {
 		if got := importer.DefaultLane(path); got != want {
 			t.Errorf("DefaultLane(%s) = %s, want %s", path, got, want)
 		}
+	}
+}
+
+func TestImportReparsesLinesFromAnOlderParser(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
+	write(t, inbox, "DONE (1:44 AM PT) tooling-ccx-5: defect 14 fixed\nOPENED (1:45 AM PT) release-simplify-3: #30541 stack grants\nLANDED (1:46 AM PT) inference-delete-3: #30543 compacted away\n")
+	if _, err := importer.Import(ctx, st, inbox, "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	first, err := st.Get(ctx, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(home, "inbox.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, stmt := range []string{
+		"UPDATE records SET lane = 'deploy-go', kind = 'note', at = at - 3600000",
+		"DELETE FROM records WHERE text LIKE '%compacted away%'",
+		"UPDATE imports SET parser = 0",
+	} {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	appendTo(t, inbox, "DONE (1:47 AM PT) tooling-ccx-5: defect 15 fixed\n")
+	res, err := importer.Import(ctx, st, inbox, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Reparsed != 2 || res.Inserted != 1 {
+		t.Fatalf("import = %+v, want 2 reparsed and 1 new", res)
+	}
+	all, err := st.Query(ctx, store.Filter{Drive: "drive", IncludeExpired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(all))
+	for _, r := range all {
+		got = append(got, string(r.Kind)+" "+r.Lane)
+	}
+	if want := "done tooling-ccx-5|opened release-simplify-3|done tooling-ccx-5"; strings.Join(got, "|") != want {
+		t.Fatalf("records = %s, want %s", strings.Join(got, "|"), want)
+	}
+	if kept := first.At.Add(-time.Hour); !all[0].At.Equal(kept) || all[0].ExpiresAt != nil {
+		t.Fatalf("reparsed record at %v expires %v, want the stored %v and no expiry", all[0].At, all[0].ExpiresAt, kept)
+	}
+	if results, err := importer.Refresh(ctx, st); err != nil || len(results) != 0 {
+		t.Fatalf("refresh after reparse = %+v, %v; want nothing to do", results, err)
+	}
+}
+
+func TestImportReparseSplitsContinuationsAndFollowsRotation(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
+	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
+	write(t, inbox, body)
+	if _, err := importer.Import(ctx, st, inbox, "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(home, "inbox.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	exec := func(stmts ...string) {
+		t.Helper()
+		for _, stmt := range stmts {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+	}
+	exec(
+		"UPDATE records SET lane = 'deploy-go', text = 'first DONE (9:41 PM PT) lane-b: second' WHERE seq = 1",
+		"DELETE FROM records WHERE seq = 2",
+		"UPDATE imports SET parser = 0",
+	)
+	res, err := importer.Import(ctx, st, inbox, "", "")
+	if err != nil || res.Reparsed != 1 || res.Inserted != 1 {
+		t.Fatalf("reparse = %+v, %v; want 1 reparsed and 1 split out", res, err)
+	}
+	all, err := st.Query(ctx, store.Filter{Drive: "drive", IncludeExpired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 || all[0].Lane != "lane-a" || all[0].Text != "first" || all[1].Lane != "lane-b" || !all[1].At.Equal(all[0].At) {
+		t.Fatalf("records = %+v, want lane-a first and the split lane-b at its parent's time", all)
+	}
+	exec("UPDATE records SET lane = 'deploy-go'", "UPDATE imports SET parser = 0")
+	staged := inbox + ".new"
+	write(t, staged, body)
+	if err := os.Rename(staged, inbox); err != nil {
+		t.Fatal(err)
+	}
+	if res, err = importer.Import(ctx, st, inbox, "", ""); err != nil || res.Reparsed != 2 || res.Inserted != 0 {
+		t.Fatalf("rotated import = %+v, %v; want 2 reparsed, 0 new", res, err)
+	}
+	if all, err = st.Query(ctx, store.Filter{Drive: "drive", IncludeExpired: true}); err != nil || all[0].Lane != "lane-a" || all[1].Lane != "lane-b" {
+		t.Fatalf("records after rotation = %+v, %v", all, err)
 	}
 }

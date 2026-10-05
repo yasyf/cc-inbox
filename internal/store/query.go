@@ -193,10 +193,11 @@ type Source struct {
 	Lane   string
 	Offset int64
 	Inode  uint64
+	Parser int
 }
 
 func (s *Store) Sources(ctx context.Context) ([]Source, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT path, drive, lane, offset, inode FROM imports ORDER BY path")
+	rows, err := s.db.QueryContext(ctx, "SELECT path, drive, lane, offset, inode, parser FROM imports ORDER BY path")
 	if err != nil {
 		return nil, fmt.Errorf("list import sources: %w", err)
 	}
@@ -204,7 +205,7 @@ func (s *Store) Sources(ctx context.Context) ([]Source, error) {
 	var out []Source
 	for rows.Next() {
 		var src Source
-		if err := rows.Scan(&src.Path, &src.Drive, &src.Lane, &src.Offset, &src.Inode); err != nil {
+		if err := rows.Scan(&src.Path, &src.Drive, &src.Lane, &src.Offset, &src.Inode, &src.Parser); err != nil {
 			return nil, fmt.Errorf("scan import source: %w", err)
 		}
 		out = append(out, src)
@@ -214,7 +215,7 @@ func (s *Store) Sources(ctx context.Context) ([]Source, error) {
 
 func (s *Store) Source(ctx context.Context, path string) (Source, bool, error) {
 	src := Source{Path: path}
-	err := s.db.QueryRowContext(ctx, "SELECT drive, lane, offset, inode FROM imports WHERE path = ?", path).Scan(&src.Drive, &src.Lane, &src.Offset, &src.Inode)
+	err := s.db.QueryRowContext(ctx, "SELECT drive, lane, offset, inode, parser FROM imports WHERE path = ?", path).Scan(&src.Drive, &src.Lane, &src.Offset, &src.Inode, &src.Parser)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Source{}, false, nil
 	}
@@ -225,8 +226,8 @@ func (s *Store) Source(ctx context.Context, path string) (Source, bool, error) {
 }
 
 func (s *Store) SaveSource(ctx context.Context, src Source) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO imports (path, drive, lane, offset, inode) VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (path) DO UPDATE SET drive = excluded.drive, lane = excluded.lane, offset = excluded.offset, inode = excluded.inode`, src.Path, src.Drive, src.Lane, src.Offset, src.Inode)
+	_, err := s.db.ExecContext(ctx, `INSERT INTO imports (path, drive, lane, offset, inode, parser) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT (path) DO UPDATE SET drive = excluded.drive, lane = excluded.lane, offset = excluded.offset, inode = excluded.inode, parser = excluded.parser`, src.Path, src.Drive, src.Lane, src.Offset, src.Inode, src.Parser)
 	if err != nil {
 		return fmt.Errorf("save import source: %w", err)
 	}

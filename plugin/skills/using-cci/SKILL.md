@@ -157,7 +157,10 @@ TTL means time to live; `--ttl` overrides defaults.
 
 Import appended inbox files, not the runner's rewritten `runner-state.md` view.
 `cci import` registers files, restarts after inode changes or shrinkage, and
-deduplicates lines within the drive. It extracts PRs, Buildkite build URLs, and
+deduplicates lines within the drive. After a parser version change, the next
+import or daemon refresh reparses consumed lines and updates matching records
+without changing their stored timestamps or restoring compacted records. Import
+output includes the number reparsed. It extracts PRs, Buildkite build URLs, and
 stack tokens such as `api/plat-usw2-prod`. The daemon refreshes registered imports
 every second, importing later appends and new `<inbox>.md.archive/*.md` files
 with the inbox's drive and lane; direct archive imports default to the inbox

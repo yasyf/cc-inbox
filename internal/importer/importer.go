@@ -11,14 +11,18 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/store"
 )
+
+const ParserVersion = 1
 
 type Result struct {
 	Path     string `json:"path"`
 	Entries  int    `json:"entries"`
 	Inserted int    `json:"inserted"`
+	Reparsed int    `json:"reparsed"`
 	Offset   int64  `json:"offset"`
 }
 
@@ -60,6 +64,22 @@ func Import(ctx context.Context, st *store.Store, path, drive, lane string) (Res
 		src.Offset = 0
 	}
 	src.Inode = inode
+	reparsed, split := 0, 0
+	stale := src.Parser != ParserVersion
+	if stale && src.Offset > 0 {
+		prefix := make([]byte, src.Offset)
+		if _, err := io.ReadFull(f, prefix); err != nil {
+			return Result{}, fmt.Errorf("read %s: %w", abs, err)
+		}
+		_, items, err := ingestions(st, src, abs, prefix, info.ModTime())
+		if err != nil {
+			return Result{}, err
+		}
+		if reparsed, split, err = st.Reparse(ctx, items, false); err != nil {
+			return Result{}, err
+		}
+	}
+	src.Parser = ParserVersion
 	if _, err := f.Seek(src.Offset, io.SeekStart); err != nil {
 		return Result{}, fmt.Errorf("seek %s: %w", abs, err)
 	}
@@ -68,11 +88,34 @@ func Import(ctx context.Context, st *store.Store, path, drive, lane string) (Res
 		return Result{}, fmt.Errorf("read %s: %w", abs, err)
 	}
 	chunk = chunk[:bytes.LastIndexByte(chunk, '\n')+1]
+	entries, items, err := ingestions(st, src, abs, chunk, info.ModTime())
+	if err != nil {
+		return Result{}, err
+	}
+	var inserted int
+	if stale {
+		var updated int
+		updated, inserted, err = st.Reparse(ctx, items, true)
+		reparsed += updated
+	} else {
+		inserted, err = st.IngestAll(ctx, items)
+	}
+	if err != nil {
+		return Result{}, err
+	}
+	src.Offset += int64(len(chunk))
+	if err := st.SaveSource(ctx, src); err != nil {
+		return Result{}, err
+	}
+	return Result{Path: abs, Entries: len(entries), Inserted: split + inserted, Reparsed: reparsed, Offset: src.Offset}, nil
+}
+
+func ingestions(st *store.Store, src store.Source, abs string, chunk []byte, end time.Time) ([]Entry, []store.Ingestion, error) {
 	entries, err := Parse(bytes.NewReader(chunk), src.Lane)
 	if err != nil {
-		return Result{}, fmt.Errorf("parse %s: %w", abs, err)
+		return nil, nil, fmt.Errorf("parse %s: %w", abs, err)
 	}
-	times := Date(entries, info.ModTime())
+	times := Date(entries, end)
 	items := make([]store.Ingestion, 0, len(entries))
 	for i, e := range entries {
 		r := store.Record{
@@ -86,19 +129,11 @@ func Import(ctx context.Context, st *store.Store, path, drive, lane string) (Res
 			Source: "import:" + abs,
 		}
 		if r.Text, r.Refs.Path, err = st.Fit(e.Text); err != nil {
-			return Result{}, err
+			return nil, nil, err
 		}
-		items = append(items, store.Ingestion{Record: r, LineHash: lineHash(src.Drive, e.Start)})
+		items = append(items, store.Ingestion{Record: r, LineHash: lineHash(src.Drive, e.Start), Line: e.Start})
 	}
-	inserted, err := st.IngestAll(ctx, items)
-	if err != nil {
-		return Result{}, err
-	}
-	src.Offset += int64(len(chunk))
-	if err := st.SaveSource(ctx, src); err != nil {
-		return Result{}, err
-	}
-	return Result{Path: abs, Entries: len(entries), Inserted: inserted, Offset: src.Offset}, nil
+	return entries, items, nil
 }
 
 func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
@@ -134,7 +169,7 @@ func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
 		if err != nil {
 			return nil, fmt.Errorf("stat %s: %w", src.Path, err)
 		}
-		if info.Size() == src.Offset && info.Sys().(*syscall.Stat_t).Ino == src.Inode {
+		if info.Size() == src.Offset && info.Sys().(*syscall.Stat_t).Ino == src.Inode && src.Parser == ParserVersion {
 			continue
 		}
 		res, err := Import(ctx, st, src.Path, "", "")

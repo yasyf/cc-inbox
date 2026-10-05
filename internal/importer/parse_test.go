@@ -112,3 +112,64 @@ func TestDateWalksBackAcrossMidnight(t *testing.T) {
 		}
 	}
 }
+
+func TestParseNamesTheWritingLane(t *testing.T) {
+	tests := []struct {
+		line, lane string
+		kind       kinds.Kind
+		clock      string
+		text       string
+	}{
+		{"DONE (1:44 AM PT) tooling-ccx-5: defect 14 fixed. #30533 (landed b5a74c0c) makes stack-enqueue name a parent", "tooling-ccx-5", kinds.Done, "01:44", "defect 14 fixed. #30533 (landed b5a74c0c) makes stack-enqueue name a parent"},
+		{"MECHANISM test-slow-41463 (1:45 AM PT) IaC check release-pr-check: #30518's env-spec yaml edits reach all 289 stacks", "test-slow-41463", kinds.Mechanism, "01:45", "IaC check release-pr-check: #30518's env-spec yaml edits reach all 289 stacks"},
+		{"OPENED release-simplify-3 (1:42 AM PT) #30541 6fa7fefac1 merge-now release: use stack grants for local state access", "release-simplify-3", kinds.Opened, "01:42", "#30541 6fa7fefac1 merge-now release: use stack grants for local state access"},
+		{"READY (9:27 PM PT) tenant-parity-retro-2: #30378 43b022becd J green + approved, landable", "tenant-parity-retro-2", kinds.Note, "21:27", "READY #30378 43b022becd J green + approved, landable"},
+		{"R (1:06 AM PT) hsbc-routing-revert FIX-LIVE: plat api rollouts restarted 1:00-1:02 AM", "hsbc-routing-revert", kinds.FixLive, "01:06", "R plat api rollouts restarted 1:00-1:02 AM"},
+		{"OPENED (9:5x PM PT) platy-ux-promises-3: #30414 release: Fix Platy release messages", "platy-ux-promises-3", kinds.Opened, "21:50", "#30414 release: Fix Platy release messages"},
+		{"OWNER (1:33 AM PT) tailscale: live policy file delivered", "root", kinds.Owner, "01:33", "tailscale: live policy file delivered"},
+		{"GO (root, 1:33 AM PT) alerts-api-fix: ship #30541", "root", kinds.Go, "01:33", "alerts-api-fix: ship #30541"},
+		{"R (1:52 AM PT) hsbc-routing-revert STOOD DOWN: #30525 landed 01f0eb41bc", "hsbc-routing-revert", kinds.Note, "01:52", "R STOOD DOWN: #30525 landed 01f0eb41bc"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.lane, func(t *testing.T) {
+			e := parseOne(t, tt.line)
+			if e.Lane != tt.lane || e.Kind != tt.kind || e.Text != tt.text || clockString(e.Clock) != tt.clock {
+				t.Errorf("entry = lane %q kind %q clock %q text %q\nwant lane %q kind %q clock %q text %q", e.Lane, e.Kind, clockString(e.Clock), e.Text, tt.lane, tt.kind, tt.clock, tt.text)
+			}
+		})
+	}
+}
+
+func parseOne(t *testing.T, line string) importer.Entry {
+	t.Helper()
+	entries, err := importer.Parse(strings.NewReader(line+"\n"), "deploy-go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("parsed %d entries from %q, want 1", len(entries), line)
+	}
+	return entries[0]
+}
+
+func TestDateKeepsOutOfOrderStampsOnTheirDay(t *testing.T) {
+	loc := time.Local
+	end := time.Date(2026, 10, 5, 1, 30, 0, 0, loc)
+	entries := []importer.Entry{
+		{Clock: &importer.Clock{Hour: 1, Minute: 0}},
+		{Clock: &importer.Clock{Hour: 1, Minute: 46}},
+		{Clock: &importer.Clock{Hour: 1, Minute: 45}},
+		{Clock: &importer.Clock{Hour: 1, Minute: 10}},
+	}
+	got := importer.Date(entries, end)
+	for i, want := range []time.Time{
+		time.Date(2026, 10, 5, 1, 0, 0, 0, loc),
+		time.Date(2026, 10, 5, 1, 46, 0, 0, loc),
+		time.Date(2026, 10, 5, 1, 45, 0, 0, loc),
+		time.Date(2026, 10, 5, 1, 10, 0, 0, loc),
+	} {
+		if !got[i].Equal(want) {
+			t.Errorf("Date()[%d] = %v, want %v", i, got[i], want)
+		}
+	}
+}
