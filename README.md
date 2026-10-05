@@ -211,7 +211,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`. |
 | `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
-| `cci grep` | Search text with a case-insensitive regular expression, newest first, including expired records. |
+| `cci grep` | Search whole rendered record lines literally and case-insensitively, newest first, including expired records. `--regex` enables regular expressions. |
 | `cci state` | Show the latest `head` and `contract` per lane and topic, skipping withdrawn records, within a byte budget. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
@@ -238,6 +238,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 
 | Read option | Commands | Behavior |
 | --- | --- | --- |
+| `--regex` | `grep` | Interpret the pattern as a case-insensitive regular expression; `a\|b` matches either alternative. The default matches the pattern literally. |
 | `--kind <kind>` | `tail`, `watch`, `grep` | Select kinds; repeat for multiple kinds. |
 | `--lane <lane>` | `tail`, `watch`, `grep`, `state` | Select posting lanes; repeat for multiple lanes. |
 | `--topic <topic>` | `tail`, `watch`, `grep`, `state` | Select topics; repeat for multiple topics. |
@@ -256,7 +257,11 @@ Stack, target, and PR filters apply to addressed records too. Each takes one
 value per read; when combined, all must match.
 
 Tail and watch text lines append reply marks after clipping, so the marks stay
-visible. Grep prints whole record lines with reply marks.
+visible. Grep matches the whole rendered record line: sequence number, time,
+kind, lane, recipients, topic, text, and rendered refs. It searches all matching
+records newest first, including expired records, and prints whole lines with
+reply marks within the byte budget. Patterns are literal and case-insensitive
+by default; `--regex` enables regular expressions such as `HOLD|DEFECT`.
 
 A reply names the record's sequence number with `--re`.
 The marks are `[ANSWERED #12]`, `[WITHDRAWN #14]`,
