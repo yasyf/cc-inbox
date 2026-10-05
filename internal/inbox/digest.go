@@ -15,7 +15,10 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const latestLanes = 15
+const (
+	latestLanes  = 15
+	DigestBudget = 32000
+)
 
 type DigestView struct {
 	Drive     string         `json:"drive"`

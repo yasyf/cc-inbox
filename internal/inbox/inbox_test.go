@@ -285,3 +285,30 @@ func TestDigestListsLatestNewestSeqFirst(t *testing.T) {
 		t.Fatalf("digest prints #1 before #2:\n%s", out.String())
 	}
 }
+
+func TestDigestDefaultBudgetFitsEverySection(t *testing.T) {
+	st, _ := testutil.Store(t)
+	text := strings.Repeat("w", 390)
+	for i, k := range []kinds.Kind{kinds.Ask, kinds.Blocker, kinds.Defect, kinds.Hold, kinds.Incident} {
+		for j := range 9 {
+			testutil.Post(t, st, store.Record{Lane: fmt.Sprintf("open-lane-%d-%d", i, j), To: []string{"root"}, Kind: k, Text: text})
+		}
+	}
+	for i := range 20 {
+		testutil.Post(t, st, store.Record{Lane: fmt.Sprintf("latest-lane-%02d", i), Kind: kinds.State, Text: text})
+	}
+	v, err := inbox.Digest(context.Background(), st, "d", st.Now().Add(-inbox.DigestWindow))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	v.Write(&out, st.Now(), inbox.DigestBudget, 0)
+	for _, want := range []string{"open asks (9", "open blockers (9", "open defects (9", "open holds (9", "open incidents (9", "latest per lane (15", "latest-lane-05"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("default digest missing %q", want)
+		}
+	}
+	if strings.Contains(out.String(), "digest truncated") {
+		t.Fatalf("default digest truncated at %d bytes", out.Len())
+	}
+}

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -35,7 +36,7 @@ func newTailCmd() *cobra.Command {
 			return err
 		}),
 	}
-	rf.register(cmd, "", true)
+	rf.register(cmd, "", true, render.DefaultBudget)
 	rf.registerWidth(cmd)
 	cmd.Flags().StringVar(&cursor, "cursor", os.Getenv(sessionEnv), "cursor name, read and advanced when --since is absent")
 	return cmd
@@ -60,7 +61,7 @@ func newWatchCmd() *cobra.Command {
 			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, cmd.OutOrStdout())
 		}),
 	}
-	rf.register(cmd, "", true)
+	rf.register(cmd, "", true, render.DefaultBudget)
 	rf.registerWidth(cmd)
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor")
 	cmd.Flags().DurationVar(&interval, "interval", time.Second, "poll interval")
@@ -90,7 +91,7 @@ func newDigestCmd() *cobra.Command {
 			return nil
 		}),
 	}
-	rf.register(cmd, "24h", false)
+	rf.register(cmd, "24h", false, inbox.DigestBudget)
 	rf.registerWidth(cmd)
 	return cmd
 }
@@ -121,7 +122,7 @@ func newGrepCmd() *cobra.Command {
 			return inbox.Grep(cmd.Context(), st, f, pattern, rf.budget, rf.json, cmd.OutOrStdout())
 		}),
 	}
-	rf.register(cmd, "", true)
+	rf.register(cmd, "", true, render.DefaultBudget)
 	cmd.Flags().BoolVar(&regex, "regex", false, "treat PATTERN as a regular expression, so | alternates; the default matches it literally")
 	return cmd
 }
@@ -149,6 +150,6 @@ func newStateCmd() *cobra.Command {
 			return nil
 		}),
 	}
-	rf.register(cmd, "", true)
+	rf.register(cmd, "", true, render.DefaultBudget)
 	return cmd
 }

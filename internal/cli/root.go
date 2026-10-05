@@ -85,7 +85,7 @@ type readFlags struct {
 	json   bool
 }
 
-func (f *readFlags) register(cmd *cobra.Command, since string, filters bool) {
+func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, budget int) {
 	cmd.Flags().StringVar(&f.drive, "drive", "", "drive to read (default: the drive bound to this session)")
 	if filters {
 		cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "only these kinds (repeatable)")
@@ -98,7 +98,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool) {
 		cmd.Flags().IntVar(&f.pr, "pr", 0, "only records about this pull request")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), or an RFC3339 time")
-	cmd.Flags().IntVar(&f.budget, "budget", 0, "output budget in bytes (default 6144)")
+	cmd.Flags().IntVar(&f.budget, "budget", budget, "output budget in bytes")
 	cmd.Flags().BoolVar(&f.json, "json", false, "one JSON record per line")
 }
 
