@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/importer"
+	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
@@ -272,5 +273,40 @@ func TestImportReparseSplitsContinuationsAndFollowsRotation(t *testing.T) {
 	}
 	if all, err = st.Query(ctx, store.Filter{Drive: "drive", IncludeExpired: true}); err != nil || all[0].Lane != "lane-a" || all[1].Lane != "lane-b" {
 		t.Fatalf("records after rotation = %+v, %v", all, err)
+	}
+}
+
+func TestImportedDeploymentBlocksStayOpenUntilClosedByRef(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "deploy-go.md")
+	write(t, path, strings.Join([]string{
+		"HOLD merge-walker (10:07 PM PT) stack:tunnel/tnt-usw2-1frg9c7 has 21 creates on HSBC",
+		"DEFECT merge-walker-r2 (10:08 PM PT) -> root: storage/tnt-usw2-buckets plans 22 creates",
+		"DEFECT slack-release-sweep-8 (10:09 PM PT) target:api preview red on every plan",
+		"HOLD root (10:10 PM PT) names no deployment",
+	}, "\n")+"\n")
+	open := func() string {
+		t.Helper()
+		if _, err := importer.Import(ctx, st, path, "drive", ""); err != nil {
+			t.Fatal(err)
+		}
+		v, err := inbox.Digest(ctx, st, "drive", c.Now().Add(-48*time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		blocks := append(v.Holds, v.Defects...)
+		got := make([]string, 0, len(blocks))
+		for _, r := range blocks {
+			got = append(got, string(r.Kind)+" "+r.Lane)
+		}
+		return strings.Join(got, ",")
+	}
+	if got := open(); got != "hold merge-walker,defect merge-walker-r2,defect slack-release-sweep-8" {
+		t.Fatalf("open = %s", got)
+	}
+	appendTo(t, path, "FIX-LIVE merge-walker-r2 (10:20 PM PT) storage/tnt-usw2-buckets import landed\nLIFT root (10:21 PM PT) stack:tunnel/tnt-usw2-1frg9c7 creates approved\n")
+	if got := open(); got != "defect slack-release-sweep-8" {
+		t.Fatalf("open after closers = %s", got)
 	}
 }

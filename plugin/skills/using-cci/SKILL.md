@@ -36,9 +36,20 @@ too, so a stack or target query finds both the problem and the work addressing i
 `--stack` names a deploy stack, such as `api/plat-usw2-prod`. Use repeated `--pr`
 flags for pull requests; `opened` and `landed` require at least one.
 
-Use `blocked` when a stack or target cannot deploy. It remains open until
-`unblock` names it with `--re` or the same `--topic`, or a resolver closes it.
-Resolving a defect does not close a separate `blocked` record. For a new drive:
+Use `blocked` when a stack or target cannot deploy. Close it with `unblock`
+using `--re` or the same `--topic`, or with a resolver.
+
+A shared deployment ref also lets `unblock` close it in the same drive.
+Imported openers also accept `fix-live`, `lift`, or `done` by ref. Ref closure
+requires a later recorded time, with sequence number breaking a tie. When
+both records name stacks, at least one stack must match; when either names
+no stack, a shared target is enough.
+
+An explicit `--resolves` link closes only the named item.
+A `fix-live` record can close a defect and a separate imported deployment
+block by ref; a native `blocked` record still needs `unblock`.
+
+For a new drive:
 
 ```bash
 cci post --drive demo --lane walker --kind blocked --stack api/plat-usw2-prod --target api --text 'Platy cannot deploy: wave cycle.'
@@ -105,7 +116,9 @@ cci tail --drive demo --pr 30440 --since 0
 
 Read filters `--stack`, `--target`, and `--pr` each take one value and combine
 with AND. JSON tail, grep, and watch reads add `status` to opener kinds: `open`,
-`closed`, or `imported`. Text tail and watch reads append reply marks after
+`closed`, or `imported`. Imported openers with a stack or target ref use `open`
+or `closed`; those without either ref use `imported` and remain untracked.
+Text tail and watch reads append reply marks after
 clipping; grep prints whole record lines with reply marks. These include
 `[ANSWERED #12]`,
 `[WITHDRAWN #14]`, `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or
@@ -150,7 +163,17 @@ Watch has no total byte budget in text or JSON form.
 
 ## Choose a kind
 
-Pair kinds with a later record using `--re` or the same `--topic` in the drive.
+Pair kinds through `--re` or a shared `--topic` in the drive using the table's
+kind pairs and a later sequence number.
+
+A shared deployment ref also closes a tracked opener with one of its normal
+closers. A `hold` accepts `lift`; `defect` accepts `fix-live` or `done`;
+`blocker` accepts `withdraw`, `answer`, or `done`; `blocked` accepts `unblock`.
+Imported openers also accept `fix-live`, `lift`, or `done`.
+
+Ref closure requires a later recorded time; sequence number breaks a tie.
+When both records name stacks, at least one stack must match. When either
+names no stack, a shared target is enough. A native hold still needs `lift`.
 TTL means time to live; `--ttl` overrides defaults.
 
 | Kinds | Default TTL | Pairing or requirement |
@@ -182,14 +205,33 @@ Import appended inbox files, not the runner's rewritten `runner-state.md` view.
 deduplicates lines within the drive. After a parser version change, the next
 import or daemon refresh reparses consumed lines and updates matching records
 without changing their stored timestamps or restoring compacted records. Import
-output includes the number reparsed. It extracts PRs, Buildkite build URLs, and
-stack tokens such as `api/plat-usw2-prod`. The daemon refreshes registered imports
-every second, importing later appends and new `<inbox>.md.archive/*.md` files
+output includes the number reparsed. It extracts PRs, Buildkite build URLs,
+bare stack names with region-shaped environments such as `api/plat-usw2-prod`,
+and explicit `stack:<project>/<env>` and `target:<name>` tokens. Explicit names
+use lowercase letters, digits, and hyphens; projects and targets start with a
+letter, and environments start with a letter or digit. `stack:api/staging`
+works without a region-shaped environment. Labels such as `tunnel/T`, `k8s/T`,
+and box names supply no stack ref; write `stack:tunnel/tnt-usw2-1frg9c7`.
+The daemon refreshes registered imports every second, importing later appends
+and new `<inbox>.md.archive/*.md` files
 with the inbox's drive and lane; direct archive imports default to the inbox
 name. Run `cci serve` or start any Claude Code session with the plugin installed
 to start or reuse the daemon. Allow the next refresh to finish before reading
 appended records.
 
-Once lanes post directly, stop writing markdown inboxes. Compaction folds old
-records into daily counts and keeps open items. Open-item tracking skips
-`import:<file>` records because legacy lines lack closure links.
+Once lanes post directly, stop writing markdown inboxes. Open-item tracking
+includes imported openers with a stack or target ref. Imported `hold`, `defect`,
+`blocker`, and `blocked` records with either ref appear in the digest's open
+sections and the dashboard's blocked view. Imported openers without either
+ref remain untracked.
+
+In the same drive, a shared deployment ref closes a tracked opener with one
+of its normal closers; imported openers also accept `fix-live`, `lift`, or
+`done`. The closer must be later in recorded time, with sequence number
+breaking a tie. When both records name stacks, at least one
+stack must match; when either names no stack, a shared target is enough.
+
+A fix on `api/tnt-usw2-bbbb` leaves a defect on `api/tnt-usw2-aaaa` open even
+when both name target `api`. Imports from older archives cannot close newer
+regressions because closure compares recorded time. Compaction folds old
+records into daily counts and preserves tracked open items.

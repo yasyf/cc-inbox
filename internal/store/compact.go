@@ -33,7 +33,7 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 		if by, ok := resolved[o.Seq]; ok && by > o.Seq {
 			continue
 		}
-		if strings.HasPrefix(o.Source, "import:") {
+		if !o.Tracked() {
 			continue
 		}
 		if !closed(o, closers) {
@@ -45,14 +45,26 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 
 func closed(opener Record, closers []Record) bool {
 	for _, c := range closers {
-		if !c.Kind.Closes(opener.Kind) || c.Seq <= opener.Seq {
-			continue
+		if c.Seq > opener.Seq && c.Kind.Closes(opener.Kind) && (c.Re == opener.Seq || (c.Topic != "" && c.Topic == opener.Topic)) {
+			return true
 		}
-		if c.Re == opener.Seq || (c.Topic != "" && c.Topic == opener.Topic) {
+		if closesByRef(opener, c) {
 			return true
 		}
 	}
 	return false
+}
+
+func closesByRef(opener, c Record) bool {
+	pairs := c.Kind.Closes(opener.Kind) || c.Kind.ClosesByRef() && strings.HasPrefix(opener.Source, "import:")
+	later := c.At.After(opener.At) || c.At.Equal(opener.At) && c.Seq > opener.Seq
+	if !pairs || !later {
+		return false
+	}
+	if len(opener.Refs.Stacks) > 0 && len(c.Refs.Stacks) > 0 {
+		return slices.ContainsFunc(opener.Refs.Stacks, func(s string) bool { return slices.Contains(c.Refs.Stacks, s) })
+	}
+	return slices.ContainsFunc(opener.Refs.Targets, func(t string) bool { return slices.Contains(c.Refs.Targets, t) })
 }
 
 type CompactResult struct {

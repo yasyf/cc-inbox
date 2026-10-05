@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -267,5 +268,35 @@ func TestBindingSurvivesReopen(t *testing.T) {
 	}
 	if !errors.Is(store.Validate(store.Record{}), store.ErrNoDrive) {
 		t.Fatal("Validate on an empty record did not report ErrNoDrive")
+	}
+}
+
+func TestDeploymentRefsCloseOnlyMatchingLaterBlocks(t *testing.T) {
+	st, c := open(t)
+	ctx := context.Background()
+	hold := post(t, st, store.Record{Kind: kinds.Hold, Text: "native hold", Refs: store.Refs{Stacks: []string{"api/plat-usw2-prod"}}})
+	post(t, st, store.Record{Kind: kinds.FixLive, Text: "fix live on the held stack", Refs: store.Refs{Stacks: []string{"api/plat-usw2-prod"}}})
+	at := c.Now()
+	imported := func(kind kinds.Kind, minutes int, line string, refs store.Refs) store.Ingestion {
+		return store.Ingestion{Record: store.Record{Drive: "d", Lane: "walker", Kind: kind, At: at.Add(time.Duration(minutes) * time.Minute), Text: line, Refs: refs, Source: "import:/deploy-go.md"}, LineHash: line}
+	}
+	if _, err := st.IngestAll(ctx, []store.Ingestion{
+		imported(kinds.FixLive, -60, "fix for an earlier regression", store.Refs{Stacks: []string{"storage/tnt-usw2-buckets"}}),
+		imported(kinds.Defect, 0, "regression after that fix", store.Refs{Stacks: []string{"storage/tnt-usw2-buckets"}}),
+		imported(kinds.Defect, 1, "tenant a plan red", store.Refs{Stacks: []string{"api/tnt-usw2-aaaa"}, Targets: []string{"api"}}),
+		imported(kinds.FixLive, 2, "tenant b fixed", store.Refs{Stacks: []string{"api/tnt-usw2-bbbb"}, Targets: []string{"api"}}),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	items, err := st.OpenItems(ctx, "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(items))
+	for _, r := range items {
+		got = append(got, r.Text)
+	}
+	if want := []string{"native hold", "regression after that fix", "tenant a plan red"}; !slices.Equal(got, want) {
+		t.Fatalf("open = %q, want %q (hold #%d)", got, want, hold.Seq)
 	}
 }
