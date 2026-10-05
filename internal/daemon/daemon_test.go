@@ -7,24 +7,20 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/yasyf/daemonkit"
 
 	"github.com/yasyf/cc-inbox/internal/daemon"
+	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 func TestDaemonServesDigestAndHTTP(t *testing.T) {
-	kit, err := os.MkdirTemp("/tmp", "cci-dk")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(kit) })
-	t.Setenv("DAEMONKIT_HOME", kit)
 	home := t.TempDir()
 	ctx := context.Background()
 	st, err := store.Open(ctx, home)
@@ -36,32 +32,7 @@ func TestDaemonServesDigestAndHTTP(t *testing.T) {
 	}
 	_ = st.Close()
 
-	d, err := daemon.Definition()
-	if err != nil {
-		t.Fatal(err)
-	}
-	d.Label = daemonkit.Label(fmt.Sprintf("com.yasyf.cc-inbox.test%d", os.Getpid()))
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	serveCtx, stop := context.WithCancel(ctx)
-	served := make(chan error, 1)
-	go func() {
-		_, err := daemonkit.Serve(serveCtx, d, daemon.Start(home, ln))
-		served <- err
-	}()
-	defer func() {
-		stop()
-		if err := <-served; err != nil {
-			t.Errorf("Serve() = %v", err)
-		}
-	}()
-
-	client, err := daemonkit.Open(d)
-	if err != nil {
-		t.Fatal(err)
-	}
+	addr, client := serve(t, home)
 	body, err := json.Marshal(daemon.DigestRequest{Drive: "d", Since: time.Now().Add(-time.Hour)})
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +58,7 @@ func TestDaemonServesDigestAndHTTP(t *testing.T) {
 	if len(v.Holds) != 1 || v.Holds[0].Text != "hold #1" {
 		t.Fatalf("daemon digest = %+v", v)
 	}
-	resp, err := http.Get("http://" + ln.Addr().String() + "/v1/records?drive=d")
+	resp, err := http.Get("http://" + addr + "/v1/records?drive=d")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,4 +67,94 @@ func TestDaemonServesDigestAndHTTP(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil || len(records) != 1 || records[0].Status != "open" {
 		t.Fatalf("daemon http records = %+v, %v", records, err)
 	}
+}
+
+func TestDaemonImportsLinesAppendedToRegisteredInboxes(t *testing.T) {
+	home := t.TempDir()
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "deploy-go.md")
+	if err := os.WriteFile(path, []byte("GO root (9:00 PM PT) one\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.Import(ctx, st, path, "d", ""); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+
+	addr, _ := serve(t, home)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("GO root (9:01 PM PT) two\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		records := getRecords(t, addr)
+		if len(records) == 2 && records[1].Text == "two" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("daemon records after append = %+v", records)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func getRecords(t *testing.T, addr string) []store.Record {
+	t.Helper()
+	resp, err := http.Get("http://" + addr + "/v1/records?drive=d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var records []store.Record
+	if err := json.NewDecoder(resp.Body).Decode(&records); err != nil {
+		t.Fatal(err)
+	}
+	return records
+}
+
+func serve(t *testing.T, home string) (string, *daemonkit.Client) {
+	t.Helper()
+	kit, err := os.MkdirTemp("/tmp", "cci-dk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(kit) })
+	t.Setenv("DAEMONKIT_HOME", kit)
+	d, err := daemon.Definition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.Label = daemonkit.Label(fmt.Sprintf("com.yasyf.cc-inbox.test%d", os.Getpid()))
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveCtx, stop := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() {
+		_, err := daemonkit.Serve(serveCtx, d, daemon.Start(home, ln, 10*time.Millisecond))
+		served <- err
+	}()
+	t.Cleanup(func() {
+		stop()
+		if err := <-served; err != nil {
+			t.Errorf("Serve() = %v", err)
+		}
+	})
+
+	client, err := daemonkit.Open(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ln.Addr().String(), client
 }

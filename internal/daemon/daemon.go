@@ -11,15 +11,17 @@ import (
 
 	"github.com/yasyf/daemonkit"
 
+	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 const (
-	Label  daemonkit.Label  = "com.yasyf.cc-inbox"
-	Schema daemonkit.Schema = "cci.v1"
-	Addr                    = "127.0.0.1:7377"
+	Label       daemonkit.Label  = "com.yasyf.cc-inbox"
+	Schema      daemonkit.Schema = "cci.v1"
+	Addr                         = "127.0.0.1:7377"
+	ImportEvery                  = 2 * time.Second
 )
 
 func Definition() (daemonkit.Daemon, error) {
@@ -39,22 +41,25 @@ func Definition() (daemonkit.Daemon, error) {
 }
 
 type Product struct {
-	st   *store.Store
-	http *http.Server
-	done chan error
+	st     *store.Store
+	http   *http.Server
+	done   chan error
+	synced chan struct{}
 }
 
-func Start(home string, ln net.Listener) daemonkit.Start {
+func Start(home string, ln net.Listener, importEvery time.Duration) daemonkit.Start {
 	return func(c daemonkit.Ctx) (daemonkit.Product, error) {
 		st, err := store.Open(c.Context, home)
 		if err != nil {
 			return nil, err
 		}
 		p := &Product{
-			st:   st,
-			http: &http.Server{Handler: server.New(st, time.Second).Handler(), ReadHeaderTimeout: 5 * time.Second},
-			done: make(chan error, 1),
+			st:     st,
+			http:   &http.Server{Handler: server.New(st, time.Second).Handler(), ReadHeaderTimeout: 5 * time.Second},
+			done:   make(chan error, 1),
+			synced: make(chan struct{}),
 		}
+		go p.syncImports(c, importEvery)
 		go func() {
 			err := p.http.Serve(ln)
 			if !errors.Is(err, http.ErrServerClosed) {
@@ -63,6 +68,24 @@ func Start(home string, ln net.Listener) daemonkit.Start {
 			p.done <- nil
 		}()
 		return p, nil
+	}
+}
+
+func (p *Product) syncImports(c daemonkit.Ctx, every time.Duration) {
+	ctx := c.Context
+	defer close(p.synced)
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		if _, err := importer.Refresh(ctx, p.st); err != nil && ctx.Err() == nil {
+			c.Stop(fmt.Errorf("refresh imports: %w", err))
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
 	}
 }
 
@@ -94,6 +117,7 @@ func (p *Product) Handle(ctx context.Context, req daemonkit.Request) (daemonkit.
 }
 
 func (p *Product) Drain(b daemonkit.Budget) error {
+	<-p.synced
 	ctx, cancel := b.Context(context.Background())
 	defer cancel()
 	if err := p.http.Shutdown(ctx); err != nil {

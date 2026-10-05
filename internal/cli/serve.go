@@ -58,7 +58,7 @@ func newDaemonCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("listen %s: %w", daemon.Addr, err)
 			}
-			_, err = daemonkit.Serve(cmd.Context(), d, daemon.Start(home, ln))
+			_, err = daemonkit.Serve(cmd.Context(), d, daemon.Start(home, ln, daemon.ImportEvery))
 			return err
 		},
 	})
