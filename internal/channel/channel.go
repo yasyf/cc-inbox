@@ -33,7 +33,7 @@ That means records addressed to the reader, plus other lanes' broadcasts of the 
 
 The channel never speaks unsolicited: outside a ` + "`cci subscribe`" + `d session it is silent, and silence needs nothing from you.`
 
-func Serve(ctx context.Context, st *store.Store, window int, in io.Reader, out io.Writer) error {
+func Serve(ctx context.Context, st *store.Store, window store.Window, in io.Reader, out io.Writer) error {
 	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions}, nil)
 	streamCtx, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
@@ -47,14 +47,14 @@ func Serve(ctx context.Context, st *store.Store, window int, in io.Reader, out i
 	return err
 }
 
-func Stream(ctx context.Context, st *store.Store, window int, notify func(method string, params any) error) {
+func Stream(ctx context.Context, st *store.Store, window store.Window, notify func(method string, params any) error) {
 	for ctx.Err() == nil {
 		sub, ok, err := st.Subscription(ctx, window)
 		if err == nil && ok {
 			err = follow(ctx, st, sub, notify)
 		}
 		if err != nil && ctx.Err() == nil {
-			slog.Warn("cci channel", "window", window, "err", err)
+			slog.Warn("cci channel", "pid", window.PID, "err", err)
 		}
 		sleep(ctx, idle)
 	}

@@ -2,18 +2,27 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
 
+type Window struct {
+	PID     int   `json:"pid"`
+	Started int64 `json:"started"`
+}
+
 type Subscription struct {
 	Session string       `json:"session"`
-	Window  int          `json:"window"`
+	Window  Window       `json:"window"`
 	Drive   string       `json:"drive"`
 	Reader  string       `json:"reader"`
 	Kinds   []kinds.Kind `json:"kinds"`
@@ -25,78 +34,145 @@ func (s Subscription) Filter() Filter {
 	return Filter{Drive: s.Drive, For: s.Reader, Kinds: s.Kinds}
 }
 
-func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {
+func (s *Store) Subscribe(_ context.Context, sub Subscription) (Subscription, error) {
 	sub.At = s.Now().UTC()
-	encoded, err := json.Marshal(sub.Kinds)
+	all, err := s.subscriptions()
 	if err != nil {
-		return Subscription{}, fmt.Errorf("encode subscription kinds: %w", err)
+		return Subscription{}, err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Subscription{}, fmt.Errorf("subscribe: %w", err)
+	for _, other := range all {
+		if other.Session == sub.Session && other.Window.PID != sub.Window.PID {
+			if err := s.dropSubscription(other.Window.PID); err != nil {
+				return Subscription{}, err
+			}
+		}
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM subscriptions WHERE window = ? AND session != ?", sub.Window, sub.Session); err != nil {
-		return Subscription{}, fmt.Errorf("subscribe: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO subscriptions (session, window, drive, reader, kinds, cursor, at) VALUES (?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (session) DO UPDATE SET window = excluded.window, drive = excluded.drive, reader = excluded.reader, kinds = excluded.kinds, cursor = excluded.cursor, at = excluded.at`,
-		sub.Session, sub.Window, sub.Drive, sub.Reader, string(encoded), sub.Cursor, sub.At.UnixMilli()); err != nil {
-		return Subscription{}, fmt.Errorf("subscribe: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return Subscription{}, fmt.Errorf("subscribe: %w", err)
-	}
-	return sub, nil
+	return sub, s.writeSubscription(sub)
 }
 
-func (s *Store) Subscription(ctx context.Context, window int) (Subscription, bool, error) {
-	var (
-		sub     Subscription
-		encoded string
-		at      int64
-	)
-	err := s.db.QueryRowContext(ctx, "SELECT session, window, drive, reader, kinds, cursor, at FROM subscriptions WHERE window = ?", window).
-		Scan(&sub.Session, &sub.Window, &sub.Drive, &sub.Reader, &encoded, &sub.Cursor, &at)
-	if errors.Is(err, sql.ErrNoRows) {
+func (s *Store) Subscription(_ context.Context, w Window) (Subscription, bool, error) {
+	sub, ok, err := s.readSubscription(s.subscriptionPath(w.PID))
+	if err != nil || !ok || sub.Window != w {
+		return Subscription{}, false, err
+	}
+	return sub, true, nil
+}
+
+func (s *Store) Repoint(_ context.Context, session string, w Window) error {
+	all, err := s.subscriptions()
+	if err != nil {
+		return err
+	}
+	var moved *Subscription
+	for i := range all {
+		switch {
+		case all[i].Session == session:
+			moved = &all[i]
+		case all[i].Window == w:
+			if moved == nil {
+				moved = &all[i]
+			}
+		case all[i].Window.PID == w.PID:
+			if err := s.dropSubscription(w.PID); err != nil {
+				return err
+			}
+		}
+	}
+	if moved == nil || moved.Session == session && moved.Window == w {
+		return nil
+	}
+	from := moved.Window.PID
+	moved.Session, moved.Window = session, w
+	if err := s.writeSubscription(*moved); err != nil {
+		return err
+	}
+	if from == w.PID {
+		return nil
+	}
+	return s.dropSubscription(from)
+}
+
+func (s *Store) Unsubscribe(ctx context.Context, w Window) (bool, error) {
+	if _, ok, err := s.Subscription(ctx, w); err != nil || !ok {
+		return false, err
+	}
+	return true, s.dropSubscription(w.PID)
+}
+
+func (s *Store) subscriptionDir() string {
+	return filepath.Join(s.home, "subscriptions")
+}
+
+func (s *Store) subscriptionPath(pid int) string {
+	return filepath.Join(s.subscriptionDir(), strconv.Itoa(pid)+".json")
+}
+
+func (s *Store) readSubscription(path string) (Subscription, bool, error) {
+	b, err := os.ReadFile(path) //nolint:gosec // G304: path is a subscription file under the cci home.
+	if errors.Is(err, fs.ErrNotExist) {
 		return Subscription{}, false, nil
 	}
 	if err != nil {
 		return Subscription{}, false, fmt.Errorf("read subscription: %w", err)
 	}
-	if err := json.Unmarshal([]byte(encoded), &sub.Kinds); err != nil {
-		return Subscription{}, false, fmt.Errorf("decode subscription kinds: %w", err)
+	var sub Subscription
+	if err := json.Unmarshal(b, &sub); err != nil {
+		return Subscription{}, false, fmt.Errorf("decode subscription %s: %w", path, err)
 	}
-	sub.At = time.UnixMilli(at).UTC()
 	return sub, true, nil
 }
 
-func (s *Store) Repoint(ctx context.Context, session string, window int) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+func (s *Store) subscriptions() ([]Subscription, error) {
+	entries, err := os.ReadDir(s.subscriptionDir())
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
 	if err != nil {
-		return fmt.Errorf("repoint subscription: %w", err)
+		return nil, fmt.Errorf("list subscriptions: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM subscriptions WHERE window = ? AND session != ? AND EXISTS (SELECT 1 FROM subscriptions WHERE session = ?)", window, session, session); err != nil {
-		return fmt.Errorf("repoint subscription: %w", err)
+	var out []Subscription
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		sub, ok, err := s.readSubscription(filepath.Join(s.subscriptionDir(), e.Name()))
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, sub)
+		}
 	}
-	if _, err := tx.ExecContext(ctx, "UPDATE subscriptions SET window = ?, session = ? WHERE session = ? OR window = ?", window, session, session, window); err != nil {
-		return fmt.Errorf("repoint subscription: %w", err)
+	return out, nil
+}
+
+func (s *Store) writeSubscription(sub Subscription) error {
+	if err := os.MkdirAll(s.subscriptionDir(), 0o700); err != nil {
+		return fmt.Errorf("create subscriptions dir: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("repoint subscription: %w", err)
+	b, err := json.Marshal(sub)
+	if err != nil {
+		return fmt.Errorf("encode subscription: %w", err)
+	}
+	tmp, err := os.CreateTemp(s.subscriptionDir(), ".subscription-*")
+	if err != nil {
+		return fmt.Errorf("write subscription: %w", err)
+	}
+	if _, err := tmp.Write(b); err != nil {
+		return errors.Join(fmt.Errorf("write subscription: %w", err), tmp.Close(), os.Remove(tmp.Name()))
+	}
+	if err := tmp.Close(); err != nil {
+		return errors.Join(fmt.Errorf("write subscription: %w", err), os.Remove(tmp.Name()))
+	}
+	if err := os.Rename(tmp.Name(), s.subscriptionPath(sub.Window.PID)); err != nil {
+		return errors.Join(fmt.Errorf("write subscription: %w", err), os.Remove(tmp.Name()))
 	}
 	return nil
 }
 
-func (s *Store) Unsubscribe(ctx context.Context, window int) (bool, error) {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM subscriptions WHERE window = ?", window)
-	if err != nil {
-		return false, fmt.Errorf("unsubscribe: %w", err)
+func (s *Store) dropSubscription(pid int) error {
+	if err := os.Remove(s.subscriptionPath(pid)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("drop subscription: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("unsubscribe: %w", err)
-	}
-	return n > 0, nil
+	return nil
 }

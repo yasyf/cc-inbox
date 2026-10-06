@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/shirou/gopsutil/v4/process"
 	"github.com/spf13/cobra"
 	"github.com/yasyf/cc-interact/procs"
 
@@ -26,7 +27,7 @@ func newSubscribeCmd() *cobra.Command {
 		Short: "Deliver this session's records over the cci channel: records addressed to --reader plus broadcasts of each --kind",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, session, err := thisWindow()
+			window, session, err := thisSession()
 			if err != nil {
 				return err
 			}
@@ -57,7 +58,7 @@ func newSubscribeCmd() *cobra.Command {
 				start = fmt.Sprintf("new cursor %s from the head", sub.Cursor)
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d (session %s) subscribed to %s as %s, kinds %s, %s; records arrive as <channel source=%q> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox\n",
-				window, session, d, reader, kindList(sub.Kinds), start, channel.Source)
+				window.PID, session, d, reader, kindList(sub.Kinds), start, channel.Source)
 			return err
 		}),
 	}
@@ -75,7 +76,7 @@ func newUnsubscribeCmd() *cobra.Command {
 		Short: "Stop delivering records over this session's cci channel",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, _, err := thisWindow()
+			window, _, err := thisSession()
 			if err != nil {
 				return err
 			}
@@ -84,10 +85,10 @@ func newUnsubscribeCmd() *cobra.Command {
 				return err
 			}
 			if !removed {
-				_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d has no subscription\n", window)
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d has no subscription\n", window.PID)
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d unsubscribed\n", window)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d unsubscribed\n", window.PID)
 			return err
 		}),
 	}
@@ -100,18 +101,37 @@ func newChannelCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			return channel.Serve(cmd.Context(), st, procs.ClaudePID(), cmd.InOrStdin(), cmd.OutOrStdout())
+			window, _ := thisWindow()
+			return channel.Serve(cmd.Context(), st, window, cmd.InOrStdin(), cmd.OutOrStdout())
 		}),
 	}
 }
 
-func thisWindow() (int, string, error) {
-	window := procs.ClaudePID()
+var errNoSession = errors.New("run this from a Claude Code session: no claude ancestor process or " + sessionEnv)
+
+func thisSession() (store.Window, string, error) {
+	window, err := thisWindow()
 	session := os.Getenv(sessionEnv)
-	if window == 0 || session == "" {
-		return 0, "", errors.New("run this from a Claude Code session: no claude ancestor process or " + sessionEnv)
+	if err != nil || session == "" {
+		return store.Window{}, "", errors.Join(errNoSession, err)
 	}
 	return window, session, nil
+}
+
+func thisWindow() (store.Window, error) {
+	pid := procs.ClaudePID()
+	if pid == 0 {
+		return store.Window{}, errNoSession
+	}
+	p, err := process.NewProcess(int32(pid)) //nolint:gosec // G115: OS pids fit in int32.
+	if err != nil {
+		return store.Window{}, fmt.Errorf("open claude pid %d: %w", pid, err)
+	}
+	started, err := p.CreateTime()
+	if err != nil {
+		return store.Window{}, fmt.Errorf("start time of claude pid %d: %w", pid, err)
+	}
+	return store.Window{PID: pid, Started: started}, nil
 }
 
 func kindList(ks []kinds.Kind) string {

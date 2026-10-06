@@ -566,7 +566,8 @@ the record line and whose meta carries `seq`, `kind`, and `lane`.
 ## Store, budgets, and caps
 
 The local store is `~/.cc-inbox/inbox.db`. Set `CCI_HOME` to move the whole store
-directory, including cursors, bindings, import offsets, and `blobs/`. Concurrent
+directory, including cursors, bindings, import offsets, `blobs/`, and
+`subscriptions/`, one JSON file per subscribed Claude Code window. Concurrent
 sessions write to the same SQLite store without a daemon.
 
 | Surface | Limit |

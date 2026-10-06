@@ -15,7 +15,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
 
-const window = 4242
+var window = store.Window{PID: 4242, Started: 1791277810598}
 
 type frame struct {
 	ID     json.RawMessage `json:"id"`
