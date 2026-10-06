@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-06
+
+### Fixed
+
+- Import each inbox line at most once per drive. A rotation archive, a reread
+  after the inbox file was replaced, or a copy of an inbox no longer
+  re-appends old lines as new records. The store now keeps a ledger of every
+  line hash it has consumed, including lines a parser reparse skipped and
+  records `cci compact` folded away. On Oct 6 the first `inbox-rotate` cut made
+  the daemon import nine archives, and 313 records dated Sep 27 to Oct 4
+  reached `cci watch` again under new sequence numbers (#42).
+
+### Changed
+
+- Store schema 6 adds the line ledger and backfills it from existing records.
+  Binaries older than 0.9.2 refuse a store this release has opened, so
+  upgrade the plugin, the Homebrew cask, and any copied `cci` binary together.
+
 ## [0.9.1] - 2026-10-06
 
 ### Fixed
@@ -302,7 +320,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/yasyf/cc-inbox/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/yasyf/cc-inbox/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/yasyf/cc-inbox/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/yasyf/cc-inbox/compare/v0.8.0...v0.8.1
