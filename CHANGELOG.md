@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Strip `com.apple.quarantine` from the Homebrew cask's `cci` binary after
+  install. The 0.7.0 cask left it set, so every new exec stalled on a
+  Gatekeeper check.
+
 ## [0.7.0] - 2026-10-05
 
 ### Added
