@@ -63,7 +63,7 @@ func open(t *testing.T, st *store.Store) *session {
 	}()
 	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	init := s.next()
-	if _, ok := init.Result.Capabilities["experimental"].(map[string]any)["claude/channel"]; !ok || !strings.Contains(init.Result.Instructions, Source) {
+	if _, ok := init.Result.Capabilities["experimental"].(map[string]any)["claude/channel"]; !ok || !strings.Contains(init.Result.Instructions, Source) || !strings.Contains(init.Result.Instructions, "answers to both names") {
 		t.Fatalf("initialize = %+v", init.Result)
 	}
 	return s

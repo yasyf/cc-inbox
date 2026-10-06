@@ -31,7 +31,7 @@ var (
 
 const instructions = `This MCP server is cci's channel. It carries coordination records from a long-running drive. After this session runs ` + "`cci subscribe`" + `, every new record for the subscription's reader arrives as a <channel source="` + Source + `" seq="..." kind="..." lane="..."> tag. The tag's body is the record line: ` + "`#<seq> <time> <KIND> <lane> -> <to>: <text> [path]`" + `.
 
-That means records addressed to the reader, plus other lanes' broadcasts of the subscribed kinds. Act on each one as you would a line from ` + "`cci tail`" + `. Answer with ` + "`cci post --re <seq>`" + `, close an ask, decide, hold or blocker with ` + "`cci post --resolves <seq>`" + `, and read a record's full body from the path it names. Delivery is at-least-once, so skip any seq you have already handled.
+Every tag already passed the subscription's filter, so act on each one as you would a line from ` + "`cci tail`" + `. A record addressed to the reader arrives whatever its kind, and a record addressed to ` + "`main`" + ` is addressed to the reader ` + "`root`" + `: the drive's root answers to both names. Other lanes' broadcasts arrive only for the subscribed kinds. Answer with ` + "`cci post --re <seq>`" + `, close an ask, decide, hold or blocker with ` + "`cci post --resolves <seq>`" + `, and read a record's full body from the path it names. Delivery is at-least-once, so skip any seq you have already handled.
 
 The channel never speaks unsolicited: outside a ` + "`cci subscribe`" + `d session it is silent, and silence needs nothing from you.`
 
