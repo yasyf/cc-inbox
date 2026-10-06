@@ -1,7 +1,7 @@
 {
   "name": "cc-inbox",
   "description": "Local, typed, append-only inbox CLI (cci) and Claude Code plugin for multi-agent drive coordination with bounded reads",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "author": {
     "name": "Yasyf Mohamedali",
     "email": "yasyf@poetic.com"
