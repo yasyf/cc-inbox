@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-06
+
+### Added
+
+- Deliver every record addressed to a lane into that lane's Claude Code
+  session after each tool call, whatever its kind. The first
+  `cci post --lane <lane>` in a session binds it to the lane, and the new
+  `PostToolUse` and `PostToolUseFailure` hook `cci hook post-tool-use` injects
+  each unseen addressed record. Records posted to the lane after the window
+  started arrive even when the lane has not posted yet. Before this, a running
+  lane received no cci record at all: a `stopped` record to
+  release-repin-head went unseen for ten minutes. `SessionStart` in a lane
+  session delivers the same records instead of the drive digest.
+
+### Fixed
+
+- Print a budgeted read's first record whole even when it alone exceeds the
+  budget. A 400-character record of multi-byte characters used to stall a
+  cursored read forever.
+- `cci drive use --root` clears a lane binding on the session.
+
 ## [0.8.1] - 2026-10-06
 
 ### Fixed
@@ -271,7 +292,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/yasyf/cc-inbox/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/yasyf/cc-inbox/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/yasyf/cc-inbox/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/yasyf/cc-inbox/compare/v0.7.1...v0.7.2
