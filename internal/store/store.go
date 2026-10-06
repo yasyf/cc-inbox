@@ -368,11 +368,15 @@ func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (upd
 	)
 	for _, it := range items {
 		r := it.Record
+		unseen, err := consume(ctx, tx, it.LineHash)
+		if err != nil {
+			return 0, 0, err
+		}
 		var (
 			at  int64
 			old string
 		)
-		err := tx.QueryRowContext(ctx, "SELECT at, text FROM records WHERE line_hash = ?", it.LineHash).Scan(&at, &old)
+		err = tx.QueryRowContext(ctx, "SELECT at, text FROM records WHERE line_hash = ?", it.LineHash).Scan(&at, &old)
 		switch {
 		case err == nil:
 			if _, err := tx.ExecContext(ctx, reparseSQL, reparseArgs(r, it.LineHash)...); err != nil {
@@ -383,10 +387,6 @@ func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (upd
 			continue
 		case !errors.Is(err, sql.ErrNoRows):
 			return 0, 0, fmt.Errorf("reparse record: %w", err)
-		}
-		unseen, err := consume(ctx, tx, it.LineHash)
-		if err != nil {
-			return 0, 0, err
 		}
 		switch {
 		case unseen && fresh:

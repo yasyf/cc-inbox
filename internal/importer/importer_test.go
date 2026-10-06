@@ -350,6 +350,33 @@ func TestRotationNeverReappendsACompactedLine(t *testing.T) {
 	}
 }
 
+func TestRereadRecordsLinesAnOlderBinaryInserted(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
+	written := time.Date(2026, 10, 1, 23, 0, 0, 0, time.Local)
+	for _, name := range []string{"deploy-go.md", "copy-1.md", "copy-2.md"} {
+		write(t, filepath.Join(dir, name), body)
+		if err := os.Chtimes(filepath.Join(dir, name), written, written); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := importer.Import(ctx, st, filepath.Join(dir, "deploy-go.md"), "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	raw(t, st)("DELETE FROM lines")
+	if res, err := importer.Import(ctx, st, filepath.Join(dir, "copy-1.md"), "drive", ""); err != nil || res.Reparsed != 2 || res.Inserted != 0 {
+		t.Fatalf("first copy = %+v, %v; want 2 reparsed, 0 new", res, err)
+	}
+	if _, err := st.Compact(ctx, "drive", 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := importer.Import(ctx, st, filepath.Join(dir, "copy-2.md"), "drive", ""); err != nil || res.Inserted != 0 {
+		t.Fatalf("second copy = %+v, %v; want the reparse to have recorded both lines", res, err)
+	}
+}
+
 func TestImportedDeploymentBlocksStayOpenUntilClosedByRef(t *testing.T) {
 	st, c := testutil.Store(t)
 	ctx := context.Background()
