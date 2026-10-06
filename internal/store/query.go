@@ -187,7 +187,7 @@ func (s *Store) Bind(ctx context.Context, session, drive string, root bool) erro
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root) VALUES (?, ?, ?)
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root`, session, drive, root); err != nil {
+ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root, lane = ''`, session, drive, root); err != nil {
 		return fmt.Errorf("bind session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(MAX(seq), 0) FROM records WHERE drive = ?
@@ -200,6 +200,10 @@ ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, session, drive, dri
 	return nil
 }
 
+func LaneCursor(session string) string {
+	return "lane-" + session
+}
+
 func (s *Store) BindLane(ctx context.Context, session, drive, lane string, started time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -210,8 +214,11 @@ func (s *Store) BindLane(ctx context.Context, session, drive, lane string, start
 ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, lane = excluded.lane WHERE NOT sessions.root`, session, drive, lane); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(MAX(seq), 0) FROM records WHERE drive = ? AND at < ?
-ON CONFLICT (name, drive) DO NOTHING`, session, drive, drive, started.UnixMilli()); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(
+	(SELECT MIN(seq) - 1 FROM records WHERE drive = ? AND at >= ?),
+	(SELECT MAX(seq) FROM records WHERE drive = ?),
+	0)
+ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(session), drive, drive, started.UnixMilli(), drive); err != nil {
 		return fmt.Errorf("start lane cursor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

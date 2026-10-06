@@ -21,6 +21,7 @@ const (
 
 type Payload struct {
 	SessionID string `json:"session_id"`
+	Event     string `json:"hook_event_name"`
 	Source    string `json:"source"`
 	Prompt    string `json:"prompt"`
 	ToolName  string `json:"tool_name"`
@@ -65,13 +66,13 @@ func PostToolUse(ctx context.Context, st *store.Store, p Payload, w io.Writer) e
 	if err != nil || !ok || b.Lane == "" {
 		return err
 	}
-	return deliver(ctx, st, p.SessionID, b, "PostToolUse", w)
+	return deliver(ctx, st, p.SessionID, b, p.Event, w)
 }
 
 func deliver(ctx context.Context, st *store.Store, session string, b store.Binding, event string, w io.Writer) error {
 	var out bytes.Buffer
 	out.WriteString("cci records addressed to " + b.Lane + "; act on each:\n")
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, To: b.Lane}, Cursor: session, Budget: tailBudget, Width: recordWidth}, &out)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, To: b.Lane}, Cursor: store.LaneCursor(session), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call"}, &out)
 	if err != nil || res.Printed == 0 {
 		return err
 	}

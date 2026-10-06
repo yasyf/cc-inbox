@@ -158,7 +158,7 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1"}, &out); err != nil {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, &out); err != nil {
 		t.Fatal(err)
 	}
 	got := hookContext(t, &out, "PostToolUse")
@@ -173,15 +173,54 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 		}
 	}
 	out.Reset()
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1"}, &out); err != nil || out.Len() != 0 {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUseFailure"}, &out); err != nil || out.Len() != 0 {
 		t.Fatalf("second round redelivered %q, %v", out.String(), err)
 	}
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Defect, To: []string{"lane-x"}, Text: strings.Repeat("🛑", 399)})
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUseFailure"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &out, "PostToolUseFailure"); !strings.Contains(got, "DEFECT root -> lane-x 🛑") {
+		t.Fatalf("an oversized record stalled delivery: %q", got)
+	}
+	out.Reset()
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Hold, To: []string{"lane-x"}, Text: "hold the apply"})
 	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1", Source: "compact"}, store.Window{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got := hookContext(t, &out, "SessionStart"); !strings.Contains(got, "HOLD root -> lane-x hold the apply") || strings.Contains(got, "open asks") {
 		t.Fatalf("SessionStart additionalContext = %q", got)
+	}
+}
+
+func TestLaneCursorSurvivesOtherReadsAndLateImports(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	started := clock.Now()
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Stopped, To: []string{"lane-x"}, Text: "abandon this item"})
+	testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.State, Text: "state"})
+	clock.Advance(-time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "lane-c", Kind: kinds.Note, Text: "imported late"})
+	clock.Advance(time.Hour)
+	if err := st.Bind(ctx, "s1", "d", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, "s1", "d", "lane-x", started); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "STOPPED root -> lane-x abandon this item") {
+		t.Fatalf("additionalContext = %q", got)
+	}
+	if err := st.Bind(ctx, "s1", "d", true); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, err := st.Binding(ctx, "s1"); err != nil || !b.Root || b.Lane != "" {
+		t.Fatalf("binding after root rebind = %+v %v", b, err)
 	}
 }
 
@@ -200,7 +239,7 @@ func TestPostingAsALaneLeavesTheRootBinding(t *testing.T) {
 	}
 	testutil.Post(t, st, store.Record{Lane: "lane-a", Kind: kinds.Stopped, To: []string{"runner"}, Text: "not for root"})
 	var out bytes.Buffer
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "root"}, &out); err != nil || out.Len() != 0 {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "root", Event: "PostToolUse"}, &out); err != nil || out.Len() != 0 {
 		t.Fatalf("root PostToolUse wrote %q, %v", out.String(), err)
 	}
 }

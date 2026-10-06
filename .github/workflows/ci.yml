@@ -79,6 +79,6 @@ jobs:
       - name: Plugin manifests parse and the descriptor template renders
         run: |
           jq -e .name plugin/.claude-plugin/plugin.json .claude-plugin/marketplace.json
-          jq -e '.hooks | length == 3' plugin/hooks/hooks.json
+          jq -e '.hooks | length == 4' plugin/hooks/hooks.json
           test -L plugin/bin/cci
           tail -n +2 plugin/descriptor/cci.binrun.tmpl | sed -E 's/__SIZE_[A-Z0-9_]+__/1/g' | jq -e '.platforms | length == 4'
