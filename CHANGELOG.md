@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-06
+
+### Fixed
+
+- Stop delivering the root's own owner prompts back to the root. The prompt
+  hook now records them with source `hook:root`, and `--reader root` and
+  `--reader main` skip broadcasts with that source, so the root's
+  `cci watch` and `cci subscribe` channel no longer echo each prompt the owner
+  just typed. Other readers still receive them (#40).
+
 ## [0.9.0] - 2026-10-06
 
 ### Added
@@ -292,7 +302,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/yasyf/cc-inbox/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/yasyf/cc-inbox/compare/v0.8.1...v0.9.0
 [0.8.1]: https://github.com/yasyf/cc-inbox/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/yasyf/cc-inbox/compare/v0.7.2...v0.8.0
