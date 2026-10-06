@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ type TailOptions struct {
 	Budget int
 	Width  int
 	JSON   bool
+	Resume string
 }
 
 type TailResult struct {
@@ -80,7 +82,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if res.More > 0 && !opts.JSON {
 		resume := fmt.Sprintf("--since %d", res.Last)
 		if opts.Cursor != "" {
-			resume = "cci tail"
+			resume = cmp.Or(opts.Resume, "cci tail")
 		}
 		b.Trailer(fmt.Sprintf("... %d more; resume with %s", res.More, resume))
 	}

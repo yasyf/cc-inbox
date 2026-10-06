@@ -102,7 +102,7 @@ func (b *Budget) Line(s string) bool {
 	if b.full {
 		return false
 	}
-	if len(s)+1 > b.left {
+	if b.wrote > 0 && len(s)+1 > b.left {
 		b.full = true
 		return false
 	}

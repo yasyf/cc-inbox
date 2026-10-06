@@ -69,6 +69,11 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if window, session, err := thisSession(); err == nil {
+				if err := st.BindLane(cmd.Context(), session, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
+					return err
+				}
+			}
 			if asJSON {
 				_, err = fmt.Fprintln(cmd.OutOrStdout(), render.JSON(got))
 				return err

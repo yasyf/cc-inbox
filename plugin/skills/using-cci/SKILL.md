@@ -118,6 +118,12 @@ leaves the cursor untouched, even with `--cursor`; use `--since 0` to replay.
 records after compaction. Both reads use a 400-character width, with a
 2,500-byte digest budget and 1,500-byte tail budget.
 
+A lane needs no reader setup: its first `cci post --lane <lane>` binds the
+session, and from then on every record addressed to the lane, whatever its
+kind, arrives as hook context after the next tool call, including records
+posted since the window started. A `stopped`, `hold`, or `owner` record
+addressed to you lands mid-task; act on it before your next edit.
+
 Read a stack's problems and fixes, or search records about a target or PR:
 
 ```bash
