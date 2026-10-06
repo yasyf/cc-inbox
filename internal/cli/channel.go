@@ -44,19 +44,16 @@ func newSubscribeCmd() *cobra.Command {
 				sub.Kinds = append(sub.Kinds, kind)
 			}
 			if sub.Cursor == "" {
-				sub.Cursor = reader + "-channel"
+				sub.Cursor = "channel-" + session
 			}
 			if _, err := st.Subscribe(cmd.Context(), sub); err != nil {
 				return err
 			}
-			from, ok, err := st.Cursor(cmd.Context(), sub.Cursor, d)
+			from, _, err := st.Cursor(cmd.Context(), sub.Cursor, d)
 			if err != nil {
 				return err
 			}
 			start := fmt.Sprintf("cursor %s at #%d", sub.Cursor, from)
-			if !ok {
-				start = fmt.Sprintf("new cursor %s from the head", sub.Cursor)
-			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d (session %s) subscribed to %s as %s, kinds %s, %s; records arrive as <channel source=%q> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox\n",
 				window.PID, session, d, reader, kindList(sub.Kinds), start, channel.Source)
 			return err
@@ -65,7 +62,7 @@ func newSubscribeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&drive, "drive", "", "drive to deliver (default: the drive bound to this session)")
 	cmd.Flags().StringVar(&reader, "reader", "", "deliver records addressed to this lane, as cci tail --reader does")
 	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
-	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor (default: <reader>-channel, starting at the head)")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")
 	_ = cmd.MarkFlagRequired("reader")
 	return cmd
 }
@@ -101,7 +98,10 @@ func newChannelCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, _ := thisWindow()
+			window, err := thisWindow()
+			if err != nil {
+				return err
+			}
 			return channel.Serve(cmd.Context(), st, window, cmd.InOrStdin(), cmd.OutOrStdout())
 		}),
 	}

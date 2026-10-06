@@ -1,7 +1,9 @@
 package channel
 
 import (
+	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -33,18 +35,47 @@ That means records addressed to the reader, plus other lanes' broadcasts of the 
 
 The channel never speaks unsolicited: outside a ` + "`cci subscribe`" + `d session it is silent, and silence needs nothing from you.`
 
+var errStale = errors.New("subscription replaced")
+
 func Serve(ctx context.Context, st *store.Store, window store.Window, in io.Reader, out io.Writer) error {
 	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions}, nil)
+	initialized := make(chan struct{})
+	requests, relay := io.Pipe()
+	go func() { _ = relay.CloseWithError(untilInitialized(in, relay, initialized)) }()
 	streamCtx, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		Stream(streamCtx, st, window, srv.Notify)
+		select {
+		case <-initialized:
+			Stream(streamCtx, st, window, srv.Notify)
+		case <-streamCtx.Done():
+		}
 	}()
-	err := srv.Serve(ctx, in, out)
+	err := srv.Serve(ctx, requests, out)
 	stop()
 	<-done
 	return err
+}
+
+func untilInitialized(in io.Reader, out io.Writer, initialized chan<- struct{}) error {
+	sc := bufio.NewScanner(in)
+	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	for sc.Scan() {
+		if initialized != nil {
+			var msg struct {
+				Method string `json:"method"`
+			}
+			if json.Unmarshal(sc.Bytes(), &msg) == nil && msg.Method == "notifications/initialized" {
+				close(initialized)
+				initialized = nil
+			}
+		}
+		if _, err := out.Write(append(sc.Bytes(), '\n')); err != nil {
+			return err
+		}
+	}
+	return sc.Err()
 }
 
 func Stream(ctx context.Context, st *store.Store, window store.Window, notify func(method string, params any) error) {
@@ -66,12 +97,22 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, notify
 	changed := make(chan error, 1)
 	go func() { changed <- untilChanged(watchCtx, st, sub, stop) }()
 	err := inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: sub.Filter(), Cursor: sub.Cursor, Interval: interval}, func(r store.Record, line string) error {
+		now, ok, err := st.Subscription(watchCtx, sub.Window)
+		if err != nil {
+			return err
+		}
+		if !ok || !reflect.DeepEqual(now, sub) {
+			return errStale
+		}
 		return notify(notifyMethod, map[string]any{
 			"content": line,
 			"meta":    map[string]string{"seq": strconv.FormatInt(r.Seq, 10), "kind": string(r.Kind), "lane": r.Lane},
 		})
 	})
 	stop()
+	if errors.Is(err, errStale) {
+		err = nil
+	}
 	return errors.Join(err, <-changed)
 }
 

@@ -187,7 +187,7 @@ records as pushed `<channel source="plugin:cc-inbox:cci">` tags instead of a
 Monitor. Subscribe once:
 
 ```bash
-cci subscribe --drive release-demo --reader root --kind incident,decide,ask --cursor root-watch
+cci subscribe --drive release-demo --reader root --kind incident,decide,ask
 ```
 
 Each tag's body is one record line, and its `seq`, `kind`, and `lane`
@@ -195,8 +195,9 @@ attributes repeat the header. Delivery is at-least-once, so skip a seq you
 have already handled. The subscription survives compaction and `/clear`, and
 the `SessionStart` hook carries it into a resumed session. Re-running
 `cci subscribe` replaces it, and `cci unsubscribe` ends it.
-Reuse a Monitor's cursor to continue from where that Monitor stopped, then
-stop the Monitor.
+The cursor starts at the head when you subscribe and defaults to
+`channel-<session>`. Stop any Monitor that watched the same records after
+subscribing; records in the overlap arrive twice.
 
 ## Choose a kind
 

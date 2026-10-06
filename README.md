@@ -131,11 +131,11 @@ claude --channels plugin:cc-inbox@cc-inbox
 ```
 
 ```bash
-cci subscribe --drive release-demo --reader root --kind incident,decide,ask --cursor root-watch
+cci subscribe --drive release-demo --reader root --kind incident,decide,ask
 ```
 
 ```text
-window 29348 (session 900424b6-…) subscribed to release-demo as root, kinds incident,decide,ask, cursor root-watch at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+window 29348 (session 900424b6-…) subscribed to release-demo as root, kinds incident,decide,ask, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
 ```
 
 What arrives:
@@ -144,9 +144,11 @@ What arrives:
 - other lanes' broadcasts of each `--kind`.
 
 Each record arrives as one tag whose body is its record line and whose `seq`,
-`kind`, and `lane` attributes repeat the header. The channel advances the
-named cursor past each delivered record. Pass the cursor a Monitor already
-uses to pick up where that Monitor stopped. A subscription belongs to the
+`kind`, and `lane` attributes repeat the header. The subscription's cursor
+starts at the head when you subscribe, and the channel advances it past each
+delivered record. It defaults to `channel-<session>`; give each subscription
+its own cursor. When a Monitor watched the same records, stop it after
+subscribing; records in the overlap arrive twice. A subscription belongs to the
 Claude Code window: compaction and `/clear` keep it, and the `SessionStart`
 hook moves it to the new window when the session is resumed.
 `cci unsubscribe` stops delivery.
@@ -265,7 +267,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument; prints its sequence number. |
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default; `--for 0` streams until interrupted. |
-| `cci subscribe` | Deliver records for `--reader`, plus other lanes' broadcasts of each `--kind`, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `<reader>-channel`, starting at the head. |
+| `cci subscribe` | Deliver records for `--reader`, plus other lanes' broadcasts of each `--kind`, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
 | `cci unsubscribe` | Stop this window's channel delivery. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
 | `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. `-F` matches the pattern literally. |

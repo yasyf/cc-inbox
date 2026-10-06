@@ -69,6 +69,17 @@ func open(t *testing.T, st *store.Store) *session {
 	return s
 }
 
+func (s *session) initialized() {
+	s.send(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
+}
+
+func subscribe(t *testing.T, st *store.Store, ks ...kinds.Kind) {
+	t.Helper()
+	if _, err := st.Subscribe(context.Background(), store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Kinds: ks, Cursor: "root-channel"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func (s *session) send(line string) {
 	if _, err := io.WriteString(s.in, line+"\n"); err != nil {
 		s.t.Fatal(err)
@@ -119,10 +130,9 @@ func TestChannelDeliversTheSubscriptionAndResumesFromItsCursor(t *testing.T) {
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before anyone subscribed", To: []string{"root"}})
 	s := open(t, st)
+	s.initialized()
 	s.quiet(50 * time.Millisecond)
-	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Incident}, Cursor: "root-channel"}); err != nil {
-		t.Fatal(err)
-	}
+	subscribe(t, st, kinds.Incident)
 	time.Sleep(50 * time.Millisecond)
 	toMain := testutil.Post(t, st, store.Record{Lane: "owner", Kind: kinds.Owner, Text: "Mark complete: the card", To: []string{"main"}})
 	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "a broadcast of a kind nobody subscribed to"})
@@ -135,11 +145,11 @@ func TestChannelDeliversTheSubscriptionAndResumesFromItsCursor(t *testing.T) {
 
 	missed := testutil.Post(t, st, store.Record{Kind: kinds.Decide, Text: "posted while no channel ran", To: []string{"root"}})
 	resumed := open(t, st)
+	resumed.quiet(50 * time.Millisecond)
+	resumed.initialized()
 	resumed.record(missed)
 	clock.Advance(time.Second)
-	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Note}, Cursor: "root-channel"}); err != nil {
-		t.Fatal(err)
-	}
+	subscribe(t, st, kinds.Note)
 	time.Sleep(50 * time.Millisecond)
 	note := testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Note, Text: "LAUNCHED R1185 cci-interact"})
 	resumed.record(note)
@@ -150,4 +160,57 @@ func TestChannelDeliversTheSubscriptionAndResumesFromItsCursor(t *testing.T) {
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "after unsubscribe", To: []string{"root"}})
 	resumed.quiet(50 * time.Millisecond)
 	resumed.close()
+}
+
+func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
+	st, clock := testutil.Store(t)
+	idle = time.Hour
+	ctx := context.Background()
+	if err := st.SetCursor(ctx, "root-channel", "d", 0); err != nil {
+		t.Fatal(err)
+	}
+	old, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Incident}, Cursor: "root-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Second)
+	current, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Note}, Cursor: "root-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	note := testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Note, Text: "LAUNCHED R1185"})
+	testutil.Post(t, st, store.Record{Lane: "alerts", Kind: kinds.Incident, Topic: "api-5xx", Text: "api 5xx above 2%"})
+	if err := follow(ctx, st, old, func(string, any) error {
+		t.Fatal("the replaced subscription delivered a record")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if seq, _, _ := st.Cursor(ctx, "root-channel", "d"); seq != 0 {
+		t.Fatalf("the replaced subscription advanced the cursor to #%d", seq)
+	}
+	followCtx, stop := context.WithCancel(ctx)
+	var got []string
+	if err := follow(followCtx, st, current, func(_ string, params any) error {
+		got = append(got, params.(map[string]any)["content"].(string))
+		stop()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !strings.HasPrefix(got[0], fmt.Sprintf("#%d ", note.Seq)) {
+		t.Fatalf("delivered %q, want note #%d", got, note.Seq)
+	}
+}
+
+func TestRecordsPostedRightAfterSubscribingArrive(t *testing.T) {
+	st, _ := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the subscription", To: []string{"root"}})
+	subscribe(t, st)
+	after := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the channel's first poll", To: []string{"root"}})
+	s := open(t, st)
+	s.initialized()
+	s.record(after)
+	s.quiet(50 * time.Millisecond)
+	s.close()
 }
