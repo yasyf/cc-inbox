@@ -40,6 +40,9 @@ func NewRootCmd() *cobra.Command {
 		newServeCmd(),
 		newDaemonCmd(),
 		newHookCmd(),
+		newSubscribeCmd(),
+		newUnsubscribeCmd(),
+		newChannelCmd(),
 	)
 	return root
 }

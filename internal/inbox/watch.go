@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -18,7 +19,7 @@ type WatchOptions struct {
 	JSON     bool
 }
 
-func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer) error {
+func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(store.Record, string) error) error {
 	f := opts.Filter
 	if f.After == 0 && f.Since.IsZero() {
 		start, err := watchStart(ctx, st, opts)
@@ -27,7 +28,10 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer)
 		}
 		f.After = start
 	}
-	deadline := time.Now().Add(opts.For)
+	var deadline time.Time
+	if opts.For > 0 {
+		deadline = time.Now().Add(opts.For)
+	}
 	for {
 		f.Limit = pageRows
 		records, err := st.Query(ctx, f)
@@ -44,21 +48,25 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer)
 		if err != nil {
 			return err
 		}
+		from := f.After
 		for i, r := range records {
-			if _, err := fmt.Fprintln(w, rendered[i]); err != nil {
-				return fmt.Errorf("write watch line: %w", err)
+			if err = emit(r, rendered[i]); err != nil {
+				break
 			}
 			f.After = r.Seq
 		}
-		if len(records) > 0 && opts.Cursor != "" {
-			if err := st.SetCursor(context.WithoutCancel(ctx), opts.Cursor, f.Drive, f.After); err != nil {
-				return err
+		if f.After > from && opts.Cursor != "" {
+			if cerr := st.SetCursor(context.WithoutCancel(ctx), opts.Cursor, f.Drive, f.After); cerr != nil {
+				return errors.Join(err, cerr)
 			}
+		}
+		if err != nil {
+			return err
 		}
 		if len(records) == pageRows {
 			continue
 		}
-		if time.Now().After(deadline) {
+		if !deadline.IsZero() && time.Now().After(deadline) {
 			return nil
 		}
 		select {
@@ -66,6 +74,15 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, w io.Writer)
 			return nil
 		case <-time.After(opts.Interval):
 		}
+	}
+}
+
+func WriteLines(w io.Writer) func(store.Record, string) error {
+	return func(_ store.Record, line string) error {
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return fmt.Errorf("write watch line: %w", err)
+		}
+		return nil
 	}
 }
 

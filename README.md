@@ -119,6 +119,42 @@ The watch prints only the GO record. For a Monitor, omit `--for` to use the
 watch resumes after the last printed record. A watch without a saved cursor or
 an explicit time window starts at the current head.
 
+### Receive records in the session without a Monitor
+
+A Monitor has to be re-armed every 30 minutes, and any record that lands
+between arms waits for the next one. The plugin's `cci` channel removes the
+Monitor. Each new record is pushed into the session as soon as it is posted.
+Launch the session with the channel enabled, then subscribe once:
+
+```bash
+claude --channels plugin:cc-inbox@cc-inbox
+```
+
+```bash
+cci subscribe --drive release-demo --reader root --kind incident,decide,ask --cursor root-watch
+```
+
+```text
+window 29348 (session 900424b6-…) subscribed to release-demo as root, kinds incident,decide,ask, cursor root-watch at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+```
+
+What arrives:
+
+- records addressed to `root` or to its other name, `main`;
+- other lanes' broadcasts of each `--kind`.
+
+Each record arrives as one tag whose body is its record line and whose `seq`,
+`kind`, and `lane` attributes repeat the header. The channel advances the
+named cursor past each delivered record. Pass the cursor a Monitor already
+uses to pick up where that Monitor stopped. A subscription belongs to the
+Claude Code window: compaction and `/clear` keep it, and the `SessionStart`
+hook moves it to the new window when the session is resumed.
+`cci unsubscribe` stops delivery.
+
+Claude Code delivers channel tags only from plugins named in `--channels` at
+launch. An organization whose managed settings set `allowedChannelPlugins`
+must also list `cc-inbox@cc-inbox`.
+
 ### Find why a stack cannot deploy
 
 Attach the stack and target to both the problem and the work addressing it.
@@ -228,7 +264,9 @@ Commands that select a drive accept `--drive` or use the current session binding
 | --- | --- |
 | `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument; prints its sequence number. |
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
-| `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default. |
+| `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default; `--for 0` streams until interrupted. |
+| `cci subscribe` | Deliver records for `--reader`, plus other lanes' broadcasts of each `--kind`, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `<reader>-channel`, starting at the head. |
+| `cci unsubscribe` | Stop this window's channel delivery. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
 | `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. `-F` matches the pattern literally. |
 | `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
@@ -505,7 +543,7 @@ Each entry invokes the plugin's `bin/cci`;
 
 | Claude Code event | Entry point | Behavior |
 | --- | --- | --- |
-| `SessionStart` | `cci hook session-start` | Inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. |
+| `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. |
 | `UserPromptSubmit` | `cci hook prompt` | In a session bound with `--root`, record ordinary user prompts as `owner` records. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
 
 `SessionStart` and `UserPromptSubmit` read the session ID from the hook payload
@@ -514,6 +552,16 @@ starts or reuses the daemon for unbound sessions. If that fails, the hook report
 a non-blocking error after any bound drive context has been written. The daemon
 refreshes registered imports every second, independent of session bindings and
 tool calls.
+
+## Plugin channel
+
+The plugin's `cci` Model Context Protocol (MCP) server, `cci channel`, is a Claude Code channel built
+on [cc-interact](https://github.com/yasyf/cc-interact)'s channel server. It
+reads the subscription for its window every five seconds. While a
+subscription exists, it streams that subscription's records through the same
+watch loop and cursor as `cci watch`, polling once a second. It has no tools.
+Each record becomes a `notifications/claude/channel` push whose content is
+the record line and whose meta carries `seq`, `kind`, and `lane`.
 
 ## Store, budgets, and caps
 

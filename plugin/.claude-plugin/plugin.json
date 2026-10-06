@@ -6,5 +6,19 @@
     "name": "Yasyf Mohamedali",
     "email": "yasyf@poetic.com"
   },
-  "homepage": "https://github.com/yasyf/cc-inbox"
+  "homepage": "https://github.com/yasyf/cc-inbox",
+  "mcpServers": {
+    "cci": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/cci",
+      "args": [
+        "channel"
+      ]
+    }
+  },
+  "channels": [
+    {
+      "server": "cci",
+      "displayName": "cci"
+    }
+  ]
 }

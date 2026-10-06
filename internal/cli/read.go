@@ -59,14 +59,14 @@ func newWatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, cmd.OutOrStdout())
+			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, inbox.WriteLines(cmd.OutOrStdout()))
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
 	rf.registerWidth(cmd)
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor")
 	cmd.Flags().DurationVar(&interval, "interval", time.Second, "poll interval")
-	cmd.Flags().DurationVar(&limit, "for", 29*time.Minute, "exit after this long so a Monitor re-arms")
+	cmd.Flags().DurationVar(&limit, "for", 29*time.Minute, "exit after this long so a Monitor re-arms; 0 watches until interrupted")
 	return cmd
 }
 

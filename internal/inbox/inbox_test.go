@@ -3,6 +3,7 @@ package inbox_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -236,7 +237,7 @@ func TestWatchEmitsOnlyNewMatchingRecords(t *testing.T) {
 			Cursor:   "monitor",
 			Interval: 5 * time.Millisecond,
 			For:      time.Minute,
-		}, &out)
+		}, inbox.WriteLines(&out))
 	}()
 	time.Sleep(50 * time.Millisecond)
 	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "filtered out"})
@@ -255,6 +256,50 @@ func TestWatchEmitsOnlyNewMatchingRecords(t *testing.T) {
 	seq, ok, err := st.Cursor(context.Background(), "monitor", "d")
 	if err != nil || !ok || seq != want.Seq {
 		t.Fatalf("watch cursor = %d %v %v, want %d", seq, ok, err, want.Seq)
+	}
+}
+
+func TestWatchAdvancesCursorOnlyPastDeliveredRecords(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	if err := st.SetCursor(ctx, "channel", "d", 0); err != nil {
+		t.Fatal(err)
+	}
+	first := testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "delivered"})
+	testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "the session went away"})
+	refused := errors.New("channel closed")
+	var got []int64
+	err := inbox.Watch(ctx, st, inbox.WatchOptions{Filter: store.Filter{Drive: "d"}, Cursor: "channel", Interval: time.Millisecond}, func(r store.Record, _ string) error {
+		if len(got) == 1 {
+			return refused
+		}
+		got = append(got, r.Seq)
+		return nil
+	})
+	if !errors.Is(err, refused) {
+		t.Fatalf("watch err = %v, want %v", err, refused)
+	}
+	seq, ok, err := st.Cursor(ctx, "channel", "d")
+	if err != nil || !ok || seq != first.Seq {
+		t.Fatalf("cursor = %d %v %v, want %d", seq, ok, err, first.Seq)
+	}
+}
+
+func TestWatchWithoutForRunsUntilCancelled(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- inbox.Watch(ctx, st, inbox.WatchOptions{Filter: store.Filter{Drive: "d"}, Interval: time.Millisecond}, func(store.Record, string) error { return nil })
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("watch returned early: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 

@@ -28,14 +28,14 @@ func TestSessionStart(t *testing.T) {
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "which env?"})
 	var unbound bytes.Buffer
-	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "other"}, &unbound); err != nil || unbound.Len() != 0 {
+	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "other"}, 0, &unbound); err != nil || unbound.Len() != 0 {
 		t.Fatalf("unbound session wrote %q, %v", unbound.String(), err)
 	}
 	if err := st.Bind(ctx, "s1", "d", true); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1", Source: "compact"}, &out); err != nil {
+	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1", Source: "compact"}, 0, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got struct {
@@ -86,5 +86,33 @@ func TestPromptRecordsOwnerRulingsOnlyForRoot(t *testing.T) {
 	}
 	if len(all) != 1 || all[0].Kind != kinds.Owner || all[0].Lane != "owner" || all[0].Text != "ship the wave fix now" || all[0].Source != "hook" {
 		t.Fatalf("records = %+v", all)
+	}
+}
+
+func TestSessionStartRepointsSubscription(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: 100, Drive: "d", Reader: "root", Cursor: "root-watch"}); err != nil {
+		t.Fatal(err)
+	}
+	steps := []struct {
+		name    string
+		session string
+		window  int
+	}{
+		{"resumed in a new process", "s1", 200},
+		{"cleared in the same process", "s2", 200},
+	}
+	for _, step := range steps {
+		if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: step.session}, step.window, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		sub, ok, err := st.Subscription(ctx, step.window)
+		if err != nil || !ok || sub.Session != step.session || sub.Reader != "root" || sub.Cursor != "root-watch" {
+			t.Fatalf("%s: subscription = %+v %v %v", step.name, sub, ok, err)
+		}
+	}
+	if _, ok, _ := st.Subscription(ctx, 100); ok {
+		t.Fatal("the old window still holds the subscription")
 	}
 }

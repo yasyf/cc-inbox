@@ -1,0 +1,126 @@
+package cli
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+	"github.com/yasyf/cc-interact/procs"
+
+	"github.com/yasyf/cc-inbox/internal/channel"
+	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/store"
+)
+
+func newSubscribeCmd() *cobra.Command {
+	var (
+		drive  string
+		reader string
+		kindsF []string
+		cursor string
+	)
+	cmd := &cobra.Command{
+		Use:   "subscribe",
+		Short: "Deliver this session's records over the cci channel: records addressed to --reader plus broadcasts of each --kind",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			window, session, err := thisWindow()
+			if err != nil {
+				return err
+			}
+			d, err := resolveDrive(cmd.Context(), st, drive)
+			if err != nil {
+				return err
+			}
+			sub := store.Subscription{Session: session, Window: window, Drive: d, Reader: reader, Cursor: cursor}
+			for _, k := range kindsF {
+				kind, err := kinds.Parse(k)
+				if err != nil {
+					return err
+				}
+				sub.Kinds = append(sub.Kinds, kind)
+			}
+			if sub.Cursor == "" {
+				sub.Cursor = reader + "-channel"
+			}
+			if _, err := st.Subscribe(cmd.Context(), sub); err != nil {
+				return err
+			}
+			from, ok, err := st.Cursor(cmd.Context(), sub.Cursor, d)
+			if err != nil {
+				return err
+			}
+			start := fmt.Sprintf("cursor %s at #%d", sub.Cursor, from)
+			if !ok {
+				start = fmt.Sprintf("new cursor %s from the head", sub.Cursor)
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d (session %s) subscribed to %s as %s, kinds %s, %s; records arrive as <channel source=%q> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox\n",
+				window, session, d, reader, kindList(sub.Kinds), start, channel.Source)
+			return err
+		}),
+	}
+	cmd.Flags().StringVar(&drive, "drive", "", "drive to deliver (default: the drive bound to this session)")
+	cmd.Flags().StringVar(&reader, "reader", "", "deliver records addressed to this lane, as cci tail --reader does")
+	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
+	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor (default: <reader>-channel, starting at the head)")
+	_ = cmd.MarkFlagRequired("reader")
+	return cmd
+}
+
+func newUnsubscribeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "unsubscribe",
+		Short: "Stop delivering records over this session's cci channel",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			window, _, err := thisWindow()
+			if err != nil {
+				return err
+			}
+			removed, err := st.Unsubscribe(cmd.Context(), window)
+			if err != nil {
+				return err
+			}
+			if !removed {
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d has no subscription\n", window)
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d unsubscribed\n", window)
+			return err
+		}),
+	}
+}
+
+func newChannelCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:    "channel",
+		Short:  "Run the cci channel MCP server (stdio) for this Claude Code window",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			return channel.Serve(cmd.Context(), st, procs.ClaudePID(), cmd.InOrStdin(), cmd.OutOrStdout())
+		}),
+	}
+}
+
+func thisWindow() (int, string, error) {
+	window := procs.ClaudePID()
+	session := os.Getenv(sessionEnv)
+	if window == 0 || session == "" {
+		return 0, "", errors.New("run this from a Claude Code session: no claude ancestor process or " + sessionEnv)
+	}
+	return window, session, nil
+}
+
+func kindList(ks []kinds.Kind) string {
+	if len(ks) == 0 {
+		return "none"
+	}
+	out := make([]string, len(ks))
+	for i, k := range ks {
+		out[i] = string(k)
+	}
+	return strings.Join(out, ",")
+}

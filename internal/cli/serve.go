@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/yasyf/cc-interact/procs"
 	"github.com/yasyf/daemonkit"
 
 	"github.com/yasyf/cc-inbox/internal/daemon"
@@ -86,7 +87,7 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := hook.SessionStart(cmd.Context(), st, p, cmd.OutOrStdout()); err != nil {
+				if err := hook.SessionStart(cmd.Context(), st, p, procs.ClaudePID(), cmd.OutOrStdout()); err != nil {
 					return err
 				}
 				_, err = ensureDaemon(cmd.Context(), 10*time.Second)
