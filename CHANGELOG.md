@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-06
+
 ### Added
 
 - Add a `cci` channel to the plugin. `cci subscribe --reader <lane>
@@ -259,7 +261,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/yasyf/cc-inbox/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/yasyf/cc-inbox/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/yasyf/cc-inbox/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/yasyf/cc-inbox/compare/v0.6.3...v0.7.0
