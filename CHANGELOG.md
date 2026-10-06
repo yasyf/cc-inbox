@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Deliver records addressed to `main` to `--reader root` and `--to root`, and
+  records addressed to `root` to `main`. Lanes and the dashboard address the
+  drive's root by either name, and the root's watch read only `root`, so 58
+  records in three hours on release-v3 never reached it.
+
 ## [0.7.2] - 2026-10-06
 
 ### Fixed
