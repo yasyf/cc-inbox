@@ -20,6 +20,7 @@ const (
 	Lift       Kind = "lift"
 	Incident   Kind = "incident"
 	Mechanism  Kind = "mechanism"
+	Evidence   Kind = "evidence"
 	FixLive    Kind = "fix-live"
 	Defect     Kind = "defect"
 	Correction Kind = "correction"
@@ -80,6 +81,7 @@ var specs = map[Kind]Spec{
 	Lift:       {NeedsRef: true},
 	Incident:   {},
 	Mechanism:  {},
+	Evidence:   {},
 	FixLive:    {},
 	Defect:     {},
 	Correction: {},

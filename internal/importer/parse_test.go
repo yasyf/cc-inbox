@@ -132,7 +132,7 @@ func TestParseNamesTheWritingLane(t *testing.T) {
 		{"1:43 AM PT tailnet-policy-29377: MECHANISM #29377 row now owns the whole tailnet policy", "tailnet-policy-29377", kinds.Mechanism, "01:43", "#29377 row now owns the whole tailnet policy"},
 		{"1:11 AM PT FIX-LIVE alerts-api-0024-fix: root hand promote 12:58", "alerts-api-0024-fix", kinds.FixLive, "01:11", "root hand promote 12:58"},
 		{"1:20 AM PT sandsql-handoff-0027 LANDED #30524 c53452e03c45", "sandsql-handoff-0027", kinds.Landed, "01:20", "#30524 c53452e03c45"},
-		{"12:28 AM PT EVIDENCE alerts-api-0024-evidence -> alerts-api-0024-fix: #1351 applies passed", "alerts-api-0024-evidence", kinds.Note, "00:28", "EVIDENCE -> alerts-api-0024-fix: #1351 applies passed"},
+		{"12:28 AM PT EVIDENCE alerts-api-0024-evidence -> alerts-api-0024-fix: #1351 applies passed", "alerts-api-0024-evidence", kinds.Evidence, "00:28", "-> alerts-api-0024-fix: #1351 applies passed"},
 		{"OPENED 9:49 PM PT rules-nudge-hook: yasyf/captain-hook#306 general: rules_nudge", "rules-nudge-hook", kinds.Opened, "21:49", "yasyf/captain-hook#306 general: rules_nudge"},
 		{"1:33 AM PT OWNER tailscale: live policy file delivered", "root", kinds.Owner, "01:33", "tailscale: live policy file delivered"},
 	}

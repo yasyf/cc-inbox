@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add the `evidence` kind for an incident's evidence lane. It has no default
+  expiry or kind pairing. Imported `EVIDENCE` lines use it; existing imports
+  reparse with parser version 6.
+- Accept `-n` and `--limit` on `tail` and `grep` to print only the newest N
+  matching records, as `tail -n` does. `tail` prints them oldest first and
+  advances its cursor to the newest one.
+
+### Changed
+
+- Read `grep` patterns as regular expressions by default, so `Q0|Syncing`
+  matches either word instead of nothing. `-F` (`--fixed-strings`) matches a
+  pattern literally. `--regex` is removed.
+
 ## [0.6.3] - 2026-10-05
 
 ### Fixed

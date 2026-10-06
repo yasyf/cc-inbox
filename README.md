@@ -230,7 +230,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
-| `cci grep` | Search whole rendered record lines literally and case-insensitively, newest first, including expired records. `--regex` enables regular expressions. |
+| `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. `-F` matches the pattern literally. |
 | `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
@@ -257,7 +257,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 
 | Read option | Commands | Behavior |
 | --- | --- | --- |
-| `--regex` | `grep` | Interpret the pattern as a regular expression; `a\|b` matches either alternative. The default matches the pattern literally. |
+| `-F`, `--fixed-strings` | `grep` | Match the pattern literally. The default reads it as a regular expression, so `a\|b` matches either alternative. |
 | `-i`, `--ignore-case` | `grep` | Match case-insensitively, the default; `--ignore-case=false` matches case exactly. |
 | `--kind <kind>` | `tail`, `watch`, `grep` | Select kinds; repeat the flag or separate kinds with commas. |
 | `--lane <lane>` | `tail`, `watch`, `grep`, `state` | Select posting lanes; repeat for multiple lanes. |
@@ -268,6 +268,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, local clock time such as `9:00 AM`, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
+| `-n`, `--limit <count>` | `tail`, `grep` | Print only the newest `count` matching records, oldest first for `tail` and newest first for `grep`, as `tail -n` does. `tail` advances its cursor to the newest record printed. |
 | `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. |
 | `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width. Records print whole by default. JSON ignores it. |
 
@@ -280,8 +281,9 @@ Tail and watch text lines append reply marks after clipping, so the marks stay
 visible. Grep matches the whole rendered record line: sequence number, time,
 kind, lane, recipients, topic, text, and rendered refs. It searches all matching
 records newest first, including expired records, and prints whole lines with
-reply marks within the byte budget. Patterns are literal and case-insensitive
-by default; `--regex` enables regular expressions such as `HOLD|DEFECT`.
+reply marks within the byte budget. Patterns are case-insensitive regular
+expressions by default, so `HOLD|DEFECT` matches either word; `-F` matches the
+pattern literally.
 When nothing matches, text output prints `no records on <drive> match; store
 head #<seq>`, so an empty result reads differently from a stale store.
 
@@ -369,7 +371,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `done` | None | Closes a matching `incident`, `defect`, or `blocker`. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
-| `owner`, `mechanism`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
+| `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
 | `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
 | `delete-list`, `skew`, `not-live`, `urgent` | None | Unpaired. |

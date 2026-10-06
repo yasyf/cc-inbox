@@ -145,10 +145,11 @@ have their own sections, followed by a count of older open items. An
 no `stack:<project>/<env>` or `target:<name>` ref; no later imported line can close them, but a
 post with `--resolves <seq>`, or a `lift` with `--re <seq>`, does. `grep` searches
 whole rendered record lines, including sequence number, time, kind, lane,
-recipients, topic, text, and rendered refs. Patterns are literal and
-case-insensitive by default (`-i` is accepted; `--ignore-case=false` matches
-case exactly); use `--regex` for regular expressions such as
-`HOLD|DEFECT`. It searches all matching records newest first, including expired
+recipients, topic, text, and rendered refs. Patterns are
+case-insensitive regular expressions by default, so `HOLD|DEFECT` matches either
+word (`-i` is accepted; `--ignore-case=false` matches case exactly); `-F`
+matches the pattern literally. `-n N` (`--limit N`) on `tail` or `grep` prints
+only the newest N matching records, as `tail -n` does. It searches all matching records newest first, including expired
 records. A text grep with no match prints `no records on <drive> match; store
 head #<seq>`. Tail, grep, and state default to 6,144 bytes, and text digest
 to 32,000 bytes so every section prints whole; `--budget` sets any other size.
@@ -205,7 +206,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `review` | None | A rules-review verdict. |
-| `owner`, `mechanism`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
+| `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
 | `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
 | `delete-list`, `skew`, `not-live`, `urgent` | None | Unpaired. |

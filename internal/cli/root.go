@@ -81,6 +81,7 @@ type readFlags struct {
 	target string
 	pr     int
 	since  string
+	limit  int
 	budget int
 	width  int
 	json   bool
@@ -105,6 +106,10 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 
 func (f *readFlags) registerWidth(cmd *cobra.Command) {
 	cmd.Flags().IntVar(&f.width, "width", 0, "clip each text record line to this many characters (default: whole records)")
+}
+
+func (f *readFlags) registerLimit(cmd *cobra.Command, usage string) {
+	cmd.Flags().IntVarP(&f.limit, "limit", "n", 0, usage)
 }
 
 func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, error) {

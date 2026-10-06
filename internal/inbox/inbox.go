@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -20,6 +21,7 @@ const (
 type TailOptions struct {
 	Filter store.Filter
 	Cursor string
+	Limit  int
 	Budget int
 	Width  int
 	JSON   bool
@@ -44,9 +46,16 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		}
 	}
 	f.Limit = pageRows
+	if opts.Limit > 0 {
+		f.Limit = opts.Limit
+		f.Descending = true
+	}
 	records, err := st.Query(ctx, f)
 	if err != nil {
 		return TailResult{}, err
+	}
+	if f.Descending {
+		slices.Reverse(records)
 	}
 	rendered, err := lines(ctx, st, records, opts.JSON, opts.Width)
 	if err != nil {
@@ -63,6 +72,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	rest := f
 	rest.Limit = 0
+	rest.Descending = false
 	rest.After = res.Last
 	if res.More, err = st.Count(ctx, rest); err != nil {
 		return TailResult{}, err
@@ -82,7 +92,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	return res, nil
 }
 
-func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, budget int, asJSON bool, w io.Writer) error {
+func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w io.Writer) error {
 	b := render.NewBudget(w, budget)
 	matched, printed := 0, 0
 	f.Descending = true
@@ -105,7 +115,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		}
 		for _, line := range rendered {
 			matched++
-			if b.Line(line) {
+			if (limit == 0 || printed < limit) && b.Line(line) {
 				printed++
 			}
 		}

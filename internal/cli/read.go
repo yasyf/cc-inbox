@@ -32,12 +32,13 @@ func newTailCmd() *cobra.Command {
 			if cmd.Flags().Changed("since") {
 				name = ""
 			}
-			_, err = inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Budget: rf.budget, Width: rf.width, JSON: rf.json}, cmd.OutOrStdout())
+			_, err = inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json}, cmd.OutOrStdout())
 			return err
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
 	rf.registerWidth(cmd)
+	rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
 	cmd.Flags().StringVar(&cursor, "cursor", os.Getenv(sessionEnv), "cursor name, read and advanced when --since is absent")
 	return cmd
 }
@@ -99,7 +100,7 @@ func newDigestCmd() *cobra.Command {
 func newGrepCmd() *cobra.Command {
 	var (
 		rf         readFlags
-		regex      bool
+		fixed      bool
 		ignoreCase bool
 	)
 	cmd := &cobra.Command{
@@ -108,7 +109,7 @@ func newGrepCmd() *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			expr := args[0]
-			if !regex {
+			if fixed {
 				expr = regexp.QuoteMeta(expr)
 			}
 			if ignoreCase {
@@ -123,12 +124,13 @@ func newGrepCmd() *cobra.Command {
 				return err
 			}
 			f.IncludeExpired = true
-			return inbox.Grep(cmd.Context(), st, f, pattern, rf.budget, rf.json, cmd.OutOrStdout())
+			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.json, cmd.OutOrStdout())
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
 	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", true, "match case-insensitively; --ignore-case=false matches case exactly")
-	cmd.Flags().BoolVar(&regex, "regex", false, "treat PATTERN as a regular expression, so | alternates; the default matches it literally")
+	cmd.Flags().BoolVarP(&fixed, "fixed-strings", "F", false, "match PATTERN literally; the default reads it as a regular expression, so | alternates")
+	rf.registerLimit(cmd, "print at most this many matches, newest first")
 	return cmd
 }
 
