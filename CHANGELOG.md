@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Tell the session in the channel's instructions that every tag already
+  passed the subscription's filter, that a record addressed to the reader
+  arrives whatever its kind, and that `main` is the root. A verification
+  session read an `ask` addressed to `main` as misrouted and refused to act on
+  it.
+
 ## [0.8.0] - 2026-10-06
 
 ### Added
