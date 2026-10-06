@@ -34,7 +34,12 @@ func Read(r io.Reader) (Payload, error) {
 	return p, nil
 }
 
-func SessionStart(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
+func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.Window, w io.Writer) error {
+	if window.PID != 0 {
+		if err := st.Repoint(ctx, p.SessionID, window); err != nil {
+			return err
+		}
+	}
 	b, ok, err := st.Binding(ctx, p.SessionID)
 	if err != nil || !ok {
 		return err

@@ -3,6 +3,7 @@ package cli
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"time"
@@ -86,11 +87,12 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				if err := hook.SessionStart(cmd.Context(), st, p, cmd.OutOrStdout()); err != nil {
+				window, windowErr := thisWindow()
+				if err := hook.SessionStart(cmd.Context(), st, p, window, cmd.OutOrStdout()); err != nil {
 					return err
 				}
 				_, err = ensureDaemon(cmd.Context(), 10*time.Second)
-				return err
+				return errors.Join(windowErr, err)
 			}),
 		},
 		&cobra.Command{

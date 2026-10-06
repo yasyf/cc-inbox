@@ -6,6 +6,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add a `cci` channel to the plugin. `cci subscribe --reader <lane>
+  [--kind <k>]... [--cursor <name>]` delivers each new record addressed to the
+  reader, plus other lanes' broadcasts of each kind, into the session as a
+  `<channel source="plugin:cc-inbox:cci">` tag, with no Monitor to re-arm.
+  The cursor defaults to `channel-<session>` and starts at the head when you
+  subscribe; the channel advances it past each delivered record, and starts
+  only once the client sends `notifications/initialized`. The
+  subscription belongs to the Claude Code window and survives compaction and
+  `/clear`, and the `SessionStart` hook carries it into a resumed session.
+  `cci unsubscribe` stops it. Sessions must be launched with
+  `--channels plugin:cc-inbox@cc-inbox`.
+- `cci watch --for 0` streams until interrupted.
+
+### Changed
+
+- `cci watch` advances its cursor past each record it writes, so a write
+  failure partway through a page no longer replays the records already
+  written.
+
 ### Fixed
 
 - Deliver records addressed to `main` to `--reader root` and `--to root`, and

@@ -28,14 +28,14 @@ func TestSessionStart(t *testing.T) {
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "which env?"})
 	var unbound bytes.Buffer
-	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "other"}, &unbound); err != nil || unbound.Len() != 0 {
+	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "other"}, store.Window{}, &unbound); err != nil || unbound.Len() != 0 {
 		t.Fatalf("unbound session wrote %q, %v", unbound.String(), err)
 	}
 	if err := st.Bind(ctx, "s1", "d", true); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1", Source: "compact"}, &out); err != nil {
+	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1", Source: "compact"}, store.Window{}, &out); err != nil {
 		t.Fatal(err)
 	}
 	var got struct {
@@ -86,5 +86,41 @@ func TestPromptRecordsOwnerRulingsOnlyForRoot(t *testing.T) {
 	}
 	if len(all) != 1 || all[0].Kind != kinds.Owner || all[0].Lane != "owner" || all[0].Text != "ship the wave fix now" || all[0].Source != "hook" {
 		t.Fatalf("records = %+v", all)
+	}
+}
+
+func TestSessionStartRepointsSubscription(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	launched := store.Window{PID: 100, Started: 1}
+	resumed := store.Window{PID: 200, Started: 2}
+	recycled := store.Window{PID: 200, Started: 3}
+	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: launched, Drive: "d", Reader: "root", Cursor: "root-watch"}); err != nil {
+		t.Fatal(err)
+	}
+	steps := []struct {
+		name    string
+		session string
+		window  store.Window
+		want    string
+	}{
+		{"resumed in a new process", "s1", resumed, "s1"},
+		{"cleared in the same process", "s2", resumed, "s2"},
+		{"compacted in the same process", "s2", resumed, "s2"},
+		{"an unrelated session reuses the pid", "s3", recycled, ""},
+	}
+	for _, step := range steps {
+		if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: step.session}, step.window, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		sub, ok, err := st.Subscription(ctx, step.window)
+		if err != nil || ok != (step.want != "") || ok && (sub.Session != step.want || sub.Reader != "root" || sub.Cursor != "root-watch") {
+			t.Fatalf("%s: subscription = %+v %v %v", step.name, sub, ok, err)
+		}
+	}
+	for _, w := range []store.Window{launched, resumed} {
+		if _, ok, _ := st.Subscription(ctx, w); ok {
+			t.Fatalf("window %+v still holds a subscription", w)
+		}
 	}
 }

@@ -172,12 +172,32 @@ cci watch --drive monitor-demo --kind go --cursor monitor
 ```
 
 It polls once a second and exits after 29 minutes. Re-arm with the same cursor.
+A session that can take the channel subscribes once instead (next section).
 Without a saved cursor or explicit window, it starts at the current head.
 Use one cursor per filtered watch.
 
 Text record lines print whole unless `--width N` clips them before reply
 marks.
 Watch has no total byte budget in text or JSON form.
+
+## Receive records over the channel
+
+A session launched with `--channels plugin:cc-inbox@cc-inbox` can take its
+records as pushed `<channel source="plugin:cc-inbox:cci">` tags instead of a
+Monitor. Subscribe once:
+
+```bash
+cci subscribe --drive release-demo --reader root --kind incident,decide,ask
+```
+
+Each tag's body is one record line, and its `seq`, `kind`, and `lane`
+attributes repeat the header. Delivery is at-least-once, so skip a seq you
+have already handled. The subscription survives compaction and `/clear`, and
+the `SessionStart` hook carries it into a resumed session. Re-running
+`cci subscribe` replaces it, and `cci unsubscribe` ends it.
+The cursor starts at the head when you subscribe and defaults to
+`channel-<session>`. Stop any Monitor that watched the same records after
+subscribing; records in the overlap arrive twice.
 
 ## Choose a kind
 
