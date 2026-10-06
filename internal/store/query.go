@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -54,9 +55,11 @@ func (f Filter) where(now time.Time) (string, []any) {
 		}
 	}
 	if f.For != "" {
-		broadcast := append([]string{"recipients = '[]'", "lane != ?"}, selectors...)
-		clauses = append(clauses, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?) OR ("+strings.Join(broadcast, " AND ")+"))")
-		params = append(append(params, f.For, f.For), selected...)
+		names := addressees(f.For)
+		in := "(" + placeholders(len(names)) + ")"
+		broadcast := append([]string{"recipients = '[]'", "lane NOT IN " + in}, selectors...)
+		clauses = append(clauses, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN "+in+") OR ("+strings.Join(broadcast, " AND ")+"))")
+		params = append(append(append(params, names...), names...), selected...)
 	} else {
 		clauses = append(clauses, selectors...)
 		params = append(params, selected...)
@@ -72,8 +75,9 @@ func (f Filter) where(now time.Time) (string, []any) {
 		}
 	}
 	if f.To != "" {
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?)")
-		params = append(params, f.To)
+		names := addressees(f.To)
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(names))+"))")
+		params = append(params, names...)
 	}
 	if f.After > 0 {
 		clauses = append(clauses, "seq > ?")
@@ -96,6 +100,15 @@ func (f Filter) where(now time.Time) (string, []any) {
 		params = append(params, now.UnixMilli())
 	}
 	return strings.Join(clauses, " AND "), params
+}
+
+var rootNames = []any{"root", "main"}
+
+func addressees(lane string) []any {
+	if slices.Contains(rootNames, any(lane)) {
+		return rootNames
+	}
+	return []any{lane}
 }
 
 func placeholders(n int) string {

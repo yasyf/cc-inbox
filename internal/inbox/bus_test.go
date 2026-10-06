@@ -49,6 +49,39 @@ func TestReaderDelivery(t *testing.T) {
 	}
 }
 
+func TestRootAnswersToMain(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	toMain := testutil.Post(t, st, store.Record{Lane: "owner", Kind: kinds.Owner, Text: "Mark complete: ship the card", To: []string{"main"}})
+	toRoot := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, Text: "which env?", To: []string{"root"}})
+	testutil.Post(t, st, store.Record{Lane: "main", Kind: kinds.Go, Text: "the root's own broadcast"})
+	testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Go, Text: "not the root's", To: []string{"other"}})
+	tests := []struct {
+		name string
+		f    store.Filter
+	}{
+		{"reader root", store.Filter{Drive: "d", For: "root", Kinds: []kinds.Kind{kinds.Owner, kinds.Ask, kinds.Go}}},
+		{"reader main", store.Filter{Drive: "d", For: "main", Kinds: []kinds.Kind{kinds.Owner, kinds.Ask, kinds.Go}}},
+		{"to root", store.Filter{Drive: "d", To: "root"}},
+		{"to main", store.Filter{Drive: "d", To: "main"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := st.Query(ctx, tt.f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seqs := make([]int64, len(got))
+			for i, r := range got {
+				seqs[i] = r.Seq
+			}
+			if want := []int64{toMain.Seq, toRoot.Seq}; fmt.Sprint(seqs) != fmt.Sprint(want) {
+				t.Fatalf("seqs = %v, want %v", seqs, want)
+			}
+		})
+	}
+}
+
 func TestTailMarksAnsweredAndWithdrawn(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ask := testutil.Post(t, st, store.Record{Lane: "pr-plans", Kind: kinds.Ask, Text: "can my stack land first?", To: []string{"iam"}})
