@@ -306,7 +306,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--target <name>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.targets`. |
 | `--pr <number>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.prs`. |
 | `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
-| `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts. |
+| `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts, including the root's own prompts for `root` and `main`. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, local clock time such as `9:00 AM`, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
 | `-n`, `--limit <count>` | `tail`, `grep` | Print only the newest `count` matching records, oldest first for `tail` and newest first for `grep`, as `tail -n` does. `tail` advances its cursor to the newest record printed. |
 | `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. |
@@ -494,7 +494,7 @@ into `refs.prs` without duplicates. `fields.env` becomes `fields.envs`.
 The old keys are removed. Deploy stack names live in `refs.stacks`; use repeated
 `--pr` flags for a stack of pull requests.
 
-`source` is `post`, `hook`, `import:<file>`, or `compact`. Record reads emit one
+`source` is `post`, `hook:root`, `import:<file>`, or `compact`. Record reads emit one
 JSON object per line; `digest --json` emits one summary object with counts,
 `open_asks` (asks and `decide`), `open_blockers` (`blocker` and `blocked`),
 `open_defects`, `open_holds`, `open_incidents`, `latest`, `older_open`, and `max_seq`.
@@ -517,7 +517,8 @@ The listener is fixed at `127.0.0.1:7377`.
 
 On both records and stream endpoints, `reader=<lane>` delivers records addressed
 to that lane regardless of `kind`, `lane`, or `topic` filters, plus other lanes'
-broadcasts that match those filters. The reader's own broadcasts are excluded.
+broadcasts that match those filters. The reader's own broadcasts are excluded,
+and so are the `owner` records the root's prompt hook wrote for readers `root` and `main`.
 Stack, target, and PR filters apply to every returned record and combine with
 AND. Query `/v1/records?drive=D&stack=api/plat-usw2-prod` to read a stack's
 problems and the records addressing them, including whether each opener is closed.
@@ -547,7 +548,7 @@ Each entry invokes the plugin's `bin/cci`;
 | --- | --- | --- |
 | `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
 | `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. |
-| `UserPromptSubmit` | `cci hook prompt` | In a session bound with `--root`, record ordinary user prompts as `owner` records. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
+| `UserPromptSubmit` | `cci hook prompt` | In a session bound with `--root`, record ordinary user prompts as `owner` records with source `hook:root`. Lanes receive them as broadcasts; `--reader root` and `--reader main` never get them back. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
 
 A session becomes a lane session the first time `cci post --lane <lane>` runs
 inside it, unless `cci drive use --root` bound it as the root. Its delivery

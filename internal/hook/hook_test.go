@@ -85,8 +85,29 @@ func TestPromptRecordsOwnerRulingsOnlyForRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 1 || all[0].Kind != kinds.Owner || all[0].Lane != "owner" || all[0].Text != "ship the wave fix now" || all[0].Source != "hook" {
+	if len(all) != 1 || all[0].Kind != kinds.Owner || all[0].Lane != "owner" || all[0].Text != "ship the wave fix now" || all[0].Source != "hook:root" {
 		t.Fatalf("records = %+v", all)
+	}
+}
+
+func TestRootReaderSkipsTheOwnerPromptsItRecorded(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	if err := st.Bind(ctx, "root", "d", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.Prompt(ctx, st, hook.Payload{SessionID: "root", Prompt: "fix cci so my own messages are not echoed"}); err != nil {
+		t.Fatal(err)
+	}
+	relayed := testutil.Post(t, st, store.Record{Lane: "owner", Kind: kinds.Owner, Text: "relayed from slack"})
+	for reader, want := range map[string]int{"root": 1, "main": 1, "merge-walker-r2": 2} {
+		got, err := st.Query(ctx, store.Filter{Drive: "d", For: reader})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != want || got[len(got)-1].Seq != relayed.Seq {
+			t.Errorf("reader %s got %+v, want %d records ending at #%d", reader, got, want, relayed.Seq)
+		}
 	}
 }
 
