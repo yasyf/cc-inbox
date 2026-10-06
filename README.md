@@ -218,10 +218,15 @@ cci tail --drive migration --cursor root
 ```
 
 `cci import` tracks offsets, inodes, and the parser version. It rereads files
-from the start when they shrink or rotation replaces them, and deduplicates
-source lines within a drive. After a parser version change, the next import
-or daemon refresh reparses already-consumed lines, even if the file's size
-and inode are unchanged. Matching records get updated parsed fields and
+from the start when they shrink or rotation replaces them, and imports each
+source line at most once per drive.
+
+The store remembers every line it has consumed, including lines a reparse
+skipped and records `cci compact` folded away. Rereading a file, its rotation
+archive, or a copy of it never re-appends an old line as a new record.
+
+After a parser version change, the next import or daemon refresh reparses
+already-consumed lines, even if the file's size and inode are unchanged. Matching records get updated parsed fields and
 expiry based on their stored time. Their timestamps stay unchanged, and
 records folded away by `cci compact` stay gone. The import output reports
 the number reparsed.

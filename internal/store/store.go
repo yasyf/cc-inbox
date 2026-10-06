@@ -75,6 +75,8 @@ UPDATE records SET refs = json_set(refs, '$.prs', (SELECT json_group_array(value
 UPDATE records SET fields = json_set(json_remove(fields, '$.env'), '$.envs', json_array(json_extract(fields, '$.env'))) WHERE json_extract(fields, '$.env') IS NOT NULL`,
 	`ALTER TABLE imports ADD COLUMN parser INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE sessions ADD COLUMN lane TEXT NOT NULL DEFAULT ''`,
+	`CREATE TABLE lines (hash TEXT PRIMARY KEY) WITHOUT ROWID;
+INSERT INTO lines SELECT line_hash FROM records WHERE line_hash IS NOT NULL`,
 }
 
 var (
@@ -329,6 +331,13 @@ func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
 	defer func() { _ = tx.Rollback() }()
 	inserted := 0
 	for _, it := range items {
+		unseen, err := consume(ctx, tx, it.LineHash)
+		if err != nil {
+			return 0, err
+		}
+		if !unseen {
+			continue
+		}
 		r := it.Record
 		r.ExpiresAt = expiry(r, 0)
 		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", args(r, Hash(r), &it.LineHash)...)
@@ -374,8 +383,14 @@ func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (upd
 			continue
 		case !errors.Is(err, sql.ErrNoRows):
 			return 0, 0, fmt.Errorf("reparse record: %w", err)
-		case fresh:
-		case parentText != "" && strings.Contains(parentText, strings.Join(strings.Fields(it.Line), " ")):
+		}
+		unseen, err := consume(ctx, tx, it.LineHash)
+		if err != nil {
+			return 0, 0, err
+		}
+		switch {
+		case unseen && fresh:
+		case unseen && parentText != "" && strings.Contains(parentText, strings.Join(strings.Fields(it.Line), " ")):
 			r.At = parentAt
 		default:
 			parentText = ""
@@ -396,6 +411,18 @@ func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (upd
 		return 0, 0, fmt.Errorf("commit reparse: %w", err)
 	}
 	return updated, inserted, nil
+}
+
+func consume(ctx context.Context, tx *sql.Tx, lineHash string) (bool, error) {
+	res, err := tx.ExecContext(ctx, "INSERT INTO lines (hash) VALUES (?) ON CONFLICT DO NOTHING", lineHash)
+	if err != nil {
+		return false, fmt.Errorf("record consumed line: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("record consumed line: %w", err)
+	}
+	return n == 1, nil
 }
 
 func reparseArgs(r Record, lineHash string) []any {
