@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Include `--re`, `--resolves`, `--topic` and `--to` in the duplicate check
+  for `post`, so posts with the same text that close different records are
+  stored separately instead of collapsing into one `(duplicate)`.
+
 ## [0.7.1] - 2026-10-05
 
 ### Fixed

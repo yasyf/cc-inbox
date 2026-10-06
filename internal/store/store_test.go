@@ -79,6 +79,56 @@ func TestDedupeWindow(t *testing.T) {
 	}
 }
 
+func TestDedupeKeysAddressing(t *testing.T) {
+	st, _ := open(t)
+	ctx := context.Background()
+	const text = "Superseded by #27825 (standing)."
+	base := store.Record{Kind: kinds.Done, Text: text, Re: 27805}
+	first := post(t, st, base)
+	tests := []struct {
+		name string
+		r    store.Record
+	}{
+		{"re", store.Record{Kind: kinds.Done, Text: text, Re: 27813}},
+		{"topic", store.Record{Kind: kinds.Done, Text: text, Re: 27805, Topic: "#27825"}},
+		{"to", store.Record{Kind: kinds.Done, Text: text, Re: 27805, To: []string{"root"}}},
+		{"kind", store.Record{Kind: kinds.Note, Text: text, Re: 27805}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, dup, err := st.Post(ctx, withDrive(tt.r), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if dup || got.Seq == first.Seq {
+				t.Fatalf("dup=%v seq=%d, want a record distinct from #%d", dup, got.Seq, first.Seq)
+			}
+		})
+	}
+	for _, r := range []store.Record{base, {Kind: kinds.Done, Text: text, Re: 27805, To: []string{"root", "main"}}} {
+		first := post(t, st, r)
+		again, dup, err := st.Post(ctx, withDrive(r), 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !dup || again.Seq != first.Seq {
+			t.Fatalf("identical post: dup=%v seq=%d, want dup of #%d", dup, again.Seq, first.Seq)
+		}
+	}
+	reordered, dup, err := st.Post(ctx, withDrive(store.Record{Kind: kinds.Done, Text: text, Re: 27805, To: []string{"main", "root"}}), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dup {
+		t.Fatalf("reordered --to was not deduped: seq=%d", reordered.Seq)
+	}
+}
+
+func withDrive(r store.Record) store.Record {
+	r.Drive, r.Lane = "d", "lane-a"
+	return r
+}
+
 func TestExpiry(t *testing.T) {
 	st, c := open(t)
 	ctx := context.Background()
