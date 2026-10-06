@@ -37,6 +37,50 @@ func appendTo(t *testing.T, path, body string) {
 	}
 }
 
+func rotate(t *testing.T, inbox, archived, live string) {
+	t.Helper()
+	archive := filepath.Join(inbox+".archive", "2026-10-06.md")
+	if err := os.MkdirAll(filepath.Dir(archive), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write(t, archive, archived)
+	staged := inbox + ".new"
+	write(t, staged, live)
+	if err := os.Rename(staged, inbox); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func raw(t *testing.T, st *store.Store) func(stmts ...string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(st.HomeDir(), "inbox.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return func(stmts ...string) {
+		t.Helper()
+		for _, stmt := range stmts {
+			if _, err := db.ExecContext(context.Background(), stmt); err != nil {
+				t.Fatalf("%s: %v", stmt, err)
+			}
+		}
+	}
+}
+
+func lanes(t *testing.T, st *store.Store) string {
+	t.Helper()
+	all, err := st.Query(context.Background(), store.Filter{Drive: "drive", IncludeExpired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(all))
+	for _, r := range all {
+		got = append(got, r.Lane)
+	}
+	return strings.Join(got, " ")
+}
+
 func TestImportIsIncrementalAndSurvivesRotation(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
@@ -122,16 +166,7 @@ func TestRefreshFollowsRenameRotationIntoArchives(t *testing.T) {
 		t.Fatal(err)
 	}
 	appendTo(t, inbox, "GO root (9:02 PM PT) three, written before rotation and never imported\n")
-	archive := filepath.Join(inbox+".archive", "2026-10-04.md")
-	if err := os.MkdirAll(filepath.Dir(archive), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	write(t, archive, "GO root (9:00 PM PT) one\nGO root (9:01 PM PT) two\nGO root (9:02 PM PT) three, written before rotation and never imported\n")
-	staged := inbox + ".new"
-	write(t, staged, "GO root (9:30 PM PT) four, after rotation "+strings.Repeat("x", 200)+"\n")
-	if err := os.Rename(staged, inbox); err != nil {
-		t.Fatal(err)
-	}
+	rotate(t, inbox, "GO root (9:00 PM PT) one\nGO root (9:01 PM PT) two\nGO root (9:02 PM PT) three, written before rotation and never imported\n", "GO root (9:30 PM PT) four, after rotation "+strings.Repeat("x", 200)+"\n")
 	if _, err := importer.Refresh(ctx, st); err != nil {
 		t.Fatal(err)
 	}
@@ -223,34 +258,18 @@ func TestImportReparsesLinesFromAnOlderParser(t *testing.T) {
 }
 
 func TestImportReparseSplitsContinuationsAndFollowsRotation(t *testing.T) {
+	st, _ := testutil.Store(t)
 	ctx := context.Background()
-	home := t.TempDir()
-	st, err := store.Open(ctx, home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = st.Close() }()
 	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
 	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
 	write(t, inbox, body)
 	if _, err := importer.Import(ctx, st, inbox, "drive", ""); err != nil {
 		t.Fatal(err)
 	}
-	db, err := sql.Open("sqlite", "file:"+filepath.Join(home, "inbox.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = db.Close() }()
-	exec := func(stmts ...string) {
-		t.Helper()
-		for _, stmt := range stmts {
-			if _, err := db.ExecContext(ctx, stmt); err != nil {
-				t.Fatalf("%s: %v", stmt, err)
-			}
-		}
-	}
+	exec := raw(t, st)
 	exec(
 		"UPDATE records SET lane = 'deploy-go', text = 'first DONE (9:41 PM PT) lane-b: second' WHERE seq = 1",
+		"DELETE FROM lines WHERE hash = (SELECT line_hash FROM records WHERE seq = 2)",
 		"DELETE FROM records WHERE seq = 2",
 		"UPDATE imports SET parser = 0",
 	)
@@ -276,6 +295,85 @@ func TestImportReparseSplitsContinuationsAndFollowsRotation(t *testing.T) {
 	}
 	if all, err = st.Query(ctx, store.Filter{Drive: "drive", IncludeExpired: true}); err != nil || all[0].Lane != "lane-a" || all[1].Lane != "lane-b" {
 		t.Fatalf("records after rotation = %+v, %v", all, err)
+	}
+}
+
+func TestRotationNeverReappendsALineAReparseSkipped(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
+	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
+	write(t, inbox, body)
+	if _, err := importer.Import(ctx, st, inbox, "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	raw(t, st)(
+		"UPDATE records SET lane = 'deploy-go', text = 'first DONE (9:41 PM PT) lane-b: sec…' WHERE seq = 1",
+		"DELETE FROM lines WHERE hash = (SELECT line_hash FROM records WHERE seq = 2)",
+		"DELETE FROM records WHERE seq = 2",
+		"UPDATE imports SET parser = 0",
+	)
+	if res, err := importer.Import(ctx, st, inbox, "", ""); err != nil || res.Reparsed != 1 || res.Inserted != 0 {
+		t.Fatalf("reparse = %+v, %v; want 1 reparsed and the truncated continuation skipped", res, err)
+	}
+	rotate(t, inbox, body, "DONE (9:50 PM PT) lane-c: third\n")
+	if _, err := importer.Refresh(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	if got := lanes(t, st); got != "lane-a lane-c" {
+		t.Fatalf("lanes = %s, want lane-a lane-c with lane-b never re-appended from the archive", got)
+	}
+}
+
+func TestRotationNeverReappendsACompactedLine(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
+	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
+	write(t, inbox, body)
+	written := time.Date(2026, 10, 1, 23, 0, 0, 0, time.Local)
+	if err := os.Chtimes(inbox, written, written); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := importer.Import(ctx, st, inbox, "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := st.Compact(ctx, "drive", 48*time.Hour); err != nil || res.Folded != 2 {
+		t.Fatalf("compact = %+v, %v; want both records folded", res, err)
+	}
+	rotate(t, inbox, body, "DONE (9:50 PM PT) lane-c: third\n")
+	if _, err := importer.Refresh(ctx, st); err != nil {
+		t.Fatal(err)
+	}
+	if got := lanes(t, st); got != "cci lane-c" {
+		t.Fatalf("lanes = %s, want the digest and lane-c with no folded line re-appended", got)
+	}
+}
+
+func TestRereadRecordsLinesAnOlderBinaryInserted(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
+	written := time.Date(2026, 10, 1, 23, 0, 0, 0, time.Local)
+	for _, name := range []string{"deploy-go.md", "copy-1.md", "copy-2.md"} {
+		write(t, filepath.Join(dir, name), body)
+		if err := os.Chtimes(filepath.Join(dir, name), written, written); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := importer.Import(ctx, st, filepath.Join(dir, "deploy-go.md"), "drive", ""); err != nil {
+		t.Fatal(err)
+	}
+	raw(t, st)("DELETE FROM lines")
+	if res, err := importer.Import(ctx, st, filepath.Join(dir, "copy-1.md"), "drive", ""); err != nil || res.Reparsed != 2 || res.Inserted != 0 {
+		t.Fatalf("first copy = %+v, %v; want 2 reparsed, 0 new", res, err)
+	}
+	if _, err := st.Compact(ctx, "drive", 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if res, err := importer.Import(ctx, st, filepath.Join(dir, "copy-2.md"), "drive", ""); err != nil || res.Inserted != 0 {
+		t.Fatalf("second copy = %+v, %v; want the reparse to have recorded both lines", res, err)
 	}
 }
 
