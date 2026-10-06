@@ -16,7 +16,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const ParserVersion = 5
+const ParserVersion = 6
 
 type Result struct {
 	Path     string `json:"path"`

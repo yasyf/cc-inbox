@@ -123,7 +123,7 @@ func TestReadsClipRecordsToWidth(t *testing.T) {
 			return err
 		},
 		"grep": func(b *bytes.Buffer) error {
-			return inbox.Grep(ctx, st, store.Filter{Drive: "d"}, regexp.MustCompile("059 z"), 0, false, b)
+			return inbox.Grep(ctx, st, store.Filter{Drive: "d"}, regexp.MustCompile("059 z"), 0, 0, false, b)
 		},
 		"state": func(b *bytes.Buffer) error {
 			records, err := inbox.State(ctx, st, store.Filter{Drive: "d"})
@@ -172,7 +172,7 @@ func TestGrep(t *testing.T) {
 	testutil.Post(t, st, store.Record{Kind: kinds.Landed, Text: "landed #30427", Refs: store.Refs{PRs: []int{30427}}})
 	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "unrelated"})
 	var out bytes.Buffer
-	if err := inbox.Grep(context.Background(), st, store.Filter{Drive: "d"}, regexp.MustCompile("30427"), 0, false, &out); err != nil {
+	if err := inbox.Grep(context.Background(), st, store.Filter{Drive: "d"}, regexp.MustCompile("30427"), 0, 0, false, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.TrimSpace(out.String()); !strings.Contains(got, "LANDED lane-a landed #30427 pr#30427") || strings.Contains(got, "unrelated") {

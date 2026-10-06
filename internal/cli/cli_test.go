@@ -64,9 +64,38 @@ func TestPostTailDigest(t *testing.T) {
 	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "#2 ") {
 		t.Fatalf("grep = %q, %v", out, err)
 	}
+	if out, err = run(t, "post", "--lane", "evidence-lane", "--kind", "evidence", "--text", "5xx began at 5:40 PM"); err != nil || out != "#3\n" {
+		t.Fatalf("post evidence = %q, %v", out, err)
+	}
 }
 
-func TestGrepMatchesWholeRecordLinesLiterally(t *testing.T) {
+func TestTailLimitPrintsTheNewestRecords(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "release-v3"); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"first", "second", "third", "fourth"} {
+		if _, err := run(t, "post", "--lane", "l", "--kind", "note", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{{"-n", "2", "--since", "0"}, {"--limit", "2", "--since", "0"}, {"-n", "2"}} {
+		out, err := run(t, append([]string{"tail"}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		lines := strings.Split(strings.TrimSpace(out), "\n")
+		if len(lines) != 2 || !strings.HasSuffix(lines[0], "third") || !strings.HasSuffix(lines[1], "fourth") {
+			t.Fatalf("tail %v = %q, want third then fourth", args, out)
+		}
+	}
+	if out, err := run(t, "tail"); err != nil || out != "" {
+		t.Fatalf("tail after -n advanced the cursor = %q, %v", out, err)
+	}
+}
+
+func TestGrepMatchesWholeRecordLines(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
 	lines := []string{
@@ -88,9 +117,13 @@ func TestGrepMatchesWholeRecordLinesLiterally(t *testing.T) {
 		{[]string{"STATE census"}, []string{"STATE census"}},
 		{[]string{"CLAIM merge-walker-r2"}, []string{"CLAIM merge-walker-r2 #30541"}},
 		{[]string{"runner-protocol-idle-tenant"}, []string{"runner-protocol-idle-tenant GREEN #30568"}},
-		{[]string{"census|GREEN"}, []string{"no records on release-v3 match; store head #4"}},
-		{[]string{"--regex", "census|GREEN"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
-		{[]string{"-i", "--regex", "census|green"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
+		{[]string{"census|GREEN"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
+		{[]string{"-i", "census|green"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
+		{[]string{"-F", "census|GREEN"}, []string{"no records on release-v3 match; store head #4"}},
+		{[]string{"234.293"}, []string{"STATE census"}},
+		{[]string{"--fixed-strings", "234.293"}, []string{"no records on release-v3 match; store head #4"}},
+		{[]string{"-n", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... 1 more matches"}},
+		{[]string{"--limit", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... 1 more matches"}},
 		{[]string{"--ignore-case=false", "green"}, []string{"no records on release-v3 match; store head #4"}},
 		{[]string{"--ignore-case=false", "GREEN"}, []string{"runner-protocol-idle-tenant GREEN"}},
 	}
