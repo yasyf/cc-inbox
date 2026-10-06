@@ -218,7 +218,8 @@ func (s *Store) migrate(ctx context.Context) error {
 }
 
 func Hash(r Record) string {
-	sum := sha256.Sum256([]byte(r.Drive + "\x00" + r.Lane + "\x00" + string(r.Kind) + "\x00" + strings.Join(strings.Fields(r.Text), " ")))
+	key, _ := json.Marshal([]any{r.Drive, r.Lane, r.Kind, r.Topic, slices.Sorted(slices.Values(r.To)), r.Re, r.Resolves, strings.Fields(r.Text)})
+	sum := sha256.Sum256(key)
 	return hex.EncodeToString(sum[:])
 }
 

@@ -22,6 +22,25 @@ func run(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
+func TestPostDedupeKeepsDistinctCloses(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ re, want string }{
+		{"27805", "#1\n"},
+		{"27813", "#2\n"},
+		{"27819", "#3\n"},
+		{"27819", "#3 (duplicate)\n"},
+	} {
+		out, err := run(t, "post", "--lane", "root", "--kind", "done", "--re", tt.re, "--text", "Superseded by #27825 (standing).")
+		if err != nil || out != tt.want {
+			t.Fatalf("post --re %s = %q, %v; want %q", tt.re, out, err, tt.want)
+		}
+	}
+}
+
 func TestPostTailDigest(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
