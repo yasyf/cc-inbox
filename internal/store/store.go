@@ -74,6 +74,7 @@ UPDATE records SET refs = json_set(json_remove(refs, '$.build'), '$.builds', jso
 UPDATE records SET refs = json_set(refs, '$.prs', (SELECT json_group_array(value) FROM (SELECT value FROM json_each(records.refs, '$.prs') UNION SELECT value FROM json_each(records.fields, '$.stack') ORDER BY value))), fields = json_remove(fields, '$.stack') WHERE json_extract(fields, '$.stack') IS NOT NULL;
 UPDATE records SET fields = json_set(json_remove(fields, '$.env'), '$.envs', json_array(json_extract(fields, '$.env'))) WHERE json_extract(fields, '$.env') IS NOT NULL`,
 	`ALTER TABLE imports ADD COLUMN parser INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE sessions ADD COLUMN lane TEXT NOT NULL DEFAULT ''`,
 }
 
 var (

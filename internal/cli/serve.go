@@ -96,6 +96,17 @@ func newHookCmd() *cobra.Command {
 			}),
 		},
 		&cobra.Command{
+			Use:  "post-tool-use",
+			Args: cobra.NoArgs,
+			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+				p, err := hook.Read(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				return hook.PostToolUse(cmd.Context(), st, p, cmd.OutOrStdout())
+			}),
+		},
+		&cobra.Command{
 			Use:  "prompt",
 			Args: cobra.NoArgs,
 			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {

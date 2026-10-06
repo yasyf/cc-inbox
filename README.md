@@ -545,11 +545,17 @@ Each entry invokes the plugin's `bin/cci`;
 
 | Claude Code event | Entry point | Behavior |
 | --- | --- | --- |
-| `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. |
+| `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
+| `PostToolUse` | `cci hook post-tool-use` | In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. |
 | `UserPromptSubmit` | `cci hook prompt` | In a session bound with `--root`, record ordinary user prompts as `owner` records. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
 
-`SessionStart` and `UserPromptSubmit` read the session ID from the hook payload
-and emit no context or owner records for unbound sessions. `SessionStart` still
+A session becomes a lane session the first time `cci post --lane <lane>` runs
+inside it, unless `cci drive use --root` bound it as the root. Its delivery
+cursor starts at the Claude Code window's start, so records addressed to the
+lane before its first post still arrive.
+
+The hooks read the session ID from the hook payload and emit no context or
+owner records for unbound sessions. `SessionStart` still
 starts or reuses the daemon for unbound sessions. If that fails, the hook reports
 a non-blocking error after any bound drive context has been written. The daemon
 refreshes registered imports every second, independent of session bindings and
@@ -586,6 +592,7 @@ sessions write to the same SQLite store without a daemon.
 | JSON `watch` and `digest` | No byte-budget cap. |
 | Text digest sections | Up to 8 asks and decision requests combined; 6 blockers and deployment blocks combined; 6 defects; 6 holds; 8 untracked holds on one line; 6 incidents; and 15 latest lane records, subject to the byte budget. |
 | `SessionStart` context | Width 400 for both reads, with a digest budget of 2,500 bytes and a tail budget of 1,500 bytes. |
+| Lane delivery context | Width 400, with a budget of 1,500 bytes per hook call; the rest arrives on the next tool call. |
 
 Wider record lines leave the byte budgets unchanged, so fewer records may fit.
 Capped text tail and grep reads report omitted records; capped text digest

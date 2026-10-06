@@ -44,6 +44,9 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 	if err != nil || !ok {
 		return err
 	}
+	if b.Lane != "" {
+		return deliver(ctx, st, p.SessionID, b, "SessionStart", w)
+	}
 	var out bytes.Buffer
 	v, err := inbox.Digest(ctx, st, b.Drive, st.Now().Add(-inbox.DigestWindow))
 	if err != nil {
@@ -54,10 +57,32 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive}, Cursor: p.SessionID, Budget: tailBudget, Width: recordWidth}, &out); err != nil {
 		return err
 	}
+	return additionalContext(w, "SessionStart", out.String())
+}
+
+func PostToolUse(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
+	b, ok, err := st.Binding(ctx, p.SessionID)
+	if err != nil || !ok || b.Lane == "" {
+		return err
+	}
+	return deliver(ctx, st, p.SessionID, b, "PostToolUse", w)
+}
+
+func deliver(ctx context.Context, st *store.Store, session string, b store.Binding, event string, w io.Writer) error {
+	var out bytes.Buffer
+	out.WriteString("cci records addressed to " + b.Lane + "; act on each:\n")
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, To: b.Lane}, Cursor: session, Budget: tailBudget, Width: recordWidth}, &out)
+	if err != nil || res.Printed == 0 {
+		return err
+	}
+	return additionalContext(w, event, out.String())
+}
+
+func additionalContext(w io.Writer, event, text string) error {
 	return json.NewEncoder(w).Encode(map[string]any{
 		"hookSpecificOutput": map[string]string{
-			"hookEventName":     "SessionStart",
-			"additionalContext": out.String(),
+			"hookEventName":     event,
+			"additionalContext": text,
 		},
 	})
 }
