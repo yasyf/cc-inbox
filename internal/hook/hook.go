@@ -107,7 +107,7 @@ func Prompt(ctx context.Context, st *store.Store, p Payload) error {
 		Kind:   kinds.Owner,
 		Text:   text,
 		Refs:   store.Refs{Path: path},
-		Source: "hook",
+		Source: store.HookSource("root"),
 	}, 0)
 	return err
 }

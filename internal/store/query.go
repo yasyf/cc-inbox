@@ -57,9 +57,9 @@ func (f Filter) where(now time.Time) (string, []any) {
 	if f.For != "" {
 		names := addressees(f.For)
 		in := "(" + placeholders(len(names)) + ")"
-		broadcast := append([]string{"recipients = '[]'", "lane NOT IN " + in}, selectors...)
+		broadcast := append([]string{"recipients = '[]'", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
 		clauses = append(clauses, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN "+in+") OR ("+strings.Join(broadcast, " AND ")+"))")
-		params = append(append(append(params, names...), names...), selected...)
+		params = append(append(append(append(params, names...), names...), hookSources(names)...), selected...)
 	} else {
 		clauses = append(clauses, selectors...)
 		params = append(params, selected...)
@@ -109,6 +109,18 @@ func addressees(lane string) []any {
 		return rootNames
 	}
 	return []any{lane}
+}
+
+func HookSource(reader string) string {
+	return "hook:" + reader
+}
+
+func hookSources(names []any) []any {
+	out := make([]any, len(names))
+	for i, n := range names {
+		out[i] = HookSource(n.(string))
+	}
+	return out
 }
 
 func placeholders(n int) string {
