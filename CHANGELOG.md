@@ -6,13 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-10-09
+
 ### Fixed
 
 - `cci post --path <file>` without a text argument or `--text` posts the file's
   first line, clipped to 400 characters, as the record's text, and the file
   stays the body. It used to fail with `post needs its text`, the dead end the
   over-400 error pointed to. That error now names the working command:
-  `cci post --lane <lane> --kind <kind> --path <file>`.
+  `cci post --lane <lane> --kind <kind> --path <file>` (#44).
+
+### Changed
+
+- Builds use Go 1.26.9, which fixes the `net/http` advisories GO-2026-6611
+  through GO-2026-6617 (#44).
 
 ## [0.9.2] - 2026-10-06
 
@@ -328,7 +335,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.3...HEAD
+[0.9.3]: https://github.com/yasyf/cc-inbox/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/yasyf/cc-inbox/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/yasyf/cc-inbox/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/yasyf/cc-inbox/compare/v0.8.1...v0.9.0
