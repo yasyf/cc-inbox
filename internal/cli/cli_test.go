@@ -231,10 +231,44 @@ func TestPostTakesItsTextAsOneArgument(t *testing.T) {
 	}{
 		{append(post, "land", "the fix"), "one quoted argument or --text; got 2 arguments"},
 		{append(post, "--text", "a", "b"), "as an argument or --text, not both"},
-		{post, "post needs its text, as one quoted argument or --text"},
+		{post, "post needs its text, as one quoted argument, --text, or a --path file"},
 	} {
 		if _, err := run(t, tt.args...); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Errorf("%v: %v, want %q", tt.args, err, tt.want)
 		}
+	}
+}
+
+func TestPostPathSuppliesTheTextFromItsFirstLine(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	post := []string{"post", "--drive", "release-v3", "--lane", "perf-asks", "--kind", "note"}
+	long := strings.Repeat("x", 500)
+	if _, err := run(t, append(post, "--text", long)...); err == nil || !strings.Contains(err.Error(), "cci post --lane <lane> --kind <kind> --path <file>") {
+		t.Fatalf("post --text over 400 characters: %v", err)
+	}
+	dir := t.TempDir()
+	summary := filepath.Join(dir, "summary.md")
+	if err := os.WriteFile(summary, []byte("  perf findings for api-sql  \n\n"+long+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wide := filepath.Join(dir, "wide.md")
+	if err := os.WriteFile(wide, []byte(long+"\nrest"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		path, want string
+	}{
+		{summary, "NOTE perf-asks perf findings for api-sql " + summary},
+		{wide, "NOTE perf-asks " + strings.Repeat("x", 399) + "… " + wide},
+	} {
+		if _, err := run(t, append(post, "--path", tt.path)...); err != nil {
+			t.Fatalf("post --path %s: %v", tt.path, err)
+		}
+		if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, tt.want) {
+			t.Errorf("tail after post --path %s = %q, %v; want %q", tt.path, out, err, tt.want)
+		}
+	}
+	if _, err := run(t, append(post, "--path", filepath.Join(dir, "missing.md"))...); err == nil || !strings.Contains(err.Error(), "--path") {
+		t.Errorf("post --path to a missing file: %v", err)
 	}
 }

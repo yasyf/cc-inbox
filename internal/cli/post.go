@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -32,14 +33,22 @@ func newPostCmd() *cobra.Command {
 				return fmt.Errorf("post takes its text as one quoted argument or --text; got %d arguments", len(args))
 			case len(args) == 1 && cmd.Flags().Changed("text"):
 				return fmt.Errorf("post takes its text once: as an argument or --text, not both")
-			case len(args) == 0 && !cmd.Flags().Changed("text"):
-				return fmt.Errorf("post needs its text, as one quoted argument or --text")
+			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path"):
+				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
 			}
 			return nil
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
-			if len(args) == 1 {
+			switch {
+			case len(args) == 1:
 				text = args[0]
+			case !cmd.Flags().Changed("text"):
+				body, err := os.ReadFile(r.Refs.Path)
+				if err != nil {
+					return fmt.Errorf("--path: %w", err)
+				}
+				first, _, _ := strings.Cut(string(body), "\n")
+				text = store.Clip(strings.TrimSpace(first))
 			}
 			k, err := kinds.Parse(kind)
 			if err != nil {
@@ -90,12 +99,12 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
 	f.StringVar(&lane, "lane", "", "the writing lane (required)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "at most 400 characters, also accepted as the one argument; longer bodies go in a file passed with --path")
+	f.StringVar(&text, "text", "", "at most 400 characters, also accepted as the one argument; without either, the --path file's first line")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable)")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
-	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body")
+	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
 	f.IntSliceVar(&r.Refs.PRs, "pr", nil, "pull request numbers (repeatable)")
 	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")

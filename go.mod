@@ -2,7 +2,7 @@ module github.com/yasyf/cc-inbox
 
 go 1.26.5
 
-toolchain go1.26.6
+toolchain go1.26.9
 
 require (
 	github.com/shirou/gopsutil/v4 v4.26.5

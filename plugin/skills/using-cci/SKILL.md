@@ -71,7 +71,8 @@ The text can also be the one quoted argument after the flags, in place of
 Repeat `--pr`, `--build`, `--stack`, `--target`, and `--lane-ref` to attach refs.
 `--lane-ref` names lanes the record is about; `--lane` names its writer.
 `--path`, `--ccn`, `--url`, and `--board` also set refs. Put long bodies in a file
-and attach it with `--path` and a short summary.
+and post it with `--path <file>`; without `--text`, the file's first line becomes
+the text, so open the file with a one-line summary.
 
 Structured fields use repeatable `--env`, `--mode` (`platy`, `cli`, `manual`,
 `walker`), `--outcome` (`passed`, `failed`, `pending`, `cancelled`), `--commit`,
