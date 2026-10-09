@@ -80,7 +80,7 @@ INSERT INTO lines SELECT line_hash FROM records WHERE line_hash IS NOT NULL`,
 }
 
 var (
-	ErrTextTooLong = errors.New("text exceeds 400 characters; put the body in a file and pass --path")
+	ErrTextTooLong = errors.New("text exceeds 400 characters; write the body to a file and run `cci post --lane <lane> --kind <kind> --path <file>`, which posts the file's first line as the text")
 	ErrNoDrive     = errors.New("no drive: pass --drive or run `cci drive use <drive>`")
 )
 
@@ -575,9 +575,15 @@ func (s *Store) Drives(ctx context.Context) ([]DriveInfo, error) {
 	return out, rows.Err()
 }
 
+func Clip(text string) string {
+	if r := []rune(text); len(r) > MaxText {
+		return string(r[:MaxText-1]) + "…"
+	}
+	return text
+}
+
 func (s *Store) Fit(text string) (string, string, error) {
-	r := []rune(text)
-	if len(r) <= MaxText {
+	if utf8.RuneCountInString(text) <= MaxText {
 		return text, "", nil
 	}
 	sum := sha256.Sum256([]byte(text))
@@ -589,5 +595,5 @@ func (s *Store) Fit(text string) (string, string, error) {
 	if err := os.WriteFile(path, []byte(text+"\n"), 0o600); err != nil {
 		return "", "", fmt.Errorf("write blob: %w", err)
 	}
-	return string(r[:MaxText-1]) + "…", path, nil
+	return Clip(text), path, nil
 }

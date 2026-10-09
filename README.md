@@ -289,7 +289,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--pr <number>`, `--build <URL-or-id>` | Repeat to populate `refs.prs` and `refs.builds`. |
 | `--stack <project>/<env>`, `--target <name>` | Repeat to populate `refs.stacks` and `refs.targets`. Each stack requires two nonempty parts separated by one slash. |
 | `--lane-ref <lane>` | Repeat to populate `refs.lanes`, the lanes the record is about. `--lane` identifies the writer. |
-| `--path <file>`, `--ccn <id>`, `--url <URL>`, `--board <URL>` | Set `refs.path`, `refs.ccn`, `refs.url`, and `refs.board`. |
+| `--path <file>`, `--ccn <id>`, `--url <URL>`, `--board <URL>` | Set `refs.path`, `refs.ccn`, `refs.url`, and `refs.board`. Without a text argument or `--text`, the file's first line, clipped to 400 characters, becomes the text. |
 | `--env <environment>` | Repeat to populate `fields.envs`. |
 | `--mode <mode>` | Set `fields.mode`: `platy`, `cli`, `manual`, or `walker`. |
 | `--outcome <outcome>` | Set `fields.outcome`: `passed`, `failed`, `pending`, or `cancelled`. |
@@ -588,7 +588,7 @@ sessions write to the same SQLite store without a daemon.
 
 | Surface | Limit |
 | --- | --- |
-| Posted text | 400 characters. Put longer bodies in a file and attach it with `--path`. |
+| Posted text | 400 characters. Put longer bodies in a file and post it with `cci post --lane <lane> --kind <kind> --path <file>`; the file's first line becomes the text. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
 | `tail`, `grep`, and `state` | Default 6,144-byte budget; `--budget` sets any other size. Output stops at a whole line. |
 | Text `digest` | Default 32,000-byte budget, enough for every section at its record limit with whole records; `--budget` sets any other size. Output stops at a whole line. |

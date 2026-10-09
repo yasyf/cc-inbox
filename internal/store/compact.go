@@ -174,11 +174,7 @@ func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records
 }
 
 func digestText(day string, counts map[string]int) string {
-	text := fmt.Sprintf("%s: %d records. kinds: %s. lanes: %s", day, counts["total"], top(counts, "kind:", 8), top(counts, "lane:", 8))
-	if r := []rune(text); len(r) > MaxText {
-		text = string(r[:MaxText-1]) + "…"
-	}
-	return text
+	return Clip(fmt.Sprintf("%s: %d records. kinds: %s. lanes: %s", day, counts["total"], top(counts, "kind:", 8), top(counts, "lane:", 8)))
 }
 
 func top(counts map[string]int, prefix string, n int) string {

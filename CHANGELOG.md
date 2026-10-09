@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci post --path <file>` without a text argument or `--text` posts the file's
+  first line, clipped to 400 characters, as the record's text, and the file
+  stays the body. It used to fail with `post needs its text`, the dead end the
+  over-400 error pointed to. That error now names the working command:
+  `cci post --lane <lane> --kind <kind> --path <file>`.
+
 ## [0.9.2] - 2026-10-06
 
 ### Fixed
