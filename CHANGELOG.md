@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A session bound before 0.10.0 has no stored role; `cci who` now derives
+  `root`, `lane` or `session` from its binding, so `--role root` finds the
+  roots of drives that predate the registry.
+
 ## [0.10.2] - 2026-10-10
 
 ### Fixed

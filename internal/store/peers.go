@@ -135,7 +135,20 @@ func scanPeer(row scanner) (Peer, error) {
 	}
 	p.AnnouncedAt = time.UnixMilli(announcedAt).UTC()
 	p.SeenAt = time.UnixMilli(seenAt).UTC()
+	if p.Role == "" {
+		p.Role = inferredRole(p)
+	}
 	return p, nil
+}
+
+func inferredRole(p Peer) string {
+	switch {
+	case p.Root:
+		return "root"
+	case p.Lane != "":
+		return "lane"
+	}
+	return "session"
 }
 
 func nonNil(v []string) []string {
