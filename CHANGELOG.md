@@ -6,11 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.3] - 2026-10-10
+
 ### Fixed
 
 - A session bound before 0.10.0 has no stored role; `cci who` now derives
   `root`, `lane` or `session` from its binding, so `--role root` finds the
-  roots of drives that predate the registry.
+  roots of drives that predate the registry (#55).
 
 ## [0.10.2] - 2026-10-10
 
@@ -407,7 +409,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.3...HEAD
+[0.10.3]: https://github.com/yasyf/cc-inbox/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/yasyf/cc-inbox/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/yasyf/cc-inbox/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/yasyf/cc-inbox/compare/v0.9.3...v0.10.0
