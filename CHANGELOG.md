@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci who` read the session registry's `procStart` as local time; it is
+  UTC, so every window looked seven hours off and `who` reported them all
+  `gone`. Liveness now parses it as UTC.
+
 ## [0.10.0] - 2026-10-10
 
 ### Added
