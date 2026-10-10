@@ -15,6 +15,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/gitinfo"
 	"github.com/yasyf/cc-inbox/internal/harness"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -40,10 +41,30 @@ type Options struct {
 	Role        string
 	Description string
 	Tags        []string
+	Speak       bool
 }
 
-// Announce records the session in the registry and returns its row.
+// Announce records the session in the registry and returns its row. With
+// Speak, a session bound to a drive also broadcasts a peer record there, so
+// a root subscribed with --kind peer hears it join.
 func Announce(ctx context.Context, st *store.Store, o Options) (store.Peer, error) {
+	p, err := announce(ctx, st, o)
+	if err != nil || !o.Speak || p.Drive == "" {
+		return p, err
+	}
+	v, err := One(ctx, st, Filter{Session: p.Session, All: true})
+	if err != nil {
+		return store.Peer{}, err
+	}
+	lane := p.Lane
+	if lane == "" {
+		lane = "root"
+	}
+	_, _, err = st.Post(ctx, store.Record{Drive: p.Drive, Lane: lane, Kind: kinds.Peer, Text: store.Clip(v.Line(st.Now())), Source: "post"}, 0)
+	return p, err
+}
+
+func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, error) {
 	info, err := gitinfo.Read(o.Cwd)
 	if err != nil {
 		return store.Peer{}, err

@@ -126,6 +126,9 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 		return store.Filter{}, err
 	}
 	out := store.Filter{Drive: drive, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
+	if f.to == "" {
+		out.Peer = os.Getenv(sessionEnv)
+	}
 	for _, k := range f.kinds {
 		kind, err := kinds.Parse(k)
 		if err != nil {

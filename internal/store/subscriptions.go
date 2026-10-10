@@ -32,7 +32,7 @@ type Subscription struct {
 }
 
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, For: s.Reader, Kinds: s.Kinds}
+	return Filter{Drive: s.Drive, Peer: s.Session, For: s.Reader, Kinds: s.Kinds}
 }
 
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {

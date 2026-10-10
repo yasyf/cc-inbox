@@ -301,8 +301,9 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--commit <sha>` | Set `fields.commit` to the full commit SHA. |
 | `--census '<JSON>'` | Set `fields.census`, for example `{"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["api/plat-usw2-prod"]}`. |
 | `--count <name>=<integer>` | Set entries in `fields.counts`, for example `--count deletes=0`. |
+| `--to peer:<session prefix or name>`, `--to <lane>@<drive>` | Address one session, resolved at post time, or a lane in another drive; `root@<drive>` and `main@<drive>` both reach that drive's root. Such a record reaches its recipient's reads from any drive, and `--resolves` may name it across drives. |
 | `--topic <key>`, `--re <seq>` | Group related events or link a reply to an earlier record. |
-| `--resolves <seq>` | Must name an existing record in the same drive. Only a later record closes the open item, regardless of the new record's kind. |
+| `--resolves <seq>` | Must name an existing record in the same drive, or one addressed across drives with `peer:` or `<lane>@<drive>`. Only a later record closes the open item, regardless of the new record's kind. |
 | `--to <lane>` | Address one or more lanes. Use `--to owner` when the owner needs to act. |
 
 | Read option | Commands | Behavior |
@@ -426,7 +427,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
 | `delete-list`, `skew`, `not-live`, `urgent` | None | Unpaired. |
 | `digest` | None | Written only by compaction. |
-| `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
+| `claim`, `note`, `state`, `matrix`, `report`, `peer` | 24 hours | No automatic pairing. `peer` is the broadcast `cci announce` makes in its drive. |
 
 `refused` is an alias for `refuse`; `failed` is an alias for `fail`.
 Imported uppercase lead tokens map to their corresponding kinds. The 16 kinds

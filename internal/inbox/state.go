@@ -29,7 +29,7 @@ func State(ctx context.Context, st *store.Store, f store.Filter) ([]store.Record
 	for i, r := range records {
 		seqs[i] = r.Seq
 	}
-	replies, err := st.Replies(ctx, f.Drive, seqs)
+	replies, err := st.Replies(ctx, seqs)
 	if err != nil {
 		return nil, err
 	}

@@ -303,6 +303,9 @@ func TestAnnounceMeWho(t *testing.T) {
 	if err != nil || me != out {
 		t.Fatalf("me = %q, %v; announce printed %q", me, err, out)
 	}
+	if spoke, err := run(t, "tail", "--since", "0", "--kind", "peer"); err != nil || !strings.HasPrefix(spoke, "#1 ") || !strings.Contains(spoke, " PEER root - root drive=release-v3 ") {
+		t.Fatalf("announce did not broadcast a peer record: %q, %v", spoke, err)
+	}
 	tests := []struct {
 		args []string
 		want []string
@@ -378,5 +381,49 @@ func TestClaimAndWhoByRef(t *testing.T) {
 	}
 	if out, err := run(t, "who", "--all", "--json", "--pr", "34363"); err != nil || !strings.Contains(out, `"claims":[{"session":"aaaa1111-2222-3333","rel":"opened","kind":"pr","key":"34363"`) {
 		t.Fatalf("who --json --pr = %q, %v", out, err)
+	}
+}
+
+func TestPostToPeerAcrossDrives(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
+	if _, err := run(t, "drive", "use", "drive-a", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
+	if _, err := run(t, "drive", "use", "drive-b", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
+	if _, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:zzzz", "--text", "anyone?"); err == nil || !strings.Contains(err.Error(), "no session has that id prefix or name") {
+		t.Fatalf("post to unknown peer: %v", err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "@drive-b", "--text", "x"); err == nil || !strings.Contains(err.Error(), "<lane>@<drive>") {
+		t.Fatalf("post to a bare @drive: %v", err)
+	}
+	if out, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:bbbb", "--text", "take #34363?"); err != nil || out != "#1\n" {
+		t.Fatalf("post to peer = %q, %v", out, err)
+	}
+	if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "root@drive-b", "--text", "GO"); err != nil || out != "#2\n" {
+		t.Fatalf("post to root@drive = %q, %v", out, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
+	out, err := run(t, "tail", "--since", "0", "--reader", "root")
+	if err != nil || !strings.Contains(out, "ASK root -> peer:bbbb2222 take #34363?") || !strings.Contains(out, "GO root -> root@drive-b GO") || strings.Count(out, "\n") != 2 {
+		t.Fatalf("b tail = %q, %v", out, err)
+	}
+	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "1", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#3\n" {
+		t.Fatalf("answer across drives = %q, %v", out, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
+	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "ANSWER root -> peer:aaaa1111 yes resolves #1") || !strings.Contains(out, "take #34363? [RESOLVED #3]") {
+		t.Fatalf("a tail = %q, %v", out, err)
+	}
+	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "GO root -> root@drive-b") {
+		t.Fatalf("tail --to root@drive-b = %q, %v", out, err)
 	}
 }

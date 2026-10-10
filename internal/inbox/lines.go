@@ -64,7 +64,7 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON 
 	for i, r := range records {
 		seqs[i] = r.Seq
 	}
-	replies, err := st.Replies(ctx, records[0].Drive, seqs)
+	replies, err := st.Replies(ctx, seqs)
 	if err != nil {
 		return nil, err
 	}

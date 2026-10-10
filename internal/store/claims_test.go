@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,5 +75,59 @@ func TestClaimsExplicitAndDerived(t *testing.T) {
 	}
 	if _, _, err := store.ParseRef("pr"); err == nil {
 		t.Fatal("ParseRef() accepted a bare kind")
+	}
+}
+
+func TestCrossDriveDelivery(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	ask := testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Ask, Text: "take it?", To: []string{store.PeerAddress("sess-b")}})
+	testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Go, Text: "go", To: []string{"root@b"}})
+	testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Go, Text: "api go", To: []string{"api@b"}})
+	testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.State, Text: "a broadcast"})
+	testutil.Post(t, st, store.Record{Drive: "b", Lane: "walker", Kind: kinds.State, Text: "b broadcast"})
+	tests := []struct {
+		name string
+		f    store.Filter
+		want []string
+	}{
+		{"b's root reader", store.Filter{Drive: "b", Peer: "sess-b", For: "root"}, []string{"take it?", "go", "b broadcast"}},
+		{"b's root by main alias", store.Filter{Drive: "b", For: "main"}, []string{"go", "b broadcast"}},
+		{"b's api lane hook delivery", store.Filter{Drive: "b", Peer: "sess-api", To: "api"}, []string{"api go"}},
+		{"plain drive read stays in the drive", store.Filter{Drive: "b"}, []string{"b broadcast"}},
+		{"kind selector gates only the drive branch", store.Filter{Drive: "b", Peer: "sess-b", For: "root", Kinds: []kinds.Kind{kinds.Go}}, []string{"take it?", "go"}},
+		{"peer with no drive match", store.Filter{Drive: "c", Peer: "sess-b"}, []string{"take it?"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := st.Query(ctx, tt.f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			texts := make([]string, len(got))
+			for i, r := range got {
+				texts[i] = r.Text
+			}
+			if strings.Join(texts, "|") != strings.Join(tt.want, "|") {
+				t.Fatalf("Query() = %v, want %v", texts, tt.want)
+			}
+		})
+	}
+	if _, _, err := st.Post(ctx, store.Record{Drive: "b", Lane: "root", Kind: kinds.Answer, Text: "yes", Resolves: ask.Seq, Source: "post"}, 0); err != nil {
+		t.Fatalf("cross-drive resolve: %v", err)
+	}
+	local := testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Ask, Text: "local only"})
+	if _, _, err := st.Post(ctx, store.Record{Drive: "b", Lane: "root", Kind: kinds.Answer, Text: "no", Resolves: local.Seq, Source: "post"}, 0); err == nil {
+		t.Fatal("resolved a record of another drive that was not addressed across drives")
+	}
+	resolved, err := st.Resolvers(ctx, "a")
+	if err != nil || resolved[ask.Seq] == 0 {
+		t.Fatalf("Resolvers(a) = %v, %v; want %d resolved", resolved, err, ask.Seq)
+	}
+	if err := store.Validate(store.Record{Drive: "a", Lane: "l", Kind: kinds.Go, Text: "x", To: []string{"@b"}}); err == nil {
+		t.Fatal("Validate() accepted an empty lane before @")
+	}
+	if !store.CrossDrive([]string{"root", "peer:x"}) || store.CrossDrive([]string{"root"}) {
+		t.Fatal("CrossDrive() misreads recipients")
 	}
 }

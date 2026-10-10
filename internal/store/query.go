@@ -14,6 +14,7 @@ import (
 
 type Filter struct {
 	Drive          string
+	Peer           string
 	Kinds          []kinds.Kind
 	Lanes          []string
 	To             string
@@ -31,8 +32,11 @@ type Filter struct {
 	Limit          int
 }
 
+// where renders the filter. Records in the drive pass the lane, kind and
+// topic selectors; records addressed across drives, to peer:<Peer> or to
+// <reader>@<Drive>, pass whatever drive they sit in.
 func (f Filter) where(now time.Time) (string, []any) {
-	clauses := []string{"drive = ?"}
+	scoped := []string{"drive = ?"}
 	params := []any{f.Drive}
 	var selectors []string
 	var selected []any
@@ -58,11 +62,23 @@ func (f Filter) where(now time.Time) (string, []any) {
 		names := addressees(f.For)
 		in := "(" + placeholders(len(names)) + ")"
 		broadcast := append([]string{"recipients = '[]'", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
-		clauses = append(clauses, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN "+in+") OR ("+strings.Join(broadcast, " AND ")+"))")
+		scoped = append(scoped, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN "+in+") OR ("+strings.Join(broadcast, " AND ")+"))")
 		params = append(append(append(append(params, names...), names...), hookSources(names)...), selected...)
 	} else {
-		clauses = append(clauses, selectors...)
+		scoped = append(scoped, selectors...)
 		params = append(params, selected...)
+	}
+	if f.To != "" {
+		names := addressees(f.To)
+		scoped = append(scoped, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(names))+"))")
+		params = append(params, names...)
+	}
+	var clauses []string
+	if cross := f.crossAddresses(); len(cross) > 0 {
+		clauses = append(clauses, "(("+strings.Join(scoped, " AND ")+") OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(cross))+")))")
+		params = append(params, cross...)
+	} else {
+		clauses = scoped
 	}
 	for _, ref := range []struct {
 		path  string
@@ -73,11 +89,6 @@ func (f Filter) where(now time.Time) (string, []any) {
 			clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(refs, '"+ref.path+"') WHERE value = ?)")
 			params = append(params, ref.value)
 		}
-	}
-	if f.To != "" {
-		names := addressees(f.To)
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(names))+"))")
-		params = append(params, names...)
 	}
 	if f.After > 0 {
 		clauses = append(clauses, "seq > ?")
@@ -100,6 +111,38 @@ func (f Filter) where(now time.Time) (string, []any) {
 		params = append(params, now.UnixMilli())
 	}
 	return strings.Join(clauses, " AND "), params
+}
+
+func (f Filter) crossAddresses() []any {
+	var out []any
+	if f.Peer != "" {
+		out = append(out, PeerAddress(f.Peer))
+	}
+	reader := f.For
+	if reader == "" {
+		reader = f.To
+	}
+	if reader != "" && f.Drive != "" {
+		for _, n := range addressees(reader) {
+			out = append(out, n.(string)+"@"+f.Drive)
+		}
+	}
+	return out
+}
+
+// PeerAddress is the recipient form that reaches one session in any drive.
+func PeerAddress(session string) string {
+	return "peer:" + session
+}
+
+// CrossDrive reports whether any recipient reaches outside the record's drive.
+func CrossDrive(to []string) bool {
+	for _, t := range to {
+		if strings.HasPrefix(t, "peer:") || strings.Contains(t, "@") {
+			return true
+		}
+	}
+	return false
 }
 
 var rootNames = []any{"root", "main"}
@@ -341,17 +384,17 @@ func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, e
 	return out, rows.Err()
 }
 
-func (s *Store) Replies(ctx context.Context, drive string, seqs []int64) (map[int64][]Record, error) {
+func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, error) {
 	out := map[int64][]Record{}
 	if len(seqs) == 0 {
 		return out, nil
 	}
-	params := []any{drive}
+	params := make([]any, 0, 2*len(seqs))
 	for _, seq := range seqs {
 		params = append(params, seq)
 	}
-	params = append(params, params[1:]...)
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE drive = ? AND (re IN ("+placeholders(len(seqs))+") OR resolves IN ("+placeholders(len(seqs))+")) ORDER BY seq", params...)
+	params = append(params, params...)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE re IN ("+placeholders(len(seqs))+") OR resolves IN ("+placeholders(len(seqs))+") ORDER BY seq", params...)
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
@@ -372,7 +415,7 @@ func (s *Store) Replies(ctx context.Context, drive string, seqs []int64) (map[in
 }
 
 func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT resolves, seq FROM records WHERE drive = ? AND resolves != 0", drive)
+	rows, err := s.db.QueryContext(ctx, "SELECT resolves, seq FROM records WHERE resolves != 0 AND (drive = ? OR resolves IN (SELECT seq FROM records WHERE drive = ?))", drive, drive)
 	if err != nil {
 		return nil, fmt.Errorf("read resolvers: %w", err)
 	}

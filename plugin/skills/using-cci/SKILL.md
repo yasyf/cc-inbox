@@ -257,6 +257,31 @@ A build key matches a stored build URL ending in `/builds/<key>`. A
 suffix `(#seq)` names the record a claim came from. The daemon serves the
 same query at `GET /v1/peers`.
 
+### Address a session in another drive
+
+`--to` reaches across drives in two forms. `peer:<session prefix or name>`
+resolves to one session at post time and fails when the prefix matches
+none or several. `<lane>@<drive>` reaches a lane in a named drive, with
+`root@<drive>` and `main@<drive>` both reaching that drive's root.
+
+```bash
+cci post --lane root --kind ask --to peer:900424b6 "can you take #34363?"
+cci post --lane root --kind go --to root@release-v3 "GO on the bake"
+cci post --lane root --kind answer --resolves 36201 --to peer:b577ef71 "yes"
+```
+
+The record stays in the sender's drive. The recipient's reads (`tail`,
+`watch`, the channel subscription, and a lane's hook delivery) include
+records addressed to `peer:<its session>` or `<its reader>@<its drive>`
+whatever drive holds them, under the same cursor, since sequence numbers
+are machine-wide. `--resolves` may name such a record from the other
+drive, and the opener shows `[RESOLVED #n]` on both sides. Lines render
+the peer as `peer:<8-char prefix>`. `tail --to <lane>` reads one lane's
+addressed records only and never adds the session's own peer records.
+
+`cci announce` broadcasts a `peer` record in the session's drive, so a
+root subscribed with `--kind peer` hears a sibling join.
+
 ## Watch GO lines with a Monitor
 
 Run the watch as the Monitor's command:
@@ -325,7 +350,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
 | `delete-list`, `skew`, `not-live`, `urgent` | None | Unpaired. |
 | `digest` | None | Written only by compaction. |
-| `claim`, `note`, `state`, `matrix`, `report` | 24 hours | No automatic pairing. |
+| `claim`, `note`, `state`, `matrix`, `report`, `peer` | 24 hours | No automatic pairing. `peer` is the broadcast `cci announce` makes in its drive. |
 
 `refused` is an alias for `refuse`; `failed` is an alias for `fail`.
 Imported uppercase lead tokens map to their corresponding kinds. The 16 kinds

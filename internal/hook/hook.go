@@ -60,7 +60,7 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 	}
 	v.Write(&out, st.Now(), digestBudget, recordWidth)
 	out.WriteString("unseen since this session's cursor (cci tail for more):\n")
-	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive}, Cursor: p.SessionID, Budget: tailBudget, Width: recordWidth}, &out); err != nil {
+	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: p.SessionID, For: "root"}, Cursor: p.SessionID, Budget: tailBudget, Width: recordWidth}, &out); err != nil {
 		return err
 	}
 	return additionalContext(w, "SessionStart", out.String())
@@ -80,7 +80,7 @@ func PostToolUse(ctx context.Context, st *store.Store, p Payload, w io.Writer) e
 func deliver(ctx context.Context, st *store.Store, session string, b store.Binding, event string, w io.Writer) error {
 	var out bytes.Buffer
 	out.WriteString("cci records addressed to " + b.Lane + "; act on each:\n")
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, To: b.Lane}, Cursor: store.LaneCursor(session), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call"}, &out)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: session, To: b.Lane}, Cursor: store.LaneCursor(session), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call"}, &out)
 	if err != nil || res.Printed == 0 {
 		return err
 	}
