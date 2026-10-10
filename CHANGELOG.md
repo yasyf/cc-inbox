@@ -6,12 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-10
+
 ### Fixed
 
 - `cci who` read the session registry's `procStart` as local time; it is
   UTC, so every window looked seven hours off and `who` reported them all
   `gone`. Liveness now parses it as UTC. A session bound before 0.10.0 has no
-  stored role and now prints as `session` instead of a blank.
+  stored role and now prints as `session` instead of a blank (#51).
 
 ## [0.10.0] - 2026-10-10
 
@@ -390,7 +392,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/yasyf/cc-inbox/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/yasyf/cc-inbox/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/yasyf/cc-inbox/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/yasyf/cc-inbox/compare/v0.9.1...v0.9.2
