@@ -330,3 +330,53 @@ func TestAnnounceMeWho(t *testing.T) {
 		t.Fatalf("who --json = %q, %v", out, err)
 	}
 }
+
+func TestClaimAndWhoByRef(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-2222-3333")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "opened", "--pr", "34363", "--text", "fix"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "claim"); err == nil || !strings.Contains(err.Error(), "name at least one artifact") {
+		t.Fatalf("claim without artifacts = %q, %v", out, err)
+	}
+	if out, err := run(t, "claim", "--rel", "watches", "--pr", "34370", "--ref", "thread:C1/1.2"); err != nil || out != "watches pr:34370\nwatches thread:C1/1.2\n" {
+		t.Fatalf("claim = %q, %v", out, err)
+	}
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"who", "--all", "--pr", "34363"}, []string{"- root drive=release-v3", "  opened pr:34363 ", " (#1)"}},
+		{[]string{"who", "--all", "--pr", "34370"}, []string{"  watches pr:34370 "}},
+		{[]string{"who", "--all", "--ref", "thread:C1/1.2", "--rel", "watches"}, []string{"  watches thread:C1/1.2 "}},
+		{[]string{"who", "--all", "--pr", "34370", "--rel", "opened"}, []string{"no matching peers"}},
+	}
+	for _, tt := range tests {
+		out, err := run(t, tt.args...)
+		if err != nil {
+			t.Fatalf("%v: %v", tt.args, err)
+		}
+		for _, w := range tt.want {
+			if !strings.Contains(out, w) {
+				t.Fatalf("%v = %q; want %q", tt.args, out, w)
+			}
+		}
+	}
+	if _, err := run(t, "who", "--pr", "1", "--build", "2"); err == nil || !strings.Contains(err.Error(), "one of") {
+		t.Fatalf("who with two refs: %v", err)
+	}
+	if out, err := run(t, "unclaim", "--rel", "watches", "--pr", "34370", "--pr", "1"); err != nil || out != "watches pr:34370 removed\nwatches pr:1 no such claim\n" {
+		t.Fatalf("unclaim = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--all", "--json", "--pr", "34363"); err != nil || !strings.Contains(out, `"claims":[{"session":"aaaa1111-2222-3333","rel":"opened","kind":"pr","key":"34363"`) {
+		t.Fatalf("who --json --pr = %q, %v", out, err)
+	}
+}

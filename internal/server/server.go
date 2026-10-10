@@ -12,6 +12,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -37,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/digest", s.digest)
 	mux.HandleFunc("GET /v1/stream", s.stream)
 	mux.HandleFunc("GET /v1/lanes", s.lanes)
+	mux.HandleFunc("GET /v1/peers", s.peers)
 	return mux
 }
 
@@ -134,6 +136,33 @@ func (s *Server) lanes(w http.ResponseWriter, r *http.Request) {
 		records = []store.Record{}
 	}
 	respond(w, records, err)
+}
+
+func (s *Server) peers(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	f := peers.Filter{Session: q.Get("session"), Name: q.Get("name"), Role: q.Get("role"), Drive: q.Get("drive"), Lane: q.Get("lane"), Tag: q.Get("tag"), Repo: q.Get("repo"), Worktree: q.Get("worktree"), Branch: q.Get("branch"), Query: q.Get("q"), Rel: q.Get("rel"), All: q.Get("all") == "1"}
+	switch pr, build, ref := q.Get("pr"), q.Get("build"), q.Get("ref"); {
+	case pr != "":
+		if _, err := strconv.Atoi(pr); err != nil {
+			respond(w, nil, badRequest{errors.New("pr must be a number")})
+			return
+		}
+		f.Kind, f.Key = "pr", pr
+	case build != "":
+		f.Kind, f.Key = "build", build
+	case ref != "":
+		kind, key, err := store.ParseRef(ref)
+		if err != nil {
+			respond(w, nil, badRequest{err})
+			return
+		}
+		f.Kind, f.Key = kind, key
+	}
+	views, err := peers.Resolve(r.Context(), s.st, f)
+	if views == nil {
+		views = []peers.View{}
+	}
+	respond(w, views, err)
 }
 
 func (s *Server) digest(w http.ResponseWriter, r *http.Request) {

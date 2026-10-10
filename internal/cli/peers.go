@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strconv"
 
 	"github.com/spf13/cobra"
 
@@ -75,14 +77,26 @@ func printPeer(cmd *cobra.Command, st *store.Store, session string) error {
 
 func newWhoCmd() *cobra.Command {
 	var (
-		f      peers.Filter
-		asJSON bool
+		f          peers.Filter
+		pr         int
+		build, ref string
+		asJSON     bool
 	)
 	cmd := &cobra.Command{
 		Use:   "who",
 		Short: "List live peer sessions on this machine with the address SendMessage accepts; every flag narrows",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			refs, err := refArgs(pr, build, ref)
+			if err != nil {
+				return err
+			}
+			if len(refs) > 1 {
+				return errors.New("pass one of --pr, --build or --ref")
+			}
+			if len(refs) == 1 {
+				f.Kind, f.Key = refs[0].Kind, refs[0].Key
+			}
 			views, err := peers.Resolve(cmd.Context(), st, f)
 			if err != nil {
 				return err
@@ -104,6 +118,11 @@ func newWhoCmd() *cobra.Command {
 				if _, err := fmt.Fprintln(cmd.OutOrStdout(), v.Line(st.Now())); err != nil {
 					return err
 				}
+				for _, line := range v.ClaimLines(st.Now()) {
+					if _, err := fmt.Fprintln(cmd.OutOrStdout(), line); err != nil {
+						return err
+					}
+				}
 			}
 			return nil
 		}),
@@ -119,6 +138,10 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&f.Worktree, "worktree", "", "sessions whose worktree or cwd is this path")
 	fl.StringVar(&f.Branch, "branch", "", "sessions on this branch")
 	fl.StringVarP(&f.Query, "query", "q", "", "substring of the name, description, tags, branch, lane, drive or cwd")
+	fl.IntVar(&pr, "pr", 0, "sessions with a claim on this pull request, explicit or derived from their records")
+	fl.StringVar(&build, "build", "", "sessions with a claim on this build id or URL")
+	fl.StringVar(&ref, "ref", "", "sessions with a claim on this <kind>:<key>, e.g. branch:yasyf/eng-1062 or thread:C0822AHFY3G/1759")
+	fl.StringVar(&f.Rel, "rel", "", "only claims with this relation, e.g. opened, watches, started")
 	fl.BoolVar(&f.All, "all", false, "include sessions whose process has ended")
 	fl.BoolVar(&asJSON, "json", false, "one JSON object per peer")
 	return cmd
@@ -150,4 +173,156 @@ func peerIdentity() (string, store.Window, error) {
 		return session, store.Window{}, nil
 	}
 	return session, window, err
+}
+
+type claimFlags struct {
+	rel       string
+	prs       []int
+	builds    []string
+	branches  []string
+	worktrees []string
+	issues    []string
+	threads   []string
+	stacks    []string
+	targets   []string
+	systems   []string
+	refs      []string
+}
+
+func (c *claimFlags) register(cmd *cobra.Command) {
+	fl := cmd.Flags()
+	fl.StringVar(&c.rel, "rel", "owns", "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
+	fl.IntSliceVar(&c.prs, "pr", nil, "pull request numbers (repeatable)")
+	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
+	fl.StringSliceVar(&c.branches, "branch", nil, "branch names (repeatable)")
+	fl.StringSliceVar(&c.worktrees, "worktree", nil, "worktree paths (repeatable)")
+	fl.StringSliceVar(&c.issues, "issue", nil, "issue keys such as ENG-1062 (repeatable)")
+	fl.StringSliceVar(&c.threads, "thread", nil, "Slack threads as <channel>/<ts> (repeatable)")
+	fl.StringSliceVar(&c.stacks, "stack", nil, "deploy stacks as <project>/<env> (repeatable)")
+	fl.StringSliceVar(&c.targets, "target", nil, "release targets (repeatable)")
+	fl.StringSliceVar(&c.systems, "subsystem", nil, "subsystems such as sandsql (repeatable)")
+	fl.StringSliceVar(&c.refs, "ref", nil, "any other <kind>:<key> (repeatable)")
+}
+
+func (c *claimFlags) claims(session string) ([]store.Claim, error) {
+	var out []store.Claim
+	add := func(kind string, keys []string) {
+		for _, key := range keys {
+			out = append(out, store.Claim{Session: session, Rel: c.rel, Kind: kind, Key: key})
+		}
+	}
+	prs := make([]string, len(c.prs))
+	for i, n := range c.prs {
+		prs[i] = strconv.Itoa(n)
+	}
+	add("pr", prs)
+	add("build", c.builds)
+	add("branch", c.branches)
+	for _, wt := range c.worktrees {
+		abs, err := filepath.Abs(wt)
+		if err != nil {
+			return nil, fmt.Errorf("--worktree %s: %w", wt, err)
+		}
+		add("worktree", []string{abs})
+	}
+	add("issue", c.issues)
+	add("thread", c.threads)
+	add("stack", c.stacks)
+	add("target", c.targets)
+	add("subsystem", c.systems)
+	for _, ref := range c.refs {
+		kind, key, err := store.ParseRef(ref)
+		if err != nil {
+			return nil, err
+		}
+		add(kind, []string{key})
+	}
+	if len(out) == 0 {
+		return nil, errors.New("name at least one artifact: --pr, --build, --branch, --worktree, --issue, --thread, --stack, --target, --subsystem or --ref")
+	}
+	return out, nil
+}
+
+func refArgs(pr int, build, ref string) ([]store.Claim, error) {
+	var out []store.Claim
+	if pr != 0 {
+		out = append(out, store.Claim{Kind: "pr", Key: strconv.Itoa(pr)})
+	}
+	if build != "" {
+		out = append(out, store.Claim{Kind: "build", Key: build})
+	}
+	if ref != "" {
+		kind, key, err := store.ParseRef(ref)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, store.Claim{Kind: kind, Key: key})
+	}
+	return out, nil
+}
+
+func newClaimCmd() *cobra.Command {
+	var cf claimFlags
+	cmd := &cobra.Command{
+		Use:   "claim",
+		Short: "Tie this session to artifacts, so cci who --pr, --build or --ref finds it",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			session, _, err := peerIdentity()
+			if err != nil {
+				return err
+			}
+			claims, err := cf.claims(session)
+			if err != nil {
+				return err
+			}
+			for _, c := range claims {
+				got, err := st.Claim(cmd.Context(), c)
+				if err != nil {
+					return err
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", got.Rel, got.Ref()); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	}
+	cf.register(cmd)
+	return cmd
+}
+
+func newUnclaimCmd() *cobra.Command {
+	var cf claimFlags
+	cmd := &cobra.Command{
+		Use:   "unclaim",
+		Short: "Drop this session's explicit claims on artifacts; derived ones stay with their records",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			session, _, err := peerIdentity()
+			if err != nil {
+				return err
+			}
+			claims, err := cf.claims(session)
+			if err != nil {
+				return err
+			}
+			for _, c := range claims {
+				removed, err := st.Unclaim(cmd.Context(), c)
+				if err != nil {
+					return err
+				}
+				state := "removed"
+				if !removed {
+					state = "no such claim"
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s %s\n", c.Rel, c.Ref(), state); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	}
+	cf.register(cmd)
+	return cmd
 }

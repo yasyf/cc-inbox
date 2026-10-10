@@ -217,6 +217,46 @@ Paste `cci me` into a handoff instead of a session name or a PR list:
 cci me
 ```
 
+### Find the session behind an artifact
+
+A claim ties a session to an artifact as `<rel> <kind>:<key>`. Records
+already make claims: a posted `--pr`, `--build`, `--stack` or `--target`
+ties the posting lane's sessions to that artifact, with `opened`, `landed`,
+`reviewed`, `released`, `handling`, `handed-off` or `mentioned` as the rel,
+from the record's kind. Add the rest by hand:
+
+```bash
+cci claim --pr 34363 --rel opened
+cci claim --pr 34370 --rel watches
+cci claim --build 4860 --rel started
+cci claim --thread C0822AHFY3G/1759012345.678 --rel posted
+cci claim --issue ENG-1062 --branch yasyf/eng-1062-ssql-bucket
+cci claim --ref dispatch:ctx_6e8064160648 --rel runs
+```
+
+`--rel` defaults to `owns`. The kinds with flags are `pr`, `build`,
+`branch`, `worktree`, `issue`, `thread`, `stack`, `target` and `subsystem`;
+`--ref <kind>:<key>` takes any other pair. `cci unclaim` with the same
+flags drops an explicit claim; a derived one stays with its record.
+
+Ask `who` by artifact, and each match lists the claims that selected it:
+
+```bash
+cci who --pr 34363
+cci who --build 4860 --rel started
+cci who --ref branch:yasyf/eng-1062-ssql-bucket
+```
+
+```text
+alewife-1a root drive=b577ef71 branch=yasyf/eng-1062-ssql-bucket wt=… busy 2m session=b577ef71 -> uds:/tmp/cc-socks/19022.sock
+  opened pr:34363 2:14 PM (#36201)
+  watches pr:34363 2:20 PM
+```
+
+A build key matches a stored build URL ending in `/builds/<key>`. A
+suffix `(#seq)` names the record a claim came from. The daemon serves the
+same query at `GET /v1/peers`.
+
 ## Watch GO lines with a Monitor
 
 Run the watch as the Monitor's command:
