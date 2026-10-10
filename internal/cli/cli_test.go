@@ -303,7 +303,7 @@ func TestAnnounceMeWho(t *testing.T) {
 	if err != nil || me != out {
 		t.Fatalf("me = %q, %v; announce printed %q", me, err, out)
 	}
-	if spoke, err := run(t, "tail", "--since", "0", "--kind", "peer"); err != nil || !strings.HasPrefix(spoke, "#1 ") || !strings.Contains(spoke, " PEER root - root drive=release-v3 ") {
+	if spoke, err := run(t, "tail", "--since", "0", "--kind", "peer", "--reader", "root"); err != nil || !strings.HasPrefix(spoke, "#1 ") || !strings.Contains(spoke, " PEER registry - root drive=release-v3 ") {
 		t.Fatalf("announce did not broadcast a peer record: %q, %v", spoke, err)
 	}
 	tests := []struct {
@@ -433,5 +433,12 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	}
 	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "GO root -> root@drive-b") {
 		t.Fatalf("tail --to root@drive-b = %q, %v", out, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
+	if out, err = run(t, "tail", "--since", "0", "--reader", "root", "--to", "api"); err != nil || out != "" {
+		t.Fatalf("tail --reader root --to api leaked a root@drive-b record: %q, %v", out, err)
+	}
+	if out, err = run(t, "state"); err != nil || !strings.Contains(out, "no head, contract, or state") {
+		t.Fatalf("state = %q, %v", out, err)
 	}
 }

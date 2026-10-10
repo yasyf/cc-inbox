@@ -96,7 +96,7 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 	}
 	days := map[string][]Record{}
 	for _, r := range old {
-		if r.Kind == kinds.Digest || keepSeq[r.Seq] {
+		if r.Kind == kinds.Digest || keepSeq[r.Seq] || r.Resolves != 0 && CrossDrive(r.To) {
 			continue
 		}
 		day := r.At.In(time.Local).Format(time.DateOnly)

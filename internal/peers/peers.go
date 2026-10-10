@@ -56,13 +56,13 @@ func Announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 	if err != nil {
 		return store.Peer{}, err
 	}
-	lane := p.Lane
-	if lane == "" {
-		lane = "root"
-	}
-	_, _, err = st.Post(ctx, store.Record{Drive: p.Drive, Lane: lane, Kind: kinds.Peer, Text: store.Clip(v.Line(st.Now())), Source: "post"}, 0)
+	_, _, err = st.Post(ctx, store.Record{Drive: p.Drive, Lane: RegistryLane, Kind: kinds.Peer, Text: store.Clip(v.Line(st.Now())), Source: "post"}, 0)
 	return p, err
 }
+
+// RegistryLane writes the peer broadcasts, so a root's own announce still
+// reaches its reader, which drops its own lane's broadcasts.
+const RegistryLane = "registry"
 
 func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, error) {
 	cwd, err := filepath.EvalSymlinks(o.Cwd)

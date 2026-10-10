@@ -34,13 +34,13 @@ func State(ctx context.Context, st *store.Store, f store.Filter) ([]store.Record
 		return nil, err
 	}
 	type key struct {
-		kind        kinds.Kind
-		lane, topic string
+		kind               kinds.Kind
+		drive, lane, topic string
 	}
 	latest := map[key]store.Record{}
 	for _, r := range records {
 		if !withdrawn(replies[r.Seq]) {
-			latest[key{r.Kind, r.Lane, r.Topic}] = r
+			latest[key{r.Kind, r.Drive, r.Lane, r.Topic}] = r
 		}
 	}
 	return slices.SortedFunc(maps.Values(latest), func(a, b store.Record) int {

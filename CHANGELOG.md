@@ -46,7 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   missing `git` never costs a session its digest. `cci claim` announces a
   session that has no registry row first, a build key's `%` and `_` match
   literally, and `GET /v1/peers` refuses two artifact selectors and
-  normalizes `pr`.
+  normalizes `pr`. Across drives: compaction keeps a resolver addressed to
+  another drive, a lane's first cursor starts before records addressed to it
+  from other drives, `--to` restricts the cross-drive branch too, JSON
+  annotation and `cci state` keep drives apart, and the `peer` broadcast is
+  written by the `registry` lane so a root hears its own siblings.
 
 ## [0.9.3] - 2026-10-09
 
