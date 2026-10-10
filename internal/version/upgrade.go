@@ -26,6 +26,7 @@ func upgradeCommand(exe, goos, goarch string) string {
 	case strings.Contains(exe, "/.daemonkit/cache/"):
 		return "claude plugin update cc-inbox@cc-inbox"
 	default:
-		return fmt.Sprintf("gh release download --repo yasyf/cc-inbox --pattern 'cci_*_%s_%s.tar.gz' --output - | tar -xzf - -C %s cci", goos, goarch, filepath.Dir(exe))
+		dir := filepath.Dir(exe)
+		return fmt.Sprintf(`d=$(mktemp -d %[1]s/.cci.XXXXXX) && gh release download --repo yasyf/cc-inbox --pattern 'cci_*_%[2]s_%[3]s.tar.gz' --output - | tar -xzf - -C "$d" cci && mv -f "$d/cci" %[1]s/cci && rmdir "$d"`, dir, goos, goarch)
 	}
 }
