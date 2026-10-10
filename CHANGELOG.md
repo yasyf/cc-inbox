@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-10-10
+
+### Fixed
+
+- The schema-skew error's upgrade command for a binary under `~/.local/bin`
+  extracted the release over the live `cci` in place, so a `cci` call during
+  the extract found it missing or half-written. It now extracts into a temp
+  directory beside the binary and renames it over (#53).
+
 ## [0.10.1] - 2026-10-10
 
 ### Fixed
@@ -392,7 +401,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.1...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.2...HEAD
+[0.10.2]: https://github.com/yasyf/cc-inbox/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/yasyf/cc-inbox/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/yasyf/cc-inbox/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/yasyf/cc-inbox/compare/v0.9.2...v0.9.3
