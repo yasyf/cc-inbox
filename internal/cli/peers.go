@@ -13,6 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yasyf/cc-interact/procs"
+
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -170,10 +172,23 @@ func peerIdentity() (string, store.Window, error) {
 		return "", store.Window{}, errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
 	}
 	window, err := thisWindow()
-	if errors.Is(err, errNoSession) {
-		return session, store.Window{}, nil
+	if !errors.Is(err, errNoSession) {
+		return session, window, err
 	}
-	return session, window, err
+	if pid := procs.FindAncestor(os.Getpid(), isCodex); pid != 0 {
+		window, err = windowOf(pid)
+		return session, window, err
+	}
+	return session, store.Window{}, nil
+}
+
+func isCodex(argv []string) bool {
+	for _, a := range argv {
+		if filepath.Base(a) == "codex" {
+			return true
+		}
+	}
+	return false
 }
 
 type claimFlags struct {
@@ -275,6 +290,13 @@ func newClaimCmd() *cobra.Command {
 			}
 			claims, err := cf.claims(session)
 			if err != nil {
+				return err
+			}
+			if _, err := st.Peer(cmd.Context(), session); errors.Is(err, sql.ErrNoRows) {
+				if err := announceSelf(cmd.Context(), st); err != nil {
+					return err
+				}
+			} else if err != nil {
 				return err
 			}
 			for _, c := range claims {

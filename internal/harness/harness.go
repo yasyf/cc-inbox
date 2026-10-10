@@ -20,7 +20,7 @@ type Session struct {
 	PID             int    `json:"pid"`
 	SessionID       string `json:"sessionId"`
 	Cwd             string `json:"cwd"`
-	StartedAt       int64  `json:"startedAt"`
+	ProcStart       string `json:"procStart"`
 	Kind            string `json:"kind"`
 	Socket          string `json:"messagingSocketPath"`
 	Name            string `json:"name"`
@@ -37,10 +37,18 @@ func (s Session) Address() string {
 }
 
 // Alive reports whether the window's process still runs: the pid exists and
-// was created no more than a minute before the session started.
+// was created when the registry says it was, to the second.
 func (s Session) Alive() bool {
+	started, err := time.ParseInLocation(time.ANSIC, s.ProcStart, time.Local)
+	if err != nil {
+		return false
+	}
 	created, ok := createTime(s.PID)
-	return ok && created <= s.StartedAt && s.StartedAt-created < time.Minute.Milliseconds()
+	if !ok {
+		return false
+	}
+	delta := created - started.UnixMilli()
+	return delta > -time.Second.Milliseconds() && delta < 2*time.Second.Milliseconds()
 }
 
 // Dir is the registry directory: $CLAUDE_CONFIG_DIR/sessions or ~/.claude/sessions.
@@ -71,6 +79,9 @@ func Sessions(dir string) (map[string]Session, error) {
 			continue
 		}
 		raw, err := os.ReadFile(filepath.Join(dir, e.Name())) //nolint:gosec // G304: dir is the registry; names come from ReadDir.
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return nil, fmt.Errorf("read %s: %w", e.Name(), err)
 		}

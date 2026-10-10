@@ -353,6 +353,14 @@ func TestClaimAndWhoByRef(t *testing.T) {
 	if out, err := run(t, "claim", "--rel", "watches", "--pr", "34370", "--ref", "thread:C1/1.2"); err != nil || out != "watches pr:34370\nwatches thread:C1/1.2\n" {
 		t.Fatalf("claim = %q, %v", out, err)
 	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "cccc3333-never-announced")
+	if _, err := run(t, "claim", "--pr", "34370"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "who", "--all", "--pr", "34370", "--session", "cccc"); err != nil || !strings.Contains(out, "session=cccc3333") || !strings.Contains(out, "  owns pr:34370 ") {
+		t.Fatalf("claim from an unannounced session is invisible: %q, %v", out, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-2222-3333")
 	tests := []struct {
 		args []string
 		want []string

@@ -558,7 +558,8 @@ Each entry invokes the plugin's `bin/cci`;
 
 | Claude Code event | Entry point | Behavior |
 | --- | --- | --- |
-| `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, announce the session in the peer registry, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
+| `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
+| `SessionStart` | `cci hook announce` | Announce the session in the peer registry: role inferred from its binding unless already set, worktree, branch and `origin` slug from git, process identity, Orca and long-running variables. A separate hook so a missing `git` never costs a session its digest. |
 | `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | Refresh the session's `seen_at` in the peer registry. In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. |
 | `UserPromptSubmit` | `cci hook prompt` | Refresh the session's `seen_at` in the peer registry. In a session bound with `--root`, record ordinary user prompts as `owner` records with source `hook:root`. Lanes receive them as broadcasts; `--reader root` and `--reader main` never get them back. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
 

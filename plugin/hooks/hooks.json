@@ -3,7 +3,8 @@
     "SessionStart": [
       {
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook session-start", "timeout": 15 }
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook session-start", "timeout": 15 },
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook announce", "timeout": 10 }
         ]
       }
     ],

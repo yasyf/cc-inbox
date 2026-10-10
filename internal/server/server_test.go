@@ -148,7 +148,13 @@ func TestPeersEndpoint(t *testing.T) {
 	if len(views) != 0 {
 		t.Fatalf("peers by unknown pr = %+v", views)
 	}
+	get(t, srv, "/v1/peers?all=1&pr=00030431", http.StatusOK, &views)
+	if len(views) != 1 {
+		t.Fatalf("peers by zero-padded pr = %+v", views)
+	}
 	var bad map[string]string
 	get(t, srv, "/v1/peers?pr=x", http.StatusBadRequest, &bad)
 	get(t, srv, "/v1/peers?ref=nokey", http.StatusBadRequest, &bad)
+	get(t, srv, "/v1/peers?pr=30431&build=9", http.StatusBadRequest, &bad)
+	get(t, srv, "/v1/peers?pr=30431&ref=nokey", http.StatusBadRequest, &bad)
 }

@@ -10,7 +10,6 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
-	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -42,9 +41,6 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 		if err := st.Repoint(ctx, p.SessionID, window); err != nil {
 			return err
 		}
-	}
-	if _, err := peers.Announce(ctx, st, peers.Options{Session: p.SessionID, Window: window, Cwd: p.Cwd}); err != nil {
-		return err
 	}
 	b, ok, err := st.Binding(ctx, p.SessionID)
 	if err != nil || !ok {

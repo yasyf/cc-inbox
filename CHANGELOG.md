@@ -35,6 +35,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recipient as `peer:<8-char prefix>`. `cci announce` broadcasts a new
   24-hour `peer` record in its drive so a root subscribed with `--kind peer`
   hears a sibling join.
+- Registry hardening from review: an automatic announce keeps an explicit
+  role, description and tags; a session replaced in the same process by
+  `/clear` is marked superseded (schema 9) and drops out of `cci who`;
+  `drive use` and a lane's first post refresh an inferred role; liveness
+  reads the registry's `procStart` instead of a registration delay; codex
+  lanes announce with the `codex` process as their window; worktree paths
+  are compared after resolving symlinks; a registry file removed mid-read
+  is skipped; and the announce runs as its own `SessionStart` hook so a
+  missing `git` never costs a session its digest. `cci claim` announces a
+  session that has no registry row first, a build key's `%` and `_` match
+  literally, and `GET /v1/peers` refuses two artifact selectors and
+  normalizes `pr`.
 
 ## [0.9.3] - 2026-10-09
 

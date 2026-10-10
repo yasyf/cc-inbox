@@ -229,6 +229,8 @@ ON CONFLICT (name, drive) DO UPDATE SET seq = MAX(seq, excluded.seq)`, name, dri
 	return nil
 }
 
+const inferredRoles = "('', 'root', 'lane', 'session')"
+
 type Binding struct {
 	Drive string
 	Root  bool
@@ -241,8 +243,9 @@ func (s *Store) Bind(ctx context.Context, session, drive string, root bool) erro
 		return fmt.Errorf("bind session: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root) VALUES (?, ?, ?)
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root, lane = ''`, session, drive, root); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, role) VALUES (?, ?, ?, CASE WHEN ? THEN 'root' ELSE 'session' END)
+ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root, lane = '',
+	role = CASE WHEN excluded.root THEN 'root' WHEN sessions.role IN `+inferredRoles+` THEN 'session' ELSE sessions.role END`, session, drive, root, root); err != nil {
 		return fmt.Errorf("bind session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(MAX(seq), 0) FROM records WHERE drive = ?
@@ -265,8 +268,9 @@ func (s *Store) BindLane(ctx context.Context, session, drive, lane string, start
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, lane) VALUES (?, ?, 0, ?)
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, lane = excluded.lane WHERE NOT sessions.root`, session, drive, lane); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, lane, role) VALUES (?, ?, 0, ?, 'lane')
+ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, lane = excluded.lane,
+	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root`, session, drive, lane); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(

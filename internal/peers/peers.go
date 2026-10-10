@@ -65,7 +65,11 @@ func Announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 }
 
 func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, error) {
-	info, err := gitinfo.Read(o.Cwd)
+	cwd, err := filepath.EvalSymlinks(o.Cwd)
+	if err != nil {
+		return store.Peer{}, fmt.Errorf("resolve cwd: %w", err)
+	}
+	info, err := gitinfo.Read(cwd)
 	if err != nil {
 		return store.Peer{}, err
 	}
@@ -99,6 +103,13 @@ func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 }
 
 func inferRole(ctx context.Context, st *store.Store, session string) (string, error) {
+	existing, err := st.Peer(ctx, session)
+	if err == nil && existing.Role != "" {
+		return "", nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
 	b, ok, err := st.Binding(ctx, session)
 	switch {
 	case err != nil:
@@ -178,7 +189,7 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 	for _, p := range rows {
 		v := View{Peer: p, Live: live(p, now), Claims: claimed[p.Session]}
 		if w, ok := windows[p.Session]; ok {
-			v.Name, v.Address, v.Status, v.Live = w.Name, w.Address(), w.Status, w.Alive()
+			v.Name, v.Address, v.Status, v.Live = w.Name, w.Address(), w.Status, w.Alive() && !p.Superseded
 			v.StatusAt = time.UnixMilli(w.StatusUpdatedAt).UTC()
 			if v.Cwd == "" {
 				v.Cwd = w.Cwd
@@ -212,7 +223,10 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 }
 
 func live(p store.Peer, now time.Time) bool {
-	if p.PID != 0 {
+	switch {
+	case p.Superseded:
+		return false
+	case p.PID != 0:
 		return harness.ProcessAlive(p.PID, p.PIDStarted)
 	}
 	return now.Sub(p.SeenAt) < StaleAfter
@@ -225,6 +239,9 @@ func (f Filter) matches(v View) bool {
 	worktree := f.Worktree
 	if worktree != "" {
 		worktree, _ = filepath.Abs(worktree)
+		if real, err := filepath.EvalSymlinks(worktree); err == nil {
+			worktree = real
+		}
 	}
 	q := strings.ToLower(f.Query)
 	return (f.Session == "" || strings.HasPrefix(v.Session, f.Session)) &&

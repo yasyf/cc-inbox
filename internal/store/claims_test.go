@@ -46,6 +46,8 @@ func TestClaimsExplicitAndDerived(t *testing.T) {
 		{"by rel", store.ClaimFilter{Rel: "owns"}, []want{{"root-1", "owns", "thread", "C1/1.2", "claim"}}},
 		{"by session", store.ClaimFilter{Sessions: []string{"lane-1"}, Kind: "target"}, []want{{"lane-1", "mentioned", "target", "api", "#2"}}},
 		{"unbound lane derives nothing", store.ClaimFilter{Kind: "pr", Key: "1"}, nil},
+		{"build wildcards are literal", store.ClaimFilter{Kind: "build", Key: "48_0"}, nil},
+		{"build percent is literal", store.ClaimFilter{Kind: "build", Key: "%"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

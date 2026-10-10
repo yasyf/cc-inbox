@@ -13,7 +13,7 @@ import (
 
 func TestSessionsReadsRegistry(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, "14575.json", `{"pid":14575,"sessionId":"bf929897-c36e","cwd":"/w/a","startedAt":1790790112453,"kind":"interactive","messagingSocketPath":"/tmp/cc-socks/14575.sock","name":"a-c6","status":"idle","statusUpdatedAt":1790830196802}`)
+	write(t, dir, "14575.json", `{"pid":14575,"sessionId":"bf929897-c36e","cwd":"/w/a","procStart":"Wed Sep 30 17:36:07 2026","kind":"interactive","messagingSocketPath":"/tmp/cc-socks/14575.sock","name":"a-c6","status":"idle","statusUpdatedAt":1790830196802}`)
 	write(t, dir, "14575.key", "not json")
 	write(t, dir, "99.json", `{"pid":99,"sessionId":"other","name":"b-01"}`)
 	got, err := harness.Sessions(dir)
@@ -42,15 +42,16 @@ func TestAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	start := time.UnixMilli(created).In(time.Local)
 	tests := []struct {
 		name string
 		s    harness.Session
 		want bool
 	}{
-		{"this process", harness.Session{PID: os.Getpid(), StartedAt: created + 10}, true},
-		{"started before the process existed", harness.Session{PID: os.Getpid(), StartedAt: created - 1}, false},
-		{"a reused pid", harness.Session{PID: os.Getpid(), StartedAt: created + 2*time.Minute.Milliseconds()}, false},
-		{"no process", harness.Session{PID: 1 << 30, StartedAt: created}, false},
+		{"this process", harness.Session{PID: os.Getpid(), ProcStart: start.Format(time.ANSIC)}, true},
+		{"a reused pid", harness.Session{PID: os.Getpid(), ProcStart: start.Add(-time.Hour).Format(time.ANSIC)}, false},
+		{"unparseable start", harness.Session{PID: os.Getpid(), ProcStart: "yesterday"}, false},
+		{"no process", harness.Session{PID: 1 << 30, ProcStart: start.Format(time.ANSIC)}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
