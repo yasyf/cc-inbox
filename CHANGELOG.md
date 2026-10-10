@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-10
+
 ### Added
 
 - A machine-wide peer registry so sessions in different worktrees and drives
@@ -18,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `drive use` announce with an inferred role, and every hook call
   refreshes `seen_at`. `cci me` prints this session's line for handoffs.
   The `sessions` table gains the peer columns, so the store schema moves to 7
-  and older `cci` builds refuse to open it until upgraded.
+  and older `cci` builds refuse to open it until upgraded (#46).
 - Claims tie a session to an artifact as `<rel> <kind>:<key>`. `cci claim`
   and `cci unclaim` record explicit ones (`--pr`, `--build`, `--branch`,
   `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`,
@@ -26,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's
   sessions. `cci who --pr`, `--build`, `--ref` and `--rel` find the sessions
   behind an artifact and list the claims that matched; `GET /v1/peers` serves
-  the same query. Schema 8 adds the `claims` table.
+  the same query. Schema 8 adds the `claims` table (#47).
 - `cci post --to peer:<session prefix or name>` reaches one session in any
   drive, resolved at post time, and `--to <lane>@<drive>` reaches a lane in
   another drive, `root@<drive>` for its root. Reads, the channel subscription
@@ -34,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cursor, `--resolves` may close one across drives, and lines render the
   recipient as `peer:<8-char prefix>`. `cci announce` broadcasts a new
   24-hour `peer` record in its drive so a root subscribed with `--kind peer`
-  hears a sibling join.
+  hears a sibling join (#48).
 - Registry hardening from review: an automatic announce keeps an explicit
   role, description and tags; a session replaced in the same process by
   `/clear` is marked superseded (schema 9) and drops out of `cci who`;
@@ -50,7 +52,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   another drive, a lane's first cursor starts before records addressed to it
   from other drives, `--to` restricts the cross-drive branch too, JSON
   annotation and `cci state` keep drives apart, and the `peer` broadcast is
-  written by the `registry` lane so a root hears its own siblings.
+  written by the `registry` lane so a root hears its own siblings (#49).
 
 ## [0.9.3] - 2026-10-09
 
@@ -381,7 +383,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/yasyf/cc-inbox/compare/v0.9.3...v0.10.0
 [0.9.3]: https://github.com/yasyf/cc-inbox/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/yasyf/cc-inbox/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/yasyf/cc-inbox/compare/v0.9.0...v0.9.1
