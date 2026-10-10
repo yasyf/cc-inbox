@@ -267,14 +267,11 @@ func (v View) lastSeen() time.Time {
 // address is the string SendMessage accepts.
 func (v View) Line(now time.Time) string {
 	var b strings.Builder
-	name, role := v.Name, v.Role
+	name := v.Name
 	if name == "" {
 		name = "-"
 	}
-	if role == "" {
-		role = RoleSession
-	}
-	fmt.Fprintf(&b, "%s %s", name, role)
+	fmt.Fprintf(&b, "%s %s", name, v.Role)
 	if v.Drive != "" {
 		fmt.Fprintf(&b, " drive=%s", v.Drive)
 	}
