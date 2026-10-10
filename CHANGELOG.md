@@ -10,7 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `cci who` read the session registry's `procStart` as local time; it is
   UTC, so every window looked seven hours off and `who` reported them all
-  `gone`. Liveness now parses it as UTC.
+  `gone`. Liveness now parses it as UTC. A session bound before 0.10.0 has no
+  stored role and now prints as `session` instead of a blank.
 
 ## [0.10.0] - 2026-10-10
 
