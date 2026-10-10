@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A machine-wide peer registry so sessions in different worktrees and drives
+  can find each other. `cci who` lists live Claude Code sessions, joined with
+  the registry under `~/.claude/sessions`, one line each ending in the `uds:`
+  address `SendMessage` accepts, and narrows by `--session` prefix, `--name`,
+  `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`
+  or `-q`. `cci announce` records a role, description and tags, with the
+  worktree, branch and `origin` slug read from git; the `SessionStart` hook
+  and `drive use` announce with an inferred role, and every hook call
+  refreshes `seen_at`. `cci me` prints this session's line for handoffs.
+  The `sessions` table gains the peer columns, so the store schema moves to 7
+  and older `cci` builds refuse to open it until upgraded.
+
 ## [0.9.3] - 2026-10-09
 
 ### Fixed

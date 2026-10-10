@@ -87,6 +87,9 @@ func newDriveCmd() *cobra.Command {
 			if err := st.Bind(cmd.Context(), session, args[0], root); err != nil {
 				return err
 			}
+			if err := announceSelf(cmd.Context(), st); err != nil {
+				return err
+			}
 			_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s -> %s\n", session, args[0])
 			return err
 		}),

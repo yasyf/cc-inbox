@@ -281,6 +281,9 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
 | `cci drive use` | Bind the current Claude Code session and reset its cursor to the drive's latest record in one transaction. `--root` enables owner-prompt capture. |
 | `cci drive ls` | List drives by their most recent activity. |
+| `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. |
+| `cci me` | Print this session's registry line, ending with the `uds:` address `SendMessage` accepts. |
+| `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Narrow with `--session <id or prefix>`, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`; `--all` includes ended sessions; `--json` emits one object per peer. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
 | `cci hook` | Run a plugin hook entry point. |
 
@@ -551,9 +554,9 @@ Each entry invokes the plugin's `bin/cci`;
 
 | Claude Code event | Entry point | Behavior |
 | --- | --- | --- |
-| `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
-| `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. |
-| `UserPromptSubmit` | `cci hook prompt` | In a session bound with `--root`, record ordinary user prompts as `owner` records with source `hook:root`. Lanes receive them as broadcasts; `--reader root` and `--reader main` never get them back. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
+| `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, announce the session in the peer registry, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
+| `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | Refresh the session's `seen_at` in the peer registry. In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. |
+| `UserPromptSubmit` | `cci hook prompt` | Refresh the session's `seen_at` in the peer registry. In a session bound with `--root`, record ordinary user prompts as `owner` records with source `hook:root`. Lanes receive them as broadcasts; `--reader root` and `--reader main` never get them back. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
 
 A session becomes a lane session the first time `cci post --lane <lane>` runs
 inside it, unless `cci drive use --root` bound it as the root. Its delivery
