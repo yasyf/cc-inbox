@@ -296,7 +296,7 @@ func TestAnnounceMeWho(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := run(t, "announce", "--desc", "mesh discovery", "--tag", "mesh", "--tag", "cci")
-	if err != nil || !strings.HasPrefix(out, "- root drive=release-v3 branch=") || !strings.Contains(out, ` "mesh discovery" #mesh #cci session=aaaa1111`) {
+	if err != nil || !strings.HasPrefix(out, "- root drive=release-v3 ") || !strings.Contains(out, " wt=") || !strings.Contains(out, ` "mesh discovery" #mesh #cci session=aaaa1111`) {
 		t.Fatalf("announce = %q, %v", out, err)
 	}
 	me, err := run(t, "me")
