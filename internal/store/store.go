@@ -276,6 +276,11 @@ func Validate(r Record) error {
 			return fmt.Errorf("stack %q is not <project>/<env>", stack)
 		}
 	}
+	for _, to := range r.To {
+		if lane, drive, ok := strings.Cut(to, "@"); ok && (lane == "" || drive == "") {
+			return fmt.Errorf("recipient %q is not <lane>@<drive>", to)
+		}
+	}
 	return nil
 }
 
@@ -303,7 +308,7 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 	}
 	if r.Resolves != 0 {
 		target, err := s.Get(ctx, r.Resolves)
-		if errors.Is(err, sql.ErrNoRows) || err == nil && target.Drive != r.Drive {
+		if errors.Is(err, sql.ErrNoRows) || err == nil && target.Drive != r.Drive && !CrossDrive(target.To) {
 			return Record{}, false, fmt.Errorf("--resolves #%d names no record in drive %s", r.Resolves, r.Drive)
 		}
 		if err != nil {

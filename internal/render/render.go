@@ -28,7 +28,7 @@ func Line(r store.Record, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
 	if len(r.To) > 0 {
-		fmt.Fprintf(&b, " -> %s", strings.Join(r.To, ","))
+		fmt.Fprintf(&b, " -> %s", strings.Join(recipients(r.To), ","))
 	}
 	if r.Re != 0 {
 		fmt.Fprintf(&b, " re #%d", r.Re)
@@ -122,4 +122,15 @@ func (b *Budget) Wrote() int {
 
 func (b *Budget) Trailer(s string) {
 	_, _ = fmt.Fprintln(b.w, s)
+}
+
+func recipients(to []string) []string {
+	out := make([]string, len(to))
+	for i, t := range to {
+		if session, ok := strings.CutPrefix(t, "peer:"); ok && len(session) > 8 {
+			t = "peer:" + session[:8]
+		}
+		out[i] = t
+	}
+	return out
 }

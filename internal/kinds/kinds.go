@@ -59,6 +59,7 @@ const (
 	Skew       Kind = "skew"
 	NotLive    Kind = "not-live"
 	Urgent     Kind = "urgent"
+	Peer       Kind = "peer"
 )
 
 const EphemeralTTL = 24 * time.Hour
@@ -101,6 +102,7 @@ var specs = map[Kind]Spec{
 	State:      {TTL: EphemeralTTL},
 	Matrix:     {TTL: EphemeralTTL},
 	Report:     {TTL: EphemeralTTL},
+	Peer:       {TTL: EphemeralTTL},
 	Blocked:    {},
 	Unblock:    {NeedsRef: true},
 	Review:     {},

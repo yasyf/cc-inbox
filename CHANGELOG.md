@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sessions. `cci who --pr`, `--build`, `--ref` and `--rel` find the sessions
   behind an artifact and list the claims that matched; `GET /v1/peers` serves
   the same query. Schema 8 adds the `claims` table.
+- `cci post --to peer:<session prefix or name>` reaches one session in any
+  drive, resolved at post time, and `--to <lane>@<drive>` reaches a lane in
+  another drive, `root@<drive>` for its root. Reads, the channel subscription
+  and lane hook delivery include such records from any drive under the same
+  cursor, `--resolves` may close one across drives, and lines render the
+  recipient as `peer:<8-char prefix>`. `cci announce` broadcasts a new
+  24-hour `peer` record in its drive so a root subscribed with `--kind peer`
+  hears a sibling join.
 
 ## [0.9.3] - 2026-10-09
 

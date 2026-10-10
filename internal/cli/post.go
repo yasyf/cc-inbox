@@ -74,6 +74,9 @@ func newPostCmd() *cobra.Command {
 					r.Fields.Counts[key] = n
 				}
 			}
+			if r.To, err = resolveRecipients(cmd.Context(), st, r.To); err != nil {
+				return err
+			}
 			got, dup, err := st.Post(cmd.Context(), r, ttl)
 			if err != nil {
 				return err
@@ -101,7 +104,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "at most 400 characters, also accepted as the one argument; without either, the --path file's first line")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable)")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name> reaches one session and <lane>@<drive> a lane in another drive")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given")

@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -36,7 +37,7 @@ func newAnnounceCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve cwd: %w", err)
 			}
-			if _, err := peers.Announce(cmd.Context(), st, peers.Options{Session: session, Window: window, Cwd: cwd, Role: role, Description: description, Tags: tags}); err != nil {
+			if _, err := peers.Announce(cmd.Context(), st, peers.Options{Session: session, Window: window, Cwd: cwd, Role: role, Description: description, Tags: tags, Speak: true}); err != nil {
 				return err
 			}
 			return printPeer(cmd, st, session)
@@ -325,4 +326,27 @@ func newUnclaimCmd() *cobra.Command {
 	}
 	cf.register(cmd)
 	return cmd
+}
+
+func resolveRecipients(ctx context.Context, st *store.Store, to []string) ([]string, error) {
+	out := make([]string, len(to))
+	for i, t := range to {
+		target, ok := strings.CutPrefix(t, "peer:")
+		if !ok {
+			out[i] = t
+			continue
+		}
+		v, err := peers.One(ctx, st, peers.Filter{Session: target, All: true})
+		if errors.Is(err, sql.ErrNoRows) {
+			v, err = peers.One(ctx, st, peers.Filter{Name: target, All: true})
+		}
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("--to %s: no session has that id prefix or name; cci who --all lists them", t)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("--to %s: %w", t, err)
+		}
+		out[i] = store.PeerAddress(v.Session)
+	}
+	return out, nil
 }

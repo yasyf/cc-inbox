@@ -264,3 +264,22 @@ func TestPostingAsALaneLeavesTheRootBinding(t *testing.T) {
 		t.Fatalf("root PostToolUse wrote %q, %v", out.String(), err)
 	}
 }
+
+func TestLaneHookDeliversPeerRecords(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	if err := st.BindLane(ctx, "s-api", "d", "api", st.Now().Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Drive: "other", Lane: "root", Kind: kinds.Go, Text: "cross-drive go", To: []string{store.PeerAddress("s-api")}})
+	testutil.Post(t, st, store.Record{Drive: "other", Lane: "root", Kind: kinds.Go, Text: "lane at drive", To: []string{"api@d"}})
+	testutil.Post(t, st, store.Record{Drive: "other", Lane: "root", Kind: kinds.Go, Text: "not for api", To: []string{"api@elsewhere"}})
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s-api", Event: "PostToolUse"}, &out); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "cross-drive go") || !strings.Contains(text, "lane at drive") || strings.Contains(text, "not for api") {
+		t.Fatalf("PostToolUse context = %q", text)
+	}
+}
