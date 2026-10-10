@@ -42,7 +42,7 @@ func TestAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := time.UnixMilli(created).In(time.Local)
+	start := time.UnixMilli(created).UTC()
 	tests := []struct {
 		name string
 		s    harness.Session
@@ -50,6 +50,7 @@ func TestAlive(t *testing.T) {
 	}{
 		{"this process", harness.Session{PID: os.Getpid(), ProcStart: start.Format(time.ANSIC)}, true},
 		{"a reused pid", harness.Session{PID: os.Getpid(), ProcStart: start.Add(-time.Hour).Format(time.ANSIC)}, false},
+		{"local time instead of UTC", harness.Session{PID: os.Getpid(), ProcStart: start.In(time.FixedZone("PDT", -7*3600)).Format(time.ANSIC)}, false},
 		{"unparseable start", harness.Session{PID: os.Getpid(), ProcStart: "yesterday"}, false},
 		{"no process", harness.Session{PID: 1 << 30, ProcStart: start.Format(time.ANSIC)}, false},
 	}

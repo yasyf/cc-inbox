@@ -37,9 +37,10 @@ func (s Session) Address() string {
 }
 
 // Alive reports whether the window's process still runs: the pid exists and
-// was created when the registry says it was, to the second.
+// was created when the registry says it was, to the second. The registry
+// writes procStart as ANSIC in UTC.
 func (s Session) Alive() bool {
-	started, err := time.ParseInLocation(time.ANSIC, s.ProcStart, time.Local)
+	started, err := time.ParseInLocation(time.ANSIC, s.ProcStart, time.UTC)
 	if err != nil {
 		return false
 	}
