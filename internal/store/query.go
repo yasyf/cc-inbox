@@ -241,7 +241,7 @@ ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(session), drive, drive, starte
 
 func (s *Store) Binding(ctx context.Context, session string) (Binding, bool, error) {
 	var b Binding
-	err := s.db.QueryRowContext(ctx, "SELECT drive, root, lane FROM sessions WHERE session = ?", session).Scan(&b.Drive, &b.Root, &b.Lane)
+	err := s.db.QueryRowContext(ctx, "SELECT drive, root, lane FROM sessions WHERE session = ? AND drive != ''", session).Scan(&b.Drive, &b.Root, &b.Lane)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Binding{}, false, nil
 	}

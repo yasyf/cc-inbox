@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
+	"github.com/yasyf/cc-inbox/internal/peers"
 )
 
 func run(t *testing.T, args ...string) (string, error) {
@@ -270,5 +271,62 @@ func TestPostPathSuppliesTheTextFromItsFirstLine(t *testing.T) {
 	}
 	if _, err := run(t, append(post, "--path", filepath.Join(dir, "missing.md"))...); err == nil || !strings.Contains(err.Error(), "--path") {
 		t.Errorf("post --path to a missing file: %v", err)
+	}
+}
+
+func TestAnnounceMeWho(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-2222-3333")
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("ORCA_LAUNCH_RUN", "run_7")
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	if err := os.MkdirAll(filepath.Join(cfg, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg, "sessions", "5.json"), []byte(`{"pid":5,"sessionId":"bbbb4444-5555-6666","cwd":"/w/sole","startedAt":1,"messagingSocketPath":"/tmp/cc-socks/5.sock","name":"sole-51","status":"busy","statusUpdatedAt":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "me"); err == nil || !strings.Contains(err.Error(), "not in the registry") {
+		t.Fatalf("me before announce = %q, %v", out, err)
+	}
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "announce", "--desc", "mesh discovery", "--tag", "mesh", "--tag", "cci")
+	if err != nil || !strings.HasPrefix(out, "- root drive=release-v3 ") || !strings.Contains(out, " wt=") || !strings.Contains(out, ` "mesh discovery" #mesh #cci session=aaaa1111`) {
+		t.Fatalf("announce = %q, %v", out, err)
+	}
+	me, err := run(t, "me")
+	if err != nil || me != out {
+		t.Fatalf("me = %q, %v; announce printed %q", me, err, out)
+	}
+	tests := []struct {
+		args []string
+		want []string
+	}{
+		{[]string{"who", "--all"}, []string{"- root drive=release-v3", "sole-51 session cwd=/w/sole gone"}},
+		{[]string{"who", "--all", "--tag", "mesh"}, []string{"- root drive=release-v3"}},
+		{[]string{"who", "--all", "--name", "sole-51"}, []string{"sole-51 session"}},
+		{[]string{"who", "--all", "--session", "bbbb"}, []string{"sole-51 session"}},
+		{[]string{"who", "--all", "-q", "discovery"}, []string{"- root drive=release-v3"}},
+		{[]string{"who", "--all", "--role", "watcher"}, []string{"no matching peers"}},
+	}
+	for _, tt := range tests {
+		out, err := run(t, tt.args...)
+		if err != nil || strings.Count(out, "\n") != len(tt.want) {
+			t.Fatalf("%v = %q, %v; want %d lines", tt.args, out, err, len(tt.want))
+		}
+		for _, w := range tt.want {
+			if !strings.Contains(out, w) {
+				t.Fatalf("%v = %q; want %q", tt.args, out, w)
+			}
+		}
+	}
+	out, err = run(t, "who", "--all", "--json", "--session", "aaaa")
+	if err != nil || !strings.Contains(out, `"env":{"ORCA_LAUNCH_RUN":"run_7"}`) || !strings.Contains(out, `"tags":["mesh","cci"]`) {
+		t.Fatalf("who --json = %q, %v", out, err)
 	}
 }

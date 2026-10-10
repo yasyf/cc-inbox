@@ -10,6 +10,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -21,6 +22,7 @@ const (
 
 type Payload struct {
 	SessionID string `json:"session_id"`
+	Cwd       string `json:"cwd"`
 	Event     string `json:"hook_event_name"`
 	Source    string `json:"source"`
 	Prompt    string `json:"prompt"`
@@ -40,6 +42,9 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 		if err := st.Repoint(ctx, p.SessionID, window); err != nil {
 			return err
 		}
+	}
+	if _, err := peers.Announce(ctx, st, peers.Options{Session: p.SessionID, Window: window, Cwd: p.Cwd}); err != nil {
+		return err
 	}
 	b, ok, err := st.Binding(ctx, p.SessionID)
 	if err != nil || !ok {
@@ -62,6 +67,9 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 }
 
 func PostToolUse(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
+	if err := st.Touch(ctx, p.SessionID); err != nil {
+		return err
+	}
 	b, ok, err := st.Binding(ctx, p.SessionID)
 	if err != nil || !ok || b.Lane == "" {
 		return err
@@ -89,6 +97,9 @@ func additionalContext(w io.Writer, event, text string) error {
 }
 
 func Prompt(ctx context.Context, st *store.Store, p Payload) error {
+	if err := st.Touch(ctx, p.SessionID); err != nil {
+		return err
+	}
 	b, ok, err := st.Binding(ctx, p.SessionID)
 	if err != nil || !ok || !b.Root {
 		return err

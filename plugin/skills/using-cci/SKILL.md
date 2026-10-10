@@ -1,6 +1,6 @@
 ---
 name: using-cci
-description: Load when posting or reading drive coordination records, inbox lines, lane status, GO lines, holds, asks, or blocked deploys; when resuming after compaction; when watching a drive with a Monitor; or when replacing markdown inbox appends or ephemeral cc-notes status with cci. Covers kinds, closures, stack and target references, cursors, and durable knowledge in cc-notes.
+description: Load when posting or reading drive coordination records, inbox lines, lane status, GO lines, holds, asks, or blocked deploys; when resuming after compaction; when watching a drive with a Monitor; when finding or reaching another Claude Code session, root, or worktree on this machine; or when replacing markdown inbox appends or ephemeral cc-notes status with cci. Covers kinds, closures, stack and target references, cursors, the peer registry, and durable knowledge in cc-notes.
 ---
 
 # Using cci
@@ -169,6 +169,53 @@ always print whole records.
 JSON ignores `--width` and keeps record text whole. Tail, grep, and state
 still apply their byte budgets in both formats. Wider lines can leave room
 for fewer records within a budget.
+
+## Find and reach a sibling session
+
+Every Claude Code session on this machine is a peer in one machine-wide
+registry, whatever its drive or worktree. `cci who` lists the live ones, one
+line each, ending with the address `SendMessage` accepts:
+
+```bash
+cci who
+cci who --session 06923255
+cci who --worktree /Users/me/.orca/workspaces/monorepo/monorepo/sole
+cci who --branch yasyf/eng-1062-ssql-bucket --role root
+cci who --repo Forge-AI/monorepo --tag release
+cci who -q sandsql --json
+```
+
+```text
+sole-51 root drive=release-v3 branch=main wt=/Users/me/.orca/workspaces/monorepo/monorepo/sole busy 6m "api release" #release session=900424b6 -> uds:/tmp/cc-socks/29348.sock
+```
+
+`--session` takes the id or its prefix, the form agents cite. `--name` takes
+the name `ListAgents` prints, which changes when a session resumes.
+`--worktree` matches the worktree or cwd. `--repo` matches the `owner/name`
+slug, or the git common dir. Pass the trailing `uds:` address to `SendMessage`; subagents
+can run `cci who` even though they lack `ListAgents`. Without `--all`, a
+session whose process has ended is hidden; with it, the line reads
+`gone, last seen <time>`.
+
+Announce what this session is doing so the lines above carry it:
+
+```bash
+cci announce --desc "sandsql replica bake" --tag release --tag sandsql
+```
+
+The `SessionStart` hook and `cci drive use` announce automatically. The role
+comes from the binding: `root`, `lane`, or `session`. The worktree, branch
+and `origin` slug come from git, and the Orca and long-running identity
+variables come from the environment. `--role` overrides the inference; `desk`, `watcher` and
+`codex` are the other values in use. Each hook call refreshes the peer's
+`seen_at`. A subagent shares its parent's session id, so its announce is
+the parent's.
+
+Paste `cci me` into a handoff instead of a session name or a PR list:
+
+```bash
+cci me
+```
 
 ## Watch GO lines with a Monitor
 
