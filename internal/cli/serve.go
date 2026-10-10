@@ -13,6 +13,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/daemon"
 	"github.com/yasyf/cc-inbox/internal/hook"
+	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -93,6 +94,22 @@ func newHookCmd() *cobra.Command {
 				}
 				_, err = ensureDaemon(cmd.Context(), 10*time.Second)
 				return errors.Join(windowErr, err)
+			}),
+		},
+		&cobra.Command{
+			Use:  "announce",
+			Args: cobra.NoArgs,
+			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+				p, err := hook.Read(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				window, err := thisWindow()
+				if err != nil {
+					return err
+				}
+				_, err = peers.Announce(cmd.Context(), st, peers.Options{Session: p.SessionID, Window: window, Cwd: p.Cwd})
+				return err
 			}),
 		},
 		&cobra.Command{

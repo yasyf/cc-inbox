@@ -29,12 +29,16 @@ type Peer struct {
 	Env         map[string]string `json:"env,omitempty"`
 	AnnouncedAt time.Time         `json:"announced_at"`
 	SeenAt      time.Time         `json:"seen_at"`
+	Superseded  bool              `json:"superseded,omitempty"`
 }
 
-const peerColumns = "session, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at"
+const peerColumns = "session, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded"
 
 // Announce upserts the session's announced attributes and leaves its drive
-// binding as Bind and BindLane set it.
+// binding as Bind and BindLane set it. An empty role, description or tag list
+// keeps the stored one, so an automatic announce never erases an explicit
+// one. Another session announced from the same process, the one a /clear
+// replaced, is marked superseded.
 func (s *Store) Announce(ctx context.Context, p Peer) (Peer, error) {
 	if p.Session == "" {
 		return Peer{}, errors.New("announce: session is required")
@@ -43,11 +47,28 @@ func (s *Store) Announce(ctx context.Context, p Peer) (Peer, error) {
 	p.AnnouncedAt, p.SeenAt = now, now
 	tags, _ := json.Marshal(nonNil(p.Tags))
 	env, _ := json.Marshal(p.Env)
-	_, err := s.db.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at)
-VALUES (?, '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-ON CONFLICT (session) DO UPDATE SET role = excluded.role, description = excluded.description, tags = excluded.tags, cwd = excluded.cwd, repo = excluded.repo, worktree = excluded.worktree, branch = excluded.branch, remote = excluded.remote, pid = excluded.pid, pid_started = excluded.pid_started, env = excluded.env, announced_at = excluded.announced_at, seen_at = excluded.seen_at`,
-		p.Session, p.Role, p.Description, string(tags), p.Cwd, p.Repo, p.Worktree, p.Branch, p.Remote, p.PID, p.PIDStarted, string(env), now.UnixMilli(), now.UnixMilli())
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
+		return Peer{}, fmt.Errorf("announce %s: %w", p.Session, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
+VALUES (?, '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+ON CONFLICT (session) DO UPDATE SET
+	role = CASE WHEN excluded.role = '' THEN sessions.role ELSE excluded.role END,
+	description = CASE WHEN excluded.description = '' THEN sessions.description ELSE excluded.description END,
+	tags = CASE WHEN excluded.tags = '[]' THEN sessions.tags ELSE excluded.tags END,
+	cwd = excluded.cwd, repo = excluded.repo, worktree = excluded.worktree, branch = excluded.branch, remote = excluded.remote,
+	pid = excluded.pid, pid_started = excluded.pid_started, env = excluded.env, announced_at = excluded.announced_at, seen_at = excluded.seen_at, superseded = 0`,
+		p.Session, p.Role, p.Description, string(tags), p.Cwd, p.Repo, p.Worktree, p.Branch, p.Remote, p.PID, p.PIDStarted, string(env), now.UnixMilli(), now.UnixMilli()); err != nil {
+		return Peer{}, fmt.Errorf("announce %s: %w", p.Session, err)
+	}
+	if p.PID != 0 {
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET superseded = 1 WHERE pid = ? AND pid_started = ? AND session != ?", p.PID, p.PIDStarted, p.Session); err != nil {
+			return Peer{}, fmt.Errorf("supersede sessions of pid %d: %w", p.PID, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
 		return Peer{}, fmt.Errorf("announce %s: %w", p.Session, err)
 	}
 	return s.Peer(ctx, p.Session)
@@ -97,7 +118,7 @@ func scanPeer(row scanner) (Peer, error) {
 		tags, env           string
 		announcedAt, seenAt int64
 	)
-	if err := row.Scan(&p.Session, &p.Drive, &p.Root, &p.Lane, &p.Role, &p.Description, &tags, &p.Cwd, &p.Repo, &p.Worktree, &p.Branch, &p.Remote, &p.PID, &p.PIDStarted, &env, &announcedAt, &seenAt); err != nil {
+	if err := row.Scan(&p.Session, &p.Drive, &p.Root, &p.Lane, &p.Role, &p.Description, &tags, &p.Cwd, &p.Repo, &p.Worktree, &p.Branch, &p.Remote, &p.PID, &p.PIDStarted, &env, &announcedAt, &seenAt, &p.Superseded); err != nil {
 		return Peer{}, err
 	}
 	if err := json.Unmarshal([]byte(tags), &p.Tags); err != nil {

@@ -92,8 +92,8 @@ func (s *Store) Claims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
 		params = append(params, f.Kind)
 	}
 	if f.Key != "" {
-		clauses = append(clauses, "(key = ? OR (kind = 'build' AND key LIKE '%/builds/' || ?))")
-		params = append(params, f.Key, f.Key)
+		clauses = append(clauses, `(key = ? OR (kind = 'build' AND key LIKE '%/builds/' || ? ESCAPE '\'))`)
+		params = append(params, f.Key, likeLiteral(f.Key))
 	}
 	where := ""
 	if len(clauses) > 0 {
@@ -117,6 +117,10 @@ func (s *Store) Claims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
 		out = append(out, c)
 	}
 	return out, rows.Err()
+}
+
+func likeLiteral(v string) string {
+	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(v)
 }
 
 const derivedRel = `CASE r.kind

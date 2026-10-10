@@ -123,6 +123,10 @@ func thisWindow() (store.Window, error) {
 	if pid == 0 {
 		return store.Window{}, errNoSession
 	}
+	return windowOf(pid)
+}
+
+func windowOf(pid int) (store.Window, error) {
 	p, err := process.NewProcess(int32(pid)) //nolint:gosec // G115: OS pids fit in int32.
 	if err != nil {
 		return store.Window{}, fmt.Errorf("open claude pid %d: %w", pid, err)

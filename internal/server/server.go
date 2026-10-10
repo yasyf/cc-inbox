@@ -141,13 +141,24 @@ func (s *Server) lanes(w http.ResponseWriter, r *http.Request) {
 func (s *Server) peers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := peers.Filter{Session: q.Get("session"), Name: q.Get("name"), Role: q.Get("role"), Drive: q.Get("drive"), Lane: q.Get("lane"), Tag: q.Get("tag"), Repo: q.Get("repo"), Worktree: q.Get("worktree"), Branch: q.Get("branch"), Query: q.Get("q"), Rel: q.Get("rel"), All: q.Get("all") == "1"}
-	switch pr, build, ref := q.Get("pr"), q.Get("build"), q.Get("ref"); {
+	pr, build, ref := q.Get("pr"), q.Get("build"), q.Get("ref")
+	selectors := 0
+	for _, v := range []string{pr, build, ref} {
+		if v != "" {
+			selectors++
+		}
+	}
+	switch {
+	case selectors > 1:
+		respond(w, nil, badRequest{errors.New("pass one of pr, build or ref")})
+		return
 	case pr != "":
-		if _, err := strconv.Atoi(pr); err != nil {
+		n, err := strconv.Atoi(pr)
+		if err != nil {
 			respond(w, nil, badRequest{errors.New("pr must be a number")})
 			return
 		}
-		f.Kind, f.Key = "pr", pr
+		f.Kind, f.Key = "pr", strconv.Itoa(n)
 	case build != "":
 		f.Kind, f.Key = "build", build
 	case ref != "":

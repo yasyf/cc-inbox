@@ -46,6 +46,8 @@ func TestClaimsExplicitAndDerived(t *testing.T) {
 		{"by rel", store.ClaimFilter{Rel: "owns"}, []want{{"root-1", "owns", "thread", "C1/1.2", "claim"}}},
 		{"by session", store.ClaimFilter{Sessions: []string{"lane-1"}, Kind: "target"}, []want{{"lane-1", "mentioned", "target", "api", "#2"}}},
 		{"unbound lane derives nothing", store.ClaimFilter{Kind: "pr", Key: "1"}, nil},
+		{"build wildcards are literal", store.ClaimFilter{Kind: "build", Key: "48_0"}, nil},
+		{"build percent is literal", store.ClaimFilter{Kind: "build", Key: "%"}, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -129,5 +131,41 @@ func TestCrossDriveDelivery(t *testing.T) {
 	}
 	if !store.CrossDrive([]string{"root", "peer:x"}) || store.CrossDrive([]string{"root"}) {
 		t.Fatal("CrossDrive() misreads recipients")
+	}
+	if got, err := st.Query(ctx, store.Filter{Drive: "b", For: "root", To: "api"}); err != nil || len(got) != 1 || got[0].Text != "api go" {
+		t.Fatalf("--reader root --to api = %+v, %v; want only the record addressed to api@b", got, err)
+	}
+}
+
+func TestLaneCursorStartsBeforeCrossDriveRecords(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	started := clock.Now()
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Go, Text: "go api", To: []string{"api@b"}})
+	testutil.Post(t, st, store.Record{Drive: "b", Lane: "api", Kind: kinds.State, Text: "first local post"})
+	if err := st.BindLane(ctx, "s-api", "b", "api", started); err != nil {
+		t.Fatal(err)
+	}
+	seq, ok, err := st.Cursor(ctx, store.LaneCursor("s-api"), "b")
+	if err != nil || !ok || seq != 0 {
+		t.Fatalf("lane cursor = %d %v %v; want 0 so #1 (api@b) is delivered", seq, ok, err)
+	}
+}
+
+func TestCompactKeepsCrossDriveResolvers(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	ask := testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Ask, Text: "take it?", To: []string{store.PeerAddress("sess-b")}})
+	testutil.Post(t, st, store.Record{Drive: "b", Lane: "root", Kind: kinds.Answer, Text: "yes", Resolves: ask.Seq, To: []string{store.PeerAddress("sess-a")}})
+	testutil.Post(t, st, store.Record{Drive: "b", Lane: "root", Kind: kinds.State, Text: "old state"})
+	clock.Advance(72 * time.Hour)
+	res, err := st.Compact(ctx, "b", 48*time.Hour)
+	if err != nil || res.Folded != 1 {
+		t.Fatalf("Compact(b) = %+v, %v; want the state folded and the resolver kept", res, err)
+	}
+	open, err := st.OpenItems(ctx, "a")
+	if err != nil || len(open) != 0 {
+		t.Fatalf("OpenItems(a) after compacting b = %+v, %v; want the ask still resolved", open, err)
 	}
 }

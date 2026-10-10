@@ -36,7 +36,7 @@ func TestAnnounceKeepsBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if again.Drive != "d" || !again.Root || again.Role != "lane" || again.Description != "" || again.Tags != nil || !again.SeenAt.Equal(clock.Now()) {
+	if again.Drive != "d" || !again.Root || again.Role != "lane" || again.Description != "ship it" || len(again.Tags) != 1 || again.PID != 0 || !again.SeenAt.Equal(clock.Now()) {
 		t.Fatalf("second Announce() = %+v", again)
 	}
 	b, ok, err := st.Binding(ctx, "s1")
@@ -63,5 +63,69 @@ func TestAnnounceWithoutDriveIsNotABinding(t *testing.T) {
 	}
 	if b, ok, err := st.Binding(ctx, "s2"); err != nil || !ok || b.Drive != "d" {
 		t.Fatalf("Binding(after bind) = %+v %v %v", b, ok, err)
+	}
+}
+
+func TestAnnounceKeepsExplicitAttributesAndSupersedes(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	if _, err := st.Announce(ctx, store.Peer{Session: "old", Role: "watcher", Description: "watch release", Tags: []string{"release"}, PID: 7, PIDStarted: 1}); err != nil {
+		t.Fatal(err)
+	}
+	auto, err := st.Announce(ctx, store.Peer{Session: "old", PID: 7, PIDStarted: 1, Branch: "main"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auto.Role != "watcher" || auto.Description != "watch release" || len(auto.Tags) != 1 || auto.Branch != "main" || auto.Superseded {
+		t.Fatalf("automatic announce changed explicit attributes: %+v", auto)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: "new", PID: 7, PIDStarted: 1}); err != nil {
+		t.Fatal(err)
+	}
+	old, err := st.Peer(ctx, "old")
+	if err != nil || !old.Superseded {
+		t.Fatalf("old session after /clear = %+v, %v; want superseded", old, err)
+	}
+	back, err := st.Announce(ctx, store.Peer{Session: "old", PID: 9, PIDStarted: 2})
+	if err != nil || back.Superseded {
+		t.Fatalf("resumed old session = %+v, %v; want live again", back, err)
+	}
+	if fresh, err := st.Peer(ctx, "new"); err != nil || fresh.Superseded {
+		t.Fatalf("new session after a different pid announced = %+v, %v", fresh, err)
+	}
+}
+
+func TestBindRefreshesInferredRoleOnly(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	if _, err := st.Announce(ctx, store.Peer{Session: "s", Role: "session"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, "s", "d", "api", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := st.Peer(ctx, "s"); p.Role != "lane" || p.Lane != "api" {
+		t.Fatalf("after BindLane = %+v", p)
+	}
+	if err := st.Bind(ctx, "s", "d", true); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := st.Peer(ctx, "s"); p.Role != "root" || !p.Root {
+		t.Fatalf("after Bind --root = %+v", p)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: "w", Role: "watcher"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, "w", "d", "pr-watch", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := st.Peer(ctx, "w"); p.Role != "watcher" || p.Lane != "pr-watch" {
+		t.Fatalf("explicit role after BindLane = %+v", p)
+	}
+	if err := st.Bind(ctx, "fresh", "d", false); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := st.Peer(ctx, "fresh"); p.Role != "session" {
+		t.Fatalf("Bind of a new session = %+v", p)
 	}
 }

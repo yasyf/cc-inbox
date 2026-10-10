@@ -24,13 +24,20 @@ func Annotate(ctx context.Context, st *store.Store, records []store.Record) erro
 	if !slices.ContainsFunc(records, func(r store.Record) bool { return r.Kind.Opens() }) {
 		return nil
 	}
-	open, err := st.OpenItems(ctx, records[0].Drive)
-	if err != nil {
-		return err
-	}
 	live := map[int64]bool{}
-	for _, o := range open {
-		live[o.Seq] = true
+	seen := map[string]bool{}
+	for _, r := range records {
+		if seen[r.Drive] {
+			continue
+		}
+		seen[r.Drive] = true
+		open, err := st.OpenItems(ctx, r.Drive)
+		if err != nil {
+			return err
+		}
+		for _, o := range open {
+			live[o.Seq] = true
+		}
 	}
 	for i, r := range records {
 		switch {

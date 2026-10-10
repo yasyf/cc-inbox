@@ -99,6 +99,7 @@ ALTER TABLE sessions ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0`,
 	PRIMARY KEY (session, rel, kind, key)
 );
 CREATE INDEX claims_ref ON claims(kind, key)`,
+	`ALTER TABLE sessions ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0`,
 }
 
 var (

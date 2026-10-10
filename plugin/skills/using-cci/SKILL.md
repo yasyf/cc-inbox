@@ -203,10 +203,13 @@ Announce what this session is doing so the lines above carry it:
 cci announce --desc "sandsql replica bake" --tag release --tag sandsql
 ```
 
-The `SessionStart` hook and `cci drive use` announce automatically. The role
-comes from the binding: `root`, `lane`, or `session`. The worktree, branch
-and `origin` slug come from git, and the Orca and long-running identity
-variables come from the environment. `--role` overrides the inference; `desk`, `watcher` and
+The `SessionStart` hook, `cci drive use` and a lane's first post announce
+automatically. The role comes from the binding: `root`, `lane`, or
+`session`; a role, description or tag set by hand stays until the next
+explicit `cci announce` names a new one. The worktree, branch and `origin`
+slug come from git, and the Orca and long-running identity variables come
+from the environment. A codex lane announces under `CODEX_THREAD_ID` with
+the `codex` process as its window. `--role` overrides the inference; `desk`, `watcher` and
 `codex` are the other values in use. Each hook call refreshes the peer's
 `seen_at`. A subagent shares its parent's session id, so its announce is
 the parent's.

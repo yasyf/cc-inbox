@@ -112,3 +112,26 @@ func TestResolveJoinsHarnessAndFilters(t *testing.T) {
 func itoa(n int64) string {
 	return strconv.FormatInt(n, 10)
 }
+
+func TestAnnounceCanonicalizesPathsAndKeepsRole(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	dir := t.TempDir()
+	real, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := peers.Announce(ctx, st, peers.Options{Session: "s", Cwd: dir, Role: "watcher"})
+	if err != nil || first.Cwd != real || first.Role != "watcher" {
+		t.Fatalf("Announce() = %+v, %v; want cwd %s", first, err, real)
+	}
+	again, err := peers.Announce(ctx, st, peers.Options{Session: "s", Cwd: dir})
+	if err != nil || again.Role != "watcher" {
+		t.Fatalf("automatic Announce() = %+v, %v; want role kept", again, err)
+	}
+	views, err := peers.Resolve(ctx, st, peers.Filter{Worktree: dir, All: true})
+	if err != nil || len(views) != 1 {
+		t.Fatalf("Resolve(--worktree %s) = %+v, %v", dir, views, err)
+	}
+}
