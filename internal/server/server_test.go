@@ -12,6 +12,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
@@ -119,4 +120,35 @@ func TestLanesEndpoint(t *testing.T) {
 	if len(lanes) != 2 || lanes[0].Lane != "a" || lanes[0].Text != "new" || lanes[1].Lane != "b" {
 		t.Fatalf("lanes = %+v", lanes)
 	}
+}
+
+func TestPeersEndpoint(t *testing.T) {
+	st, _ := testutil.Store(t)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	ctx := context.Background()
+	if err := st.Bind(ctx, "s1", "d", true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: "s1", Role: "root", Tags: []string{"release"}}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Opened, Text: "opened", Refs: store.Refs{PRs: []int{30431}}})
+	srv := httptest.NewServer(server.New(st, 10*time.Millisecond).Handler())
+	defer srv.Close()
+	var views []peers.View
+	get(t, srv, "/v1/peers?all=1&tag=release", http.StatusOK, &views)
+	if len(views) != 1 || views[0].Session != "s1" || views[0].Role != "root" || views[0].Claims != nil {
+		t.Fatalf("peers = %+v", views)
+	}
+	get(t, srv, "/v1/peers?all=1&pr=30431", http.StatusOK, &views)
+	if len(views) != 1 || len(views[0].Claims) != 1 || views[0].Claims[0].Rel != "opened" {
+		t.Fatalf("peers by pr = %+v", views)
+	}
+	get(t, srv, "/v1/peers?all=1&pr=9", http.StatusOK, &views)
+	if len(views) != 0 {
+		t.Fatalf("peers by unknown pr = %+v", views)
+	}
+	var bad map[string]string
+	get(t, srv, "/v1/peers?pr=x", http.StatusBadRequest, &bad)
+	get(t, srv, "/v1/peers?ref=nokey", http.StatusBadRequest, &bad)
 }

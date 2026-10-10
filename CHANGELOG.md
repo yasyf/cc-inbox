@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refreshes `seen_at`. `cci me` prints this session's line for handoffs.
   The `sessions` table gains the peer columns, so the store schema moves to 7
   and older `cci` builds refuse to open it until upgraded.
+- Claims tie a session to an artifact as `<rel> <kind>:<key>`. `cci claim`
+  and `cci unclaim` record explicit ones (`--pr`, `--build`, `--branch`,
+  `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`,
+  `--ref <kind>:<key>`, `--rel`), and every posted record derives claims on
+  its `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's
+  sessions. `cci who --pr`, `--build`, `--ref` and `--rel` find the sessions
+  behind an artifact and list the claims that matched; `GET /v1/peers` serves
+  the same query. Schema 8 adds the `claims` table.
 
 ## [0.9.3] - 2026-10-09
 

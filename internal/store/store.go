@@ -90,6 +90,15 @@ ALTER TABLE sessions ADD COLUMN pid_started INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sessions ADD COLUMN env TEXT NOT NULL DEFAULT '{}';
 ALTER TABLE sessions ADD COLUMN announced_at INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE sessions ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0`,
+	`CREATE TABLE claims (
+	session TEXT NOT NULL,
+	rel TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	key TEXT NOT NULL,
+	at INTEGER NOT NULL,
+	PRIMARY KEY (session, rel, kind, key)
+);
+CREATE INDEX claims_ref ON claims(kind, key)`,
 }
 
 var (

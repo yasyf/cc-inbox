@@ -90,17 +90,21 @@ func inferRole(ctx context.Context, st *store.Store, session string) (string, er
 	return RoleSession, nil
 }
 
-// View is a peer joined with its harness window, if the harness knows one.
+// View is a peer joined with its harness window, if the harness knows one,
+// and with the claims a ref selector matched.
 type View struct {
 	store.Peer
-	Name     string    `json:"name,omitempty"`
-	Address  string    `json:"address,omitempty"`
-	Status   string    `json:"status,omitempty"`
-	StatusAt time.Time `json:"status_at,omitzero"`
-	Live     bool      `json:"live"`
+	Name     string        `json:"name,omitempty"`
+	Address  string        `json:"address,omitempty"`
+	Status   string        `json:"status,omitempty"`
+	StatusAt time.Time     `json:"status_at,omitzero"`
+	Live     bool          `json:"live"`
+	Claims   []store.Claim `json:"claims,omitempty"`
 }
 
-// Filter selects peers. Every set field must match; Session matches a uuid prefix.
+// Filter selects peers. Every set field must match; Session matches a uuid
+// prefix. Kind, Key and Rel select by claim, and a matched peer carries the
+// claims that selected it.
 type Filter struct {
 	Session  string
 	Name     string
@@ -112,7 +116,14 @@ type Filter struct {
 	Worktree string
 	Branch   string
 	Query    string
+	Kind     string
+	Key      string
+	Rel      string
 	All      bool
+}
+
+func (f Filter) byClaim() bool {
+	return f.Kind != "" || f.Key != "" || f.Rel != ""
 }
 
 // Resolve joins the registry with the harness windows and applies f. Without
@@ -121,6 +132,17 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 	rows, err := st.Peers(ctx)
 	if err != nil {
 		return nil, err
+	}
+	var claimed map[string][]store.Claim
+	if f.byClaim() {
+		claims, err := st.Claims(ctx, store.ClaimFilter{Rel: f.Rel, Kind: f.Kind, Key: f.Key})
+		if err != nil {
+			return nil, err
+		}
+		claimed = make(map[string][]store.Claim, len(claims))
+		for _, c := range claims {
+			claimed[c.Session] = append(claimed[c.Session], c)
+		}
 	}
 	dir, err := harness.Dir()
 	if err != nil {
@@ -133,7 +155,7 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 	now := st.Now()
 	views := make([]View, 0, len(rows)+len(windows))
 	for _, p := range rows {
-		v := View{Peer: p, Live: live(p, now)}
+		v := View{Peer: p, Live: live(p, now), Claims: claimed[p.Session]}
 		if w, ok := windows[p.Session]; ok {
 			v.Name, v.Address, v.Status, v.Live = w.Name, w.Address(), w.Status, w.Alive()
 			v.StatusAt = time.UnixMilli(w.StatusUpdatedAt).UTC()
@@ -152,6 +174,7 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 			Status:   w.Status,
 			StatusAt: time.UnixMilli(w.StatusUpdatedAt).UTC(),
 			Live:     w.Alive(),
+			Claims:   claimed[w.SessionID],
 		})
 	}
 	views = slices.DeleteFunc(views, func(v View) bool { return !f.matches(v) })
@@ -175,7 +198,7 @@ func live(p store.Peer, now time.Time) bool {
 }
 
 func (f Filter) matches(v View) bool {
-	if !f.All && !v.Live {
+	if !f.All && !v.Live || f.byClaim() && len(v.Claims) == 0 {
 		return false
 	}
 	worktree := f.Worktree
@@ -245,6 +268,18 @@ func (v View) Line(now time.Time) string {
 		fmt.Fprintf(&b, " -> %s", v.Address)
 	}
 	return b.String()
+}
+
+// ClaimLines renders the claims that selected the peer, one per line, indented under Line.
+func (v View) ClaimLines(now time.Time) []string {
+	out := make([]string, len(v.Claims))
+	for i, c := range v.Claims {
+		out[i] = fmt.Sprintf("  %s %s %s", c.Rel, c.Ref(), render.Stamp(c.At, now))
+		if c.Source != "claim" {
+			out[i] += " (" + c.Source + ")"
+		}
+	}
+	return out
 }
 
 // Short is the eight-character prefix agents cite a session by.

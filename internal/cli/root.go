@@ -40,6 +40,8 @@ func NewRootCmd() *cobra.Command {
 		newAnnounceCmd(),
 		newMeCmd(),
 		newWhoCmd(),
+		newClaimCmd(),
+		newUnclaimCmd(),
 		newServeCmd(),
 		newDaemonCmd(),
 		newHookCmd(),
