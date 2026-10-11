@@ -277,6 +277,27 @@ to the markdown files.
 
 ---
 
+### Found a relay mesh
+
+The relay admits its first owner only with proof that a release operator
+signed in. On an owner Mac that has run `cci node endorse`:
+
+```bash
+ci cci-relay prove --mesh default --pub "$(cci node --json | jq -r .public_key)" \
+  | cci relay found --url https://<relay URL> --proof -
+```
+
+`cci relay found` sends the proof and this node's endorsement, then joins the
+mesh as its owner and mints the first group key. Admit another owner Mac
+that synckit already pins, or a scoped service key for CI, with Touch ID:
+
+```bash
+cci relay enroll <node> --tier owner --endorsement <its endorsement.json>
+cci relay enroll --tier service --pub <base64 key> --allow 'page:*|oncall.say' --label platy
+```
+
+The new member then runs `cci relay join --url https://<relay URL> --tier <tier>`.
+
 ### Let a machine outside your mesh read a drive
 
 A colleague's laptop sits outside your synckit mesh and should follow your
@@ -335,6 +356,8 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci pair` | Join an owner's mesh as a read-only node. Prints a one-time code and this node's fingerprint, then waits up to `--wait` (default 10 minutes) for an owner to accept. `--url` names the relay, `--mesh` the mesh (default `default`). On acceptance it pins the owners from the accepting owner's signed roster and prints that owner's fingerprint to compare with `cci node` there. |
 | `cci pair accept CODE` | Owner side. Shows the joining node's fingerprint, then asks for Touch ID through `synckitd consent request`, which prompts here or on another attended owner host. The sheet shows the code and the full fingerprint. `--tier service --allow '<drives>\|<kinds>' --label <name>` admits a scoped writer instead of a reader. |
 | `cci unpair NODE` | Owner side. Revokes a node, named by id or fingerprint prefix, through the relay, drops its pin here, and rotates the mesh's group key so it cannot read records written afterward. |
+| `cci relay found` | Found a relay mesh as its first owner. `--proof` names the output of `ci cci-relay prove`, or `-` for stdin; the node must carry its Secure Enclave endorsement. Then joins as owner. |
+| `cci relay enroll [NODE]` | Owner side. Admits an owner NODE pinned here, or with `--tier service --pub <key> --allow '<drives>\|<kinds>' --label <name>` a scoped writer, after Touch ID through `synckitd consent request`, and shares the current group key with it. `--endorsement` carries an owner's endorsement so it can approve pairings. |
 | `cci peers` | List the nodes this one trusts with tier and how each was admitted: `self`, `mesh` (synckit host), `pair`, or `relay`. `--mesh` adds each joined relay's member directory, flagging nodes the relay lists that are not pinned here and tier mismatches. `--json` emits one object per node. |
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`). Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -18,7 +20,7 @@ import (
 
 func newRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relay", Short: "Replicate records end-to-end encrypted through the wide-area relay"}
-	cmd.AddCommand(newRelayJoinCmd(), newRelayPushCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd())
+	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayPushCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd())
 	return cmd
 }
 
@@ -116,6 +118,112 @@ func newRelayJoinCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&services, "service", nil, "pin a service node by its base64 X9.63 public key before joining, so its records and delegated instances verify")
 	cmd.Flags().StringSliceVar(&owners, "owner", nil, "pin an owner node by its base64 X9.63 public key before joining (a fresh node has no other way to trust group-key wraps)")
 	_ = cmd.MarkFlagRequired("url")
+	return cmd
+}
+
+func newRelayFoundCmd() *cobra.Command {
+	var (
+		cfg         relay.Config
+		name, proof string
+	)
+	cmd := &cobra.Command{
+		Use:   "found",
+		Short: "Found a relay mesh as its first owner with the STS proof `ci cci-relay prove` prints, then join it",
+		Args:  cobra.NoArgs,
+		RunE: withNode(func(cmd *cobra.Command, home string, st *store.Store, self node.Node, _ []string) error {
+			raw, err := readProof(cmd, proof)
+			if err != nil {
+				return err
+			}
+			if name == "" {
+				if name, err = os.Hostname(); err != nil {
+					return err
+				}
+			}
+			return pairing.Found(cmd.Context(), home, st, self, cfg, name, raw, cmd.OutOrStdout())
+		}),
+	}
+	cmd.Flags().StringVar(&cfg.URL, "url", "", "relay base URL")
+	cmd.Flags().StringVar(&cfg.Mesh, "mesh", relay.DefaultMesh, "mesh to found")
+	cmd.Flags().StringSliceVar(&cfg.Routes, "route", nil, "drives this mesh carries (exact or trailing *); a mesh without routes carries every other drive")
+	cmd.Flags().StringVar(&proof, "proof", "", "file holding the output of `ci cci-relay prove --mesh <mesh> --pub <this node's public_key>`, or - for stdin")
+	cmd.Flags().StringVar(&name, "name", "", "this node's name in the relay's directory (default: the hostname)")
+	_ = cmd.MarkFlagRequired("url")
+	_ = cmd.MarkFlagRequired("proof")
+	return cmd
+}
+
+func readProof(cmd *cobra.Command, path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(cmd.InOrStdin())
+	}
+	return os.ReadFile(path) //nolint:gosec // G304: the operator names the proof file.
+}
+
+func newRelayEnrollCmd() *cobra.Command {
+	var (
+		mesh, tier, allow, label, name, pub, endorsement string
+		synckitd                                         string
+	)
+	cmd := &cobra.Command{
+		Use:   "enroll [NODE]",
+		Short: "Owner: admit a pinned owner NODE or a scoped service key (--pub) to the relay mesh with Touch ID, and share the group key with it",
+		Args:  cobra.MaximumNArgs(1),
+		RunE: withNode(func(cmd *cobra.Command, home string, st *store.Store, self node.Node, args []string) error {
+			opts := pairing.EnrollOptions{Tier: node.Tier(tier), Name: name}
+			switch opts.Tier {
+			case node.TierOwner:
+				if len(args) != 1 || pub != "" || allow != "" || label != "" {
+					return errors.New("--tier owner takes the pinned owner's NODE id and neither --pub, --allow nor --label")
+				}
+				opts.Target = args[0]
+				if endorsement != "" {
+					raw, err := os.ReadFile(endorsement) //nolint:gosec // G304: the operator names the endorsement file.
+					if err != nil {
+						return err
+					}
+					var e node.Endorsement
+					if err := json.Unmarshal(raw, &e); err != nil {
+						return fmt.Errorf("--endorsement %s: %w", endorsement, err)
+					}
+					opts.Endorsement = &e
+				}
+			case node.TierService:
+				if len(args) != 0 || pub == "" || label == "" || endorsement != "" {
+					return errors.New("--tier service takes --pub, --allow and --label, and no NODE or --endorsement")
+				}
+				key, err := base64.StdEncoding.DecodeString(pub)
+				if err != nil {
+					return fmt.Errorf("--pub %q is not base64: %w", pub, err)
+				}
+				opts.Pub = key
+				if opts.Allow, err = pairing.ParseAllow(allow, label); err != nil {
+					return err
+				}
+				if opts.Name == "" {
+					opts.Name = label
+				}
+			default:
+				return fmt.Errorf("--tier %q: enroll admits owner or service; paired nodes join through cci pair", tier)
+			}
+			cfg, err := joinedConfig(home, mesh)
+			if err != nil {
+				return err
+			}
+			_, err = pairing.Enroll(cmd.Context(), home, st, self, cfg, pairing.Synckitd{Path: synckitd}, opts, cmd.OutOrStdout())
+			return err
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", relay.DefaultMesh, "the mesh to enroll into")
+	cmd.Flags().StringVar(&tier, "tier", "", "owner (a node pinned here as owner) or service (a scoped writer key)")
+	cmd.Flags().StringVar(&pub, "pub", "", "the service key, base64 X9.63, as `cci node --json` prints it")
+	cmd.Flags().StringVar(&allow, "allow", "", "service scope as <drives>|<kinds>, comma-separated, trailing * globs, e.g. 'page:*|oncall.say,oncall.report'")
+	cmd.Flags().StringVar(&label, "label", "", "service writer name stamped on its records")
+	cmd.Flags().StringVar(&name, "name", "", "the member's name in the relay's directory (default: the label, or the node id)")
+	cmd.Flags().StringVar(&endorsement, "endorsement", "", "the owner's $CCI_HOME/node/endorsement.json, copied from its machine, so it can approve pairings with Touch ID")
+	cmd.Flags().StringVar(&synckitd, "synckitd", "synckitd", "the synckitd binary that routes the Touch ID prompt")
+	_ = cmd.Flags().MarkHidden("synckitd")
+	_ = cmd.MarkFlagRequired("tier")
 	return cmd
 }
 
