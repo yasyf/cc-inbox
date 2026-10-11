@@ -6,6 +6,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Multi-origin records for the cross-machine mesh. Every record carries
+  `origin`, the id of the node that wrote it, and `origin_seq`, its seq
+  there; `(origin, origin_seq)` is its identity on every node. `Store.Export`
+  and `Store.Apply` move records between nodes. Apply rewrites `re` and
+  `resolves` to local seqs and holds a reply until its target arrives.
+  Transport receipts, per-peer acked watermarks, pinned members, and
+  replicated sessions and claims live beside them. Compaction never folds a
+  record a peer has not acked, and a folded remote record stays refused if a
+  transport replays it. Schema 11; older binaries refuse the store.
+- Records for services: a dotted kind such as `oncall.fix.status` is a
+  namespaced service kind with a 14-day TTL, `cci post --attr k=v` fills
+  `fields.attrs`, and `--body-file` attaches a JSON `body` of up to 64 KiB.
+  A post whose `--id` the drive already holds returns the stored record.
+  `cci cursor set` moves a cursor backwards for a reader that restarts. The
+  channel tag and text `cci watch` print a record's body under its line, and
+  the tag's meta carries its `id`.
+- `--to peer:<node>/<session>` addresses a session on another node, `cci who`
+  lists replicated sessions, and `--origin` narrows reads and `who` to one
+  node.
+
+### Fixed
+
+- Compacting a drive deleted a resolver whose target lives in another drive
+  unless the resolver was itself addressed across drives, so the other
+  drive's digest reported the item open again. Compaction now keeps every
+  resolver whose target sits in another drive.
+- `cci state` kept the record that arrived last for a kind, lane and topic;
+  it now keeps the newest by time, so a late replicated record cannot mask a
+  newer local one.
+
 ## [0.10.4] - 2026-10-11
 
 ### Added

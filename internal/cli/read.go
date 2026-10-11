@@ -58,7 +58,7 @@ func newWatchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, inbox.WriteLines(cmd.OutOrStdout()))
+			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, inbox.WriteLines(cmd.OutOrStdout(), rf.json))
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)

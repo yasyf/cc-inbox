@@ -31,6 +31,7 @@ type Peer struct {
 	Session     string            `json:"session"`
 	Agent       string            `json:"agent,omitempty"`
 	AgentName   string            `json:"agent_name,omitempty"`
+	Origin      string            `json:"origin,omitempty"`
 	Drive       string            `json:"drive,omitempty"`
 	Root        bool              `json:"root,omitempty"`
 	Lane        string            `json:"lane,omitempty"`
@@ -54,7 +55,7 @@ func (p Peer) Key() PeerKey {
 	return PeerKey{Session: p.Session, Agent: p.Agent}
 }
 
-const peerColumns = "session, agent, agent_name, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded"
+const peerColumns = "session, agent, agent_name, origin, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded"
 
 // Announce upserts the thread's announced attributes and leaves its drive
 // binding as Bind and BindLane set it. An empty role, description, tag list
@@ -74,20 +75,23 @@ func (s *Store) Announce(ctx context.Context, p Peer) (Peer, error) {
 		return Peer{}, fmt.Errorf("announce %s: %w", p.Session, err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, agent_name, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
-VALUES (?, ?, ?, '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-ON CONFLICT (session, agent) DO UPDATE SET
+	if err := s.claimSession(ctx, tx, p.Session); err != nil {
+		return Peer{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, agent_name, origin, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
+VALUES (?, ?, ?, ?, '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin,
 	agent_name = CASE WHEN excluded.agent_name = '' THEN sessions.agent_name ELSE excluded.agent_name END,
 	role = CASE WHEN excluded.role = '' THEN sessions.role ELSE excluded.role END,
 	description = CASE WHEN excluded.description = '' THEN sessions.description ELSE excluded.description END,
 	tags = CASE WHEN excluded.tags = '[]' THEN sessions.tags ELSE excluded.tags END,
 	cwd = excluded.cwd, repo = excluded.repo, worktree = excluded.worktree, branch = excluded.branch, remote = excluded.remote,
 	pid = excluded.pid, pid_started = excluded.pid_started, env = excluded.env, announced_at = excluded.announced_at, seen_at = excluded.seen_at, superseded = 0`,
-		p.Session, p.Agent, p.AgentName, p.Role, p.Description, string(tags), p.Cwd, p.Repo, p.Worktree, p.Branch, p.Remote, p.PID, p.PIDStarted, string(env), now.UnixMilli(), now.UnixMilli()); err != nil {
+		p.Session, p.Agent, p.AgentName, s.Self(), p.Role, p.Description, string(tags), p.Cwd, p.Repo, p.Worktree, p.Branch, p.Remote, p.PID, p.PIDStarted, string(env), now.UnixMilli(), now.UnixMilli()); err != nil {
 		return Peer{}, fmt.Errorf("announce %s: %w", p.Key(), err)
 	}
 	if p.PID != 0 && p.Agent == "" {
-		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET superseded = 1 WHERE pid = ? AND pid_started = ? AND session != ?", p.PID, p.PIDStarted, p.Session); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE sessions SET superseded = 1 WHERE pid = ? AND pid_started = ? AND session != ? AND origin = ?", p.PID, p.PIDStarted, p.Session, s.Self()); err != nil {
 			return Peer{}, fmt.Errorf("supersede sessions of pid %d: %w", p.PID, err)
 		}
 	}
@@ -115,7 +119,7 @@ func (s *Store) Retire(ctx context.Context, k PeerKey) error {
 
 // Peer reads one thread's row; a thread that never bound or announced is sql.ErrNoRows.
 func (s *Store) Peer(ctx context.Context, k PeerKey) (Peer, error) {
-	p, err := scanPeer(s.db.QueryRowContext(ctx, "SELECT "+peerColumns+" FROM sessions WHERE session = ? AND agent = ?", k.Session, k.Agent))
+	p, err := s.scanPeer(s.db.QueryRowContext(ctx, "SELECT "+peerColumns+" FROM sessions WHERE session = ? AND agent = ?", k.Session, k.Agent))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Peer{}, err
 	}
@@ -134,7 +138,7 @@ func (s *Store) Peers(ctx context.Context) ([]Peer, error) {
 	defer func() { _ = rows.Close() }()
 	var out []Peer
 	for rows.Next() {
-		p, err := scanPeer(rows)
+		p, err := s.scanPeer(rows)
 		if err != nil {
 			return nil, fmt.Errorf("scan peer: %w", err)
 		}
@@ -143,13 +147,13 @@ func (s *Store) Peers(ctx context.Context) ([]Peer, error) {
 	return out, rows.Err()
 }
 
-func scanPeer(row scanner) (Peer, error) {
+func (s *Store) scanPeer(row scanner) (Peer, error) {
 	var (
 		p                   Peer
 		tags, env           string
 		announcedAt, seenAt int64
 	)
-	if err := row.Scan(&p.Session, &p.Agent, &p.AgentName, &p.Drive, &p.Root, &p.Lane, &p.Role, &p.Description, &tags, &p.Cwd, &p.Repo, &p.Worktree, &p.Branch, &p.Remote, &p.PID, &p.PIDStarted, &env, &announcedAt, &seenAt, &p.Superseded); err != nil {
+	if err := row.Scan(&p.Session, &p.Agent, &p.AgentName, &p.Origin, &p.Drive, &p.Root, &p.Lane, &p.Role, &p.Description, &tags, &p.Cwd, &p.Repo, &p.Worktree, &p.Branch, &p.Remote, &p.PID, &p.PIDStarted, &env, &announcedAt, &seenAt, &p.Superseded); err != nil {
 		return Peer{}, err
 	}
 	if err := json.Unmarshal([]byte(tags), &p.Tags); err != nil {
@@ -164,6 +168,7 @@ func scanPeer(row scanner) (Peer, error) {
 	if len(p.Env) == 0 {
 		p.Env = nil
 	}
+	p.Origin = s.local(p.Origin)
 	p.AnnouncedAt = time.UnixMilli(announcedAt).UTC()
 	p.SeenAt = time.UnixMilli(seenAt).UTC()
 	if p.Role == "" {
@@ -189,4 +194,22 @@ func nonNil(v []string) []string {
 		return []string{}
 	}
 	return v
+}
+
+// Redacted is the peer as a paired viewer sees it, without its process,
+// environment, repository or filesystem paths.
+func (p Peer) Redacted() Peer {
+	p.PID, p.PIDStarted, p.Env, p.Cwd, p.Worktree, p.Repo = 0, 0, nil, "", "", ""
+	return p
+}
+
+// claimSession drops a replicated row holding a session id this node now
+// uses, so a local session never inherits another node's binding or claims.
+func (s *Store) claimSession(ctx context.Context, tx *sql.Tx, session string) error {
+	for _, q := range []string{"DELETE FROM claims WHERE session = ? AND origin != ?", "DELETE FROM sessions WHERE session = ? AND origin != ?"} {
+		if _, err := tx.ExecContext(ctx, q, session, s.Self()); err != nil {
+			return fmt.Errorf("claim session %s: %w", session, err)
+		}
+	}
+	return nil
 }

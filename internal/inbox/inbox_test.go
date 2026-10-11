@@ -237,7 +237,7 @@ func TestWatchEmitsOnlyNewMatchingRecords(t *testing.T) {
 			Cursor:   "monitor",
 			Interval: 5 * time.Millisecond,
 			For:      time.Minute,
-		}, inbox.WriteLines(&out))
+		}, inbox.WriteLines(&out, false))
 	}()
 	time.Sleep(50 * time.Millisecond)
 	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "filtered out"})

@@ -16,6 +16,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/gitinfo"
 	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -142,14 +143,17 @@ type View struct {
 	Claims   []store.Claim `json:"claims,omitempty"`
 }
 
-// Filter selects peers. Every set field must match; Session matches a uuid
-// prefix and Agent an agent id or name. Root keeps only root threads. Kind,
-// Key and Rel select by claim, and a matched peer carries the claims that
-// selected it.
+// Filter selects peers. Every set field must match; Session and Origin match
+// a prefix, Origin "-" matches this node's own sessions, and Agent matches an
+// agent id or name. Root keeps only root threads. Kind, Key and Rel select by
+// claim, and a matched peer carries the claims that selected it. Viewer is
+// the tier of whoever reads the result: a paired viewer sees no process,
+// environment or filesystem detail.
 type Filter struct {
 	Session  string
 	Agent    string
 	Root     bool
+	Origin   string
 	Name     string
 	Role     string
 	Drive    string
@@ -163,12 +167,16 @@ type Filter struct {
 	Key      string
 	Rel      string
 	All      bool
+	Viewer   node.Tier
 }
 
 // KeyFilter selects exactly the thread k names, live or not.
 func KeyFilter(k store.PeerKey) Filter {
 	return Filter{Session: k.Session, Agent: k.Agent, Root: k.Agent == "", All: true}
 }
+
+// LocalOrigin is the Filter.Origin that selects this node's own sessions.
+const LocalOrigin = "-"
 
 func (f Filter) byClaim() bool {
 	return f.Kind != "" || f.Key != "" || f.Rel != ""
@@ -177,6 +185,9 @@ func (f Filter) byClaim() bool {
 // Resolve joins the registry with the harness windows and applies f. Without
 // All, only live peers are returned.
 func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
+	if f.Origin == st.Self() {
+		f.Origin = LocalOrigin
+	}
 	rows, err := st.Peers(ctx)
 	if err != nil {
 		return nil, err
@@ -204,7 +215,10 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 	views := make([]View, 0, len(rows)+len(windows))
 	for _, p := range rows {
 		v := View{Peer: p, Live: live(p, now), Claims: claimed[p.Key()]}
-		if p.Agent != "" {
+		if p.Origin != "" {
+			v.Address = store.PeerAddressOn(p.Origin, p.Key().String())
+		}
+		if p.Agent != "" || p.Origin != "" {
 			v.Name = p.AgentName
 			views = append(views, v)
 			continue
@@ -231,6 +245,11 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 		})
 	}
 	views = slices.DeleteFunc(views, func(v View) bool { return !f.matches(v) })
+	if f.Viewer == node.TierPaired {
+		for i := range views {
+			views[i].Peer = views[i].Redacted()
+		}
+	}
 	slices.SortFunc(views, func(a, b View) int {
 		if a.Live != b.Live {
 			if a.Live {
@@ -247,7 +266,7 @@ func live(p store.Peer, now time.Time) bool {
 	switch {
 	case p.Superseded:
 		return false
-	case p.PID != 0:
+	case p.Origin == "" && p.PID != 0:
 		return harness.ProcessAlive(p.PID, p.PIDStarted)
 	}
 	return now.Sub(p.SeenAt) < StaleAfter
@@ -268,6 +287,7 @@ func (f Filter) matches(v View) bool {
 	return (f.Session == "" || strings.HasPrefix(v.Session, f.Session)) &&
 		(f.Agent == "" || v.Agent == f.Agent || v.AgentName == f.Agent) &&
 		(!f.Root || v.Agent == "") &&
+		(f.Origin == "" || f.Origin == LocalOrigin && v.Origin == "" || f.Origin != LocalOrigin && v.Origin != "" && strings.HasPrefix(v.Origin, f.Origin)) &&
 		(f.Name == "" || v.Name == f.Name) &&
 		(f.Role == "" || v.Role == f.Role) &&
 		(f.Drive == "" || v.Drive == f.Drive) &&

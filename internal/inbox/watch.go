@@ -7,6 +7,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -77,8 +78,12 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 	}
 }
 
-func WriteLines(w io.Writer) func(store.Record, string) error {
-	return func(_ store.Record, line string) error {
+// WriteLines prints each watched line, with a text line's record body under it.
+func WriteLines(w io.Writer, asJSON bool) func(store.Record, string) error {
+	return func(r store.Record, line string) error {
+		if !asJSON {
+			line = render.WithBody(line, r)
+		}
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return fmt.Errorf("write watch line: %w", err)
 		}

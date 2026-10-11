@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -27,6 +28,9 @@ func Stamp(t, now time.Time) string {
 func Line(r store.Record, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
+	if r.Origin != "" {
+		fmt.Fprintf(&b, " origin:%s", r.Origin)
+	}
 	if len(r.To) > 0 {
 		fmt.Fprintf(&b, " -> %s", strings.Join(recipients(r.To), ","))
 	}
@@ -66,6 +70,18 @@ func Line(r store.Record, now time.Time) string {
 		fmt.Fprintf(&b, " %s", r.Refs.Path)
 	}
 	return b.String()
+}
+
+// WithBody appends the record's JSON body, indented, on the lines after line.
+func WithBody(line string, r store.Record) string {
+	if len(r.Body) == 0 {
+		return line
+	}
+	var b bytes.Buffer
+	if err := json.Indent(&b, r.Body, "", "  "); err != nil {
+		panic(fmt.Sprintf("indent body of #%d: %v", r.Seq, err))
+	}
+	return line + "\n" + b.String()
 }
 
 func JSON(r store.Record) string {
@@ -127,13 +143,18 @@ func (b *Budget) Trailer(s string) {
 func recipients(to []string) []string {
 	out := make([]string, len(to))
 	for i, t := range to {
-		if peer, ok := strings.CutPrefix(t, "peer:"); ok {
-			session, agent, _ := strings.Cut(peer, "/")
+		if target, ok := strings.CutPrefix(t, "peer:"); ok {
+			node, rest := store.SplitPeer(target)
+			session, agent, _ := strings.Cut(rest, "/")
 			if len(session) > 8 {
-				t = "peer:" + session[:8]
-				if agent != "" {
-					t += "/" + agent
-				}
+				session = session[:8]
+			}
+			t = "peer:" + session
+			if agent != "" {
+				t += "/" + agent
+			}
+			if node != "" {
+				t = store.PeerAddressOn(node, strings.TrimPrefix(t, "peer:"))
 			}
 		}
 		out[i] = t

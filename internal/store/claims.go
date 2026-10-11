@@ -45,8 +45,8 @@ func (s *Store) Claim(ctx context.Context, c Claim) (Claim, error) {
 		return Claim{}, errors.New("claim needs a session, rel, kind and key")
 	}
 	c.At, c.Source = s.Now().UTC(), "claim"
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO claims (session, agent, rel, kind, key, at) VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT (session, agent, rel, kind, key) DO UPDATE SET at = excluded.at`, c.Session, c.Agent, c.Rel, c.Kind, c.Key, c.At.UnixMilli()); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO claims (session, agent, rel, kind, key, at, origin) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (session, agent, rel, kind, key) DO UPDATE SET at = excluded.at, origin = excluded.origin`, c.Session, c.Agent, c.Rel, c.Kind, c.Key, c.At.UnixMilli(), s.Self()); err != nil {
 		return Claim{}, fmt.Errorf("claim %s %s: %w", c.Rel, c.Ref(), err)
 	}
 	return c, nil
@@ -54,7 +54,7 @@ ON CONFLICT (session, agent, rel, kind, key) DO UPDATE SET at = excluded.at`, c.
 
 // Unclaim removes an explicit association and reports whether one existed.
 func (s *Store) Unclaim(ctx context.Context, c Claim) (bool, error) {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM claims WHERE session = ? AND agent = ? AND rel = ? AND kind = ? AND key = ?", c.Session, c.Agent, c.Rel, c.Kind, c.Key)
+	res, err := s.db.ExecContext(ctx, "DELETE FROM claims WHERE session = ? AND agent = ? AND rel = ? AND kind = ? AND key = ? AND origin = ?", c.Session, c.Agent, c.Rel, c.Kind, c.Key, s.Self())
 	if err != nil {
 		return false, fmt.Errorf("unclaim %s %s: %w", c.Rel, c.Ref(), err)
 	}
@@ -138,7 +138,7 @@ const derivedRel = `CASE r.kind
 	WHEN 'handoff' THEN 'handed-off'
 	ELSE 'mentioned' END`
 
-const laneSessions = `JOIN sessions s ON s.drive = r.drive AND (s.lane = r.lane OR (s.root AND r.lane IN ('root', 'main')))`
+const laneSessions = `JOIN sessions s ON s.origin = r.origin AND s.drive = r.drive AND (s.lane = r.lane OR (s.root AND r.lane IN ('root', 'main')))`
 
 var claimsUnion = strings.Join([]string{
 	"SELECT session, agent, rel, kind, key, at, 'claim' AS source FROM claims",

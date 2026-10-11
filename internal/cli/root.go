@@ -52,6 +52,7 @@ func NewRootCmd() *cobra.Command {
 		newUnsubscribeCmd(),
 		newChannelCmd(),
 		newNodeCmd(),
+		newCursorCmd(),
 	)
 	return root
 }
@@ -84,6 +85,7 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 
 type readFlags struct {
 	drive  string
+	origin string
 	kinds  []string
 	lanes  []string
 	to     string
@@ -110,6 +112,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringVar(&f.stack, "stack", "", "only records about this <project>/<env> stack")
 		cmd.Flags().StringVar(&f.target, "target", "", "only records about this release target")
 		cmd.Flags().IntVar(&f.pr, "pr", 0, "only records about this pull request")
+		cmd.Flags().StringVar(&f.origin, "origin", "", "only records written on this node (cci node prints its id)")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), a Pacific clock time (9:00 AM, 21:30, 12:0x), or an RFC3339 time")
 	cmd.Flags().IntVar(&f.budget, "budget", budget, "output budget in bytes")
@@ -129,7 +132,7 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 	if err != nil {
 		return store.Filter{}, err
 	}
-	out := store.Filter{Drive: drive, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
+	out := store.Filter{Drive: drive, Origin: f.origin, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
 	if f.to == "" {
 		out.Peer = selfPeer().String()
 	}

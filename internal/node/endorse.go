@@ -88,8 +88,20 @@ func (n Node) Endorse(ctx context.Context, home string) (Endorsement, error) {
 	if err != nil {
 		return Endorsement{}, fmt.Errorf("encode endorsement: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(Dir(home), endorsementFile), append(raw, '\n'), 0o600); err != nil {
+	tmp, err := os.CreateTemp(Dir(home), ".endorsement-*.json")
+	if err != nil {
 		return Endorsement{}, fmt.Errorf("write endorsement: %w", err)
+	}
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if _, err := tmp.Write(append(raw, '\n')); err != nil {
+		_ = tmp.Close()
+		return Endorsement{}, fmt.Errorf("write endorsement: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return Endorsement{}, fmt.Errorf("write endorsement: %w", err)
+	}
+	if err := os.Rename(tmp.Name(), filepath.Join(Dir(home), endorsementFile)); err != nil {
+		return Endorsement{}, fmt.Errorf("install endorsement: %w", err)
 	}
 	return e, nil
 }
