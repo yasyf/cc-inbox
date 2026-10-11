@@ -264,6 +264,35 @@ to the markdown files.
 
 ---
 
+### Let a machine outside your mesh read a drive
+
+A colleague's laptop sits outside your synckit mesh and should follow your
+drives. On their machine:
+
+```bash
+cci pair --url https://<relay URL>
+```
+
+```text
+pairing code  7K2M-Q9XD
+fingerprint   3f9a 0c1d 2b4e 5f60 ...
+On an owner machine run: cci pair accept 7K2M-Q9XD --mesh default
+```
+
+On one of your machines, check that the fingerprint matches, then approve:
+
+```bash
+cci pair accept 7K2M-Q9XD
+```
+
+The Touch ID sheet repeats the code and the fingerprint. When no one is at
+that machine, `synckitd` routes the prompt to an attended owner host. Their
+`cci pair` then prints your node's fingerprint for them to compare with
+`cci node`. From then on their daemon pulls and decrypts your records. It is a reader:
+the relay rejects any record it posts, unpairs it on every node, and the
+owners rotate the group key. `cci unpair <node>` does the same on demand,
+and `cci peers --mesh` shows who can still read.
+
 ## Commands
 
 Use `cci --help` for the command list and `cci post --help` for posting options.
@@ -290,6 +319,10 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci mesh enable` | Write the synckit manifest for service `cci`, register it with `synckitd`, and ensure the daemon, which then runs the mesh helper. Each Mac in the synckit mesh runs it once. |
 | `cci mesh status` | Print this node, its latest record, and per synckit host the enrolled node, the acked record, the delivery state, and the last error; `--json` emits the report. |
 | `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Subagents and teammates list as their own peers, and sessions replicated from other nodes list too, live while seen in the last 15 minutes and addressed as `peer:<node>/<session>`. Narrow with `--session <id or prefix>`, `--agent <id or name>`, `--origin <node prefix>`, where `-` selects this machine, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
+| `cci pair` | Join an owner's mesh as a read-only node. Prints a one-time code and this node's fingerprint, then waits up to `--wait` (default 10 minutes) for an owner to accept. `--url` names the relay, `--mesh` the mesh (default `default`). On acceptance it pins the owners from the accepting owner's signed roster and prints that owner's fingerprint to compare with `cci node` there. |
+| `cci pair accept CODE` | Owner side. Shows the joining node's fingerprint, then asks for Touch ID through `synckitd consent request`, which prompts here or on another attended owner host. The sheet shows the code and the full fingerprint. `--tier service --allow '<drives>\|<kinds>' --label <name>` admits a scoped writer instead of a reader. |
+| `cci unpair NODE` | Owner side. Revokes a node, named by id or fingerprint prefix, through the relay, drops its pin here, and rotates the mesh's group key so it cannot read records written afterward. |
+| `cci peers` | List the nodes this one trusts with tier and how each was admitted: `self`, `mesh` (synckit host), `pair`, or `relay`. `--mesh` adds each joined relay's member directory, flagging nodes the relay lists that are not pinned here and tier mismatches. `--json` emits one object per node. |
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`). Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |

@@ -55,6 +55,9 @@ func NewRootCmd() *cobra.Command {
 		newCursorCmd(),
 		newMeshCmd(),
 		newRelayCmd(),
+		newPairCmd(),
+		newUnpairCmd(),
+		newPeersCmd(),
 	)
 	return root
 }
