@@ -16,6 +16,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/yasyf/cc-inbox/e2e"
 )
 
 // KeyEnv carries a PKCS#8 PEM node key for hosts with no persistent home,
@@ -70,6 +72,16 @@ func Load(home string) (Node, error) {
 	}
 	n.endorsement = &e
 	return n, nil
+}
+
+// Parse reads a node key from PKCS#8 PEM, the form $CCI_NODE_KEY and
+// service secrets carry.
+func Parse(raw []byte) (Node, error) {
+	key, err := parse(raw)
+	if err != nil {
+		return Node{}, err
+	}
+	return Node{key: key}, nil
 }
 
 // Dir is where the node key and its endorsement live.
@@ -216,5 +228,5 @@ func FingerprintOf(pub []byte) string {
 }
 
 func IDOf(pub []byte) string {
-	return FingerprintOf(pub)[:16]
+	return e2e.NodeID(pub)
 }

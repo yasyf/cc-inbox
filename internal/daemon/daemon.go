@@ -16,6 +16,8 @@ import (
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/mesh"
+	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -86,6 +88,10 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 		done:   make(chan error, 1),
 		synced: make(chan struct{}),
 	}
+	id, err := node.Load(r.home)
+	if err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
 	var syncCtx context.Context
 	syncCtx, p.stopSync = context.WithCancel(context.Background())
 	var loops sync.WaitGroup
@@ -99,6 +105,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 			r.fail(c, err)
 		}
 	})
+	loops.Go(func() { relay.NewLoop(r.home, st, id).Run(syncCtx) })
 	go func() {
 		loops.Wait()
 		close(p.synced)

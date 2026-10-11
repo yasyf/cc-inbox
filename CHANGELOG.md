@@ -6,6 +6,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cci relay join|push|pull|sync|rotate|status` replicates records through the
+  wide-area relay, end-to-end encrypted so the relay reads no record body.
+  Each mesh has a group key that an owner node wraps to every pinned member
+  with HPKE (P-256) and signs; a node accepts a wrap only from an owner it
+  pinned itself. Record bodies are AES-256-GCM under that key, and the routing
+  header (mesh, drive, origin, `origin_seq`, tier, kind, time, epoch) is
+  signed by the writer and bound as additional data. Paired members never
+  push, rotation is an epoch compare-and-set that locks out an unpaired node,
+  and `cci daemon` runs a push and a pull loop per joined mesh (#62).
+- Delegated service instances: `cci relay join --instance --drive D` mints a
+  per-job key that `$CCI_SERVICE_KEY` signs into a scoped, expiring
+  delegation, so concurrent CI jobs sharing one service write under their own
+  origins (#62).
+- The public `e2e` package holds the wrap, envelope, delegation and control
+  formats for other Go implementations of the relay (#62).
+
 ## [0.12.0] - 2026-10-11
 
 ### Added
