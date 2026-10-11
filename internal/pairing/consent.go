@@ -37,7 +37,8 @@ type Synckitd struct {
 }
 
 func (s Synckitd) Approve(ctx context.Context, a Ask) (Attestation, error) {
-	args := []string{"consent", "request", "--client", "cci", "--reason", a.Reason, "--subject", a.Subject, "--nonce", a.Nonce}
+	args := make([]string, 0, 10+2*len(a.Argv))
+	args = append(args, "consent", "request", "--client", "cci", "--reason", a.Reason, "--subject", a.Subject, "--nonce", a.Nonce)
 	for _, v := range a.Argv {
 		args = append(args, "--argv", v)
 	}
@@ -80,7 +81,7 @@ func (s Synckitd) run(ctx context.Context, out any, args ...string) error {
 		path = "synckitd"
 	}
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, path, args...)
+	cmd := exec.CommandContext(ctx, path, args...) //nolint:gosec // G204: path is synckitd or the hidden --synckitd test override; args are fixed verbs and argv elements.
 	cmd.Stderr = &stderr
 	raw, err := cmd.Output()
 	if err != nil {

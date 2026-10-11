@@ -35,8 +35,8 @@ func Unpair(ctx context.Context, home string, st *store.Store, self node.Node, c
 	if err := forget(ctx, home, st, self, cfg, m.Node, r.At, (*relay.Node).Rotate); err != nil {
 		return store.Member{}, err
 	}
-	fmt.Fprintf(out, "unpaired %s (%s) from mesh %s; group key rotated\n", m.Node, m.Tier, cfg.Mesh)
-	return m, nil
+	_, err = fmt.Fprintf(out, "unpaired %s (%s) from mesh %s; group key rotated\n", m.Node, m.Tier, cfg.Mesh)
+	return m, err
 }
 
 func resolveMember(ctx context.Context, st *store.Store, target string) (store.Member, error) {

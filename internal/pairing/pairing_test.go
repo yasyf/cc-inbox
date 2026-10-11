@@ -240,7 +240,7 @@ func texts(t *testing.T, p *peer) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
+	out := make([]string, 0, len(recs))
 	for _, r := range recs {
 		out = append(out, r.Text)
 	}
@@ -266,7 +266,7 @@ func peerIDs(t *testing.T, p *peer, directory bool) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
+	out := make([]string, 0, len(ps))
 	for _, x := range ps {
 		out = append(out, x.Node)
 	}
@@ -405,8 +405,10 @@ func TestJoinedWithoutAnOwnerGrantIsRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv.Control(e2e.Control{Type: e2e.ControlJoined, Mesh: relay.DefaultMesh, Node: intruder.id.ID(), Pub: intruder.id.PublicKey(), Tier: e2e.TierPaired, By: a.id.ID(),
-		Grant: &e2e.Grant{By: a.id.ID(), At: "now", Sig: forged}})
+	srv.Control(e2e.Control{
+		Type: e2e.ControlJoined, Mesh: relay.DefaultMesh, Node: intruder.id.ID(), Pub: intruder.id.PublicKey(), Tier: e2e.TierPaired, By: a.id.ID(),
+		Grant: &e2e.Grant{By: a.id.ID(), At: "now", Sig: forged},
+	})
 	pull(t, a)
 	if _, ok := pinned(t, a, intruder.id.ID()); ok {
 		t.Fatal("a relay-injected peer.joined without a valid owner grant pinned a key")
@@ -475,8 +477,10 @@ func TestReplayedGrantDoesNotReadmitAnUnpairedReader(t *testing.T) {
 		t.Fatalf("unpair: %v", err)
 	}
 	pull(t, b)
-	srv.Control(e2e.Control{Type: e2e.ControlJoined, Mesh: relay.DefaultMesh, Node: x.id.ID(), Pub: x.id.PublicKey(), Tier: e2e.TierPaired, By: a.id.ID(),
-		Grant: &e2e.Grant{By: a.id.ID(), At: old, Sig: sig}})
+	srv.Control(e2e.Control{
+		Type: e2e.ControlJoined, Mesh: relay.DefaultMesh, Node: x.id.ID(), Pub: x.id.PublicKey(), Tier: e2e.TierPaired, By: a.id.ID(),
+		Grant: &e2e.Grant{By: a.id.ID(), At: old, Sig: sig},
+	})
 	pull(t, b)
 	if _, ok := pinned(t, b, x.id.ID()); ok {
 		t.Fatal("a grant signed before the unpair readmitted the reader")

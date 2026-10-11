@@ -38,8 +38,10 @@ func TestSynckitdApproveSendsTheArgvAndNonce(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	want := []string{"consent", "request", "--client", "cci", "--reason", "pair x", "--subject", "cci-pair:ff00", "--nonce", "bm9uY2U=",
-		"--argv", "cci", "--argv", "pair", "--argv", "accept", "--argv", "ABCDEFGH", "--argv", "ff00"}
+	want := []string{
+		"consent", "request", "--client", "cci", "--reason", "pair x", "--subject", "cci-pair:ff00", "--nonce", "bm9uY2U=",
+		"--argv", "cci", "--argv", "pair", "--argv", "accept", "--argv", "ABCDEFGH", "--argv", "ff00",
+	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("synckitd argv = %q\nwant %q", got, want)
 	}

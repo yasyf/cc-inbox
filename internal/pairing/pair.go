@@ -52,8 +52,10 @@ func Join(ctx context.Context, home string, st *store.Store, self node.Node, opt
 	if err := c.Call(ctx, http.MethodPost, "/v1/pair/join", joinRequest{Mesh: cfg.Mesh, Code: code, Pub: self.PublicKey(), Fingerprint: self.Fingerprint()}, &jr); err != nil {
 		return store.Member{}, fmt.Errorf("start pairing: %w", err)
 	}
-	fmt.Fprintf(out, "pairing code  %s\nfingerprint   %s\nOn an owner machine run: cci pair accept %s --mesh %s\nThe code expires at %s.\n",
-		FormatCode(code), FormatFingerprint(self.Fingerprint()), FormatCode(code), cfg.Mesh, jr.ExpiresAt.Local().Format(time.Kitchen))
+	if _, err := fmt.Fprintf(out, "pairing code  %s\nfingerprint   %s\nOn an owner machine run: cci pair accept %s --mesh %s\nThe code expires at %s.\n",
+		FormatCode(code), FormatFingerprint(self.Fingerprint()), FormatCode(code), cfg.Mesh, jr.ExpiresAt.Local().Format(time.Kitchen)); err != nil {
+		return store.Member{}, err
+	}
 	sr, err := awaitAccept(ctx, c, code, self.PublicKey(), opts.Poll)
 	if err != nil {
 		return store.Member{}, err
@@ -79,8 +81,10 @@ func Join(ctx context.Context, home string, st *store.Store, self node.Node, opt
 	if err := n.Keyring.Save(home, cfg.Mesh); err != nil {
 		return store.Member{}, err
 	}
-	fmt.Fprintf(out, "paired as %s, accepted by owner %s\nowner fingerprint %s\nCompare it with `cci node` on that machine.\n",
-		cfg.Tier, owner.Node, FormatFingerprint(node.FingerprintOf(owner.PublicKey)))
+	if _, err := fmt.Fprintf(out, "paired as %s, accepted by owner %s\nowner fingerprint %s\nCompare it with `cci node` on that machine.\n",
+		cfg.Tier, owner.Node, FormatFingerprint(node.FingerprintOf(owner.PublicKey))); err != nil {
+		return store.Member{}, err
+	}
 	return owner, nil
 }
 
@@ -171,8 +175,10 @@ func Accept(ctx context.Context, home string, st *store.Store, self node.Node, c
 		return store.Member{}, fmt.Errorf("pairing: the relay's fingerprint %s does not match the joining key; refusing", p.Fingerprint)
 	}
 	id := node.IDOf(p.Pub)
-	fmt.Fprintf(out, "joining node  %s\nfingerprint   %s\nConfirm it matches the fingerprint `cci pair` printed on the joining machine; the Touch ID sheet shows it too.\n",
-		id, FormatFingerprint(p.Fingerprint))
+	if _, err := fmt.Fprintf(out, "joining node  %s\nfingerprint   %s\nConfirm it matches the fingerprint `cci pair` printed on the joining machine; the Touch ID sheet shows it too.\n",
+		id, FormatFingerprint(p.Fingerprint)); err != nil {
+		return store.Member{}, err
+	}
 	members, err := n.Members(ctx)
 	if err != nil {
 		return store.Member{}, err
@@ -218,6 +224,8 @@ func Accept(ctx context.Context, home string, st *store.Store, self node.Node, c
 	if err := st.PutMember(ctx, member); err != nil {
 		return store.Member{}, err
 	}
-	fmt.Fprintf(out, "paired %s as %s in mesh %s\n", id, opts.Tier, cfg.Mesh)
+	if _, err := fmt.Fprintf(out, "paired %s as %s in mesh %s\n", id, opts.Tier, cfg.Mesh); err != nil {
+		return store.Member{}, err
+	}
 	return member, nil
 }

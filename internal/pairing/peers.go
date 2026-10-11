@@ -43,7 +43,7 @@ func (p Peer) Line(now time.Time) string {
 
 func Peers(ctx context.Context, st *store.Store, self node.Node, cfgs []relay.Config, withDirectory bool) ([]Peer, error) {
 	selfTier := node.TierOwner
-	var selfMeshes []string
+	selfMeshes := make([]string, 0, len(cfgs))
 	for _, c := range cfgs {
 		selfMeshes = append(selfMeshes, c.Mesh)
 		if c.Tier != string(node.TierOwner) {
