@@ -12,6 +12,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/yasyf/cc-inbox/internal/node"
@@ -48,6 +49,26 @@ func TestFileKeyRoundTrip(t *testing.T) {
 	}
 	if _, ok := first.Endorsement(); ok {
 		t.Fatal("fresh node reports an endorsement")
+	}
+}
+
+func TestConcurrentLoadsAgreeOnOneKey(t *testing.T) {
+	t.Setenv(node.KeyEnv, "")
+	home := t.TempDir()
+	ids := make([]string, 16)
+	errs := make([]error, len(ids))
+	var wg sync.WaitGroup
+	for i := range ids {
+		wg.Go(func() {
+			n, err := node.Load(home)
+			ids[i], errs[i] = n.ID(), err
+		})
+	}
+	wg.Wait()
+	for i := range ids {
+		if errs[i] != nil || ids[i] != ids[0] {
+			t.Fatalf("Load() #%d = %s, %v; want %s", i, ids[i], errs[i], ids[0])
+		}
 	}
 }
 

@@ -97,22 +97,26 @@ func loadOrCreate(path string) (*ecdsa.PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("encode node key: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("create node dir: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: path is the node key under the cci home.
-	if errors.Is(err, os.ErrExist) {
-		return loadOrCreate(path)
-	}
+	tmp, err := os.CreateTemp(dir, ".key-*.pem")
 	if err != nil {
 		return nil, fmt.Errorf("create node key: %w", err)
 	}
-	if err := pem.Encode(f, &pem.Block{Type: "PRIVATE KEY", Bytes: der}); err != nil {
-		_ = f.Close()
+	defer func() { _ = os.Remove(tmp.Name()) }()
+	if err := pem.Encode(tmp, &pem.Block{Type: "PRIVATE KEY", Bytes: der}); err != nil {
+		_ = tmp.Close()
 		return nil, fmt.Errorf("write node key: %w", err)
 	}
-	if err := f.Close(); err != nil {
+	if err := tmp.Close(); err != nil {
 		return nil, fmt.Errorf("write node key: %w", err)
+	}
+	if err := os.Link(tmp.Name(), path); errors.Is(err, os.ErrExist) {
+		return loadOrCreate(path)
+	} else if err != nil {
+		return nil, fmt.Errorf("install node key: %w", err)
 	}
 	return key, nil
 }
