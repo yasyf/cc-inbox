@@ -21,22 +21,23 @@ type Pointer struct {
 // Row is a record as it travels between nodes. Its re and resolves are
 // pointers; Apply rewrites them to the receiving store's seqs.
 type Row struct {
-	Origin    string     `json:"origin"`
-	OriginSeq int64      `json:"origin_seq"`
-	ID        string     `json:"id,omitempty"`
-	Drive     string     `json:"drive"`
-	Lane      string     `json:"lane"`
-	Kind      kinds.Kind `json:"kind"`
-	At        time.Time  `json:"at"`
-	Text      string     `json:"text"`
-	Topic     string     `json:"topic,omitempty"`
-	To        []string   `json:"to,omitempty"`
-	Re        *Pointer   `json:"re,omitempty"`
-	Resolves  *Pointer   `json:"resolves,omitempty"`
-	Refs      Refs       `json:"refs"`
-	Fields    Fields     `json:"fields"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Source    string     `json:"source"`
+	Origin    string          `json:"origin"`
+	OriginSeq int64           `json:"origin_seq"`
+	ID        string          `json:"id,omitempty"`
+	Drive     string          `json:"drive"`
+	Lane      string          `json:"lane"`
+	Kind      kinds.Kind      `json:"kind"`
+	At        time.Time       `json:"at"`
+	Text      string          `json:"text"`
+	Topic     string          `json:"topic,omitempty"`
+	To        []string        `json:"to,omitempty"`
+	Re        *Pointer        `json:"re,omitempty"`
+	Resolves  *Pointer        `json:"resolves,omitempty"`
+	Refs      Refs            `json:"refs"`
+	Fields    Fields          `json:"fields"`
+	ExpiresAt *time.Time      `json:"expires_at,omitempty"`
+	Source    string          `json:"source"`
+	Body      json.RawMessage `json:"body,omitempty"`
 }
 
 // Receipt is the last change a transport channel applied completely from
@@ -87,7 +88,7 @@ func (s *Store) Export(ctx context.Context, origin string, since int64, limit in
 			Origin: s.origin(r.Origin), OriginSeq: originSeq(r), ID: r.ID,
 			Drive: r.Drive, Lane: r.Lane, Kind: r.Kind, At: r.At, Text: r.Text, Topic: r.Topic, To: r.To,
 			Re: pointer(r.Re, re), Resolves: pointer(r.Resolves, resolves),
-			Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source,
+			Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body,
 		})
 	}
 	return out, rows.Err()
@@ -155,8 +156,8 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 		return nil
 	}
 	var known int
-	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM records WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM pending WHERE origin = ? AND origin_seq = ?)",
-		row.Origin, row.OriginSeq, row.Origin, row.OriginSeq).Scan(&known); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM records WHERE origin = ? AND origin_seq = ? OR ? != '' AND drive = ? AND id = ?) + (SELECT COUNT(*) FROM pending WHERE origin = ? AND origin_seq = ?)",
+		row.Origin, row.OriginSeq, row.ID, row.Drive, row.ID, row.Origin, row.OriginSeq).Scan(&known); err != nil {
 		return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
 	}
 	if known > 0 {
@@ -188,7 +189,7 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 	r := Record{
 		Origin: row.Origin, OriginSeq: row.OriginSeq, ID: row.ID,
 		Drive: row.Drive, Lane: row.Lane, Kind: row.Kind, At: row.At, Text: row.Text, Topic: row.Topic, To: row.To,
-		Re: re, Resolves: resolves, Refs: row.Refs, Fields: row.Fields, ExpiresAt: row.ExpiresAt, Source: row.Source,
+		Re: re, Resolves: resolves, Refs: row.Refs, Fields: row.Fields, ExpiresAt: row.ExpiresAt, Source: row.Source, Body: row.Body,
 	}
 	seq, err := s.insert(ctx, tx, r, Hash(r), nil)
 	if err != nil {
@@ -336,6 +337,18 @@ func forget(ctx context.Context, tx *sql.Tx, peer string) error {
 		}
 	}
 	return nil
+}
+
+// CompactedThrough is the highest of this node's origin_seqs compaction has
+// folded; an Export from below it cannot be complete, so a peer that far
+// behind needs a snapshot.
+func (s *Store) CompactedThrough(ctx context.Context) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, "SELECT value FROM meta WHERE key = 'compacted_through'").Scan(&seq)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("read compacted-through: %w", err)
+	}
+	return seq, nil
 }
 
 func (s *Store) compactionFloor(ctx context.Context) (int64, bool, error) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,17 +152,20 @@ func TestMembers(t *testing.T) {
 	st, _ := testutil.Store(t)
 	peer, _ := testutil.Store(t)
 	pub := peer.Node().PublicKey()
-	if err := st.PutMember(ctx, store.Member{Node: "0123456789abcdef", PublicKey: pub, Tier: node.TierOwner}); err == nil {
+	if err := st.PutMember(ctx, store.Member{Node: "0123456789abcdef", PublicKey: pub, Tier: node.TierOwner, Via: "mesh"}); err == nil {
 		t.Fatal("PutMember() accepted an id that is not the key's")
 	}
-	if err := st.PutMember(ctx, store.Member{Node: peer.Self(), PublicKey: pub, Tier: "admin"}); err == nil {
+	if err := st.PutMember(ctx, store.Member{Node: peer.Self(), PublicKey: pub, Tier: "admin", Via: "pair"}); err == nil {
 		t.Fatal("PutMember() accepted an unknown tier")
 	}
-	if err := st.PutMember(ctx, store.Member{Node: peer.Self(), PublicKey: pub, Tier: node.TierPaired, By: "owner"}); err != nil {
+	if err := st.PutMember(ctx, store.Member{Node: peer.Self(), PublicKey: pub, Tier: node.TierPaired, Via: "carrier-pigeon"}); err == nil {
+		t.Fatal("PutMember() accepted an unknown via")
+	}
+	if err := st.PutMember(ctx, store.Member{Node: peer.Self(), PublicKey: pub, Tier: node.TierOwner, Via: "mesh", Host: "yasyf@forge", By: "owner"}); err != nil {
 		t.Fatal(err)
 	}
 	m, err := st.Member(ctx, peer.Self())
-	if err != nil || m.Tier != node.TierPaired || string(m.PublicKey) != string(pub) {
+	if err != nil || m.Tier != node.TierOwner || m.Via != "mesh" || m.Host != "yasyf@forge" || string(m.PublicKey) != string(pub) {
 		t.Fatalf("Member() = %+v, %v", m, err)
 	}
 	if dropped, err := st.DropMember(ctx, peer.Self()); err != nil || !dropped {
@@ -180,5 +184,75 @@ func TestPeerAddressOnAnotherNode(t *testing.T) {
 	got, err := st.Query(ctx, store.Filter{Drive: "d", Peer: "sess-api", To: "api"})
 	if err != nil || len(got) != 1 || got[0].Text != "remote go" {
 		t.Fatalf("Query() = %+v, %v", got, err)
+	}
+}
+
+func TestServiceRecordsTravelWithBodyAttrsAndID(t *testing.T) {
+	ctx := context.Background()
+	platy, _ := testutil.Store(t)
+	mac, clock := testutil.Store(t)
+	r := store.Record{
+		Drive: "page:1", Lane: "platy", Kind: "oncall.fix.status", Text: "fix deployed", ID: "env-1",
+		Fields: store.Fields{Attrs: map[string]string{"actor": "platy", "epoch": "3"}}, Body: []byte(`{"status":"live"}`),
+	}
+	first := testutil.Post(t, platy, r)
+	if first.ExpiresAt == nil || first.ExpiresAt.Sub(first.At) != kinds.ServiceTTL {
+		t.Fatalf("service record expires %v, want after %v", first.ExpiresAt, kinds.ServiceTTL)
+	}
+	r.Text = "a retried envelope"
+	again, dup, err := platy.Post(ctx, r, 0)
+	if err != nil || !dup || again.Seq != first.Seq {
+		t.Fatalf("Post(same id) = #%d dup=%v %v; want #%d as a duplicate", again.Seq, dup, err, first.Seq)
+	}
+	if _, _, err := platy.Post(ctx, store.Record{Drive: "d", Lane: "x", Kind: kinds.Note, Text: "big", Body: []byte(`"` + strings.Repeat("x", store.MaxBody) + `"`)}, 0); err == nil {
+		t.Fatal("Post() accepted a body over the limit")
+	}
+	rows, err := platy.Export(ctx, platy.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mac.Apply(ctx, rows, nil); err != nil || got.Inserted != 1 {
+		t.Fatalf("Apply() = %+v, %v", got, err)
+	}
+	clock.Advance(time.Hour)
+	held, err := mac.Query(ctx, store.Filter{Drive: "page:1"})
+	if err != nil || len(held) != 1 || held[0].ID != "env-1" || string(held[0].Body) != `{"status":"live"}` || held[0].Fields.Attrs["epoch"] != "3" {
+		t.Fatalf("mac holds %+v, %v", held, err)
+	}
+	if got, err := mac.Apply(ctx, []store.Row{{Origin: "ffffffffffffffff", OriginSeq: 9, ID: "env-1", Drive: "page:1", Lane: "platy", Kind: "oncall.fix.status", Text: "replay", At: clock.Now()}}, nil); err != nil || got.Duplicate != 1 {
+		t.Fatalf("Apply(same id, other origin) = %+v, %v", got, err)
+	}
+}
+
+func TestCompactedThroughAndSchemaFingerprint(t *testing.T) {
+	ctx := context.Background()
+	st, clock := testutil.Store(t)
+	if through, err := st.CompactedThrough(ctx); err != nil || through != 0 {
+		t.Fatalf("fresh CompactedThrough() = %d, %v", through, err)
+	}
+	old := testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "old"})
+	clock.Advance(72 * time.Hour)
+	if _, err := st.Compact(ctx, "d", 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if through, err := st.CompactedThrough(ctx); err != nil || through != old.Seq {
+		t.Fatalf("CompactedThrough() = %d, %v; want #%d", through, err, old.Seq)
+	}
+	other, _ := testutil.Store(t)
+	if fp := st.SchemaFingerprint(); len(fp) != 64 || fp != other.SchemaFingerprint() {
+		t.Fatalf("SchemaFingerprint() = %q / %q", fp, other.SchemaFingerprint())
+	}
+}
+
+func TestSplitPeer(t *testing.T) {
+	for _, tt := range []struct{ in, node, rest string }{
+		{"0123456789abcdef/3785cb11-d400", "0123456789abcdef", "3785cb11-d400"},
+		{"3785cb11-d400-486b", "", "3785cb11-d400-486b"},
+		{"3785cb11/agent-1", "", "3785cb11/agent-1"},
+		{"0123456789ABCDEF/s", "", "0123456789ABCDEF/s"},
+	} {
+		if node, rest := store.SplitPeer(tt.in); node != tt.node || rest != tt.rest {
+			t.Errorf("SplitPeer(%q) = %q, %q; want %q, %q", tt.in, node, rest, tt.node, tt.rest)
+		}
 	}
 }

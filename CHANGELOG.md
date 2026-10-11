@@ -19,9 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cci node` prints this machine's node id and key fingerprint, and
   `cci node endorse` binds the node key to the authkit Secure Enclave key.
   CI and service hosts pass their key in `CCI_NODE_KEY`.
+- Records for services: a dotted kind such as `oncall.fix.status` is a
+  namespaced service kind with a 14-day TTL, `cci post --attr k=v` fills
+  `fields.attrs`, and `--body-file` attaches a JSON `body` of up to 64 KiB.
+  A post whose `--id` the drive already holds returns the stored record.
+  `cci cursor set` moves a cursor backwards for a reader that restarts.
 - `--to peer:<node>/<session>` addresses a session on another node, `cci who`
-  lists replicated sessions, `--origin` narrows reads and `who` to one node,
-  and `cci post --id` sets an idempotency key that joins the dedup hash.
+  lists replicated sessions, and `--origin` narrows reads and `who` to one
+  node.
 
 ### Fixed
 

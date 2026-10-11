@@ -131,15 +131,12 @@ func recipients(to []string) []string {
 	out := make([]string, len(to))
 	for i, t := range to {
 		if target, ok := strings.CutPrefix(t, "peer:"); ok {
-			node, session, remote := strings.Cut(target, "/")
-			if !remote {
-				node, session = "", target
-			}
+			node, session := store.SplitPeer(target)
 			if len(session) > 8 {
 				session = session[:8]
 			}
 			t = "peer:" + session
-			if remote {
+			if node != "" {
 				t = store.PeerAddressOn(node, session)
 			}
 		}

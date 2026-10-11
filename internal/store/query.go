@@ -145,6 +145,17 @@ func PeerAddressOn(node, session string) string {
 	return "peer:" + node + "/" + session
 }
 
+// SplitPeer splits the target of a peer: address into its node and the rest.
+// A first segment of exactly 16 lowercase hex characters is a node id; a
+// session prefix that long always holds a dash, so the forms never collide.
+func SplitPeer(target string) (node, rest string) {
+	first, after, ok := strings.Cut(target, "/")
+	if ok && len(first) == 16 && strings.Trim(first, "0123456789abcdef") == "" {
+		return first, after
+	}
+	return "", target
+}
+
 // CrossDrive reports whether any recipient reaches outside the record's drive.
 func CrossDrive(to []string) bool {
 	for _, t := range to {
@@ -235,6 +246,17 @@ func (s *Store) SetCursor(ctx context.Context, name, drive string, seq int64) er
 ON CONFLICT (name, drive) DO UPDATE SET seq = MAX(seq, excluded.seq)`, name, drive, seq)
 	if err != nil {
 		return fmt.Errorf("write cursor %s: %w", name, err)
+	}
+	return nil
+}
+
+// MoveCursor sets a cursor to seq exactly, backwards included, so a reader
+// that restarts replays from the point it last committed.
+func (s *Store) MoveCursor(ctx context.Context, name, drive string, seq int64) error {
+	_, err := s.db.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) VALUES (?, ?, ?)
+ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, name, drive, seq)
+	if err != nil {
+		return fmt.Errorf("move cursor %s: %w", name, err)
 	}
 	return nil
 }

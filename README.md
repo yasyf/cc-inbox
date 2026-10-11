@@ -278,13 +278,14 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. `-F` matches the pattern literally. |
 | `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
-| `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain. |
+| `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain, and so does any record a peer node has not acked. |
+| `cci cursor set <name> <seq>` | Move a named cursor to `seq`, backwards included, so a restarted reader replays from the point it committed. |
 | `cci drive use` | Bind the current Claude Code session and reset its cursor to the drive's latest record in one transaction. `--root` enables owner-prompt capture. |
 | `cci drive ls` | List drives by their most recent activity. |
 | `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. |
 | `cci me` | Print this session's registry line, ending with the `uds:` address `SendMessage` accepts. |
 | `cci node` | Print this machine's node id, key fingerprint, and Secure Enclave endorsement; `--json` adds the public key. `cci node endorse` signs the node key with the authkit Secure Enclave key, one Touch ID tap. |
-| `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`, plus sessions replicated from other nodes, which are live while seen in the last 15 minutes and address as `peer:<node>/<session>`. Narrow with `--session <id or prefix>`, `--origin <node prefix>` (`-` for this machine), `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
+| `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`, plus sessions replicated from other nodes, which are live while seen in the last 15 minutes and address as `peer:<node>/<session>`. Narrow with `--session <id or prefix>`, `--origin <node prefix>`, where `-` selects this machine, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`). Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
@@ -302,7 +303,9 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--commit <sha>` | Set `fields.commit` to the full commit SHA. |
 | `--census '<JSON>'` | Set `fields.census`, for example `{"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["api/plat-usw2-prod"]}`. |
 | `--count <name>=<integer>` | Set entries in `fields.counts`, for example `--count deletes=0`. |
-| `--id <key>` | Set the record's idempotency key; it joins the dedup hash. |
+| `--id <key>` | Set the record's idempotency key. A post whose key the drive already holds returns the stored record as a duplicate. |
+| `--attr <name>=<value>` | Repeat to populate `fields.attrs`, a map of strings. |
+| `--body-file <file>` | Set `body` to the file's JSON, at most 64 KiB; `-` reads stdin. |
 | `--to peer:<session prefix or name>`, `--to peer:<node>/<session>`, `--to <lane>@<drive>` | Address one session on this machine or on another node, resolved at post time, or a lane in another drive; `root@<drive>` and `main@<drive>` both reach that drive's root. Such a record reaches its recipient's reads from any drive, and `--resolves` may name it across drives. |
 | `--topic <key>`, `--re <seq>` | Group related events or link a reply to an earlier record. |
 | `--resolves <seq>` | Must name an existing record in the same drive, or one addressed across drives with `peer:` or `<lane>@<drive>`. Only a later record closes the open item, regardless of the new record's kind. |
@@ -390,6 +393,10 @@ archives cannot close newer regressions because closure compares recorded
 time.
 
 ## Kinds and pairing
+
+A dotted kind such as `oncall.fix.status` is a namespaced service kind outside
+the fixed vocabulary. It opens and closes nothing and expires after 14 days
+unless `--ttl` says otherwise.
 
 Pair records within a drive using a shared `--topic` or a closing record's
 `--re` pointing to the opener's sequence number. Those links require a later

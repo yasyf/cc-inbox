@@ -359,11 +359,8 @@ func resolveRecipients(ctx context.Context, st *store.Store, to []string) ([]str
 			out[i] = t
 			continue
 		}
-		origin, session, remote := strings.Cut(target, "/")
-		switch {
-		case !remote:
-			origin, session = peers.LocalOrigin, target
-		case strings.HasPrefix(st.Self(), origin):
+		origin, session := store.SplitPeer(target)
+		if origin == "" || origin == st.Self() {
 			origin = peers.LocalOrigin
 		}
 		v, err := peers.One(ctx, st, peers.Filter{Origin: origin, Session: session, All: true})

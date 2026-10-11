@@ -18,11 +18,16 @@ type Member struct {
 	Node      string    `json:"node"`
 	PublicKey []byte    `json:"public_key"`
 	Tier      node.Tier `json:"tier"`
+	Via       string    `json:"via"`
+	Host      string    `json:"host,omitempty"`
 	By        string    `json:"by"`
 	At        time.Time `json:"at"`
 }
 
-var tiers = []node.Tier{node.TierOwner, node.TierService, node.TierPaired}
+var (
+	tiers = []node.Tier{node.TierOwner, node.TierService, node.TierPaired}
+	vias  = []string{"mesh", "relay", "pair"}
+)
 
 // PutMember pins m, replacing the key and tier of a node already pinned.
 func (s *Store) PutMember(ctx context.Context, m Member) error {
@@ -32,12 +37,15 @@ func (s *Store) PutMember(ctx context.Context, m Member) error {
 	if !slices.Contains(tiers, m.Tier) {
 		return fmt.Errorf("member %s: tier %q is not owner, service or paired", m.Node, m.Tier)
 	}
+	if !slices.Contains(vias, m.Via) {
+		return fmt.Errorf("member %s: via %q is not mesh, relay or pair", m.Node, m.Via)
+	}
 	if m.At.IsZero() {
 		m.At = s.Now().UTC()
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO members (node, public_key, tier, by, at) VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (node) DO UPDATE SET public_key = excluded.public_key, tier = excluded.tier, by = excluded.by, at = excluded.at`,
-		m.Node, m.PublicKey, string(m.Tier), m.By, m.At.UnixMilli()); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO members (node, public_key, tier, via, host, by, at) VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT (node) DO UPDATE SET public_key = excluded.public_key, tier = excluded.tier, via = excluded.via, host = excluded.host, by = excluded.by, at = excluded.at`,
+		m.Node, m.PublicKey, string(m.Tier), m.Via, m.Host, m.By, m.At.UnixMilli()); err != nil {
 		return fmt.Errorf("pin member %s: %w", m.Node, err)
 	}
 	return nil
@@ -45,7 +53,7 @@ ON CONFLICT (node) DO UPDATE SET public_key = excluded.public_key, tier = exclud
 
 // Member reads one pinned node; an unknown node is sql.ErrNoRows.
 func (s *Store) Member(ctx context.Context, id string) (Member, error) {
-	m, err := scanMember(s.db.QueryRowContext(ctx, "SELECT node, public_key, tier, by, at FROM members WHERE node = ?", id))
+	m, err := scanMember(s.db.QueryRowContext(ctx, "SELECT node, public_key, tier, via, host, by, at FROM members WHERE node = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Member{}, err
 	}
@@ -56,7 +64,7 @@ func (s *Store) Member(ctx context.Context, id string) (Member, error) {
 }
 
 func (s *Store) Members(ctx context.Context) ([]Member, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT node, public_key, tier, by, at FROM members ORDER BY node")
+	rows, err := s.db.QueryContext(ctx, "SELECT node, public_key, tier, via, host, by, at FROM members ORDER BY node")
 	if err != nil {
 		return nil, fmt.Errorf("list members: %w", err)
 	}
@@ -102,7 +110,7 @@ func scanMember(row scanner) (Member, error) {
 		tier string
 		at   int64
 	)
-	if err := row.Scan(&m.Node, &m.PublicKey, &tier, &m.By, &at); err != nil {
+	if err := row.Scan(&m.Node, &m.PublicKey, &tier, &m.Via, &m.Host, &m.By, &at); err != nil {
 		return Member{}, err
 	}
 	m.Tier, m.At = node.Tier(tier), time.UnixMilli(at).UTC()

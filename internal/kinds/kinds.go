@@ -2,6 +2,7 @@ package kinds
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -151,12 +152,23 @@ var openers = map[Kind][]Kind{
 	Defect:   {FixLive, Done},
 }
 
+// ServiceTTL is how long a namespaced service kind lives without an override.
+const ServiceTTL = 14 * 24 * time.Hour
+
+var service = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$`)
+
 func Parse(s string) (Kind, error) {
 	k := Kind(s)
-	if _, ok := specs[k]; ok {
+	if _, ok := specs[k]; ok || k.Service() {
 		return k, nil
 	}
-	return "", fmt.Errorf("unknown kind %q (known: %s)", s, strings.Join(Names(), ", "))
+	return "", fmt.Errorf("unknown kind %q (known: %s, or a dotted service kind such as oncall.fix.status)", s, strings.Join(Names(), ", "))
+}
+
+// Service reports whether k is a dotted, namespaced kind a service writes,
+// such as oncall.fix.status, outside the fixed vocabulary.
+func (k Kind) Service() bool {
+	return service.MatchString(string(k))
 }
 
 func Lookup(word string) (Kind, bool) {
@@ -169,6 +181,9 @@ func Lookup(word string) (Kind, bool) {
 }
 
 func (k Kind) Spec() Spec {
+	if k.Service() {
+		return Spec{TTL: ServiceTTL}
+	}
 	return specs[k]
 }
 

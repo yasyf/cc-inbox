@@ -187,8 +187,18 @@ func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records
 		return err
 	}
 	seqs := make([]any, len(records))
+	var through int64
 	for i, r := range records {
 		seqs[i] = r.Seq
+		if r.Origin == "" {
+			through = max(through, r.Seq)
+		}
+	}
+	if through > 0 {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('compacted_through', ?)
+ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)`, through); err != nil {
+			return fmt.Errorf("record compacted-through: %w", err)
+		}
 	}
 	for chunk := range slices.Chunk(seqs, 500) {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM records WHERE seq IN ("+placeholders(len(chunk))+")", chunk...); err != nil {
