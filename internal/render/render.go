@@ -27,6 +27,9 @@ func Stamp(t, now time.Time) string {
 func Line(r store.Record, now time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
+	if r.Origin != "" {
+		fmt.Fprintf(&b, " origin:%s", r.Origin)
+	}
 	if len(r.To) > 0 {
 		fmt.Fprintf(&b, " -> %s", strings.Join(recipients(r.To), ","))
 	}
@@ -127,8 +130,18 @@ func (b *Budget) Trailer(s string) {
 func recipients(to []string) []string {
 	out := make([]string, len(to))
 	for i, t := range to {
-		if session, ok := strings.CutPrefix(t, "peer:"); ok && len(session) > 8 {
-			t = "peer:" + session[:8]
+		if target, ok := strings.CutPrefix(t, "peer:"); ok {
+			node, session, remote := strings.Cut(target, "/")
+			if !remote {
+				node, session = "", target
+			}
+			if len(session) > 8 {
+				session = session[:8]
+			}
+			t = "peer:" + session
+			if remote {
+				t = store.PeerAddressOn(node, session)
+			}
 		}
 		out[i] = t
 	}

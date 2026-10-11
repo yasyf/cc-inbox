@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/version"
 )
 
@@ -62,5 +63,49 @@ func TestNewerSchemaNamesTheUpgradeCommand(t *testing.T) {
 	want := fmt.Sprintf("store schema %d is newer than this cci %s (schema %d); upgrade it with: %s", len(migrations)+1, version.String(), len(migrations), version.UpgradeCommand())
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("open newer store error = %v, want %q", err, want)
+	}
+}
+
+func TestMigratesSchemaNineRecordsToThisOrigin(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "inbox.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := append(append([]string{}, migrations[:9]...),
+		`INSERT INTO records (drive, lane, kind, at, text, source, hash) VALUES ('d', 'root', 'ask', 1, 'q', 'post', 'h1')`,
+		`INSERT INTO records (drive, lane, kind, at, text, re, resolves, source, hash) VALUES ('d', 'api', 'answer', 2, 'a', 1, 1, 'post', 'h2')`,
+		`INSERT INTO sessions (session, drive, root) VALUES ('s', 'd', 1)`,
+		"PRAGMA user_version = 9")
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	_ = db.Close()
+	st, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatalf("open schema-9 store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	rows, err := st.Export(ctx, st.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := Pointer{Origin: st.Self(), Seq: 1}
+	if len(rows) != 2 || rows[1].OriginSeq != 2 || rows[1].Re == nil || *rows[1].Re != want || *rows[1].Resolves != want {
+		t.Fatalf("migrated rows = %+v", rows)
+	}
+	if b, ok, err := st.Binding(ctx, "s"); err != nil || !ok || !b.Root {
+		t.Fatalf("migrated binding = %+v %v %v", b, ok, err)
+	}
+	next, _, err := st.Post(ctx, Record{Drive: "d", Lane: "api", Kind: kinds.Answer, Text: "again", Re: 1}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err = st.Export(ctx, st.Self(), 2, 0)
+	if err != nil || len(rows) != 1 || rows[0].OriginSeq != next.Seq || *rows[0].Re != want {
+		t.Fatalf("post-migration export = %+v, %v", rows, err)
 	}
 }

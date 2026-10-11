@@ -14,6 +14,7 @@ import (
 
 type Filter struct {
 	Drive          string
+	Origin         string
 	Peer           string
 	Kinds          []kinds.Kind
 	Lanes          []string
@@ -35,7 +36,7 @@ type Filter struct {
 // where renders the filter. Records in the drive pass the lane, kind and
 // topic selectors; records addressed across drives, to peer:<Peer> or to
 // <reader>@<Drive>, pass whatever drive they sit in.
-func (f Filter) where(now time.Time) (string, []any) {
+func (f Filter) where(self string, now time.Time) (string, []any) {
 	scoped := []string{"drive = ?"}
 	params := []any{f.Drive}
 	var selectors []string
@@ -74,11 +75,15 @@ func (f Filter) where(now time.Time) (string, []any) {
 		params = append(params, names...)
 	}
 	var clauses []string
-	if cross := f.crossAddresses(); len(cross) > 0 {
+	if cross := f.crossAddresses(self); len(cross) > 0 {
 		clauses = append(clauses, "(("+strings.Join(scoped, " AND ")+") OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(cross))+")))")
 		params = append(params, cross...)
 	} else {
 		clauses = scoped
+	}
+	if f.Origin != "" {
+		clauses = append(clauses, "origin = ?")
+		params = append(params, f.Origin)
 	}
 	for _, ref := range []struct {
 		path  string
@@ -113,10 +118,10 @@ func (f Filter) where(now time.Time) (string, []any) {
 	return strings.Join(clauses, " AND "), params
 }
 
-func (f Filter) crossAddresses() []any {
+func (f Filter) crossAddresses(self string) []any {
 	var out []any
 	if f.Peer != "" {
-		out = append(out, PeerAddress(f.Peer))
+		out = append(out, PeerAddress(f.Peer), PeerAddressOn(self, f.Peer))
 	}
 	reader := f.To
 	if reader == "" {
@@ -130,9 +135,14 @@ func (f Filter) crossAddresses() []any {
 	return out
 }
 
-// PeerAddress is the recipient form that reaches one session in any drive.
+// PeerAddress is the recipient form that reaches one local session in any drive.
 func PeerAddress(session string) string {
 	return "peer:" + session
+}
+
+// PeerAddressOn reaches one session on another node, in any drive.
+func PeerAddressOn(node, session string) string {
+	return "peer:" + node + "/" + session
 }
 
 // CrossDrive reports whether any recipient reaches outside the record's drive.
@@ -174,7 +184,7 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
 	if f.Drive == "" {
 		return nil, ErrNoDrive
 	}
-	where, params := f.where(s.Now())
+	where, params := f.where(s.Self(), s.Now())
 	order := "ASC"
 	if f.Descending {
 		order = "DESC"
@@ -190,7 +200,7 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
 	defer func() { _ = rows.Close() }()
 	var out []Record
 	for rows.Next() {
-		r, err := scan(rows)
+		r, err := s.scan(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -200,7 +210,7 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
 }
 
 func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
-	where, params := f.where(s.Now())
+	where, params := f.where(s.Self(), s.Now())
 	var n int
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE "+where, params...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count records: %w", err)
@@ -243,9 +253,9 @@ func (s *Store) Bind(ctx context.Context, session, drive string, root bool) erro
 		return fmt.Errorf("bind session: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, role) VALUES (?, ?, ?, CASE WHEN ? THEN 'root' ELSE 'session' END)
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root, lane = '',
-	role = CASE WHEN excluded.root THEN 'root' WHEN sessions.role IN `+inferredRoles+` THEN 'session' ELSE sessions.role END`, session, drive, root, root); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, origin, drive, root, role) VALUES (?, ?, ?, ?, CASE WHEN ? THEN 'root' ELSE 'session' END)
+ON CONFLICT (session) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, root = excluded.root, lane = '',
+	role = CASE WHEN excluded.root THEN 'root' WHEN sessions.role IN `+inferredRoles+` THEN 'session' ELSE sessions.role END`, session, s.Self(), drive, root, root); err != nil {
 		return fmt.Errorf("bind session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(MAX(seq), 0) FROM records WHERE drive = ?
@@ -268,9 +278,9 @@ func (s *Store) BindLane(ctx context.Context, session, drive, lane string, start
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, lane, role) VALUES (?, ?, 0, ?, 'lane')
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, lane = excluded.lane,
-	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root`, session, drive, lane); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, origin, drive, root, lane, role) VALUES (?, ?, ?, 0, ?, 'lane')
+ON CONFLICT (session) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, lane = excluded.lane,
+	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root`, session, s.Self(), drive, lane); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(
@@ -288,7 +298,7 @@ ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(session), drive, started.UnixM
 
 func (s *Store) Binding(ctx context.Context, session string) (Binding, bool, error) {
 	var b Binding
-	err := s.db.QueryRowContext(ctx, "SELECT drive, root, lane FROM sessions WHERE session = ? AND drive != ''", session).Scan(&b.Drive, &b.Root, &b.Lane)
+	err := s.db.QueryRowContext(ctx, "SELECT drive, root, lane FROM sessions WHERE session = ? AND drive != '' AND origin = ?", session, s.Self()).Scan(&b.Drive, &b.Root, &b.Lane)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Binding{}, false, nil
 	}
@@ -349,7 +359,7 @@ func (s *Store) CountBy(ctx context.Context, f Filter, column string) (map[strin
 	if column != "kind" && column != "lane" {
 		panic("CountBy column must be kind or lane, got " + column)
 	}
-	where, params := f.where(s.Now())
+	where, params := f.where(s.Self(), s.Now())
 	rows, err := s.db.QueryContext(ctx, "SELECT "+column+", COUNT(*) FROM records WHERE "+where+" GROUP BY "+column, params...)
 	if err != nil {
 		return nil, fmt.Errorf("count by %s: %w", column, err)
@@ -370,7 +380,7 @@ func (s *Store) CountBy(ctx context.Context, f Filter, column string) (map[strin
 }
 
 func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, error) {
-	where, params := f.where(s.Now())
+	where, params := f.where(s.Self(), s.Now())
 	q := "SELECT " + columns + " FROM records WHERE seq IN (SELECT seq FROM (SELECT seq, MAX(at * 1000000 + seq) FROM records WHERE " + where + " AND kind != 'digest' GROUP BY lane)) ORDER BY seq DESC LIMIT ?"
 	rows, err := s.db.QueryContext(ctx, q, append(params, n)...)
 	if err != nil {
@@ -379,7 +389,7 @@ func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, e
 	defer func() { _ = rows.Close() }()
 	var out []Record
 	for rows.Next() {
-		r, err := scan(rows)
+		r, err := s.scan(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -404,7 +414,7 @@ func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, 
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		r, err := scan(rows)
+		r, err := s.scan(rows)
 		if err != nil {
 			return nil, err
 		}

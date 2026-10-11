@@ -157,7 +157,7 @@ func TestCompactKeepsCrossDriveResolvers(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
 	ask := testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Ask, Text: "take it?", To: []string{store.PeerAddress("sess-b")}})
-	testutil.Post(t, st, store.Record{Drive: "b", Lane: "root", Kind: kinds.Answer, Text: "yes", Resolves: ask.Seq, To: []string{store.PeerAddress("sess-a")}})
+	testutil.Post(t, st, store.Record{Drive: "b", Lane: "root", Kind: kinds.Answer, Text: "yes", Resolves: ask.Seq})
 	testutil.Post(t, st, store.Record{Drive: "b", Lane: "root", Kind: kinds.State, Text: "old state"})
 	clock.Advance(72 * time.Hour)
 	res, err := st.Compact(ctx, "b", 48*time.Hour)

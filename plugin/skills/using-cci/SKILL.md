@@ -273,6 +273,11 @@ cci post --lane root --kind go --to root@release-v3 "GO on the bake"
 cci post --lane root --kind answer --resolves 36201 --to peer:b577ef71 "yes"
 ```
 
+`peer:<node>/<session>` reaches a session on another node in the mesh;
+`cci who` prints that address for every replicated session, and
+`cci node` prints this machine's node id. A bare `peer:` names a session on
+this machine.
+
 The record stays in the sender's drive. The recipient's reads (`tail`,
 `watch`, the channel subscription, and a lane's hook delivery) include
 records addressed to `peer:<its session>` or `<its reader>@<its drive>`

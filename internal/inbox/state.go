@@ -39,8 +39,9 @@ func State(ctx context.Context, st *store.Store, f store.Filter) ([]store.Record
 	}
 	latest := map[key]store.Record{}
 	for _, r := range records {
-		if !withdrawn(replies[r.Seq]) {
-			latest[key{r.Kind, r.Drive, r.Lane, r.Topic}] = r
+		k := key{r.Kind, r.Drive, r.Lane, r.Topic}
+		if prev, ok := latest[k]; !withdrawn(replies[r.Seq]) && (!ok || !r.At.Before(prev.At)) {
+			latest[k] = r
 		}
 	}
 	return slices.SortedFunc(maps.Values(latest), func(a, b store.Record) int {

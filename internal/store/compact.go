@@ -94,9 +94,17 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 	if err != nil {
 		return CompactResult{}, err
 	}
+	floor, held, err := s.compactionFloor(ctx)
+	if err != nil {
+		return CompactResult{}, err
+	}
+	elsewhere, err := s.foreignResolvers(ctx, drive)
+	if err != nil {
+		return CompactResult{}, err
+	}
 	days := map[string][]Record{}
 	for _, r := range old {
-		if r.Kind == kinds.Digest || keepSeq[r.Seq] || r.Resolves != 0 && CrossDrive(r.To) {
+		if r.Kind == kinds.Digest || keepSeq[r.Seq] || elsewhere[r.Seq] || held && r.Origin == "" && r.Seq > floor {
 			continue
 		}
 		day := r.At.In(time.Local).Format(time.DateOnly)
@@ -119,6 +127,23 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 		return CompactResult{}, fmt.Errorf("commit compact: %w", err)
 	}
 	return res, nil
+}
+
+func (s *Store) foreignResolvers(ctx context.Context, drive string) (map[int64]bool, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT r.seq FROM records r JOIN records t ON t.seq = r.resolves WHERE r.drive = ? AND t.drive != ?", drive, drive)
+	if err != nil {
+		return nil, fmt.Errorf("read cross-drive resolvers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[int64]bool{}
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, fmt.Errorf("scan cross-drive resolver: %w", err)
+		}
+		out[seq] = true
+	}
+	return out, rows.Err()
 }
 
 func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records []Record) error {
@@ -158,7 +183,7 @@ func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records
 		if _, err := tx.ExecContext(ctx, "UPDATE records SET text = ?, fields = ?, at = MAX(at, ?) WHERE seq = ?", d.Text, string(fields), last.UnixMilli(), existing); err != nil {
 			return fmt.Errorf("update digest %s: %w", topic, err)
 		}
-	} else if _, err := insert(ctx, tx, d, Hash(d), nil); err != nil {
+	} else if _, err := s.insert(ctx, tx, d, Hash(d), nil); err != nil {
 		return err
 	}
 	seqs := make([]any, len(records))

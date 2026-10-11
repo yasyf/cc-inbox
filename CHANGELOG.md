@@ -6,6 +6,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Multi-origin records for the cross-machine mesh. Every record carries
+  `origin`, the id of the node that wrote it, and `origin_seq`, its seq
+  there; `(origin, origin_seq)` is its identity on every node. `Store.Export`
+  and `Store.Apply` move records between nodes. Apply rewrites `re` and
+  `resolves` to local seqs and holds a reply until its target arrives.
+  Transport receipts, per-peer acked watermarks, pinned members, and
+  replicated sessions and claims live beside them. Compaction never folds a
+  record a peer has not acked. Schema 10; older binaries refuse the store.
+- `cci node` prints this machine's node id and key fingerprint, and
+  `cci node endorse` binds the node key to the authkit Secure Enclave key.
+  CI and service hosts pass their key in `CCI_NODE_KEY`.
+- `--to peer:<node>/<session>` addresses a session on another node, `cci who`
+  lists replicated sessions, `--origin` narrows reads and `who` to one node,
+  and `cci post --id` sets an idempotency key that joins the dedup hash.
+
+### Fixed
+
+- Compacting a drive deleted a resolver whose target lives in another drive
+  unless the resolver was itself addressed across drives, so the other
+  drive's digest reported the item open again. Compaction now keeps every
+  resolver whose target sits in another drive.
+- `cci state` kept the record that arrived last for a kind, lane and topic;
+  it now keeps the newest by time, so a late replicated record cannot mask a
+  newer local one.
+
 ## [0.10.3] - 2026-10-10
 
 ### Fixed
