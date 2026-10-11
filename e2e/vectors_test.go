@@ -93,4 +93,3 @@ func withSig(d e2e.Delegation, sig []byte) e2e.Delegation {
 	d.Sig = sig
 	return d
 }
-
