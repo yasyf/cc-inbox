@@ -298,6 +298,25 @@ addressed records only and never adds the session's own peer records.
 `cci announce` broadcasts a `peer` record in the session's drive, so a
 root subscribed with `--kind peer` hears a sibling join.
 
+### Pair a machine outside the owner mesh
+
+Owner hosts trust each other through synckit. Any other machine joins a mesh
+as a read-only node by pairing over the relay:
+
+```bash
+cci pair --url https://<relay URL>     # on the joining machine: prints CODE + fingerprint
+cci pair accept <CODE>                 # on an owner machine: Touch ID, here or routed
+cci peers --mesh                       # nodes with tier: self, mesh, pair, relay
+cci unpair <node id prefix>            # revoke and rotate the group key
+```
+
+Compare the fingerprint `cci pair` prints with the one `pair accept` shows
+and the Touch ID sheet repeats; that comparison is the only check that the
+relay did not swap keys. A paired node never writes. A record it posts is
+rejected and unpairs it on every node, and the owners rotate the group key.
+`--tier service --allow '<drives>|<kinds>' --label <name>` on `pair accept`
+admits a scoped writer instead.
+
 ## Watch GO lines with a Monitor
 
 Run the watch as the Monitor's command:

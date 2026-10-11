@@ -52,6 +52,8 @@ type Server struct {
 	wraps    map[uint64][]e2e.Wrap
 	log      map[string]e2e.Envelope
 	nextID   int
+	pairs    map[string]*pairCode
+	consent  map[string][]byte
 	Pushes   [][]byte
 }
 
@@ -69,6 +71,8 @@ func NewServer(t testing.TB) *Server {
 		inflight: map[string]map[string]queued{},
 		wraps:    map[uint64][]e2e.Wrap{},
 		log:      map[string]e2e.Envelope{},
+		pairs:    map[string]*pairCode{},
+		consent:  map[string][]byte{},
 	}
 	s.Mux.HandleFunc("GET /v1/relay", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"pub": s.Pub(), "fingerprint": ""})
@@ -83,6 +87,7 @@ func NewServer(t testing.TB) *Server {
 	s.Mux.HandleFunc("GET /v1/status", s.signed(s.status))
 	s.Mux.HandleFunc("GET /v1/log/origins", s.signed(s.logOrigins))
 	s.Mux.HandleFunc("GET /v1/log", s.signed(s.readLog))
+	s.pairRoutes()
 	s.Server = httptest.NewServer(s.Mux)
 	t.Cleanup(s.Close)
 	return s

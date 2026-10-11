@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/pairing"
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -198,7 +199,7 @@ func newRelayPullCmd() *cobra.Command {
 				return err
 			}
 			for _, n := range nodes {
-				a, err := n.Pull(cmd.Context(), wait, nil)
+				a, err := n.Pull(cmd.Context(), wait, pairing.Handler(n.Home, st, n.Identity))
 				if err != nil {
 					return err
 				}

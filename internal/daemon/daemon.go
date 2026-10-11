@@ -17,6 +17,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/mesh"
 	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/pairing"
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -105,7 +106,11 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 			r.fail(c, err)
 		}
 	})
-	loops.Go(func() { relay.NewLoop(r.home, st, id).Run(syncCtx) })
+	loops.Go(func() {
+		loop := relay.NewLoop(r.home, st, id)
+		loop.OnControl(pairing.Handler(r.home, st, id))
+		loop.Run(syncCtx)
+	})
 	go func() {
 		loops.Wait()
 		close(p.synced)
