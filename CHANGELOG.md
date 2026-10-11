@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-11
+
 ### Added
 
 - Multi-origin records for the cross-machine mesh. Every record carries
@@ -16,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Transport receipts, per-peer acked watermarks, pinned members, and
   replicated sessions and claims live beside them. Compaction never folds a
   record a peer has not acked, and a folded remote record stays refused if a
-  transport replays it. Schema 11; older binaries refuse the store.
+  transport replays it. Schema 11; older binaries refuse the store (#58).
 - Records for services: a dotted kind such as `oncall.fix.status` is a
   namespaced service kind with a 14-day TTL, `cci post --attr k=v` fills
   `fields.attrs`, and `--body-file` attaches a JSON `body` of up to 64 KiB.
@@ -463,7 +465,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.4...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/yasyf/cc-inbox/compare/v0.10.4...v0.11.0
 [0.10.4]: https://github.com/yasyf/cc-inbox/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/yasyf/cc-inbox/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/yasyf/cc-inbox/compare/v0.10.1...v0.10.2
