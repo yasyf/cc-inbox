@@ -406,7 +406,7 @@ func (s *Server) logOrigins(w http.ResponseWriter, r *http.Request, caller Membe
 			last[e.Origin] = max(last[e.Origin], e.OriginSeq)
 		}
 	}
-	out := []map[string]any{}
+	out := make([]map[string]any, 0, len(last))
 	for o, n := range last {
 		out = append(out, map[string]any{"origin": o, "last": n})
 	}
