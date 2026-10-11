@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.4] - 2026-10-11
+
 ### Added
 
 - Subagents and teammates are peers of their own. Every session thread is
@@ -20,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `peer:<session>/<agent id or name>` addresses one subagent, and a bare
   `peer:<session>` still means the root thread. `cci who --agent` and
   `GET /v1/peers?agent=` select one. Store schema 10 adds the agent to the
-  `sessions` and `claims` keys; existing rows become root threads.
+  `sessions` and `claims` keys; existing rows become root threads (#60).
+- `cci node` prints this machine's node id, key fingerprint and endorsement;
+  `cci node endorse` endorses the node's P-256 file key once with the macOS
+  Secure Enclave key. The key lives at `<home>/node/key.pem`, or
+  `$CCI_NODE_KEY` on CI and service hosts (#57).
 
 ## [0.10.3] - 2026-10-10
 
@@ -425,7 +431,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.3...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.10.4...HEAD
+[0.10.4]: https://github.com/yasyf/cc-inbox/compare/v0.10.3...v0.10.4
 [0.10.3]: https://github.com/yasyf/cc-inbox/compare/v0.10.2...v0.10.3
 [0.10.2]: https://github.com/yasyf/cc-inbox/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/yasyf/cc-inbox/compare/v0.10.0...v0.10.1
