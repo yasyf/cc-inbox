@@ -293,48 +293,71 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 	if err != nil || len(rows) == 0 {
 		return res, err
 	}
-	members, err := n.Members(ctx)
-	if err != nil {
-		return res, err
-	}
-	k, err := n.Keyring.Current(n.keyHolder(), n.Config.Mesh, members)
-	if err != nil {
-		return res, err
-	}
 	for batch := range slices.Chunk(rows, pushBatch) {
-		var envs []e2e.Envelope
-		sent := map[int64]store.Row{}
-		for _, r := range batch {
-			if Route(configs, r.Drive) != n.Config.Mesh {
-				continue
-			}
-			e, err := SealRow(k, n.Identity, n.Config, r)
-			if err != nil {
+		pr, sent, err := n.pushBatch(ctx, configs, batch)
+		if errors.Is(err, errStaleEpoch) {
+			if err := n.RefreshKeys(ctx); err != nil {
 				return res, err
 			}
-			envs = append(envs, e)
-			sent[r.OriginSeq] = r
+			pr, sent, err = n.pushBatch(ctx, configs, batch)
 		}
-		if len(envs) > 0 {
-			var pr pushResponse
-			if err := n.client().Call(ctx, http.MethodPost, "/v1/push", pushRequest{Mesh: n.Config.Mesh, Envelopes: envs}, &pr); err != nil {
-				return res, err
-			}
-			if err := accounted(envs, pr); err != nil {
-				return res, err
-			}
-			for _, rj := range pr.Rejected {
-				r := sent[rj.OriginSeq]
-				slog.Warn("relay refused record", "mesh", n.Config.Mesh, "origin_seq", rj.OriginSeq, "reason", rj.Reason)
-				res.Rejected = append(res.Rejected, Rejection{ID: r.ID, Drive: r.Drive, OriginSeq: rj.OriginSeq, Reason: rj.Reason})
-			}
-			res.Pushed += len(pr.Accepted)
+		if err != nil {
+			return res, err
 		}
+		for _, rj := range pr.Rejected {
+			r := sent[rj.OriginSeq]
+			slog.Warn("relay refused record", "mesh", n.Config.Mesh, "origin_seq", rj.OriginSeq, "reason", rj.Reason)
+			res.Rejected = append(res.Rejected, Rejection{ID: r.ID, Drive: r.Drive, OriginSeq: rj.OriginSeq, Reason: rj.Reason})
+		}
+		res.Pushed += len(pr.Accepted)
 		if err := n.Store.Ack(ctx, Peer(n.Config.Mesh), batch[len(batch)-1].OriginSeq); err != nil {
 			return res, err
 		}
 	}
 	return res, nil
+}
+
+var errStaleEpoch = errors.New("relay: sealed under a superseded group key")
+
+func (n *Node) pushBatch(ctx context.Context, configs []Config, batch []store.Row) (pushResponse, map[int64]store.Row, error) {
+	ring, err := LoadKeyring(n.Home, n.Config.Mesh)
+	if err != nil {
+		return pushResponse{}, nil, err
+	}
+	n.Keyring = ring
+	members, err := n.Members(ctx)
+	if err != nil {
+		return pushResponse{}, nil, err
+	}
+	k, err := n.Keyring.Current(n.keyHolder(), n.Config.Mesh, members)
+	if err != nil {
+		return pushResponse{}, nil, err
+	}
+	var envs []e2e.Envelope
+	sent := map[int64]store.Row{}
+	for _, r := range batch {
+		if Route(configs, r.Drive) != n.Config.Mesh {
+			continue
+		}
+		e, err := SealRow(k, n.Identity, n.Config, r)
+		if err != nil {
+			return pushResponse{}, nil, err
+		}
+		envs = append(envs, e)
+		sent[r.OriginSeq] = r
+	}
+	var pr pushResponse
+	if len(envs) == 0 {
+		return pr, sent, nil
+	}
+	if err := n.client().Call(ctx, http.MethodPost, "/v1/push", pushRequest{Mesh: n.Config.Mesh, Envelopes: envs}, &pr); err != nil {
+		var se *StatusError
+		if errors.As(err, &se) && se.Kind == "stale_epoch" {
+			return pr, sent, fmt.Errorf("%w: %w", errStaleEpoch, err)
+		}
+		return pr, sent, err
+	}
+	return pr, sent, accounted(envs, pr)
 }
 
 func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {

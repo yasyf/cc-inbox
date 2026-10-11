@@ -364,3 +364,20 @@ func TestRotateAfterIsConditional(t *testing.T) {
 		t.Fatalf("second rotation after epoch 1 = %v at epoch %d, want ErrEpochTaken at 2", err, srv.Epoch())
 	}
 }
+
+func TestPushResealsAfterAConcurrentRotation(t *testing.T) {
+	srv, a, b, c := mesh(t)
+	if _, err := b.st.DropMember(context.Background(), c.id.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.node.Rotate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: secret})
+	if res, err := a.node.Push(context.Background(), configs(t, a)); err != nil || res.Pushed != 1 {
+		t.Fatalf("push across a rotation = %+v, %v; want 1 resealed", res, err)
+	}
+	if got := pull(t, b); got.Inserted != 1 || srv.Epoch() != 2 {
+		t.Fatalf("owner inserted %d at epoch %d, want 1 at 2", got.Inserted, srv.Epoch())
+	}
+}

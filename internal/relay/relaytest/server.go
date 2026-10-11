@@ -219,6 +219,12 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 		fail(w, 403, "unpaired", "paired members are read-only")
 		return
 	}
+	for _, e := range req.Envelopes {
+		if e.Epoch < s.epoch {
+			fail(w, 409, "stale_epoch", fmt.Sprintf("epoch %d, current %d", e.Epoch, s.epoch))
+			return
+		}
+	}
 	type result struct {
 		OriginSeq int64  `json:"origin_seq"`
 		Duplicate bool   `json:"duplicate,omitempty"`
