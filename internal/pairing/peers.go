@@ -61,11 +61,7 @@ func Peers(ctx context.Context, st *store.Store, self node.Node, cfgs []relay.Co
 			continue
 		}
 		idx[m.Node] = len(out)
-		via, by, _ := strings.Cut(m.By, ":")
-		p := Peer{Node: m.Node, Fingerprint: node.FingerprintOf(m.PublicKey), Tier: m.Tier, Via: []string{via}, By: by, At: m.At}
-		if via == "synckit" {
-			p.Via, p.Host, p.By = []string{"mesh"}, by, ""
-		}
+		p := Peer{Node: m.Node, Fingerprint: node.FingerprintOf(m.PublicKey), Tier: m.Tier, Via: []string{m.Via}, Host: m.Host, By: m.By, At: m.At}
 		out = append(out, p)
 	}
 	if !withDirectory {

@@ -153,5 +153,5 @@ func admit(ctx context.Context, home string, st *store.Store, self e2e.Identity,
 	if !c.Grant.Verify(by.PublicKey, c.Mesh, c.Node, c.Pub, c.Tier) {
 		return refuse("grant signature does not verify against owner " + c.Grant.By)
 	}
-	return st.PutMember(ctx, store.Member{Node: c.Node, PublicKey: c.Pub, Tier: node.Tier(c.Tier), By: byPair + c.Grant.By, At: st.Now()})
+	return st.PutMember(ctx, store.Member{Node: c.Node, PublicKey: c.Pub, Tier: node.Tier(c.Tier), Via: viaPair, By: c.Grant.By, At: st.Now()})
 }

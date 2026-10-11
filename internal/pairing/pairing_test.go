@@ -57,7 +57,7 @@ func newOwners(t *testing.T, srv *relaytest.Server, n int) []*peer {
 	for _, o := range owners {
 		for _, other := range owners {
 			if other != o {
-				put(t, o, store.Member{Node: other.id.ID(), PublicKey: other.id.PublicKey(), Tier: node.TierOwner, By: "synckit:test", At: time.Now()})
+				put(t, o, store.Member{Node: other.id.ID(), PublicKey: other.id.PublicKey(), Tier: node.TierOwner, Via: "mesh", By: "test", At: time.Now()})
 			}
 		}
 	}
@@ -281,7 +281,7 @@ func TestPairAdmitsAReaderThatDecryptsOwnerRecords(t *testing.T) {
 	x := pair(t, srv, a, consent)
 
 	m, ok := pinned(t, a, x.id.ID())
-	if !ok || m.Tier != node.TierPaired || m.By != "pair:"+a.id.ID() {
+	if !ok || m.Tier != node.TierPaired || m.Via != "pair" || m.By != a.id.ID() {
 		t.Fatalf("owner pinned the reader as %+v (ok=%v); want tier paired by pair:<owner>", m, ok)
 	}
 	for _, o := range owners {
@@ -297,7 +297,7 @@ func TestPairAdmitsAReaderThatDecryptsOwnerRecords(t *testing.T) {
 	}
 
 	pull(t, b)
-	if m, ok := pinned(t, b, x.id.ID()); !ok || m.Tier != node.TierPaired || m.By != "pair:"+a.id.ID() {
+	if m, ok := pinned(t, b, x.id.ID()); !ok || m.Tier != node.TierPaired || m.Via != "pair" || m.By != a.id.ID() {
 		t.Fatalf("second owner pinned the reader as %+v (ok=%v); want paired, granted by the accepting owner", m, ok)
 	}
 

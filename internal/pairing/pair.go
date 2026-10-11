@@ -16,7 +16,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const byPair = "pair:"
+const viaPair = "pair"
 
 var ErrExpired = errors.New("pairing: the code expired before an owner accepted it")
 
@@ -145,7 +145,7 @@ func awaitAccept(ctx context.Context, c relay.Client, code string, pub []byte, p
 func pinRoster(ctx context.Context, st *store.Store, sr statusReply) (store.Member, error) {
 	now := st.Now()
 	for _, k := range sr.Roster {
-		if err := st.PutMember(ctx, store.Member{Node: k.ID, PublicKey: k.Pub, Tier: node.TierOwner, By: byPair + sr.Owner.ID, At: now}); err != nil {
+		if err := st.PutMember(ctx, store.Member{Node: k.ID, PublicKey: k.Pub, Tier: node.TierOwner, Via: viaPair, By: sr.Owner.ID, At: now}); err != nil {
 			return store.Member{}, err
 		}
 	}
@@ -186,7 +186,7 @@ func Accept(ctx context.Context, home string, st *store.Store, self node.Node, c
 	if _, err := n.Keyring.Current(self, cfg.Mesh, members); err != nil {
 		return store.Member{}, fmt.Errorf("pairing: this owner holds no group key for mesh %s: %w", cfg.Mesh, err)
 	}
-	member := store.Member{Node: id, PublicKey: p.Pub, Tier: opts.Tier, By: byPair + self.ID(), At: st.Now()}
+	member := store.Member{Node: id, PublicKey: p.Pub, Tier: opts.Tier, Via: viaPair, By: self.ID(), At: st.Now()}
 	req := acceptRequest{Mesh: cfg.Mesh, Code: opts.Code, Fingerprint: p.Fingerprint, Nonce: p.Nonce, Tier: opts.Tier, Argv: AcceptArgv(opts.Code, p.Fingerprint)}
 	if opts.Tier == node.TierService {
 		req.Argv = append(req.Argv, string(node.TierService), CanonicalAllow(opts.Allow), opts.Allow.Label)
