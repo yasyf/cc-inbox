@@ -1,0 +1,118 @@
+{
+  "control": {
+    "control": {
+      "v": 1,
+      "type": "peer.unpaired",
+      "mesh": "oncall",
+      "node": "c71199aab8a9481d",
+      "pub": "BETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=",
+      "tier": "paired",
+      "reason": "violation",
+      "by": "relay",
+      "epoch": 4,
+      "at": "2026-10-11T12:00:00Z",
+      "id": "ctl-1",
+      "sig": null
+    },
+    "signed": {
+      "message": "cci-mesh/control/v1\npeer.unpaired\noncall\nc71199aab8a9481d\nBETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=\npaired\nviolation\nrelay\n4\n2026-10-11T12:00:00Z\nctl-1",
+      "sig_b64": "MEUCIQDHFpIXUSV7Wkyer2S41646xsIpwaQB+hZjQjrMRtzLLwIgWjk8QUg1rr+e4XkxpOq7ppRmBZw36Ab9Je1NxsvxHck="
+    }
+  },
+  "delegation_kinds_empty": {
+    "delegation": {
+      "v": 1,
+      "mesh": "oncall",
+      "service": "07e1e848d37e1b40",
+      "instance": "c71199aab8a9481d",
+      "instance_pub": "BETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=",
+      "drives": [
+        "page:*"
+      ],
+      "kinds": [],
+      "expires": "2026-10-11T13:00:00Z",
+      "sig": null
+    },
+    "signed": {
+      "message": "cci-mesh/delegation/v1\noncall\n07e1e848d37e1b40\nc71199aab8a9481d\nBETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=\n[\"page:*\"]\n[]\n2026-10-11T13:00:00Z",
+      "sig_b64": "MEQCIHZkCDwF704X6dgSwQU9i1lFCbV9pGnrcHQ6gS4/CVgaAiAy9WceMqGbG1MWhdx3lITDCv0mv1jT70EblZ23Njk+wA=="
+    }
+  },
+  "delegation_kinds_nil": {
+    "delegation": {
+      "v": 1,
+      "mesh": "oncall",
+      "service": "07e1e848d37e1b40",
+      "instance": "c71199aab8a9481d",
+      "instance_pub": "BETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=",
+      "drives": [
+        "page:*"
+      ],
+      "kinds": null,
+      "expires": "2026-10-11T13:00:00Z",
+      "sig": null
+    },
+    "signed": {
+      "message": "cci-mesh/delegation/v1\noncall\n07e1e848d37e1b40\nc71199aab8a9481d\nBETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=\n[\"page:*\"]\nnull\n2026-10-11T13:00:00Z",
+      "sig_b64": "MEQCIHVmzTXadsWJs65wnKcIRda84uRqljTpz4ETVPFmmoaeAiBqEp+7Z7salu+AFMrjz/Tr38aXlf9oktMfWv62WMS0xw=="
+    }
+  },
+  "delegation_kinds_set": {
+    "delegation": {
+      "v": 1,
+      "mesh": "oncall",
+      "service": "07e1e848d37e1b40",
+      "instance": "c71199aab8a9481d",
+      "instance_pub": "BETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=",
+      "drives": [
+        "page:*"
+      ],
+      "kinds": [
+        "oncall.page.*"
+      ],
+      "expires": "2026-10-11T13:00:00Z",
+      "sig": null
+    },
+    "signed": {
+      "message": "cci-mesh/delegation/v1\noncall\n07e1e848d37e1b40\nc71199aab8a9481d\nBETqSPiZSTjIJMebG7ufFxPYHJm2g3BBur79Cbejuc2ADzA4LnNlRA36jgjOCO828gfx1OkzIrr7jtZkPibFXxQ=\n[\"page:*\"]\n[\"oncall.page.*\"]\n2026-10-11T13:00:00Z",
+      "sig_b64": "MEUCIARgu2mK9WFJq6IXZ3MFEGa1Ct1SucmVoL1xgd4apANDAiEA0yKS1py+aasbZRieXWQn7TW6H1XBS7hlpaW4koM9Adw="
+    }
+  },
+  "envelope": {
+    "envelope": {
+      "v": 1,
+      "mesh": "oncall",
+      "drive": "page:42",
+      "origin": "07e1e848d37e1b40",
+      "origin_seq": 7,
+      "tier": "service",
+      "kind_class": "oncall.page.opened",
+      "ts": "2026-10-11T12:00:00Z",
+      "epoch": 3,
+      "nonce": "MDEyMzQ1Njc4OWFi",
+      "body": "Y2lwaGVydGV4dA==",
+      "sig": null
+    },
+    "signed": {
+      "message": "cci-mesh/record/v1\noncall\npage:42\n07e1e848d37e1b40\n7\nservice\noncall.page.opened\n2026-10-11T12:00:00Z\n3\nMDEyMzQ1Njc4OWFi\n305531dcc50ebca31cf1d5b31e9fc76ed51f66b3b6dd5a030c6539ae6532f979",
+      "sig_b64": "MEYCIQDNfrC00i4LFsBEXD0K83bESg1Vzmtz8bVaXnlUFsmb7wIhAOBg2EyOD8r738xY9ghQwdXn7XuCHHM/hyKNeMGLQ/c+"
+    }
+  },
+  "key": {
+    "fingerprint": "07e1e848d37e1b40f4dec5866d2c116cb469c19c0ac2caf0bd73a726ba226488",
+    "id": "07e1e848d37e1b40",
+    "pub_b64": "BE/ZU69nncJZPFQOHMUBd8y7I4Menv3V9ehJyXCh9N3jZFCfqgDTROtX3Gwqw4iVSumTyM4pUzCnnLvuvzZ67HA=",
+    "scalar_hex_is_sha256_of": "cci-relay-vector-key"
+  },
+  "request": {
+    "at": "2026-10-11T12:00:00Z",
+    "body": "{}",
+    "method": "POST",
+    "nonce": "bm9uY2U=",
+    "signed": {
+      "message": "cci-relay/req/v1\nPOST\n/v1/push?mesh=oncall\n2026-10-11T12:00:00Z\nbm9uY2U=\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+      "sig_b64": "MEUCIEkZrlyhfUud5ckCBS+kcLE2arH+pHpE7rCHieoIDo3MAiEAh3LNsFo22Fkt6IbROEt0YS8P+ycphd8q4QNEIo9appk="
+    },
+    "target": "/v1/push?mesh=oncall"
+  }
+}
