@@ -19,11 +19,13 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 const (
 	MaxText     = 400
+	MaxBody     = 64 << 10
 	DedupWindow = 10 * time.Minute
 )
 
@@ -140,6 +142,65 @@ INSERT INTO claims_by_agent (session, rel, kind, key, at) SELECT session, rel, k
 DROP TABLE claims;
 ALTER TABLE claims_by_agent RENAME TO claims;
 CREATE INDEX claims_ref ON claims(kind, key)`,
+	`ALTER TABLE records ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+ALTER TABLE records ADD COLUMN origin_seq INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE records ADD COLUMN id TEXT;
+ALTER TABLE records ADD COLUMN body TEXT;
+ALTER TABLE records ADD COLUMN re_origin TEXT NOT NULL DEFAULT '';
+ALTER TABLE records ADD COLUMN re_origin_seq INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE records ADD COLUMN resolves_origin TEXT NOT NULL DEFAULT '';
+ALTER TABLE records ADD COLUMN resolves_origin_seq INTEGER NOT NULL DEFAULT 0;
+UPDATE records SET origin = {self}, origin_seq = seq,
+	re_origin = CASE WHEN re = 0 THEN '' ELSE {self} END, re_origin_seq = re,
+	resolves_origin = CASE WHEN resolves = 0 THEN '' ELSE {self} END, resolves_origin_seq = resolves;
+CREATE UNIQUE INDEX records_origin ON records(origin, origin_seq);
+CREATE UNIQUE INDEX records_id ON records(drive, id) WHERE id IS NOT NULL;
+CREATE TRIGGER records_identity AFTER INSERT ON records
+WHEN NEW.origin_seq = 0 OR (NEW.re != 0 AND NEW.re_origin = '') OR (NEW.resolves != 0 AND NEW.resolves_origin = '')
+BEGIN
+UPDATE records SET
+	origin_seq = CASE WHEN NEW.origin_seq = 0 THEN NEW.seq ELSE NEW.origin_seq END,
+	re_origin = CASE WHEN NEW.re = 0 OR NEW.re_origin != '' THEN NEW.re_origin ELSE COALESCE((SELECT t.origin FROM records t WHERE t.seq = NEW.re), NEW.origin) END,
+	re_origin_seq = CASE WHEN NEW.re = 0 OR NEW.re_origin != '' THEN NEW.re_origin_seq ELSE COALESCE((SELECT t.origin_seq FROM records t WHERE t.seq = NEW.re), NEW.re) END,
+	resolves_origin = CASE WHEN NEW.resolves = 0 OR NEW.resolves_origin != '' THEN NEW.resolves_origin ELSE COALESCE((SELECT t.origin FROM records t WHERE t.seq = NEW.resolves), NEW.origin) END,
+	resolves_origin_seq = CASE WHEN NEW.resolves = 0 OR NEW.resolves_origin != '' THEN NEW.resolves_origin_seq ELSE COALESCE((SELECT t.origin_seq FROM records t WHERE t.seq = NEW.resolves), NEW.resolves) END
+WHERE seq = NEW.seq;
+END;
+ALTER TABLE sessions ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+UPDATE sessions SET origin = {self};
+ALTER TABLE claims ADD COLUMN origin TEXT NOT NULL DEFAULT '';
+UPDATE claims SET origin = {self};
+CREATE TABLE receipts (
+	channel TEXT NOT NULL,
+	origin TEXT NOT NULL,
+	change_id TEXT NOT NULL,
+	revision TEXT NOT NULL,
+	digest TEXT NOT NULL,
+	PRIMARY KEY (channel, origin)
+);
+CREATE TABLE watermarks (peer TEXT PRIMARY KEY, origin_seq INTEGER NOT NULL);
+CREATE TABLE members (
+	node TEXT PRIMARY KEY,
+	public_key BLOB NOT NULL,
+	tier TEXT NOT NULL,
+	via TEXT NOT NULL,
+	host TEXT NOT NULL DEFAULT '',
+	by TEXT NOT NULL,
+	at INTEGER NOT NULL
+);
+CREATE TABLE pending (
+	origin TEXT NOT NULL,
+	origin_seq INTEGER NOT NULL,
+	wait_origin TEXT NOT NULL,
+	wait_seq INTEGER NOT NULL,
+	row TEXT NOT NULL,
+	PRIMARY KEY (origin, origin_seq)
+);
+CREATE INDEX pending_wait ON pending(wait_origin, wait_seq);
+CREATE TABLE aliases (origin TEXT NOT NULL, origin_seq INTEGER NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (origin, origin_seq));
+CREATE TABLE folded (origin TEXT NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (origin, origin_seq)) WITHOUT ROWID;
+CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+INSERT INTO meta (key, value) SELECT 'compacted_through', MAX(seq) FROM records WHERE kind = 'digest' HAVING MAX(seq) IS NOT NULL`,
 }
 
 var (
@@ -168,30 +229,35 @@ type Census struct {
 }
 
 type Fields struct {
-	Envs    []string       `json:"envs,omitempty"`
-	Mode    string         `json:"mode,omitempty"`
-	Outcome string         `json:"outcome,omitempty"`
-	Commit  string         `json:"commit,omitempty"`
-	Census  *Census        `json:"census,omitempty"`
-	Counts  map[string]int `json:"counts,omitempty"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
+	Envs    []string          `json:"envs,omitempty"`
+	Mode    string            `json:"mode,omitempty"`
+	Outcome string            `json:"outcome,omitempty"`
+	Commit  string            `json:"commit,omitempty"`
+	Census  *Census           `json:"census,omitempty"`
+	Counts  map[string]int    `json:"counts,omitempty"`
 }
 
 type Record struct {
-	Seq       int64      `json:"seq"`
-	Drive     string     `json:"drive"`
-	Lane      string     `json:"lane"`
-	Kind      kinds.Kind `json:"kind"`
-	At        time.Time  `json:"at"`
-	Text      string     `json:"text"`
-	Topic     string     `json:"topic,omitempty"`
-	To        []string   `json:"to,omitempty"`
-	Re        int64      `json:"re,omitempty"`
-	Resolves  int64      `json:"resolves,omitempty"`
-	Refs      Refs       `json:"refs"`
-	Fields    Fields     `json:"fields"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Source    string     `json:"source"`
-	Status    string     `json:"status,omitempty"`
+	Seq       int64           `json:"seq"`
+	Origin    string          `json:"origin,omitempty"`
+	OriginSeq int64           `json:"origin_seq,omitempty"`
+	ID        string          `json:"id,omitempty"`
+	Drive     string          `json:"drive"`
+	Lane      string          `json:"lane"`
+	Kind      kinds.Kind      `json:"kind"`
+	At        time.Time       `json:"at"`
+	Text      string          `json:"text"`
+	Topic     string          `json:"topic,omitempty"`
+	To        []string        `json:"to,omitempty"`
+	Re        int64           `json:"re,omitempty"`
+	Resolves  int64           `json:"resolves,omitempty"`
+	Refs      Refs            `json:"refs"`
+	Fields    Fields          `json:"fields"`
+	ExpiresAt *time.Time      `json:"expires_at,omitempty"`
+	Source    string          `json:"source"`
+	Body      json.RawMessage `json:"body,omitempty"`
+	Status    string          `json:"status,omitempty"`
 }
 
 func (r Record) Tracked() bool {
@@ -201,6 +267,7 @@ func (r Record) Tracked() bool {
 type Store struct {
 	db   *sql.DB
 	home string
+	node node.Node
 	Now  func() time.Time
 }
 
@@ -219,12 +286,16 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", home, err)
 	}
+	n, err := node.Load(home)
+	if err != nil {
+		return nil, err
+	}
 	dsn := "file:" + filepath.Join(home, "inbox.db") + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	s := &Store{db: db, home: home, Now: time.Now}
+	s := &Store{db: db, home: home, node: n, Now: time.Now}
 	if err := s.initialize(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -253,6 +324,36 @@ func (s *Store) HomeDir() string {
 	return s.home
 }
 
+// SchemaFingerprint names the store schema this binary writes: the hex
+// SHA-256 of its migrations, so two nodes replicate only on the same schema.
+func (s *Store) SchemaFingerprint() string {
+	sum := sha256.Sum256([]byte(strings.Join(migrations, "\x00")))
+	return hex.EncodeToString(sum[:])
+}
+
+// Self is this node's id, the origin of every record Post writes.
+func (s *Store) Self() string {
+	return s.node.ID()
+}
+
+func (s *Store) Node() node.Node {
+	return s.node
+}
+
+func (s *Store) local(origin string) string {
+	if origin == s.Self() {
+		return ""
+	}
+	return origin
+}
+
+func (s *Store) origin(local string) string {
+	if local == "" {
+		return s.Self()
+	}
+	return local
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -270,7 +371,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("store schema %d is newer than this cci %s (schema %d); upgrade it with: %s", schema, version.String(), len(migrations), version.UpgradeCommand())
 	}
 	for i, step := range migrations[schema:] {
-		if _, err := tx.ExecContext(ctx, step); err != nil {
+		if _, err := tx.ExecContext(ctx, strings.ReplaceAll(step, "{self}", "'"+s.Self()+"'")); err != nil {
 			return fmt.Errorf("migrate store to schema %d: %w", schema+i+1, err)
 		}
 	}
@@ -284,7 +385,11 @@ func (s *Store) migrate(ctx context.Context) error {
 }
 
 func Hash(r Record) string {
-	key, _ := json.Marshal([]any{r.Drive, r.Lane, r.Kind, r.Topic, slices.Sorted(slices.Values(r.To)), r.Re, r.Resolves, strings.Fields(r.Text)})
+	parts := []any{r.Drive, r.Lane, r.Kind, r.Topic, slices.Sorted(slices.Values(r.To)), r.Re, r.Resolves, strings.Fields(r.Text)}
+	if r.ID != "" {
+		parts = append(parts, r.ID)
+	}
+	key, _ := json.Marshal(parts)
 	sum := sha256.Sum256(key)
 	return hex.EncodeToString(sum[:])
 }
@@ -311,6 +416,12 @@ func Validate(r Record) error {
 	}
 	if err := validateFields(r.Fields); err != nil {
 		return err
+	}
+	if len(r.Body) > MaxBody {
+		return fmt.Errorf("body is %d bytes; the limit is %d", len(r.Body), MaxBody)
+	}
+	if len(r.Body) > 0 && !json.Valid(r.Body) {
+		return errors.New("body is not valid JSON")
 	}
 	for _, stack := range r.Refs.Stacks {
 		if project, env, ok := strings.Cut(stack, "/"); !ok || project == "" || env == "" || strings.Contains(env, "/") {
@@ -356,6 +467,7 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 			return Record{}, false, err
 		}
 	}
+	r.Origin, r.OriginSeq = "", 0
 	r.At = s.Now().UTC()
 	r.ExpiresAt = expiry(r, ttl)
 	hash := Hash(r)
@@ -365,8 +477,15 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 	}
 	defer func() { _ = tx.Rollback() }()
 	var existing int64
-	err = tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE hash = ? AND at >= ? ORDER BY seq DESC LIMIT 1",
-		hash, r.At.Add(-DedupWindow).UnixMilli()).Scan(&existing)
+	if r.ID != "" {
+		err = tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE drive = ? AND id = ?", r.Drive, r.ID).Scan(&existing)
+	} else {
+		err = sql.ErrNoRows
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		err = tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE hash = ? AND at >= ? AND origin = ? ORDER BY seq DESC LIMIT 1",
+			hash, r.At.Add(-DedupWindow).UnixMilli(), s.Self()).Scan(&existing)
+	}
 	switch {
 	case err == nil:
 		got, err := s.get(ctx, tx, existing)
@@ -374,7 +493,7 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 	case !errors.Is(err, sql.ErrNoRows):
 		return Record{}, false, fmt.Errorf("check duplicate: %w", err)
 	}
-	seq, err := insert(ctx, tx, r, hash, nil)
+	seq, err := s.insert(ctx, tx, r, hash, nil)
 	if err != nil {
 		return Record{}, false, err
 	}
@@ -408,7 +527,7 @@ func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
 		}
 		r := it.Record
 		r.ExpiresAt = expiry(r, 0)
-		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", args(r, Hash(r), &it.LineHash)...)
+		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", s.args(r, Hash(r), &it.LineHash)...)
 		if err != nil {
 			return 0, fmt.Errorf("ingest record: %w", err)
 		}
@@ -465,7 +584,7 @@ func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (upd
 			continue
 		}
 		r.ExpiresAt = expiry(r, 0)
-		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", args(r, Hash(r), &it.LineHash)...)
+		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", s.args(r, Hash(r), &it.LineHash)...)
 		if err != nil {
 			return 0, 0, fmt.Errorf("reparse record: %w", err)
 		}
@@ -518,8 +637,8 @@ func expiry(r Record, ttl time.Duration) *time.Time {
 	return &t
 }
 
-const insertSQL = `INSERT INTO records (drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+const insertSQL = `INSERT INTO records (origin, origin_seq, id, drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash, body)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 const reparseSQL = `UPDATE records SET lane = ?, kind = ?, text = ?, topic = ?, recipients = ?, refs = ?, hash = ?, expires_at = at + ?
 WHERE line_hash = ?`
@@ -528,8 +647,8 @@ type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func insert(ctx context.Context, x execer, r Record, hash string, lineHash *string) (int64, error) {
-	res, err := x.ExecContext(ctx, insertSQL, args(r, hash, lineHash)...)
+func (s *Store) insert(ctx context.Context, x execer, r Record, hash string, lineHash *string) (int64, error) {
+	res, err := x.ExecContext(ctx, insertSQL, s.args(r, hash, lineHash)...)
 	if err != nil {
 		return 0, fmt.Errorf("insert record: %w", err)
 	}
@@ -540,7 +659,7 @@ func insert(ctx context.Context, x execer, r Record, hash string, lineHash *stri
 	return seq, nil
 }
 
-func args(r Record, hash string, lineHash *string) []any {
+func (s *Store) args(r Record, hash string, lineHash *string) []any {
 	to := r.To
 	if to == nil {
 		to = []string{}
@@ -556,24 +675,37 @@ func args(r Record, hash string, lineHash *string) []any {
 	if lineHash != nil {
 		line = *lineHash
 	}
-	return []any{r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), r.Text, r.Topic, string(recipients), r.Re, r.Resolves, string(refs), string(fields), expires, r.Source, hash, line}
+	var id, body any
+	if r.ID != "" {
+		id = r.ID
+	}
+	if len(r.Body) > 0 {
+		body = string(r.Body)
+	}
+	return []any{s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), r.Text, r.Topic, string(recipients), r.Re, r.Resolves, string(refs), string(fields), expires, r.Source, hash, line, body}
 }
 
-const columns = "seq, drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source"
+const columns = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, '')"
 
 type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scan(row scanner) (Record, error) {
+func (s *Store) scan(row scanner) (Record, error) {
 	var (
-		r                          Record
-		kind, recipients, refs, fs string
-		at                         int64
-		expires                    sql.NullInt64
+		r                                Record
+		kind, recipients, refs, fs, body string
+		at                               int64
+		expires                          sql.NullInt64
 	)
-	if err := row.Scan(&r.Seq, &r.Drive, &r.Lane, &kind, &at, &r.Text, &r.Topic, &recipients, &r.Re, &r.Resolves, &refs, &fs, &expires, &r.Source); err != nil {
+	if err := row.Scan(&r.Seq, &r.Origin, &r.OriginSeq, &r.ID, &r.Drive, &r.Lane, &kind, &at, &r.Text, &r.Topic, &recipients, &r.Re, &r.Resolves, &refs, &fs, &expires, &r.Source, &body); err != nil {
 		return Record{}, fmt.Errorf("scan record: %w", err)
+	}
+	if r.Origin = s.local(r.Origin); r.Origin == "" {
+		r.OriginSeq = 0
+	}
+	if body != "" {
+		r.Body = json.RawMessage(body)
 	}
 	r.Kind = kinds.Kind(kind)
 	r.At = time.UnixMilli(at).UTC()
@@ -601,7 +733,7 @@ type querier interface {
 }
 
 func (s *Store) get(ctx context.Context, q querier, seq int64) (Record, error) {
-	return scan(q.QueryRowContext(ctx, "SELECT "+columns+" FROM records WHERE seq = ?", seq))
+	return s.scan(q.QueryRowContext(ctx, "SELECT "+columns+" FROM records WHERE seq = ?", seq))
 }
 
 func (s *Store) Get(ctx context.Context, seq int64) (Record, error) {

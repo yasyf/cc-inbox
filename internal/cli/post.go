@@ -1,8 +1,11 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -20,7 +23,7 @@ func newPostCmd() *cobra.Command {
 		drive, lane, kind, text string
 		r                       store.Record
 		counts                  map[string]string
-		census                  string
+		census, bodyFile        string
 		ttl                     time.Duration
 		asJSON                  bool
 	)
@@ -64,6 +67,11 @@ func newPostCmd() *cobra.Command {
 					return fmt.Errorf("--census: %w", err)
 				}
 			}
+			if bodyFile != "" {
+				if r.Body, err = readBody(cmd, bodyFile); err != nil {
+					return err
+				}
+			}
 			if len(counts) > 0 {
 				r.Fields.Counts = map[string]int{}
 				for key, v := range counts {
@@ -104,7 +112,8 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "at most 400 characters, also accepted as the one argument; without either, the --path file's first line")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents and <lane>@<drive> a lane in another drive")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive")
+	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given")
@@ -122,10 +131,35 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Fields.Commit, "commit", "", "full commit sha")
 	f.StringVar(&census, "census", "", `census JSON: {"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["<project>/<env>"]}`)
 	f.StringToStringVar(&counts, "count", nil, "named counts, e.g. --count deletes=0")
+	f.StringToStringVar(&r.Fields.Attrs, "attr", nil, "named string attributes (repeatable), e.g. --attr actor=platy")
+	f.StringVar(&bodyFile, "body-file", "", "JSON body of at most 64 KiB, from a file or - for stdin")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	for _, name := range []string{"lane", "kind"} {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
+}
+
+func readBody(cmd *cobra.Command, path string) (json.RawMessage, error) {
+	var (
+		raw []byte
+		err error
+	)
+	if path == "-" {
+		raw, err = io.ReadAll(io.LimitReader(cmd.InOrStdin(), store.MaxBody+1))
+	} else {
+		raw, err = os.ReadFile(path) //nolint:gosec // G304: the caller names its own body file.
+	}
+	if err != nil {
+		return nil, fmt.Errorf("--body-file: %w", err)
+	}
+	if len(raw) > store.MaxBody {
+		return nil, fmt.Errorf("--body-file: body exceeds %d bytes", store.MaxBody)
+	}
+	body := bytes.TrimSpace(raw)
+	if len(body) == 0 || !json.Valid(body) {
+		return nil, errors.New("--body-file: not a JSON value")
+	}
+	return json.RawMessage(body), nil
 }

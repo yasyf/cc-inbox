@@ -87,7 +87,7 @@ func newWhoCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "who",
-		Short: "List live peer sessions on this machine with the address SendMessage accepts; every flag narrows",
+		Short: "List live peer sessions on this machine and replicated nodes with the address that reaches each; every flag narrows",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			refs, err := refArgs(pr, build, ref)
@@ -133,6 +133,7 @@ func newWhoCmd() *cobra.Command {
 	fl := cmd.Flags()
 	fl.StringVar(&f.Session, "session", "", "session id or its prefix")
 	fl.StringVar(&f.Agent, "agent", "", "the subagent or teammate with this agent id or name")
+	fl.StringVar(&f.Origin, "origin", "", "sessions on this node, by id or prefix; - for this machine's own")
 	fl.StringVar(&f.Name, "name", "", "the harness name, as ListAgents prints it")
 	fl.StringVar(&f.Role, "role", "", "root, lane, desk, watcher, codex or session")
 	fl.StringVar(&f.Drive, "drive", "", "sessions bound to this drive")
@@ -359,12 +360,16 @@ func resolveRecipients(ctx context.Context, st *store.Store, to []string) ([]str
 			out[i] = t
 			continue
 		}
-		session, agent, _ := strings.Cut(target, "/")
-		v, err := peers.One(ctx, st, peers.Filter{Session: session, Agent: agent, Root: agent == "", All: true})
+		origin, rest := store.SplitPeer(target)
+		if origin == "" || origin == st.Self() {
+			origin = peers.LocalOrigin
+		}
+		session, agent, _ := strings.Cut(rest, "/")
+		v, err := peers.One(ctx, st, peers.Filter{Origin: origin, Session: session, Agent: agent, Root: agent == "", All: true})
 		if errors.Is(err, sql.ErrNoRows) {
-			v, err = peers.One(ctx, st, peers.Filter{Name: session, Root: true, All: true})
+			v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Name: session, Root: true, All: true})
 			if err == nil && agent != "" {
-				v, err = peers.One(ctx, st, peers.Filter{Session: v.Session, Agent: agent, All: true})
+				v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Session: v.Session, Agent: agent, All: true})
 			}
 		}
 		if errors.Is(err, sql.ErrNoRows) {
@@ -374,6 +379,9 @@ func resolveRecipients(ctx context.Context, st *store.Store, to []string) ([]str
 			return nil, fmt.Errorf("--to %s: %w", t, err)
 		}
 		out[i] = store.PeerAddress(v.Key().String())
+		if v.Origin != "" {
+			out[i] = store.PeerAddressOn(v.Origin, v.Key().String())
+		}
 	}
 	return out, nil
 }
