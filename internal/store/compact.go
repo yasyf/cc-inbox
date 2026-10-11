@@ -102,9 +102,14 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 	if err != nil {
 		return CompactResult{}, err
 	}
+	for _, r := range old {
+		if held && r.Origin == "" && r.Seq > floor {
+			keepSeq[r.Seq] = true
+		}
+	}
 	days := map[string][]Record{}
 	for _, r := range old {
-		if r.Kind == kinds.Digest || keepSeq[r.Seq] || elsewhere[r.Seq] || held && r.Origin == "" && r.Seq > floor {
+		if r.Kind == kinds.Digest || keepSeq[r.Seq] || elsewhere[r.Seq] || keepSeq[r.Re] || keepSeq[r.Resolves] {
 			continue
 		}
 		day := r.At.In(time.Local).Format(time.DateOnly)

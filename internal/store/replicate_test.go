@@ -219,8 +219,15 @@ func TestServiceRecordsTravelWithBodyAttrsAndID(t *testing.T) {
 	if err != nil || len(held) != 1 || held[0].ID != "env-1" || string(held[0].Body) != `{"status":"live"}` || held[0].Fields.Attrs["epoch"] != "3" {
 		t.Fatalf("mac holds %+v, %v", held, err)
 	}
-	if got, err := mac.Apply(ctx, []store.Row{{Origin: "ffffffffffffffff", OriginSeq: 9, ID: "env-1", Drive: "page:1", Lane: "platy", Kind: "oncall.fix.status", Text: "replay", At: clock.Now()}}, nil); err != nil || got.Duplicate != 1 {
-		t.Fatalf("Apply(same id, other origin) = %+v, %v", got, err)
+	other := "ffffffffffffffff"
+	replay := store.Row{Origin: other, OriginSeq: 9, ID: "env-1", Drive: "page:1", Lane: "platy", Kind: "oncall.fix.status", Text: "replay", At: clock.Now()}
+	reply := store.Row{Origin: other, OriginSeq: 10, Drive: "page:1", Lane: "ic", Kind: kinds.Note, Text: "ack", At: clock.Now(), Re: &store.Pointer{Origin: other, Seq: 9}}
+	if got, err := mac.Apply(ctx, []store.Row{reply, replay}, nil); err != nil || got != (store.Applied{Duplicate: 1, Buffered: 1, Released: 1}) {
+		t.Fatalf("Apply(reply, same id from another origin) = %+v, %v", got, err)
+	}
+	acked, err := mac.Query(ctx, store.Filter{Drive: "page:1", Lanes: []string{"ic"}})
+	if err != nil || len(acked) != 1 || acked[0].Re != held[0].Seq {
+		t.Fatalf("reply to the aliased row = %+v, %v; want re #%d", acked, err, held[0].Seq)
 	}
 }
 
@@ -254,5 +261,57 @@ func TestSplitPeer(t *testing.T) {
 		if node, rest := store.SplitPeer(tt.in); node != tt.node || rest != tt.rest {
 			t.Errorf("SplitPeer(%q) = %q, %q; want %q, %q", tt.in, node, rest, tt.node, tt.rest)
 		}
+	}
+}
+
+func TestCompactionKeepsTheResolverOfAHeldRow(t *testing.T) {
+	ctx := context.Background()
+	a, clock := testutil.Store(t)
+	b, _ := testutil.Store(t)
+	if err := a.Ack(ctx, "forge", 0); err != nil {
+		t.Fatal(err)
+	}
+	ask := testutil.Post(t, a, store.Record{Lane: "root", Kind: kinds.Ask, Text: "ship it?"})
+	rows, err := a.Export(ctx, a.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Apply(ctx, rows, nil); err != nil {
+		t.Fatal(err)
+	}
+	asked, err := b.Query(ctx, store.Filter{Drive: "d"})
+	if err != nil || len(asked) != 1 {
+		t.Fatalf("b holds %+v, %v", asked, err)
+	}
+	testutil.Post(t, b, store.Record{Lane: "api", Kind: kinds.Answer, Text: "yes", Resolves: asked[0].Seq})
+	answers, err := b.Export(ctx, b.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Apply(ctx, answers, nil); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(72 * time.Hour)
+	if _, err := a.Compact(ctx, "d", 48*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if open, err := a.OpenItems(ctx, "d"); err != nil || len(open) != 0 {
+		t.Fatalf("after compaction a reopens %+v (ask #%d), %v", open, ask.Seq, err)
+	}
+}
+
+func TestLocalSessionDisplacesAReplicatedRow(t *testing.T) {
+	ctx := context.Background()
+	a, _ := testutil.Store(t)
+	b, _ := testutil.Store(t)
+	if err := b.ApplyPresence(ctx, store.Presence{Origin: a.Self(), Peers: []store.Peer{{Session: "sess-x", Drive: "remote", Root: true}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.BindLane(ctx, "sess-x", "local", "api", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := b.Peer(ctx, "sess-x")
+	if err != nil || p.Origin != "" || p.Drive != "local" || p.Root {
+		t.Fatalf("local bind over a replicated row = %+v, %v", p, err)
 	}
 }

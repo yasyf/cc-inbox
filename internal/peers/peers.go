@@ -169,6 +169,9 @@ func (f Filter) byClaim() bool {
 // Resolve joins the registry with the harness windows and applies f. Without
 // All, only live peers are returned.
 func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
+	if f.Origin == st.Self() {
+		f.Origin = LocalOrigin
+	}
 	rows, err := st.Peers(ctx)
 	if err != nil {
 		return nil, err

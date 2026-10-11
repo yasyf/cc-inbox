@@ -161,6 +161,9 @@ func (s *Store) ExportPresence(ctx context.Context, viewer node.Tier) (Presence,
 		if err := claims.Scan(&c.Session, &c.Rel, &c.Kind, &c.Key, &at); err != nil {
 			return Presence{}, fmt.Errorf("export claims: %w", err)
 		}
+		if viewer == node.TierPaired && c.Kind == "worktree" {
+			continue
+		}
 		c.At, c.Source = time.UnixMilli(at).UTC(), "claim"
 		p.Claims = append(p.Claims, c)
 	}

@@ -157,7 +157,9 @@ CREATE TABLE pending (
 	PRIMARY KEY (origin, origin_seq)
 );
 CREATE INDEX pending_wait ON pending(wait_origin, wait_seq);
-CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL)`,
+CREATE TABLE aliases (origin TEXT NOT NULL, origin_seq INTEGER NOT NULL, seq INTEGER NOT NULL, PRIMARY KEY (origin, origin_seq));
+CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+INSERT INTO meta (key, value) SELECT 'compacted_through', MAX(seq) FROM records WHERE kind = 'digest' HAVING MAX(seq) IS NOT NULL`,
 }
 
 var (

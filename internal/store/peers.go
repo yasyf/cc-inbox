@@ -53,6 +53,9 @@ func (s *Store) Announce(ctx context.Context, p Peer) (Peer, error) {
 		return Peer{}, fmt.Errorf("announce %s: %w", p.Session, err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.claimSession(ctx, tx, p.Session); err != nil {
+		return Peer{}, err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, origin, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
 VALUES (?, ?, '', 0, '', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
 ON CONFLICT (session) DO UPDATE SET origin = excluded.origin,
@@ -161,8 +164,19 @@ func nonNil(v []string) []string {
 }
 
 // Redacted is the peer as a paired viewer sees it, without its process,
-// environment or filesystem paths.
+// environment, repository or filesystem paths.
 func (p Peer) Redacted() Peer {
-	p.PID, p.PIDStarted, p.Env, p.Cwd, p.Worktree = 0, 0, nil, "", ""
+	p.PID, p.PIDStarted, p.Env, p.Cwd, p.Worktree, p.Repo = 0, 0, nil, "", "", ""
 	return p
+}
+
+// claimSession drops a replicated row holding a session id this node now
+// uses, so a local session never inherits another node's binding or claims.
+func (s *Store) claimSession(ctx context.Context, tx *sql.Tx, session string) error {
+	for _, q := range []string{"DELETE FROM claims WHERE session = ? AND origin != ?", "DELETE FROM sessions WHERE session = ? AND origin != ?"} {
+		if _, err := tx.ExecContext(ctx, q, session, s.Self()); err != nil {
+			return fmt.Errorf("claim session %s: %w", session, err)
+		}
+	}
+	return nil
 }

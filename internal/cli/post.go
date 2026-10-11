@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -153,5 +154,12 @@ func readBody(cmd *cobra.Command, path string) (json.RawMessage, error) {
 	if err != nil {
 		return nil, fmt.Errorf("--body-file: %w", err)
 	}
-	return json.RawMessage(bytes.TrimSpace(raw)), nil
+	if len(raw) > store.MaxBody {
+		return nil, fmt.Errorf("--body-file: body exceeds %d bytes", store.MaxBody)
+	}
+	body := bytes.TrimSpace(raw)
+	if len(body) == 0 || !json.Valid(body) {
+		return nil, errors.New("--body-file: not a JSON value")
+	}
+	return json.RawMessage(body), nil
 }

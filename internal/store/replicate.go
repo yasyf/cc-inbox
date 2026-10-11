@@ -156,13 +156,27 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 		return nil
 	}
 	var known int
-	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM records WHERE origin = ? AND origin_seq = ? OR ? != '' AND drive = ? AND id = ?) + (SELECT COUNT(*) FROM pending WHERE origin = ? AND origin_seq = ?)",
-		row.Origin, row.OriginSeq, row.ID, row.Drive, row.ID, row.Origin, row.OriginSeq).Scan(&known); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM records WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM pending WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM aliases WHERE origin = ? AND origin_seq = ?)",
+		row.Origin, row.OriginSeq, row.Origin, row.OriginSeq, row.Origin, row.OriginSeq).Scan(&known); err != nil {
 		return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
 	}
 	if known > 0 {
 		a.Duplicate++
 		return nil
+	}
+	if row.ID != "" {
+		var same int64
+		err := tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE drive = ? AND id = ?", row.Drive, row.ID).Scan(&same)
+		switch {
+		case err == nil:
+			if _, err := tx.ExecContext(ctx, "INSERT INTO aliases (origin, origin_seq, seq) VALUES (?, ?, ?)", row.Origin, row.OriginSeq, same); err != nil {
+				return fmt.Errorf("alias %s/%d: %w", row.Origin, row.OriginSeq, err)
+			}
+			a.Duplicate++
+			return s.release(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a)
+		case !errors.Is(err, sql.ErrNoRows):
+			return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
+		}
 	}
 	re, waiting, err := s.target(ctx, tx, row.Re)
 	if err != nil {
@@ -245,7 +259,7 @@ func (s *Store) target(ctx context.Context, tx *sql.Tx, p *Pointer) (int64, *Poi
 		return p.Seq, nil, nil
 	}
 	var seq int64
-	err := tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE origin = ? AND origin_seq = ?", p.Origin, p.Seq).Scan(&seq)
+	err := tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE origin = ? AND origin_seq = ? UNION ALL SELECT seq FROM aliases WHERE origin = ? AND origin_seq = ? LIMIT 1", p.Origin, p.Seq, p.Origin, p.Seq).Scan(&seq)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return 0, p, nil

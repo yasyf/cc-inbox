@@ -275,6 +275,9 @@ func (s *Store) Bind(ctx context.Context, session, drive string, root bool) erro
 		return fmt.Errorf("bind session: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.claimSession(ctx, tx, session); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, origin, drive, root, role) VALUES (?, ?, ?, ?, CASE WHEN ? THEN 'root' ELSE 'session' END)
 ON CONFLICT (session) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, root = excluded.root, lane = '',
 	role = CASE WHEN excluded.root THEN 'root' WHEN sessions.role IN `+inferredRoles+` THEN 'session' ELSE sessions.role END`, session, s.Self(), drive, root, root); err != nil {
@@ -300,6 +303,9 @@ func (s *Store) BindLane(ctx context.Context, session, drive, lane string, start
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.claimSession(ctx, tx, session); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, origin, drive, root, lane, role) VALUES (?, ?, ?, 0, ?, 'lane')
 ON CONFLICT (session) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, lane = excluded.lane,
 	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root`, session, s.Self(), drive, lane); err != nil {
