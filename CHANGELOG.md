@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cci relay found` founds a relay mesh as its first owner. It sends the STS
+  caller proof that `ci cci-relay prove` prints, with this node's Secure
+  Enclave endorsement, then joins as owner. Before it, no client could create
+  a mesh, so `cci relay join` had no member to join as.
+- `cci relay enroll` admits a pinned owner node or a scoped service key to a
+  relay mesh. The owner approves with Touch ID through `synckitd consent
+  request`, and the command shares the current group key with the new member.
+
 ## [0.15.0] - 2026-10-11
 
 ### Added
