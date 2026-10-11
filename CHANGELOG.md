@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci relay enroll` signs an owner grant for the member it admits, as
+  `cci pair accept` does. The relay forwards it on `peer.joined`, so every
+  other owner pins the new service or owner on its next pull instead of
+  running `cci relay join --service` by hand. A relay without relay-api v3.5
+  ignores the grant.
+
 ## [0.16.0] - 2026-10-11
 
 ### Added

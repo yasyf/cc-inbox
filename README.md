@@ -296,7 +296,7 @@ cci relay enroll <node> --tier owner --endorsement <its endorsement.json>
 cci relay enroll --tier service --pub <base64 key> --allow 'page:*|oncall.say' --label platy
 ```
 
-The new member then runs `cci relay join --url https://<relay URL> --tier <tier> --owner <the enrolling owner's public key>`, so it trusts that owner's group-key wraps. Every other owner pins a new service with `cci relay join --service <its public key>` so its records verify there.
+The new member then runs `cci relay join --url https://<relay URL> --tier <tier> --owner <the enrolling owner's public key>`, so it trusts that owner's group-key wraps. Every other owner pins the new member from the relay's `peer.joined`, which carries the enrolling owner's signed grant; against a relay older than relay-api v3.5, pin a new service by hand with `cci relay join --service <its public key>`.
 
 ### Let a machine outside your mesh read a drive
 

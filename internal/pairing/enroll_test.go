@@ -132,3 +132,23 @@ func TestEnrollOwnerAdmitsOnlyAPinnedOwner(t *testing.T) {
 		t.Fatalf("Touch ID asked %d times for a refused enrollment", len(consent.asks))
 	}
 }
+
+func TestAnEnrolledServiceIsAdmittedByEveryOtherOwner(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	owners := newOwners(t, srv, 2)
+	a, b := owners[0], owners[1]
+	svc := newPeer(t)
+	allow, err := pairing.ParseAllow("page:*|oncall.say", "platy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := pairing.EnrollOptions{Pub: svc.id.PublicKey(), Tier: node.TierService, Allow: allow, Name: "platy"}
+	if _, err := pairing.Enroll(context.Background(), a.home(), a.st, a.id, cfg(t, a), newConsent(t, srv), opts, &bytes.Buffer{}); err != nil {
+		t.Fatalf("Enroll: %v", err)
+	}
+	pull(t, b)
+	m, ok := pinned(t, b, svc.id.ID())
+	if !ok || m.Tier != node.TierService || m.By != a.id.ID() || !bytes.Equal(m.PublicKey, svc.id.PublicKey()) {
+		t.Fatalf("owner b pins %+v (%v), want the service granted by %s", m, ok, a.id.ID())
+	}
+}

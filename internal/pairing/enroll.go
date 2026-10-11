@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/yasyf/cc-inbox/e2e"
 	"github.com/yasyf/cc-inbox/internal/node"
@@ -38,6 +39,7 @@ type enrollRequest struct {
 	Endorsement *node.Endorsement `json:"endorsement,omitempty"`
 	Nonce       []byte            `json:"nonce"`
 	Attestation Attestation       `json:"attestation"`
+	Grant       e2e.Grant         `json:"grant"`
 }
 
 func Found(ctx context.Context, home string, st *store.Store, self node.Node, cfg relay.Config, name string, proof json.RawMessage, out io.Writer) error {
@@ -121,6 +123,10 @@ func Enroll(ctx context.Context, home string, st *store.Store, self node.Node, c
 	argv := EnrollArgv(req.Pub, req.Tier, req.Allow)
 	var err error
 	if req.Attestation, err = consent.Approve(ctx, Ask{Reason: "enroll " + member.Node + " as " + string(opts.Tier), Subject: "cci-enroll:" + node.FingerprintOf(req.Pub), Nonce: base64.StdEncoding.EncodeToString(nr.Nonce), Argv: argv}); err != nil {
+		return store.Member{}, err
+	}
+	req.Grant = e2e.Grant{By: self.ID(), At: time.Now().UTC().Format(time.RFC3339Nano)}
+	if req.Grant.Sig, err = self.Sign(e2e.GrantMessage(cfg.Mesh, member.Node, req.Pub, string(req.Tier), req.Grant.By, req.Grant.At)); err != nil {
 		return store.Member{}, err
 	}
 	if err := c.Call(ctx, http.MethodPost, "/v1/enroll", req, nil); err != nil {
