@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-11
+
 ### Added
 
 - `cci relay join|push|pull|sync|rotate|status` replicates records through the
@@ -494,7 +496,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/yasyf/cc-inbox/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/yasyf/cc-inbox/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/yasyf/cc-inbox/compare/v0.10.4...v0.11.0
 [0.10.4]: https://github.com/yasyf/cc-inbox/compare/v0.10.3...v0.10.4
