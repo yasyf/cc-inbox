@@ -114,11 +114,6 @@ func Enroll(ctx context.Context, home string, st *store.Store, self node.Node, c
 	if req.Name == "" {
 		req.Name = member.Node
 	}
-	req.Grant = e2e.Grant{By: self.ID(), At: st.Now().UTC().Format(time.RFC3339Nano)}
-	var err error
-	if req.Grant.Sig, err = self.Sign(e2e.GrantMessage(cfg.Mesh, member.Node, req.Pub, string(req.Tier), req.Grant.By, req.Grant.At)); err != nil {
-		return store.Member{}, err
-	}
 	c := relay.Client{Config: cfg, Identity: self}
 	var nr nonceReply
 	if err := c.Call(ctx, http.MethodPost, "/v1/nonce", map[string]string{"mesh": cfg.Mesh}, &nr); err != nil {
@@ -126,7 +121,12 @@ func Enroll(ctx context.Context, home string, st *store.Store, self node.Node, c
 	}
 	req.Nonce = nr.Nonce
 	argv := EnrollArgv(req.Pub, req.Tier, req.Allow)
+	var err error
 	if req.Attestation, err = consent.Approve(ctx, Ask{Reason: "enroll " + member.Node + " as " + string(opts.Tier), Subject: "cci-enroll:" + node.FingerprintOf(req.Pub), Nonce: base64.StdEncoding.EncodeToString(nr.Nonce), Argv: argv}); err != nil {
+		return store.Member{}, err
+	}
+	req.Grant = e2e.Grant{By: self.ID(), At: st.Now().UTC().Format(time.RFC3339Nano)}
+	if req.Grant.Sig, err = self.Sign(e2e.GrantMessage(cfg.Mesh, member.Node, req.Pub, string(req.Tier), req.Grant.By, req.Grant.At)); err != nil {
 		return store.Member{}, err
 	}
 	if err := c.Call(ctx, http.MethodPost, "/v1/enroll", req, nil); err != nil {

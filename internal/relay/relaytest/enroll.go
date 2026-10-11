@@ -98,6 +98,8 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request, caller Member, b
 		fail(w, 400, "bad_request", "a service member and only a service member carries a scope")
 	case req.Grant == nil:
 		fail(w, 400, "bad_request", "an enrollment carries the enrolling owner's grant")
+	case !freshGrant(req.Grant.At):
+		fail(w, 403, "forbidden", "the grant time is not RFC 3339 within five minutes of now")
 	case req.Grant.By != caller.ID || !req.Grant.Verify(caller.Pub, req.Mesh, node.IDOf(req.Pub), req.Pub, req.Tier):
 		fail(w, 403, "forbidden", "the grant does not verify against the enrolling owner")
 	case !s.attests(req.Attestation, nonce, argv):
@@ -109,4 +111,9 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request, caller Member, b
 		s.controlLocked(e2e.Control{Type: e2e.ControlJoined, Mesh: req.Mesh, Node: id, Pub: req.Pub, Tier: req.Tier, By: caller.ID, Grant: req.Grant})
 		reply(w, map[string]any{"member": s.members[id]})
 	}
+}
+
+func freshGrant(at string) bool {
+	t, err := time.Parse(time.RFC3339Nano, at)
+	return err == nil && time.Since(t).Abs() <= 5*time.Minute
 }
