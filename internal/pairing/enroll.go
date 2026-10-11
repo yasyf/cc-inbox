@@ -125,7 +125,7 @@ func Enroll(ctx context.Context, home string, st *store.Store, self node.Node, c
 	if req.Attestation, err = consent.Approve(ctx, Ask{Reason: "enroll " + member.Node + " as " + string(opts.Tier), Subject: "cci-enroll:" + node.FingerprintOf(req.Pub), Nonce: base64.StdEncoding.EncodeToString(nr.Nonce), Argv: argv}); err != nil {
 		return store.Member{}, err
 	}
-	req.Grant = e2e.Grant{By: self.ID(), At: st.Now().UTC().Format(time.RFC3339Nano)}
+	req.Grant = e2e.Grant{By: self.ID(), At: time.Now().UTC().Format(time.RFC3339Nano)}
 	if req.Grant.Sig, err = self.Sign(e2e.GrantMessage(cfg.Mesh, member.Node, req.Pub, string(req.Tier), req.Grant.By, req.Grant.At)); err != nil {
 		return store.Member{}, err
 	}
