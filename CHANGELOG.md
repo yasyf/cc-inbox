@@ -15,7 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `resolves` to local seqs and holds a reply until its target arrives.
   Transport receipts, per-peer acked watermarks, pinned members, and
   replicated sessions and claims live beside them. Compaction never folds a
-  record a peer has not acked. Schema 10; older binaries refuse the store.
+  record a peer has not acked, and a folded remote record stays refused if a
+  transport replays it. Schema 10; older binaries refuse the store.
 - `cci node` prints this machine's node id and key fingerprint, and
   `cci node endorse` binds the node key to the authkit Secure Enclave key.
   CI and service hosts pass their key in `CCI_NODE_KEY`.

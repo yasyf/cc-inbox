@@ -315,3 +315,24 @@ func TestLocalSessionDisplacesAReplicatedRow(t *testing.T) {
 		t.Fatalf("local bind over a replicated row = %+v, %v", p, err)
 	}
 }
+
+func TestApplyRefusesAFoldedRow(t *testing.T) {
+	ctx := context.Background()
+	a, _ := testutil.Store(t)
+	b, clock := testutil.Store(t)
+	testutil.Post(t, a, store.Record{Kind: kinds.Note, Text: "old news"})
+	rows, err := a.Export(ctx, a.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Apply(ctx, rows, nil); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(72 * time.Hour)
+	if res, err := b.Compact(ctx, "d", 48*time.Hour); err != nil || res.Folded != 1 {
+		t.Fatalf("Compact() = %+v, %v", res, err)
+	}
+	if got, err := b.Apply(ctx, rows, nil); err != nil || got != (store.Applied{Duplicate: 1}) {
+		t.Fatalf("replayed folded row = %+v, %v", got, err)
+	}
+}

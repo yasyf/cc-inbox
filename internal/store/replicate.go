@@ -156,8 +156,8 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 		return nil
 	}
 	var known int
-	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM records WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM pending WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM aliases WHERE origin = ? AND origin_seq = ?)",
-		row.Origin, row.OriginSeq, row.Origin, row.OriginSeq, row.Origin, row.OriginSeq).Scan(&known); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM records WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM pending WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM aliases WHERE origin = ? AND origin_seq = ?) + (SELECT COUNT(*) FROM folded WHERE origin = ? AND origin_seq = ?)",
+		row.Origin, row.OriginSeq, row.Origin, row.OriginSeq, row.Origin, row.OriginSeq, row.Origin, row.OriginSeq).Scan(&known); err != nil {
 		return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
 	}
 	if known > 0 {

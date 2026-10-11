@@ -197,6 +197,10 @@ func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records
 		seqs[i] = r.Seq
 		if r.Origin == "" {
 			through = max(through, r.Seq)
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, "INSERT INTO folded (origin, origin_seq) VALUES (?, ?) ON CONFLICT DO NOTHING", r.Origin, r.OriginSeq); err != nil {
+			return fmt.Errorf("record folded %s/%d: %w", r.Origin, r.OriginSeq, err)
 		}
 	}
 	if through > 0 {
