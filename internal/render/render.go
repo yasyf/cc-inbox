@@ -1,6 +1,7 @@
 package render
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -69,6 +70,18 @@ func Line(r store.Record, now time.Time) string {
 		fmt.Fprintf(&b, " %s", r.Refs.Path)
 	}
 	return b.String()
+}
+
+// WithBody appends the record's JSON body, indented, on the lines after line.
+func WithBody(line string, r store.Record) string {
+	if len(r.Body) == 0 {
+		return line
+	}
+	var b bytes.Buffer
+	if err := json.Indent(&b, r.Body, "", "  "); err != nil {
+		panic(fmt.Sprintf("indent body of #%d: %v", r.Seq, err))
+	}
+	return line + "\n" + b.String()
 }
 
 func JSON(r store.Record) string {

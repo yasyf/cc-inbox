@@ -23,7 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   namespaced service kind with a 14-day TTL, `cci post --attr k=v` fills
   `fields.attrs`, and `--body-file` attaches a JSON `body` of up to 64 KiB.
   A post whose `--id` the drive already holds returns the stored record.
-  `cci cursor set` moves a cursor backwards for a reader that restarts.
+  `cci cursor set` moves a cursor backwards for a reader that restarts. The
+  channel tag and text `cci watch` print a record's body under its line, and
+  the tag's meta carries its `id`.
 - `--to peer:<node>/<session>` addresses a session on another node, `cci who`
   lists replicated sessions, and `--origin` narrows reads and `who` to one
   node.

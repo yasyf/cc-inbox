@@ -14,6 +14,7 @@ import (
 	mcp "github.com/yasyf/cc-interact/channel"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
 )
@@ -104,10 +105,11 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, notify
 		if !ok || !reflect.DeepEqual(now, sub) {
 			return errStale
 		}
-		return notify(notifyMethod, map[string]any{
-			"content": line,
-			"meta":    map[string]string{"seq": strconv.FormatInt(r.Seq, 10), "kind": string(r.Kind), "lane": r.Lane},
-		})
+		meta := map[string]string{"seq": strconv.FormatInt(r.Seq, 10), "kind": string(r.Kind), "lane": r.Lane}
+		if r.ID != "" {
+			meta["id"] = r.ID
+		}
+		return notify(notifyMethod, map[string]any{"content": render.WithBody(line, r), "meta": meta})
 	})
 	stop()
 	if errors.Is(err, errStale) {
