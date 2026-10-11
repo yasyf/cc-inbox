@@ -50,7 +50,7 @@ func pin(t *testing.T, on *peer, others ...*peer) {
 
 func join(t *testing.T, srv *relaytest.Server, p *peer, routes ...string) {
 	t.Helper()
-	n, err := relay.Open(p.st.HomeDir(), p.st, p.id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Routes: routes})
+	n, err := relay.Open(p.st.HomeDir(), p.st, p.id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Tier: string(p.tier), Routes: routes})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestDelegatedInstancesWriteUnderTheirOwnOrigins(t *testing.T) {
 		}
 		job := &peer{st: st, id: id, tier: node.TierService}
 		pin(t, job, a)
-		n, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh})
+		n, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Tier: string(node.TierService)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -287,4 +287,44 @@ func mustConfig(t *testing.T, p *peer) relay.Config {
 		t.Fatalf("load config: %v, %v", ok, err)
 	}
 	return c
+}
+
+func TestJoinRefusesARelayAssignedTier(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	p := newPeer(t, srv, node.TierPaired)
+	n, err := relay.Open(p.st.HomeDir(), p.st, p.id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Tier: string(node.TierOwner)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Join(context.Background()); err == nil {
+		t.Fatal("join accepted a tier the relay contradicts")
+	}
+}
+
+func TestForgedWrapDoesNotShadowTheRealOne(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	b := newPeer(t, srv, node.TierOwner)
+	pin(t, a, b)
+	pin(t, b, a)
+	join(t, srv, a)
+	forger, err := node.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, _ := e2e.NewGroupKey(1)
+	forged, err := e2e.WrapKey(k, relay.DefaultMesh, forger, e2e.Member{Node: b.id.ID(), PublicKey: b.id.PublicKey(), Tier: "owner"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged.From = a.id.ID()
+	srv.InjectWrap(forged)
+	join(t, srv, b)
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: secret})
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	if got := pull(t, b); got.Inserted != 1 {
+		t.Fatalf("owner with a forged wrap ahead of the real one inserted %d, want 1", got.Inserted)
+	}
 }

@@ -113,7 +113,9 @@ func (n *Node) Join(ctx context.Context) error {
 	if err := n.client().Call(ctx, http.MethodPost, "/v1/join", join, &jr); err != nil {
 		return err
 	}
-	n.Config.Tier = jr.Tier
+	if jr.Tier != n.Config.Tier {
+		return fmt.Errorf("relay: %s says this node is %q, its local tier is %q", n.Config.URL, jr.Tier, n.Config.Tier)
+	}
 	if err := SaveConfig(n.Home, n.Config); err != nil {
 		return err
 	}
@@ -150,9 +152,17 @@ func (n *Node) RefreshKeys(ctx context.Context) error {
 	if err := n.client().Call(ctx, http.MethodGet, "/v1/keys?"+q.Encode(), nil, &kr); err != nil {
 		return err
 	}
+	members, err := n.Members(ctx)
+	if err != nil {
+		return err
+	}
 	added := false
 	for _, w := range kr.Wraps {
-		if w.To == n.keyHolder().ID() && w.Mesh == n.Config.Mesh && n.Keyring.Add(w) {
+		if _, err := e2e.UnwrapKey(w, n.Config.Mesh, n.keyHolder(), members); err != nil {
+			slog.Warn("relay wrap refused", "mesh", n.Config.Mesh, "epoch", w.Epoch, "from", w.From, "err", err)
+			continue
+		}
+		if n.Keyring.Add(w) {
 			added = true
 		}
 	}
@@ -171,6 +181,10 @@ func (n *Node) Rotate(ctx context.Context) (uint64, error) {
 	if err := n.client().Call(ctx, http.MethodGet, "/v1/keys?"+q.Encode(), nil, &kr); err != nil {
 		return 0, err
 	}
+	local := n.Keyring.Latest(n.Config.Mesh)
+	if kr.Epoch < local {
+		return 0, fmt.Errorf("relay: reports epoch %d below this node's %d", kr.Epoch, local)
+	}
 	k, err := e2e.NewGroupKey(kr.Epoch + 1)
 	if err != nil {
 		return 0, err
@@ -179,18 +193,15 @@ func (n *Node) Rotate(ctx context.Context) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if err := n.client().Call(ctx, http.MethodPut, "/v1/keys/"+strconv.FormatUint(k.Epoch, 10), keysRequest{Mesh: n.Config.Mesh, Wraps: wraps}, nil); err != nil {
+	req := keysRequest{Mesh: n.Config.Mesh, Wraps: wraps, Rotate: true}
+	if err := n.client().Call(ctx, http.MethodPut, "/v1/keys/"+strconv.FormatUint(k.Epoch, 10), req, nil); err != nil {
 		var se *StatusError
 		if errors.As(err, &se) && se.Code == http.StatusConflict {
 			return 0, fmt.Errorf("%w: %d", ErrEpochTaken, k.Epoch)
 		}
 		return 0, err
 	}
-	for _, w := range wraps {
-		if w.To == n.Identity.ID() {
-			n.Keyring.Add(w)
-		}
-	}
+	n.Keyring.Add(wraps[0])
 	return k.Epoch, n.Keyring.Save(n.Home, n.Config.Mesh)
 }
 
@@ -222,10 +233,14 @@ func (n *Node) wrapAll(ctx context.Context, k e2e.GroupKey) ([]e2e.Wrap, error) 
 	if err := n.client().Call(ctx, http.MethodGet, "/v1/members?"+url.Values{"mesh": {n.Config.Mesh}}.Encode(), nil, &mr); err != nil {
 		return nil, err
 	}
-	var wraps []e2e.Wrap
+	self, err := e2e.WrapKey(k, n.Config.Mesh, n.Identity, local[n.Identity.ID()])
+	if err != nil {
+		return nil, err
+	}
+	wraps := []e2e.Wrap{self}
 	for _, rm := range mr.Members {
 		m, ok := local[rm.ID]
-		if !ok || !slices.Equal(m.PublicKey, rm.Pub) {
+		if !ok || rm.ID == n.Identity.ID() || !slices.Equal(m.PublicKey, rm.Pub) {
 			continue
 		}
 		w, err := e2e.WrapKey(k, n.Config.Mesh, n.Identity, m)
@@ -289,9 +304,9 @@ func (n *Node) Push(ctx context.Context, configs []Config) (int, error) {
 		if len(envs) > 0 {
 			var pr pushResponse
 			if err := n.client().Call(ctx, http.MethodPost, "/v1/push", pushRequest{Mesh: n.Config.Mesh, Envelopes: envs}, &pr); err != nil {
-				if IsUnpaired(err) {
-					return pushed, errors.Join(err, Forget(n.Home, n.Config.Mesh))
-				}
+				return pushed, err
+			}
+			if err := accounted(envs, pr); err != nil {
 				return pushed, err
 			}
 			for _, rj := range pr.Rejected {
@@ -304,6 +319,19 @@ func (n *Node) Push(ctx context.Context, configs []Config) (int, error) {
 		}
 	}
 	return pushed, nil
+}
+
+func accounted(envs []e2e.Envelope, pr pushResponse) error {
+	answered := map[int64]bool{}
+	for _, r := range slices.Concat(pr.Accepted, pr.Rejected) {
+		answered[r.OriginSeq] = true
+	}
+	for _, e := range envs {
+		if !answered[e.OriginSeq] {
+			return fmt.Errorf("relay: push response omits origin_seq %d; not advancing past it", e.OriginSeq)
+		}
+	}
+	return nil
 }
 
 func SealRow(k e2e.GroupKey, id e2e.Identity, cfg Config, r store.Row) (e2e.Envelope, error) {
@@ -397,7 +425,7 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 	if len(acks) == 0 {
 		return applied, nil
 	}
-	return applied, n.client().Call(ctx, http.MethodPost, "/v1/ack", ackRequest{Receipts: acks, Tap: n.Config.Tap}, nil)
+	return applied, n.client().Call(ctx, http.MethodPost, "/v1/ack", ackRequest{Mesh: n.Config.Mesh, Receipts: acks, Tap: n.Config.Tap}, nil)
 }
 
 func (n *Node) open(e e2e.Envelope, keys map[uint64]e2e.GroupKey, members map[string]e2e.Member) (store.Row, error) {

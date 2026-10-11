@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -70,6 +71,9 @@ func newRelayJoinCmd() *cobra.Command {
 			}
 			if ok {
 				cfg.RelayPub = have.RelayPub
+				if cfg.Tier == "" {
+					cfg.Tier = have.Tier
+				}
 			}
 			for _, o := range owners {
 				pub, err := base64.StdEncoding.DecodeString(o)
@@ -90,6 +94,10 @@ func newRelayJoinCmd() *cobra.Command {
 				if err := n.Delegate(drives, kinds, ttl); err != nil {
 					return err
 				}
+				n.Config.Tier = string(node.TierService)
+			}
+			if n.Config.Tier == "" {
+				return errors.New("pass --tier owner|service|paired: the tier this node was enrolled at, which the relay must confirm")
 			}
 			if err := n.Join(cmd.Context()); err != nil {
 				return err
@@ -102,6 +110,7 @@ func newRelayJoinCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.URL, "url", "", "relay base URL")
 	cmd.Flags().StringVar(&cfg.Mesh, "mesh", relay.DefaultMesh, "mesh to join")
 	cmd.Flags().StringSliceVar(&cfg.Routes, "route", nil, "drives this mesh carries (exact or trailing *); a mesh without routes carries every other drive")
+	cmd.Flags().StringVar(&cfg.Tier, "tier", "", "the tier this node was enrolled at (owner|service|paired); kept from an earlier join")
 	cmd.Flags().StringVar(&cfg.Tap, "tap", "", "pull from the per-drive tap NAME instead of this node's queue (service members)")
 	cmd.Flags().BoolVar(&instance, "instance", false, "join as an instance delegated by the service key in $CCI_SERVICE_KEY (CI jobs sharing one service identity)")
 	cmd.Flags().StringSliceVar(&drives, "drive", nil, "drives the instance may write (exact or trailing *); required with --instance")

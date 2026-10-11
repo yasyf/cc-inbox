@@ -50,13 +50,15 @@ type pullResponse struct {
 }
 
 type ackRequest struct {
+	Mesh     string   `json:"mesh"`
 	Receipts []string `json:"receipts"`
 	Tap      string   `json:"tap,omitempty"`
 }
 
 type keysRequest struct {
-	Mesh  string     `json:"mesh"`
-	Wraps []e2e.Wrap `json:"wraps"`
+	Mesh   string     `json:"mesh"`
+	Wraps  []e2e.Wrap `json:"wraps"`
+	Rotate bool       `json:"rotate,omitempty"`
 }
 
 type keysResponse struct {

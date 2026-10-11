@@ -3,6 +3,7 @@ package e2e
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -31,7 +32,24 @@ func NodeID(pub []byte) string {
 
 func (d Delegation) Message() []byte {
 	return []byte(joinLines("cci-mesh/delegation/v1", d.Mesh, d.Service, d.Instance, b64(d.InstancePub),
-		strings.Join(d.Drives, ","), strings.Join(d.Kinds, ","), d.Expires))
+		list(d.Drives), list(d.Kinds), d.Expires))
+}
+
+func list(globs []string) string {
+	b, err := json.Marshal(globs)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func validGlobs(globs []string) error {
+	for _, g := range globs {
+		if g == "" || g == "*" || strings.ContainsAny(strings.TrimSuffix(g, "*"), "*\n\r") {
+			return fmt.Errorf("e2e: scope %q must be non-empty, not bare *, with * only as a suffix", g)
+		}
+	}
+	return nil
 }
 
 func Delegate(service Identity, mesh string, instancePub []byte, drives, kinds []string, expires time.Time) (Delegation, error) {
@@ -42,7 +60,10 @@ func Delegate(service Identity, mesh string, instancePub []byte, drives, kinds [
 		V: 1, Mesh: mesh, Service: service.ID(), Instance: NodeID(instancePub), InstancePub: instancePub,
 		Drives: drives, Kinds: kinds, Expires: expires.UTC().Format(time.RFC3339Nano),
 	}
-	if err := clean(append([]string{d.Mesh, d.Expires}, append(slices.Clone(drives), kinds...)...)...); err != nil {
+	if err := clean(d.Mesh, d.Expires); err != nil {
+		return Delegation{}, err
+	}
+	if err := validGlobs(slices.Concat(drives, kinds)); err != nil {
 		return Delegation{}, err
 	}
 	sig, err := service.Sign(d.Message())

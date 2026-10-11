@@ -148,7 +148,7 @@ func TestDelegationScope(t *testing.T) {
 	if _, err := e2e.Open(env("page:9", "fix.status", ts, d), keys, pinned); err != nil {
 		t.Fatalf("in-scope envelope: %v", err)
 	}
-	forged, _ := e2e.Delegate(other, "default", inst.PublicKey(), []string{"*"}, nil, ts.Add(time.Hour))
+	forged, _ := e2e.Delegate(other, "default", inst.PublicKey(), []string{"page:*"}, nil, ts.Add(time.Hour))
 	forged.Service = svc.ID()
 	relabelled := d
 	relabelled.Instance = other.ID()

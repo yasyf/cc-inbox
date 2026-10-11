@@ -104,6 +104,12 @@ func (s *Server) Epoch() uint64 {
 	return s.epoch
 }
 
+func (s *Server) InjectWrap(w e2e.Wrap) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.wraps[w.Epoch] = append([]e2e.Wrap{w}, s.wraps[w.Epoch]...)
+}
+
 func (s *Server) Control(c e2e.Control) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -306,8 +312,9 @@ func (s *Server) putKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 		return
 	}
 	var req struct {
-		Mesh  string     `json:"mesh"`
-		Wraps []e2e.Wrap `json:"wraps"`
+		Mesh   string     `json:"mesh"`
+		Wraps  []e2e.Wrap `json:"wraps"`
+		Rotate bool       `json:"rotate"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		fail(w, 400, "bad_request", err.Error())
@@ -325,12 +332,12 @@ func (s *Server) putKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 			return
 		}
 	}
-	switch epoch {
-	case s.epoch + 1:
+	switch {
+	case req.Rotate && epoch == s.epoch+1:
 		s.epoch = epoch
 		s.wraps[epoch] = req.Wraps
 		s.controlLocked(e2e.Control{Type: e2e.ControlRekey, Mesh: req.Mesh, By: caller.ID, Epoch: epoch})
-	case s.epoch:
+	case !req.Rotate && epoch == s.epoch:
 		s.wraps[epoch] = append(s.wraps[epoch], req.Wraps...)
 	default:
 		fail(w, 409, "conflict", fmt.Sprintf("epoch %d, current %d", epoch, s.epoch))

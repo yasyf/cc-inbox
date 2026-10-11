@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 const DefaultMesh = "default"
@@ -93,8 +94,9 @@ func Forget(home, mesh string) error {
 type Keyring struct {
 	Wraps []e2e.Wrap `json:"wraps"`
 
-	mu   sync.Mutex
-	open map[uint64]e2e.GroupKey
+	mu      sync.Mutex
+	open    map[uint64]e2e.GroupKey
+	dropped map[string]bool
 }
 
 func LoadKeyring(home, mesh string) (*Keyring, error) {
@@ -108,16 +110,40 @@ func LoadKeyring(home, mesh string) (*Keyring, error) {
 func (k *Keyring) Save(home, mesh string) error {
 	k.mu.Lock()
 	defer k.mu.Unlock()
+	if err := os.MkdirAll(dir(home, mesh), 0o700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir(home, mesh), "keyring.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock keyring: %w", err)
+	}
+	var disk Keyring
+	if _, err := readJSON(keyringPath(home, mesh), &disk); err != nil {
+		return err
+	}
+	for _, w := range disk.Wraps {
+		if !k.dropped[w.From] && !k.has(w) {
+			k.Wraps = append(k.Wraps, w)
+		}
+	}
 	return writeJSON(keyringPath(home, mesh), k)
+}
+
+func (k *Keyring) has(w e2e.Wrap) bool {
+	return slices.ContainsFunc(k.Wraps, func(have e2e.Wrap) bool {
+		return have.Mesh == w.Mesh && have.Epoch == w.Epoch && have.To == w.To
+	})
 }
 
 func (k *Keyring) Add(w e2e.Wrap) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
-	for _, have := range k.Wraps {
-		if have.Mesh == w.Mesh && have.Epoch == w.Epoch && have.To == w.To {
-			return false
-		}
+	if k.has(w) {
+		return false
 	}
 	k.Wraps = append(k.Wraps, w)
 	return true
@@ -127,6 +153,10 @@ func (k *Keyring) DropFrom(node string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.Wraps = slices.DeleteFunc(k.Wraps, func(w e2e.Wrap) bool { return w.From == node })
+	if k.dropped == nil {
+		k.dropped = map[string]bool{}
+	}
+	k.dropped[node] = true
 	k.open = nil
 }
 

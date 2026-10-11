@@ -30,13 +30,17 @@ func NewLoop(home string, st *store.Store, id e2e.Identity) *Loop {
 
 func (l *Loop) OnControl(h ControlHandler) { l.onControl = h }
 
+type worker struct {
+	stop context.CancelFunc
+	done chan struct{}
+}
+
 func (l *Loop) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	running := map[string]context.CancelFunc{}
+	running := map[string]worker{}
 	defer func() {
-		for _, stop := range running {
-			stop()
+		for _, w := range running {
+			w.stop()
+			<-w.done
 		}
 	}()
 	tick := time.NewTicker(ConfigInterval)
@@ -49,19 +53,23 @@ func (l *Loop) Run(ctx context.Context) {
 		live := map[string]bool{}
 		for _, c := range configs {
 			live[c.Mesh] = true
-			if _, ok := running[c.Mesh]; ok {
-				continue
-			}
-			mctx, stop := context.WithCancel(ctx)
-			running[c.Mesh] = stop
-			wg.Add(2)
-			go func() { defer wg.Done(); l.every(mctx, c.Mesh, "push", l.push) }()
-			go func() { defer wg.Done(); l.every(mctx, c.Mesh, "pull", l.pull) }()
 		}
-		for mesh, stop := range running {
-			if !live[mesh] {
-				stop()
+		for mesh, w := range running {
+			select {
+			case <-w.done:
 				delete(running, mesh)
+				continue
+			default:
+			}
+			if !live[mesh] {
+				w.stop()
+				<-w.done
+				delete(running, mesh)
+			}
+		}
+		for mesh := range live {
+			if _, ok := running[mesh]; !ok {
+				running[mesh] = l.start(ctx, mesh)
 			}
 		}
 		select {
@@ -70,6 +78,17 @@ func (l *Loop) Run(ctx context.Context) {
 		case <-tick.C:
 		}
 	}
+}
+
+func (l *Loop) start(ctx context.Context, mesh string) worker {
+	mctx, stop := context.WithCancel(ctx)
+	w := worker{stop: stop, done: make(chan struct{})}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); l.every(mctx, mesh, "push", l.push) }()
+	go func() { defer wg.Done(); l.every(mctx, mesh, "pull", l.pull) }()
+	go func() { wg.Wait(); stop(); close(w.done) }()
+	return w
 }
 
 func (l *Loop) node(mesh string) (*Node, []Config, bool, error) {
