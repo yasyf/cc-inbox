@@ -54,7 +54,7 @@ func Load(home string) (Node, error) {
 		return Node{}, err
 	}
 	n := Node{key: key}
-	raw, err := os.ReadFile(filepath.Join(dir, endorsementFile))
+	raw, err := os.ReadFile(filepath.Join(dir, endorsementFile)) //nolint:gosec // G304: dir is the node directory under the cci home.
 	switch {
 	case errors.Is(err, os.ErrNotExist):
 		return n, nil
@@ -78,7 +78,7 @@ func Dir(home string) string {
 }
 
 func loadOrCreate(path string) (*ecdsa.PrivateKey, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the node key under the cci home.
 	if err == nil {
 		key, err := parse(raw)
 		if err != nil {
@@ -100,7 +100,7 @@ func loadOrCreate(path string) (*ecdsa.PrivateKey, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create node dir: %w", err)
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: path is the node key under the cci home.
 	if errors.Is(err, os.ErrExist) {
 		return loadOrCreate(path)
 	}
