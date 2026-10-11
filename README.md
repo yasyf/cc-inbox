@@ -129,15 +129,15 @@ cci watch --drive monitor-demo --kind go --cursor monitor --since 1h --for 2s
 #2 <time> GO root [rollout] Deploy after the checks pass.
 ```
 
-The watch prints only the GO record. For a Monitor, omit `--for` to use the
-29-minute lifetime. Re-arm with the same cursor and omit `--since` so the next
-watch resumes after the last printed record. A watch without a saved cursor or
+The watch prints only the GO record. For a persistent Monitor, omit `--for`:
+the watch then runs until it is interrupted. A watch restarted with the same
+cursor and no `--since` resumes after the last printed record. A watch without a saved cursor or
 an explicit time window starts at the current head.
 
 ### Receive records in the session without a Monitor
 
-A Monitor has to be re-armed every 30 minutes, and any record that lands
-between arms waits for the next one. The plugin's `cci` channel removes the
+A Monitor holds a process open for the whole session, and a record posted
+while it is down waits until it restarts. The plugin's `cci` channel removes the
 Monitor. Each new record is pushed into the session as soon as it is posted.
 Launch the session with the channel enabled, then subscribe once:
 
@@ -336,7 +336,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | --- | --- |
 | `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument; prints its sequence number. |
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
-| `cci watch` | Stream matching records. Polls once a second and exits after 29 minutes by default; `--for 0` streams until interrupted. |
+| `cci watch` | Stream matching records. Polls once a second until interrupted; `--for` exits after a duration. |
 | `cci subscribe` | Deliver records for `--reader`, plus other lanes' broadcasts of each `--kind`, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
 | `cci unsubscribe` | Stop this window's channel delivery. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
