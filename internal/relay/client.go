@@ -37,6 +37,8 @@ func IsUnpaired(err error) bool {
 	return errors.As(err, &se) && se.Kind == "unpaired"
 }
 
+var defaultHTTP = &http.Client{Timeout: time.Minute}
+
 type Client struct {
 	Config   Config
 	Identity e2e.Identity
@@ -64,7 +66,7 @@ func (c Client) Call(ctx context.Context, method, path string, in, out any) erro
 	}
 	httpc := c.HTTP
 	if httpc == nil {
-		httpc = http.DefaultClient
+		httpc = defaultHTTP
 	}
 	resp, err := httpc.Do(req)
 	if err != nil {

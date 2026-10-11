@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -46,7 +47,14 @@ func relayNodes(st *store.Store, mesh string) ([]*relay.Node, []relay.Config, er
 }
 
 func newRelayJoinCmd() *cobra.Command {
-	var cfg relay.Config
+	var (
+		cfg      relay.Config
+		instance bool
+		drives   []string
+		kinds    []string
+		ttl      time.Duration
+		owners   []string
+	)
 	cmd := &cobra.Command{
 		Use:   "join",
 		Short: "Join a relay mesh: pin the relay key, open this node's queue, fetch the group key",
@@ -63,9 +71,25 @@ func newRelayJoinCmd() *cobra.Command {
 			if ok {
 				cfg.RelayPub = have.RelayPub
 			}
+			for _, o := range owners {
+				pub, err := base64.StdEncoding.DecodeString(o)
+				if err != nil {
+					return fmt.Errorf("--owner %q is not base64: %w", o, err)
+				}
+				if err := st.PutMember(cmd.Context(), store.Member{
+					Node: node.IDOf(pub), PublicKey: pub, Tier: node.TierOwner, By: "relay join --owner", At: time.Now(),
+				}); err != nil {
+					return err
+				}
+			}
 			n, err := relay.Open(st.HomeDir(), st, id, cfg)
 			if err != nil {
 				return err
+			}
+			if instance {
+				if err := n.Delegate(drives, kinds, ttl); err != nil {
+					return err
+				}
 			}
 			if err := n.Join(cmd.Context()); err != nil {
 				return err
@@ -79,6 +103,11 @@ func newRelayJoinCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.Mesh, "mesh", relay.DefaultMesh, "mesh to join")
 	cmd.Flags().StringSliceVar(&cfg.Routes, "route", nil, "drives this mesh carries (exact or trailing *); a mesh without routes carries every other drive")
 	cmd.Flags().StringVar(&cfg.Tap, "tap", "", "pull from the per-drive tap NAME instead of this node's queue (service members)")
+	cmd.Flags().BoolVar(&instance, "instance", false, "join as an instance delegated by the service key in $CCI_SERVICE_KEY (CI jobs sharing one service identity)")
+	cmd.Flags().StringSliceVar(&drives, "drive", nil, "drives the instance may write (exact or trailing *); required with --instance")
+	cmd.Flags().StringSliceVar(&kinds, "kind", nil, "kinds the instance may write (default: the service's scope)")
+	cmd.Flags().DurationVar(&ttl, "ttl", 6*time.Hour, "how long the instance delegation lasts")
+	cmd.Flags().StringSliceVar(&owners, "owner", nil, "pin an owner node by its base64 X9.63 public key before joining (a fresh node has no other way to trust group-key wraps)")
 	_ = cmd.MarkFlagRequired("url")
 	return cmd
 }

@@ -21,12 +21,13 @@ import (
 )
 
 type Member struct {
-	ID   string `json:"id"`
-	Pub  []byte `json:"pub"`
-	Name string `json:"name"`
-	Tier string `json:"tier"`
-	By   string `json:"by"`
-	At   string `json:"at"`
+	ID       string `json:"id"`
+	Pub      []byte `json:"pub"`
+	Name     string `json:"name"`
+	Tier     string `json:"tier"`
+	By       string `json:"by"`
+	At       string `json:"at"`
+	keysFrom string
 }
 
 type queued struct {
@@ -150,6 +151,9 @@ func (s *Server) signed(h handler) http.HandlerFunc {
 		}
 		s.mu.Lock()
 		m, ok := s.members[node]
+		if !ok && r.URL.Path == "/v1/join" {
+			m, ok = s.delegatedLocked(body)
+		}
 		s.mu.Unlock()
 		if !ok {
 			fail(w, 403, "unknown_node", node)
@@ -161,6 +165,23 @@ func (s *Server) signed(h handler) http.HandlerFunc {
 		}
 		h(w, r, m, body)
 	}
+}
+
+func (s *Server) delegatedLocked(body []byte) (Member, bool) {
+	var req struct {
+		Delegation *e2e.Delegation `json:"delegation"`
+	}
+	if json.Unmarshal(body, &req) != nil || req.Delegation == nil {
+		return Member{}, false
+	}
+	d := req.Delegation
+	svc, ok := s.members[d.Service]
+	if !ok || svc.Tier != e2e.TierService || !e2e.VerifyDelegation(svc.Pub, *d) || d.Instance != e2e.NodeID(d.InstancePub) {
+		return Member{}, false
+	}
+	m := Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: d.Service, keysFrom: d.Service}
+	s.members[m.ID] = m
+	return m, true
 }
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
@@ -195,7 +216,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 	}
 	var accepted, rejected []result
 	for _, e := range req.Envelopes {
-		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) {
+		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) || caller.keysFrom != "" && e.Delegation == nil {
 			rejected = append(rejected, result{OriginSeq: e.OriginSeq, Reason: "forbidden"})
 			continue
 		}
@@ -322,13 +343,17 @@ func (s *Server) getKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 	since, _ := strconv.ParseUint(r.URL.Query().Get("since"), 10, 64)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	to := caller.ID
+	if caller.keysFrom != "" {
+		to = caller.keysFrom
+	}
 	out := []e2e.Wrap{}
 	for e, ws := range s.wraps {
 		if e < since {
 			continue
 		}
 		for _, wr := range ws {
-			if wr.To == caller.ID {
+			if wr.To == to {
 				out = append(out, wr)
 			}
 		}
@@ -341,7 +366,9 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request, caller Memb
 	defer s.mu.Unlock()
 	out := []Member{}
 	for _, m := range s.members {
-		out = append(out, m)
+		if m.keysFrom == "" {
+			out = append(out, m)
+		}
 	}
 	reply(w, map[string]any{"epoch": s.epoch, "members": out})
 }

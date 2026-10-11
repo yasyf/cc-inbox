@@ -11,8 +11,9 @@ type relayKey struct {
 }
 
 type joinRequest struct {
-	Mesh string `json:"mesh"`
-	Pub  []byte `json:"pub"`
+	Mesh       string          `json:"mesh"`
+	Pub        []byte          `json:"pub"`
+	Delegation *e2e.Delegation `json:"delegation,omitempty"`
 }
 
 type joinResponse struct {

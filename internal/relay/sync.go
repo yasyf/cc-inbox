@@ -8,11 +8,13 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"time"
 
 	"github.com/yasyf/cc-inbox/e2e"
+	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -29,6 +31,7 @@ type Node struct {
 	Home     string
 	Store    *store.Store
 	Identity e2e.Identity
+	Service  e2e.Identity
 	Config   Config
 	HTTP     *http.Client
 	Keyring  *Keyring
@@ -39,7 +42,53 @@ func Open(home string, st *store.Store, id e2e.Identity, cfg Config) (*Node, err
 	if err != nil {
 		return nil, err
 	}
-	return &Node{Home: home, Store: st, Identity: id, Config: cfg, Keyring: ring}, nil
+	n := &Node{Home: home, Store: st, Identity: id, Config: cfg, Keyring: ring}
+	if cfg.Delegation != nil {
+		if n.Service, err = ServiceKey(); err != nil {
+			return nil, err
+		}
+		if n.Service.ID() != cfg.Delegation.Service {
+			return nil, fmt.Errorf("relay: $%s is node %s, the delegation names %s", ServiceKeyEnv, n.Service.ID(), cfg.Delegation.Service)
+		}
+	}
+	return n, nil
+}
+
+const ServiceKeyEnv = "CCI_SERVICE_KEY"
+
+func ServiceKey() (e2e.Identity, error) {
+	raw := os.Getenv(ServiceKeyEnv)
+	if raw == "" {
+		return nil, fmt.Errorf("relay: a delegated instance needs the service key in $%s", ServiceKeyEnv)
+	}
+	n, err := node.Parse([]byte(raw))
+	if err != nil {
+		return nil, fmt.Errorf("$%s: %w", ServiceKeyEnv, err)
+	}
+	return n, nil
+}
+
+func (n *Node) keyHolder() e2e.Identity {
+	if n.Service != nil {
+		return n.Service
+	}
+	return n.Identity
+}
+
+func (n *Node) Delegate(drives, kinds []string, ttl time.Duration) error {
+	svc, err := ServiceKey()
+	if err != nil {
+		return err
+	}
+	if svc.ID() == n.Identity.ID() {
+		return fmt.Errorf("relay: the instance key is the service key; run the instance with a fresh CCI_HOME and without $%s", node.KeyEnv)
+	}
+	d, err := e2e.Delegate(svc, n.Config.Mesh, n.Identity.PublicKey(), drives, kinds, time.Now().Add(ttl))
+	if err != nil {
+		return err
+	}
+	n.Service, n.Config.Delegation = svc, &d
+	return nil
 }
 
 func (n *Node) client() Client {
@@ -60,7 +109,8 @@ func (n *Node) Join(ctx context.Context) error {
 		return fmt.Errorf("relay: %s presents a different relay key than the one pinned at first join", n.Config.URL)
 	}
 	var jr joinResponse
-	if err := n.client().Call(ctx, http.MethodPost, "/v1/join", joinRequest{Mesh: n.Config.Mesh, Pub: n.Identity.PublicKey()}, &jr); err != nil {
+	join := joinRequest{Mesh: n.Config.Mesh, Pub: n.Identity.PublicKey(), Delegation: n.Config.Delegation}
+	if err := n.client().Call(ctx, http.MethodPost, "/v1/join", join, &jr); err != nil {
 		return err
 	}
 	n.Config.Tier = jr.Tier
@@ -88,6 +138,9 @@ func (n *Node) Members(ctx context.Context) (map[string]e2e.Member, error) {
 		out[m.Node] = e2e.Member{Node: m.Node, PublicKey: m.PublicKey, Tier: string(m.Tier)}
 	}
 	out[n.Identity.ID()] = e2e.Member{Node: n.Identity.ID(), PublicKey: n.Identity.PublicKey(), Tier: n.Config.Tier}
+	if n.Service != nil {
+		out[n.Service.ID()] = e2e.Member{Node: n.Service.ID(), PublicKey: n.Service.PublicKey(), Tier: e2e.TierService}
+	}
 	return out, nil
 }
 
@@ -99,7 +152,7 @@ func (n *Node) RefreshKeys(ctx context.Context) error {
 	}
 	added := false
 	for _, w := range kr.Wraps {
-		if w.To == n.Identity.ID() && w.Mesh == n.Config.Mesh && n.Keyring.Add(w) {
+		if w.To == n.keyHolder().ID() && w.Mesh == n.Config.Mesh && n.Keyring.Add(w) {
 			added = true
 		}
 	}
@@ -216,7 +269,7 @@ func (n *Node) Push(ctx context.Context, configs []Config) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	k, err := n.Keyring.Current(n.Identity, n.Config.Mesh, members)
+	k, err := n.Keyring.Current(n.keyHolder(), n.Config.Mesh, members)
 	if err != nil {
 		return 0, err
 	}
@@ -227,7 +280,7 @@ func (n *Node) Push(ctx context.Context, configs []Config) (int, error) {
 			if Route(configs, r.Drive) != n.Config.Mesh {
 				continue
 			}
-			e, err := SealRow(k, n.Identity, n.Config.Mesh, n.Config.Tier, r)
+			e, err := SealRow(k, n.Identity, n.Config, r)
 			if err != nil {
 				return pushed, err
 			}
@@ -253,14 +306,14 @@ func (n *Node) Push(ctx context.Context, configs []Config) (int, error) {
 	return pushed, nil
 }
 
-func SealRow(k e2e.GroupKey, id e2e.Identity, mesh, tier string, r store.Row) (e2e.Envelope, error) {
+func SealRow(k e2e.GroupKey, id e2e.Identity, cfg Config, r store.Row) (e2e.Envelope, error) {
 	pt, err := json.Marshal(r)
 	if err != nil {
 		return e2e.Envelope{}, fmt.Errorf("encode row %s/%d: %w", r.Origin, r.OriginSeq, err)
 	}
 	return e2e.Seal(k, id, e2e.Envelope{
-		Mesh: mesh, Drive: r.Drive, OriginSeq: r.OriginSeq, Tier: tier,
-		KindClass: string(r.Kind), TS: r.At.UTC().Format(time.RFC3339Nano),
+		Mesh: cfg.Mesh, Drive: r.Drive, OriginSeq: r.OriginSeq, Tier: cfg.Tier,
+		KindClass: string(r.Kind), TS: r.At.UTC().Format(time.RFC3339Nano), Delegation: cfg.Delegation,
 	}, pt)
 }
 
@@ -295,7 +348,7 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 	if err != nil {
 		return store.Applied{}, err
 	}
-	keys, err := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
+	keys, err := n.Keyring.Keys(n.Config.Mesh, n.keyHolder(), members)
 	if err != nil {
 		slog.Warn("relay keyring holds an unusable wrap", "mesh", n.Config.Mesh, "err", err)
 	}
@@ -319,7 +372,7 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 				if err := n.RefreshKeys(ctx); err != nil {
 					return store.Applied{}, err
 				}
-				keys, _ = n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
+				keys, _ = n.Keyring.Keys(n.Config.Mesh, n.keyHolder(), members)
 				r, err = n.open(*m.Envelope, keys, members)
 			}
 			switch {

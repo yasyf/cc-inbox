@@ -3,6 +3,8 @@ package relay_test
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -223,4 +225,66 @@ func TestForgedControlIgnored(t *testing.T) {
 	if len(seen) != 1 || seen[0].Node != "x" {
 		t.Fatalf("handler saw %+v, want only the relay-signed control", seen)
 	}
+}
+
+func TestDelegatedInstancesWriteUnderTheirOwnOrigins(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	svc := newPeer(t, srv, node.TierService)
+	pin(t, a, svc)
+	join(t, srv, a)
+	pemKey, err := os.ReadFile(filepath.Join(node.Dir(svc.st.HomeDir()), "key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, string(pemKey))
+	var jobs []*peer
+	for range 2 {
+		st, _ := testutil.Store(t)
+		id, err := node.Load(st.HomeDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		job := &peer{st: st, id: id, tier: node.TierService}
+		pin(t, job, a)
+		n, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := n.Delegate([]string{"page:*"}, nil, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		if err := n.Join(context.Background()); err != nil {
+			t.Fatalf("instance join: %v", err)
+		}
+		job.node = n
+		testutil.Post(t, st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "from job " + id.ID()})
+		if pushed, err := n.Push(context.Background(), configs(t, job)); err != nil || pushed != 1 {
+			t.Fatalf("instance push = %d, %v; want 1", pushed, err)
+		}
+		jobs = append(jobs, job)
+	}
+	if got := pull(t, a); got.Inserted != 2 {
+		t.Fatalf("owner inserted %d instance records, want 2 (one per origin)", got.Inserted)
+	}
+	reopened, err := relay.Open(jobs[0].st.HomeDir(), jobs[0].st, jobs[0].id, mustConfig(t, jobs[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, a.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: secret})
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := reopened.Pull(context.Background(), 0, nil); err != nil || got.Inserted != 2 {
+		t.Fatalf("instance pull = %+v, %v; want the sibling's record and the owner's", got, err)
+	}
+}
+
+func mustConfig(t *testing.T, p *peer) relay.Config {
+	t.Helper()
+	c, ok, err := relay.LoadConfig(p.st.HomeDir(), relay.DefaultMesh)
+	if err != nil || !ok {
+		t.Fatalf("load config: %v, %v", ok, err)
+	}
+	return c
 }

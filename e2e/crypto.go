@@ -129,18 +129,19 @@ func UnwrapKey(w Wrap, mesh string, id Identity, members map[string]Member) (Gro
 }
 
 type Envelope struct {
-	V         int    `json:"v"`
-	Mesh      string `json:"mesh"`
-	Drive     string `json:"drive"`
-	Origin    string `json:"origin"`
-	OriginSeq int64  `json:"origin_seq"`
-	Tier      string `json:"tier"`
-	KindClass string `json:"kind_class"`
-	TS        string `json:"ts"`
-	Epoch     uint64 `json:"epoch"`
-	Nonce     []byte `json:"nonce"`
-	Body      []byte `json:"body"`
-	Sig       []byte `json:"sig"`
+	V          int         `json:"v"`
+	Mesh       string      `json:"mesh"`
+	Drive      string      `json:"drive"`
+	Origin     string      `json:"origin"`
+	OriginSeq  int64       `json:"origin_seq"`
+	Tier       string      `json:"tier"`
+	KindClass  string      `json:"kind_class"`
+	TS         string      `json:"ts"`
+	Epoch      uint64      `json:"epoch"`
+	Nonce      []byte      `json:"nonce"`
+	Body       []byte      `json:"body"`
+	Sig        []byte      `json:"sig"`
+	Delegation *Delegation `json:"delegation,omitempty"`
 }
 
 func (e Envelope) header() []byte {
@@ -183,16 +184,11 @@ func Open(e Envelope, keys map[uint64]GroupKey, members map[string]Member) ([]by
 	if err := clean(e.Mesh, e.Drive, e.Origin, e.Tier, e.KindClass, e.TS); err != nil {
 		return nil, err
 	}
-	m, ok := members[e.Origin]
-	switch {
-	case !ok:
-		return nil, fmt.Errorf("%w: %s", ErrUnknownMember, e.Origin)
-	case m.Tier != e.Tier:
-		return nil, fmt.Errorf("%w: %s pinned %s, sent %s", ErrTierMismatch, e.Origin, m.Tier, e.Tier)
-	case m.Tier == TierPaired:
-		return nil, fmt.Errorf("%w: %s", ErrPairedWrite, e.Origin)
+	pub, err := writer(e, members)
+	if err != nil {
+		return nil, err
 	}
-	if !verify(m.PublicKey, e.Message(), e.Sig) {
+	if !verify(pub, e.Message(), e.Sig) {
 		return nil, fmt.Errorf("record %s/%d: %w", e.Origin, e.OriginSeq, ErrBadSignature)
 	}
 	k, ok := keys[e.Epoch]
@@ -243,6 +239,22 @@ func clean(fields ...string) error {
 		}
 	}
 	return nil
+}
+
+func writer(e Envelope, members map[string]Member) ([]byte, error) {
+	if e.Delegation != nil {
+		return e.Delegation.InstancePub, e.Delegation.check(members, e)
+	}
+	m, ok := members[e.Origin]
+	switch {
+	case !ok:
+		return nil, fmt.Errorf("%w: %s", ErrUnknownMember, e.Origin)
+	case m.Tier != e.Tier:
+		return nil, fmt.Errorf("%w: %s pinned %s, sent %s", ErrTierMismatch, e.Origin, m.Tier, e.Tier)
+	case m.Tier == TierPaired:
+		return nil, fmt.Errorf("%w: %s", ErrPairedWrite, e.Origin)
+	}
+	return m.PublicKey, nil
 }
 
 func VerifyEnvelope(pub []byte, e Envelope) bool {

@@ -25,6 +25,8 @@ type Config struct {
 	RelayPub []byte   `json:"relay_pub"`
 	Routes   []string `json:"routes,omitempty"`
 	Tap      string   `json:"tap,omitempty"`
+
+	Delegation *e2e.Delegation `json:"delegation,omitempty"`
 }
 
 func (c Config) Carries(drive string) bool {

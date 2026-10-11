@@ -124,3 +124,50 @@ func TestOpenRefusals(t *testing.T) {
 		t.Fatal("wrong group key decrypted")
 	}
 }
+
+func TestDelegationScope(t *testing.T) {
+	svc, inst, other := e2etest.NewIdentity(t), e2etest.NewIdentity(t), e2etest.NewIdentity(t)
+	k, _ := e2e.NewGroupKey(1)
+	keys := map[uint64]e2e.GroupKey{1: k}
+	pinned := members(member(svc, e2e.TierService))
+	ts := time.Date(2026, 10, 11, 0, 0, 0, 0, time.UTC)
+	d, err := e2e.Delegate(svc, "default", inst.PublicKey(), []string{"page:*"}, []string{"fix.status"}, ts.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := func(drive, kind string, at time.Time, d e2e.Delegation) e2e.Envelope {
+		e, err := e2e.Seal(k, inst, e2e.Envelope{
+			Mesh: "default", Drive: drive, OriginSeq: 1, Tier: e2e.TierService, KindClass: kind,
+			TS: at.Format(time.RFC3339Nano), Delegation: &d,
+		}, []byte("x"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return e
+	}
+	if _, err := e2e.Open(env("page:9", "fix.status", ts, d), keys, pinned); err != nil {
+		t.Fatalf("in-scope envelope: %v", err)
+	}
+	forged, _ := e2e.Delegate(other, "default", inst.PublicKey(), []string{"*"}, nil, ts.Add(time.Hour))
+	forged.Service = svc.ID()
+	relabelled := d
+	relabelled.Instance = other.ID()
+	cases := []struct {
+		name string
+		env  e2e.Envelope
+		want error
+	}{
+		{"drive", env("cci-mesh", "fix.status", ts, d), e2e.ErrOutOfScope},
+		{"kind", env("page:9", "decision", ts, d), e2e.ErrOutOfScope},
+		{"expired", env("page:9", "fix.status", ts.Add(2*time.Hour), d), e2e.ErrOutOfScope},
+		{"forged", env("page:9", "fix.status", ts, forged), e2e.ErrBadSignature},
+		{"relabelled", env("page:9", "fix.status", ts, relabelled), e2e.ErrBadSignature},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if _, err := e2e.Open(c.env, keys, pinned); !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+		})
+	}
+}
