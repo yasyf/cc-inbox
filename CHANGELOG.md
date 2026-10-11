@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-11
+
+### Added
+
+- `cci pair` lets a machine outside the owner's synckit mesh join a mesh as a
+  read-only node over the relay. It prints a one-time code and its node
+  fingerprint. `cci pair accept CODE` on an owner shows that fingerprint and
+  asks for Touch ID through `synckitd consent request`, here or on an attended
+  owner host. `--tier service --allow --label` admits a scoped writer instead.
+  The accepting owner signs a member grant and its owner roster, so no node
+  pins a key on the relay's word alone (#64).
+- `cci unpair NODE` revokes a node through the relay and rotates the group
+  key. The daemon acts on relay-signed `peer.unpaired` controls on every
+  node, so a write from a paired node unpairs it everywhere with one key
+  rotation. `cci peers` lists trusted nodes with their tier, and `--mesh`
+  reconciles that list against the relay's directory (#64).
+
 ## [0.13.0] - 2026-10-11
 
 ### Added
@@ -496,7 +513,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/yasyf/cc-inbox/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/yasyf/cc-inbox/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/yasyf/cc-inbox/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/yasyf/cc-inbox/compare/v0.10.4...v0.11.0
