@@ -51,6 +51,7 @@ func NewRootCmd() *cobra.Command {
 		newSubscribeCmd(),
 		newUnsubscribeCmd(),
 		newChannelCmd(),
+		newNodeCmd(),
 	)
 	return root
 }
