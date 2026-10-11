@@ -287,6 +287,8 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. |
 | `cci me` | Print this session's registry line, ending with the `uds:` address `SendMessage` accepts. |
 | `cci node` | Print this machine's node id, key fingerprint, and Secure Enclave endorsement; `--json` adds the public key. `cci node endorse` signs the node key with the authkit Secure Enclave key, one Touch ID tap. |
+| `cci mesh enable` | Write the synckit manifest for service `cci`, register it with `synckitd`, and ensure the daemon, which then runs the mesh helper. Each Mac in the synckit mesh runs it once. |
+| `cci mesh status` | Print this node, its latest record, and per synckit host the enrolled node, the acked record, the delivery state, and the last error; `--json` emits the report. |
 | `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Subagents and teammates list as their own peers, and sessions replicated from other nodes list too, live while seen in the last 15 minutes and addressed as `peer:<node>/<session>`. Narrow with `--session <id or prefix>`, `--agent <id or name>`, `--origin <node prefix>`, where `-` selects this machine, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`). Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |
@@ -565,6 +567,21 @@ the `addr` operation returns the HTTP address. Each CLI process still writes
 directly to SQLite's write-ahead log. CLI reads, including `tail`, `digest`,
 `grep`, and `watch`, also stay direct and use the same reader code as the daemon.
 Posting and CLI reads work without the daemon.
+
+### Mesh
+
+After `cci mesh enable`, the daemon spawns `cci mesh helper`, the resident
+synckit consumer `cci`, and stops itself if the helper exits. `synckitd` sends
+each mesh host a delta of the records after the one it acknowledged. A host that
+is new, missed compacted records, or is too far behind gets a snapshot of the
+newest records that fit in 7 MiB instead. Every change carries
+this node's sessions and claims, so a session change alone also reaches every
+host, and is signed with the node key. A receiver
+applies a change only when its signer is pinned at tier `owner` for the host that
+delivered it, and fences it against the last change it applied from that node.
+`synckitd host add <user@node>` pins both hosts' node keys once each has run
+`cci node endorse`; `synckitd host
+enroll <user@node>` pins a host that joined the mesh before `cci mesh enable`.
 
 ## Plugin hooks
 

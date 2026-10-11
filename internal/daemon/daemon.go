@@ -15,6 +15,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/mesh"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -87,11 +88,20 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	}
 	var syncCtx context.Context
 	syncCtx, p.stopSync = context.WithCancel(context.Background())
-	go func() {
-		defer close(p.synced)
+	var loops sync.WaitGroup
+	loops.Go(func() {
 		if err := p.syncImports(syncCtx); err != nil {
 			r.fail(c, err)
 		}
+	})
+	loops.Go(func() {
+		if err := superviseMesh(syncCtx, c, r.home); err != nil {
+			r.fail(c, err)
+		}
+	})
+	go func() {
+		loops.Wait()
+		close(p.synced)
 	}()
 	go func() {
 		err := p.http.Serve(r.ln)
@@ -113,6 +123,39 @@ func (p *Product) syncImports(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+func superviseMesh(ctx context.Context, c daemonkit.Ctx, home string) error {
+	tick := time.NewTicker(ImportInterval)
+	defer tick.Stop()
+	var exited <-chan daemonkit.Exit
+	for {
+		if exited == nil {
+			enabled, err := mesh.Enabled(home)
+			if err != nil {
+				return err
+			}
+			if enabled {
+				child, err := mesh.StartHelper(ctx, c)
+				if err != nil && ctx.Err() == nil {
+					return err
+				}
+				if child != nil {
+					exited = child.Done()
+				}
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case exit := <-exited:
+			if ctx.Err() != nil {
+				return nil
+			}
+			return fmt.Errorf("mesh helper exited: code=%d signal=%v", exit.Code, exit.Signal)
 		case <-tick.C:
 		}
 	}
