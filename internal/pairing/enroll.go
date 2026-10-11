@@ -135,6 +135,9 @@ func Enroll(ctx context.Context, home string, st *store.Store, self node.Node, c
 	if err != nil {
 		return store.Member{}, err
 	}
+	if err := n.RefreshKeys(ctx); err != nil {
+		return store.Member{}, err
+	}
 	if err := n.Share(ctx); err != nil {
 		return store.Member{}, fmt.Errorf("share the group key with %s: %w", member.Node, err)
 	}
