@@ -442,3 +442,51 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 		t.Fatalf("state = %q, %v", out, err)
 	}
 }
+
+func TestAgentThreadsClaimAndAreAddressedApart(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-2222-3333")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "mesh", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "claim", "--pr", "5"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCI_AGENT_ID", "aapi-0123")
+	if out, err := run(t, "claim", "--rel", "watches", "--pr", "5"); err != nil || out != "watches pr:5\n" {
+		t.Fatalf("agent claim = %q, %v", out, err)
+	}
+	if me, err := run(t, "me"); err != nil || !strings.HasPrefix(me, "- agent ") || !strings.Contains(me, " session=aaaa1111/aapi-0123") {
+		t.Fatalf("agent me = %q, %v", me, err)
+	}
+	out, err := run(t, "who", "--all", "--pr", "5")
+	if err != nil || !strings.Contains(out, "session=aaaa1111/aapi-0123\n  watches pr:5 ") || !strings.Contains(out, "session=aaaa1111\n  owns pr:5 ") {
+		t.Fatalf("who --pr 5 = %q, %v; want the root and its agent apart", out, err)
+	}
+	if out, err := run(t, "who", "--all", "--agent", "aapi-0123"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "/aapi-0123") {
+		t.Fatalf("who --agent = %q, %v", out, err)
+	}
+	if out, err := run(t, "unclaim", "--rel", "owns", "--pr", "5"); err != nil || out != "owns pr:5 no such claim\n" {
+		t.Fatalf("agent unclaimed the root's claim: %q, %v", out, err)
+	}
+	t.Setenv("CCI_AGENT_ID", "")
+	if out, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:aaaa/aapi-0123", "--text", "status?"); err != nil || out != "#1\n" {
+		t.Fatalf("post to an agent = %q, %v", out, err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:aaaa/nobody", "--text", "x"); err == nil || !strings.Contains(err.Error(), "no agent of it") {
+		t.Fatalf("post to an unknown agent: %v", err)
+	}
+	if out, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:aaaa", "--text", "root?"); err != nil || out != "#2\n" {
+		t.Fatalf("post to the root thread = %q, %v", out, err)
+	}
+	t.Setenv("CCI_AGENT_ID", "aapi-0123")
+	out, err = run(t, "tail", "--drive", "mesh", "--since", "0", "--reader", "api")
+	if err != nil || !strings.Contains(out, "ASK root -> peer:aaaa1111/aapi-0123 status?") || strings.Contains(out, "root?") {
+		t.Fatalf("agent reader = %q, %v", out, err)
+	}
+}

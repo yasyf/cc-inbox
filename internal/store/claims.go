@@ -8,16 +8,21 @@ import (
 	"time"
 )
 
-// Claim ties a session to an artifact: (rel, kind, key) such as
+// Claim ties a session thread to an artifact: (rel, kind, key) such as
 // (opened, pr, 34363). Kind and rel are open vocabularies. Source is "claim"
 // for an explicit one and "#<seq>" for one derived from a record's refs.
 type Claim struct {
 	Session string    `json:"session"`
+	Agent   string    `json:"agent,omitempty"`
 	Rel     string    `json:"rel"`
 	Kind    string    `json:"kind"`
 	Key     string    `json:"key"`
 	At      time.Time `json:"at"`
 	Source  string    `json:"source"`
+}
+
+func (c Claim) Peer() PeerKey {
+	return PeerKey{Session: c.Session, Agent: c.Agent}
 }
 
 // Ref renders the claim's artifact as kind:key.
@@ -40,8 +45,8 @@ func (s *Store) Claim(ctx context.Context, c Claim) (Claim, error) {
 		return Claim{}, errors.New("claim needs a session, rel, kind and key")
 	}
 	c.At, c.Source = s.Now().UTC(), "claim"
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO claims (session, rel, kind, key, at) VALUES (?, ?, ?, ?, ?)
-ON CONFLICT (session, rel, kind, key) DO UPDATE SET at = excluded.at`, c.Session, c.Rel, c.Kind, c.Key, c.At.UnixMilli()); err != nil {
+	if _, err := s.db.ExecContext(ctx, `INSERT INTO claims (session, agent, rel, kind, key, at) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT (session, agent, rel, kind, key) DO UPDATE SET at = excluded.at`, c.Session, c.Agent, c.Rel, c.Kind, c.Key, c.At.UnixMilli()); err != nil {
 		return Claim{}, fmt.Errorf("claim %s %s: %w", c.Rel, c.Ref(), err)
 	}
 	return c, nil
@@ -49,7 +54,7 @@ ON CONFLICT (session, rel, kind, key) DO UPDATE SET at = excluded.at`, c.Session
 
 // Unclaim removes an explicit association and reports whether one existed.
 func (s *Store) Unclaim(ctx context.Context, c Claim) (bool, error) {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM claims WHERE session = ? AND rel = ? AND kind = ? AND key = ?", c.Session, c.Rel, c.Kind, c.Key)
+	res, err := s.db.ExecContext(ctx, "DELETE FROM claims WHERE session = ? AND agent = ? AND rel = ? AND kind = ? AND key = ?", c.Session, c.Agent, c.Rel, c.Kind, c.Key)
 	if err != nil {
 		return false, fmt.Errorf("unclaim %s %s: %w", c.Rel, c.Ref(), err)
 	}
@@ -99,7 +104,7 @@ func (s *Store) Claims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
 	if len(clauses) > 0 {
 		where = " WHERE " + strings.Join(clauses, " AND ")
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT session, rel, kind, key, at, source FROM ("+claimsUnion+")"+where+" ORDER BY at DESC, source", params...)
+	rows, err := s.db.QueryContext(ctx, "SELECT session, agent, rel, kind, key, at, source FROM ("+claimsUnion+")"+where+" ORDER BY at DESC, source", params...)
 	if err != nil {
 		return nil, fmt.Errorf("list claims: %w", err)
 	}
@@ -110,7 +115,7 @@ func (s *Store) Claims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
 			c  Claim
 			at int64
 		)
-		if err := rows.Scan(&c.Session, &c.Rel, &c.Kind, &c.Key, &at, &c.Source); err != nil {
+		if err := rows.Scan(&c.Session, &c.Agent, &c.Rel, &c.Kind, &c.Key, &at, &c.Source); err != nil {
 			return nil, fmt.Errorf("scan claim: %w", err)
 		}
 		c.At = time.UnixMilli(at).UTC()
@@ -136,7 +141,7 @@ const derivedRel = `CASE r.kind
 const laneSessions = `JOIN sessions s ON s.drive = r.drive AND (s.lane = r.lane OR (s.root AND r.lane IN ('root', 'main')))`
 
 var claimsUnion = strings.Join([]string{
-	"SELECT session, rel, kind, key, at, 'claim' AS source FROM claims",
+	"SELECT session, agent, rel, kind, key, at, 'claim' AS source FROM claims",
 	derived("pr", "$.prs"),
 	derived("build", "$.builds"),
 	derived("stack", "$.stacks"),
@@ -144,5 +149,5 @@ var claimsUnion = strings.Join([]string{
 }, " UNION ALL ")
 
 func derived(kind, path string) string {
-	return "SELECT s.session, " + derivedRel + ", '" + kind + "', CAST(j.value AS TEXT), r.at, '#' || r.seq FROM records r, json_each(r.refs, '" + path + "') j " + laneSessions
+	return "SELECT s.session, s.agent, " + derivedRel + ", '" + kind + "', CAST(j.value AS TEXT), r.at, '#' || r.seq FROM records r, json_each(r.refs, '" + path + "') j " + laneSessions
 }

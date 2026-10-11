@@ -126,7 +126,7 @@ func TestPeersEndpoint(t *testing.T) {
 	st, _ := testutil.Store(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	ctx := context.Background()
-	if err := st.Bind(ctx, "s1", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "s1"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Announce(ctx, store.Peer{Session: "s1", Role: "root", Tags: []string{"release"}}); err != nil {

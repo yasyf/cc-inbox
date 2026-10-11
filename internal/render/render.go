@@ -127,8 +127,14 @@ func (b *Budget) Trailer(s string) {
 func recipients(to []string) []string {
 	out := make([]string, len(to))
 	for i, t := range to {
-		if session, ok := strings.CutPrefix(t, "peer:"); ok && len(session) > 8 {
-			t = "peer:" + session[:8]
+		if peer, ok := strings.CutPrefix(t, "peer:"); ok {
+			session, agent, _ := strings.Cut(peer, "/")
+			if len(session) > 8 {
+				t = "peer:" + session[:8]
+				if agent != "" {
+					t += "/" + agent
+				}
+			}
 		}
 		out[i] = t
 	}

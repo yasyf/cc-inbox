@@ -16,7 +16,10 @@ import (
 	"github.com/yasyf/cc-inbox/internal/version"
 )
 
-const sessionEnv = "CLAUDE_CODE_SESSION_ID"
+const (
+	sessionEnv = "CLAUDE_CODE_SESSION_ID"
+	agentEnv   = "CCI_AGENT_ID"
+)
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -64,11 +67,11 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 	if drive != "" {
 		return drive, nil
 	}
-	session := os.Getenv(sessionEnv)
-	if session == "" {
+	self := selfPeer()
+	if self.Session == "" {
 		return "", store.ErrNoDrive
 	}
-	b, ok, err := st.Binding(ctx, session)
+	b, ok, err := st.Binding(ctx, self)
 	if err != nil {
 		return "", err
 	}
@@ -127,7 +130,7 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 	}
 	out := store.Filter{Drive: drive, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
 	if f.to == "" {
-		out.Peer = os.Getenv(sessionEnv)
+		out.Peer = selfPeer().String()
 	}
 	for _, k := range f.kinds {
 		kind, err := kinds.Parse(k)
@@ -159,6 +162,14 @@ func parseSince(s string, now time.Time) (int64, time.Time, error) {
 		return 0, t, nil
 	}
 	return 0, time.Time{}, fmt.Errorf("--since %q is not a seq, a duration, a clock time (9:00 AM, 21:30), or an RFC3339 time", s)
+}
+
+func selfPeer() store.PeerKey {
+	session := os.Getenv(sessionEnv)
+	if session == "" {
+		return store.PeerKey{}
+	}
+	return store.PeerKey{Session: session, Agent: os.Getenv(agentEnv)}
 }
 
 func withStore(fn func(cmd *cobra.Command, st *store.Store, args []string) error) func(*cobra.Command, []string) error {

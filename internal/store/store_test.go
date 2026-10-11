@@ -305,10 +305,10 @@ func TestBindingSurvivesReopen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Bind(ctx, "s", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "s"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
-	b, ok, err := st.Binding(ctx, "s")
+	b, ok, err := st.Binding(ctx, store.PeerKey{Session: "s"})
 	if err != nil || !ok || b != (store.Binding{Drive: "d", Root: true}) {
 		t.Fatalf("Binding() = %+v %v %v", b, ok, err)
 	}

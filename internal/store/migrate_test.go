@@ -64,3 +64,40 @@ func TestNewerSchemaNamesTheUpgradeCommand(t *testing.T) {
 		t.Fatalf("open newer store error = %v, want %q", err, want)
 	}
 }
+
+func TestMigratesSessionsAndClaimsToAgentKeys(t *testing.T) {
+	dir := t.TempDir()
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(dir, "inbox.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	stmts := append([]string{}, migrations[:9]...)
+	stmts = append(stmts,
+		`INSERT INTO sessions (session, drive, root, lane, role, pid, pid_started) VALUES ('s', 'd', 1, '', 'root', 42, 7)`,
+		`INSERT INTO claims (session, rel, kind, key, at) VALUES ('s', 'owns', 'pr', '1', 5)`,
+		"PRAGMA user_version = 9",
+	)
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	_ = db.Close()
+	st, err := Open(ctx, dir)
+	if err != nil {
+		t.Fatalf("open schema-9 store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	p, err := st.Peer(ctx, PeerKey{Session: "s"})
+	if err != nil || p.Agent != "" || p.Drive != "d" || !p.Root || p.PID != 42 {
+		t.Fatalf("migrated peer = %+v, %v", p, err)
+	}
+	claims, err := st.Claims(ctx, ClaimFilter{Kind: "pr", Key: "1"})
+	if err != nil || len(claims) != 1 || claims[0].Peer() != (PeerKey{Session: "s"}) {
+		t.Fatalf("migrated claims = %+v, %v", claims, err)
+	}
+	if _, err := st.Announce(ctx, Peer{Session: "s", Agent: "a1"}); err != nil {
+		t.Fatalf("announce an agent beside a migrated root: %v", err)
+	}
+}

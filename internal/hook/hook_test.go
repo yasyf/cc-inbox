@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +34,7 @@ func TestSessionStart(t *testing.T) {
 	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "other"}, store.Window{}, &unbound); err != nil || unbound.Len() != 0 {
 		t.Fatalf("unbound session wrote %q, %v", unbound.String(), err)
 	}
-	if err := st.Bind(ctx, "s1", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "s1"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
@@ -64,10 +66,10 @@ func TestSessionStart(t *testing.T) {
 func TestPromptRecordsOwnerRulingsOnlyForRoot(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
-	if err := st.Bind(ctx, "root", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "root"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Bind(ctx, "lane", "d", false); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "lane"}, "d", false); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []hook.Payload{
@@ -93,7 +95,7 @@ func TestPromptRecordsOwnerRulingsOnlyForRoot(t *testing.T) {
 func TestRootReaderSkipsTheOwnerPromptsItRecorded(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
-	if err := st.Bind(ctx, "root", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "root"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
 	if err := hook.Prompt(ctx, st, hook.Payload{SessionID: "root", Prompt: "fix cci so my own messages are not echoed"}); err != nil {
@@ -175,11 +177,11 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Owner, To: []string{"lane-x", "lane-y"}, Text: "owner ruling"})
 	testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Note, Text: "broadcast"})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Go, To: []string{"lane-y"}, Text: "for another lane"})
-	if err := st.BindLane(ctx, "s1", "d", "lane-x", started); err != nil {
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "lane-x", started); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, &out); err != nil {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
 		t.Fatal(err)
 	}
 	got := hookContext(t, &out, "PostToolUse")
@@ -194,11 +196,11 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 		}
 	}
 	out.Reset()
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUseFailure"}, &out); err != nil || out.Len() != 0 {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUseFailure"}, noWindow, &out); err != nil || out.Len() != 0 {
 		t.Fatalf("second round redelivered %q, %v", out.String(), err)
 	}
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Defect, To: []string{"lane-x"}, Text: strings.Repeat("🛑", 399)})
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUseFailure"}, &out); err != nil {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUseFailure"}, noWindow, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got := hookContext(t, &out, "PostToolUseFailure"); !strings.Contains(got, "DEFECT root -> lane-x 🛑") {
@@ -224,23 +226,23 @@ func TestLaneCursorSurvivesOtherReadsAndLateImports(t *testing.T) {
 	clock.Advance(-time.Hour)
 	testutil.Post(t, st, store.Record{Lane: "lane-c", Kind: kinds.Note, Text: "imported late"})
 	clock.Advance(time.Hour)
-	if err := st.Bind(ctx, "s1", "d", false); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "s1"}, "d", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.BindLane(ctx, "s1", "d", "lane-x", started); err != nil {
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "lane-x", started); err != nil {
 		t.Fatal(err)
 	}
 	var out bytes.Buffer
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, &out); err != nil {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
 		t.Fatal(err)
 	}
 	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "STOPPED root -> lane-x abandon this item") {
 		t.Fatalf("additionalContext = %q", got)
 	}
-	if err := st.Bind(ctx, "s1", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "s1"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
-	if b, _, err := st.Binding(ctx, "s1"); err != nil || !b.Root || b.Lane != "" {
+	if b, _, err := st.Binding(ctx, store.PeerKey{Session: "s1"}); err != nil || !b.Root || b.Lane != "" {
 		t.Fatalf("binding after root rebind = %+v %v", b, err)
 	}
 }
@@ -248,19 +250,19 @@ func TestLaneCursorSurvivesOtherReadsAndLateImports(t *testing.T) {
 func TestPostingAsALaneLeavesTheRootBinding(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
-	if err := st.Bind(ctx, "root", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "root"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.BindLane(ctx, "root", "d", "runner", time.Time{}); err != nil {
+	if err := st.BindLane(ctx, store.PeerKey{Session: "root"}, "d", "runner", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	b, ok, err := st.Binding(ctx, "root")
+	b, ok, err := st.Binding(ctx, store.PeerKey{Session: "root"})
 	if err != nil || !ok || !b.Root || b.Lane != "" {
 		t.Fatalf("root binding = %+v %v %v", b, ok, err)
 	}
 	testutil.Post(t, st, store.Record{Lane: "lane-a", Kind: kinds.Stopped, To: []string{"runner"}, Text: "not for root"})
 	var out bytes.Buffer
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "root", Event: "PostToolUse"}, &out); err != nil || out.Len() != 0 {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "root", Event: "PostToolUse"}, noWindow, &out); err != nil || out.Len() != 0 {
 		t.Fatalf("root PostToolUse wrote %q, %v", out.String(), err)
 	}
 }
@@ -268,18 +270,96 @@ func TestPostingAsALaneLeavesTheRootBinding(t *testing.T) {
 func TestLaneHookDeliversPeerRecords(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
-	if err := st.BindLane(ctx, "s-api", "d", "api", st.Now().Add(-time.Hour)); err != nil {
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s-api"}, "d", "api", st.Now().Add(-time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Post(t, st, store.Record{Drive: "other", Lane: "root", Kind: kinds.Go, Text: "cross-drive go", To: []string{store.PeerAddress("s-api")}})
 	testutil.Post(t, st, store.Record{Drive: "other", Lane: "root", Kind: kinds.Go, Text: "lane at drive", To: []string{"api@d"}})
 	testutil.Post(t, st, store.Record{Drive: "other", Lane: "root", Kind: kinds.Go, Text: "not for api", To: []string{"api@elsewhere"}})
 	var out bytes.Buffer
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s-api", Event: "PostToolUse"}, &out); err != nil {
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s-api", Event: "PostToolUse"}, noWindow, &out); err != nil {
 		t.Fatal(err)
 	}
 	text := out.String()
 	if !strings.Contains(text, "cross-drive go") || !strings.Contains(text, "lane at drive") || strings.Contains(text, "not for api") {
 		t.Fatalf("PostToolUse context = %q", text)
+	}
+}
+
+func noWindow() (store.Window, error) {
+	return store.Window{}, nil
+}
+
+func TestPostToolUseAnnouncesAgentsAndDeliversTheirLanes(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	projects := t.TempDir()
+	transcript := filepath.Join(projects, "s1.jsonl")
+	if err := os.MkdirAll(filepath.Join(projects, "s1", "subagents"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects, "s1", "subagents", "agent-aapi-0123.meta.json"), []byte(`{"agentType":"lane","name":"api-lane"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	api := hook.Payload{SessionID: "s1", AgentID: "aapi-0123", TranscriptPath: transcript, Cwd: t.TempDir(), Event: "PostToolUse"}
+	web := hook.Payload{SessionID: "s1", AgentID: "aweb-4567", TranscriptPath: transcript, Cwd: t.TempDir(), Event: "PostToolUse"}
+	window := func() (store.Window, error) { return store.Window{PID: 42, Started: 7}, nil }
+	for _, p := range []hook.Payload{api, web} {
+		if err := hook.PostToolUse(ctx, st, p, window, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := st.Peer(ctx, api.Key())
+	if err != nil || got.AgentName != "api-lane" || got.Role != "agent" || got.PID != 42 || got.Superseded {
+		t.Fatalf("announced api agent = %+v, %v", got, err)
+	}
+	if got, err := st.Peer(ctx, web.Key()); err != nil || got.AgentName != "" {
+		t.Fatalf("announced unnamed agent = %+v, %v", got, err)
+	}
+	if _, err := st.Peer(ctx, store.PeerKey{Session: "s1"}); err == nil {
+		t.Fatal("an agent's tool call announced its root thread")
+	}
+	started := clock.Now()
+	clock.Advance(time.Minute)
+	if err := st.BindLane(ctx, api.Key(), "d", "api", started); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, web.Key(), "d", "web", started); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Go, To: []string{"api"}, Text: "ship api"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Go, To: []string{"web"}, Text: "ship web"})
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, api, window, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "GO root -> api ship api") || strings.Contains(got, "ship web") {
+		t.Fatalf("api agent's delivery = %q", got)
+	}
+	out.Reset()
+	if err := hook.PostToolUse(ctx, st, web, window, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "GO root -> web ship web") || strings.Contains(got, "ship api") {
+		t.Fatalf("web agent's delivery = %q", got)
+	}
+	if err := hook.SubagentStop(ctx, st, api); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Peer(ctx, api.Key()); !got.Superseded {
+		t.Fatalf("stopped agent = %+v", got)
+	}
+	if err := hook.PostToolUse(ctx, st, api, window, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Peer(ctx, api.Key()); got.Superseded || got.Lane != "api" {
+		t.Fatalf("agent after its next tool call = %+v", got)
+	}
+	resumed := func() (store.Window, error) { return store.Window{PID: 43, Started: 8}, nil }
+	if err := hook.PostToolUse(ctx, st, api, resumed, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Peer(ctx, api.Key()); got.PID != 43 || got.PIDStarted != 8 {
+		t.Fatalf("agent in a new process kept its old window: %+v", got)
 	}
 }

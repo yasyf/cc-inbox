@@ -11,7 +11,8 @@ in `cc-notes`, linked with `--ccn`. Use `decision` for a call already made and
 
 Use the task's drive and lane names. Pass `--drive` or bind the current Claude
 Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`; subagents share their
-parent's value. Each `cci drive use` sets the session's cursor to the selected
+parent's value and add `CCI_AGENT_ID` to it, so each subagent or teammate binds,
+claims and reads as its own thread. Each `cci drive use` sets the session's cursor to the selected
 drive's latest record, including when rebinding the same drive. An empty drive
 starts at sequence 0. A root binding also enables owner-prompt capture through
 the plugin:
@@ -211,8 +212,15 @@ slug come from git, and the Orca and long-running identity variables come
 from the environment. A codex lane announces under `CODEX_THREAD_ID` with
 the `codex` process as its window. `--role` overrides the inference; `desk`, `watcher` and
 `codex` are the other values in use. Each hook call refreshes the peer's
-`seen_at`. A subagent shares its parent's session id, so its announce is
-the parent's.
+`seen_at`. A subagent or teammate is its own peer: the plugin's hooks
+announce it on its first tool call under its session and the harness's
+`agent_id`, name it from the harness's agent metadata, and retire it on
+`SubagentStop`. Its line cites it as `session=<session>/<agent name>`, and
+`peer:<session>/<agent id or name>` addresses it; a bare `peer:<session>`
+is the root thread. Its own `cci` calls carry `CCI_AGENT_ID`, the payload's
+`agent_id` exported into each of its Bash commands, so its claims, lane
+binding and default cursor are its own. Without `CCI_AGENT_ID` a command
+acts as the root thread.
 
 Paste `cci me` into a handoff instead of a session name or a PR list:
 

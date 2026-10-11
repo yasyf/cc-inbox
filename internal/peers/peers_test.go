@@ -31,7 +31,7 @@ func TestResolveJoinsHarnessAndFilters(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := st.Bind(ctx, "aaaa1111-root", "b577ef71", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "aaaa1111-root"}, "b577ef71", true); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []store.Peer{
@@ -133,5 +133,48 @@ func TestAnnounceCanonicalizesPathsAndKeepsRole(t *testing.T) {
 	views, err := peers.Resolve(ctx, st, peers.Filter{Worktree: dir, All: true})
 	if err != nil || len(views) != 1 {
 		t.Fatalf("Resolve(--worktree %s) = %+v, %v", dir, views, err)
+	}
+}
+
+func TestAgentViewsLeaveTheRootItsWindow(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	if err := os.MkdirAll(filepath.Join(cfg, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfg, "sessions", "11.json"), []byte(`{"pid":11,"sessionId":"aaaa1111-root","cwd":"/w/alewife","startedAt":1,"messagingSocketPath":"/tmp/cc-socks/11.sock","name":"alewife-6d","status":"idle","statusUpdatedAt":1}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: "aaaa1111-root", Agent: "aapi-0123", AgentName: "api-lane"}); err != nil {
+		t.Fatal(err)
+	}
+	views, err := peers.Resolve(ctx, st, peers.Filter{Session: "aaaa", All: true})
+	if err != nil || len(views) != 2 {
+		t.Fatalf("Resolve() = %+v, %v; want the root window and its agent", views, err)
+	}
+	byAgent := map[string]peers.View{}
+	for _, v := range views {
+		byAgent[v.Agent] = v
+	}
+	if root := byAgent[""]; root.Name != "alewife-6d" || root.Address == "" || root.Thread() != "aaaa1111" {
+		t.Fatalf("root view = %+v", root)
+	}
+	if agent := byAgent["aapi-0123"]; agent.Name != "api-lane" || agent.Address != "" || agent.Thread() != "aaaa1111/api-lane" || !agent.Live {
+		t.Fatalf("agent view = %+v", agent)
+	}
+	for _, tt := range []struct {
+		f    peers.Filter
+		want string
+	}{
+		{peers.Filter{Agent: "api-lane", All: true}, "aapi-0123"},
+		{peers.Filter{Agent: "aapi-0123", All: true}, "aapi-0123"},
+		{peers.KeyFilter(store.PeerKey{Session: "aaaa1111-root"}), ""},
+	} {
+		v, err := peers.One(ctx, st, tt.f)
+		if err != nil || v.Agent != tt.want {
+			t.Fatalf("One(%+v) = %+v, %v; want agent %q", tt.f, v, err, tt.want)
+		}
 	}
 }

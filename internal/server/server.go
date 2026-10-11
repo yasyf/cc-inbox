@@ -140,7 +140,7 @@ func (s *Server) lanes(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) peers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	f := peers.Filter{Session: q.Get("session"), Name: q.Get("name"), Role: q.Get("role"), Drive: q.Get("drive"), Lane: q.Get("lane"), Tag: q.Get("tag"), Repo: q.Get("repo"), Worktree: q.Get("worktree"), Branch: q.Get("branch"), Query: q.Get("q"), Rel: q.Get("rel"), All: q.Get("all") == "1"}
+	f := peers.Filter{Session: q.Get("session"), Agent: q.Get("agent"), Name: q.Get("name"), Role: q.Get("role"), Drive: q.Get("drive"), Lane: q.Get("lane"), Tag: q.Get("tag"), Repo: q.Get("repo"), Worktree: q.Get("worktree"), Branch: q.Get("branch"), Query: q.Get("q"), Rel: q.Get("rel"), All: q.Get("all") == "1"}
 	pr, build, ref := q.Get("pr"), q.Get("build"), q.Get("ref")
 	selectors := 0
 	for _, v := range []string{pr, build, ref} {
