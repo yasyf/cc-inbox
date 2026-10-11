@@ -55,6 +55,7 @@ func newRelayJoinCmd() *cobra.Command {
 		kinds    []string
 		ttl      time.Duration
 		owners   []string
+		services []string
 	)
 	cmd := &cobra.Command{
 		Use:   "join",
@@ -75,16 +76,11 @@ func newRelayJoinCmd() *cobra.Command {
 					cfg.Tier = have.Tier
 				}
 			}
-			for _, o := range owners {
-				pub, err := base64.StdEncoding.DecodeString(o)
-				if err != nil {
-					return fmt.Errorf("--owner %q is not base64: %w", o, err)
-				}
-				if err := st.PutMember(cmd.Context(), store.Member{
-					Node: node.IDOf(pub), PublicKey: pub, Tier: node.TierOwner, Via: "relay", By: "relay join --owner", At: time.Now(),
-				}); err != nil {
-					return err
-				}
+			if err := pinMembers(cmd, st, "owner", node.TierOwner, owners); err != nil {
+				return err
+			}
+			if err := pinMembers(cmd, st, "service", node.TierService, services); err != nil {
+				return err
 			}
 			n, err := relay.Open(st.HomeDir(), st, id, cfg)
 			if err != nil {
@@ -116,9 +112,25 @@ func newRelayJoinCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&drives, "drive", nil, "drives the instance may write (exact or trailing *); required with --instance")
 	cmd.Flags().StringSliceVar(&kinds, "kind", nil, "kinds the instance may write (default: the service's scope)")
 	cmd.Flags().DurationVar(&ttl, "ttl", 6*time.Hour, "how long the instance delegation lasts")
+	cmd.Flags().StringSliceVar(&services, "service", nil, "pin a service node by its base64 X9.63 public key before joining, so its records and delegated instances verify")
 	cmd.Flags().StringSliceVar(&owners, "owner", nil, "pin an owner node by its base64 X9.63 public key before joining (a fresh node has no other way to trust group-key wraps)")
 	_ = cmd.MarkFlagRequired("url")
 	return cmd
+}
+
+func pinMembers(cmd *cobra.Command, st *store.Store, flag string, tier node.Tier, keys []string) error {
+	for _, k := range keys {
+		pub, err := base64.StdEncoding.DecodeString(k)
+		if err != nil {
+			return fmt.Errorf("--%s %q is not base64: %w", flag, k, err)
+		}
+		if err := st.PutMember(cmd.Context(), store.Member{
+			Node: node.IDOf(pub), PublicKey: pub, Tier: tier, Via: "relay", By: "relay join --" + flag, At: time.Now(),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newRelayPushCmd() *cobra.Command {
