@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cci cursor set` moves a cursor backwards for a reader that restarts. The
   channel tag and text `cci watch` print a record's body under its line, and
   the tag's meta carries its `id`.
+- `cci mesh enable` replicates records across the owner's Macs through
+  synckit: the daemon runs the resident consumer `cci`, `synckitd` delivers
+  node-signed deltas and bounded snapshots to every mesh host, and a receiver
+  applies only changes signed by the owner node it pinned for the delivering
+  host, fenced by its per-origin receipt. `synckitd host add` and `host enroll`
+  pin each host's node key. `cci mesh status` shows what each host acked.
 - `--to peer:<node>/<session>` addresses a session on another node, `cci who`
   lists replicated sessions, and `--origin` narrows reads and `who` to one
   node.

@@ -9,7 +9,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/yasyf/cc-interact v0.35.2
 	github.com/yasyf/daemonkit v0.32.3
-	github.com/yasyf/synckit v0.40.0
+	github.com/yasyf/synckit v0.41.0
 	modernc.org/sqlite v1.60.1
 )
 
@@ -17,9 +17,11 @@ require (
 	github.com/brutella/dnssd v1.2.14 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.1 // indirect
+	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20211012122336-39d0f177ccd0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/miekg/dns v1.1.61 // indirect
