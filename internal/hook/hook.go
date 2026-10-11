@@ -124,12 +124,12 @@ func announceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 	if err != nil {
 		return err
 	}
-	if found && existing.PID != 0 && !existing.Superseded && (existing.AgentName != "" || name == "") {
-		return nil
-	}
 	win, err := window()
 	if err != nil {
 		return err
+	}
+	if found && existing.PID == win.PID && existing.PIDStarted == win.Started && !existing.Superseded && (existing.AgentName != "" || name == "") {
+		return nil
 	}
 	_, err = peers.Announce(ctx, st, peers.Options{Session: p.SessionID, Agent: p.AgentID, AgentName: name, Window: win, Cwd: p.Cwd})
 	return err

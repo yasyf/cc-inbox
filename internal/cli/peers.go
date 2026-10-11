@@ -362,7 +362,10 @@ func resolveRecipients(ctx context.Context, st *store.Store, to []string) ([]str
 		session, agent, _ := strings.Cut(target, "/")
 		v, err := peers.One(ctx, st, peers.Filter{Session: session, Agent: agent, Root: agent == "", All: true})
 		if errors.Is(err, sql.ErrNoRows) {
-			v, err = peers.One(ctx, st, peers.Filter{Name: session, Agent: agent, Root: agent == "", All: true})
+			v, err = peers.One(ctx, st, peers.Filter{Name: session, Root: true, All: true})
+			if err == nil && agent != "" {
+				v, err = peers.One(ctx, st, peers.Filter{Session: v.Session, Agent: agent, All: true})
+			}
 		}
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("--to %s: no session has that id prefix or name, or no agent of it that id or name; cci who --all lists them", t)

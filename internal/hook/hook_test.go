@@ -355,4 +355,11 @@ func TestPostToolUseAnnouncesAgentsAndDeliversTheirLanes(t *testing.T) {
 	if got, _ := st.Peer(ctx, api.Key()); got.Superseded || got.Lane != "api" {
 		t.Fatalf("agent after its next tool call = %+v", got)
 	}
+	resumed := func() (store.Window, error) { return store.Window{PID: 43, Started: 8}, nil }
+	if err := hook.PostToolUse(ctx, st, api, resumed, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := st.Peer(ctx, api.Key()); got.PID != 43 || got.PIDStarted != 8 {
+		t.Fatalf("agent in a new process kept its old window: %+v", got)
+	}
 }

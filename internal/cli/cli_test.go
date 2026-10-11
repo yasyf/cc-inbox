@@ -485,7 +485,7 @@ func TestAgentThreadsClaimAndAreAddressedApart(t *testing.T) {
 		t.Fatalf("post to the root thread = %q, %v", out, err)
 	}
 	t.Setenv("CCI_AGENT_ID", "aapi-0123")
-	out, err = run(t, "tail", "--since", "0", "--reader", "api")
+	out, err = run(t, "tail", "--drive", "mesh", "--since", "0", "--reader", "api")
 	if err != nil || !strings.Contains(out, "ASK root -> peer:aaaa1111/aapi-0123 status?") || strings.Contains(out, "root?") {
 		t.Fatalf("agent reader = %q, %v", out, err)
 	}
