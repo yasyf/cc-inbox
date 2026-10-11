@@ -12,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ inputs.commit || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
