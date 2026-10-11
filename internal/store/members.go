@@ -148,7 +148,7 @@ func (s *Store) ExportPresence(ctx context.Context, viewer node.Tier) (Presence,
 	if err := rows.Err(); err != nil {
 		return Presence{}, fmt.Errorf("export sessions: %w", err)
 	}
-	claims, err := s.db.QueryContext(ctx, "SELECT session, rel, kind, key, at FROM claims WHERE origin = ? ORDER BY session, rel, kind, key", s.Self())
+	claims, err := s.db.QueryContext(ctx, "SELECT session, agent, rel, kind, key, at FROM claims WHERE origin = ? ORDER BY session, agent, rel, kind, key", s.Self())
 	if err != nil {
 		return Presence{}, fmt.Errorf("export claims: %w", err)
 	}
@@ -158,7 +158,7 @@ func (s *Store) ExportPresence(ctx context.Context, viewer node.Tier) (Presence,
 			c  Claim
 			at int64
 		)
-		if err := claims.Scan(&c.Session, &c.Rel, &c.Kind, &c.Key, &at); err != nil {
+		if err := claims.Scan(&c.Session, &c.Agent, &c.Rel, &c.Kind, &c.Key, &at); err != nil {
 			return Presence{}, fmt.Errorf("export claims: %w", err)
 		}
 		if viewer == node.TierPaired && c.Kind == "worktree" {
@@ -190,17 +190,17 @@ func (s *Store) ApplyPresence(ctx context.Context, p Presence) error {
 	for _, peer := range p.Peers {
 		tags, _ := json.Marshal(nonNil(peer.Tags))
 		env, _ := json.Marshal(peer.Env)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, origin, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (session) DO NOTHING`,
-			peer.Session, p.Origin, peer.Drive, peer.Root, peer.Lane, peer.Role, peer.Description, string(tags), peer.Cwd, peer.Repo, peer.Worktree, peer.Branch, peer.Remote,
+		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, agent_name, origin, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (session, agent) DO NOTHING`,
+			peer.Session, peer.Agent, peer.AgentName, p.Origin, peer.Drive, peer.Root, peer.Lane, peer.Role, peer.Description, string(tags), peer.Cwd, peer.Repo, peer.Worktree, peer.Branch, peer.Remote,
 			peer.PID, peer.PIDStarted, string(env), peer.AnnouncedAt.UnixMilli(), peer.SeenAt.UnixMilli(), peer.Superseded); err != nil {
 			return fmt.Errorf("apply session %s of %s: %w", peer.Session, p.Origin, err)
 		}
 	}
 	for _, c := range p.Claims {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO claims (session, rel, kind, key, at, origin)
-SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM sessions WHERE session = ? AND origin = ?) ON CONFLICT DO NOTHING`,
-			c.Session, c.Rel, c.Kind, c.Key, c.At.UnixMilli(), p.Origin, c.Session, p.Origin); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO claims (session, agent, rel, kind, key, at, origin)
+SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM sessions WHERE session = ? AND agent = ? AND origin = ?) ON CONFLICT DO NOTHING`,
+			c.Session, c.Agent, c.Rel, c.Kind, c.Key, c.At.UnixMilli(), p.Origin, c.Session, c.Agent, p.Origin); err != nil {
 			return fmt.Errorf("apply claim of %s: %w", p.Origin, err)
 		}
 	}

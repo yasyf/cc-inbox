@@ -103,7 +103,7 @@ func TestPresenceReplicatesSessions(t *testing.T) {
 	ctx := context.Background()
 	a, _ := testutil.Store(t)
 	b, _ := testutil.Store(t)
-	if err := a.Bind(ctx, "sess-a", "d", false); err != nil {
+	if err := a.Bind(ctx, store.PeerKey{Session: "sess-a"}, "d", false); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := a.Announce(ctx, store.Peer{Session: "sess-a", Cwd: "/src", PID: 42, Env: map[string]string{"K": "v"}}); err != nil {
@@ -123,11 +123,11 @@ func TestPresenceReplicatesSessions(t *testing.T) {
 	if err := b.ApplyPresence(ctx, owner); err != nil {
 		t.Fatal(err)
 	}
-	p, err := b.Peer(ctx, "sess-a")
+	p, err := b.Peer(ctx, store.PeerKey{Session: "sess-a"})
 	if err != nil || p.Origin != a.Self() || p.Drive != "d" {
 		t.Fatalf("b sees %+v, %v", p, err)
 	}
-	if _, ok, err := b.Binding(ctx, "sess-a"); err != nil || ok {
+	if _, ok, err := b.Binding(ctx, store.PeerKey{Session: "sess-a"}); err != nil || ok {
 		t.Fatalf("a remote session binds on b: %v %v", ok, err)
 	}
 	if claims, err := b.Claims(ctx, store.ClaimFilter{Kind: "pr", Key: "1"}); err != nil || len(claims) != 1 {
@@ -142,7 +142,7 @@ func TestPresenceReplicatesSessions(t *testing.T) {
 	if err := b.ForgetPeer(ctx, a.Self()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := b.Peer(ctx, "sess-a"); !errors.Is(err, sql.ErrNoRows) {
+	if _, err := b.Peer(ctx, store.PeerKey{Session: "sess-a"}); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("forgotten peer's session = %v", err)
 	}
 }
@@ -307,10 +307,10 @@ func TestLocalSessionDisplacesAReplicatedRow(t *testing.T) {
 	if err := b.ApplyPresence(ctx, store.Presence{Origin: a.Self(), Peers: []store.Peer{{Session: "sess-x", Drive: "remote", Root: true}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.BindLane(ctx, "sess-x", "local", "api", time.Time{}); err != nil {
+	if err := b.BindLane(ctx, store.PeerKey{Session: "sess-x"}, "local", "api", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	p, err := b.Peer(ctx, "sess-x")
+	p, err := b.Peer(ctx, store.PeerKey{Session: "sess-x"})
 	if err != nil || p.Origin != "" || p.Drive != "local" || p.Root {
 		t.Fatalf("local bind over a replicated row = %+v, %v", p, err)
 	}
