@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci upgrade` moves every cci install on the machine in one command: the
+  plugin through `claude plugin update`, the Homebrew cask through
+  `brew upgrade --cask`, and each standalone `cci` on `PATH` from the release
+  asset. It then runs `serve` from the newest install so the daemon moves too.
+  Run it once after a release workflow finishes.
+- The daemon follows upgrades by itself. At start and every 30 seconds it
+  reads the plugin cache and Homebrew cask version directories, and hands off
+  to a newer release's `cci serve`, which drains it and starts the newer build.
+  The daemon copy no longer stays behind until someone runs `cci serve`.
+
 - `cci relay join|push|pull|sync|rotate|status` replicates records through the
   wide-area relay, end-to-end encrypted so the relay reads no record body.
   Each mesh has a group key that an owner node wraps to every pinned member

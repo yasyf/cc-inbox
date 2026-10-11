@@ -5,7 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+)
+
+const (
+	pluginUpgrade = "claude plugin marketplace update cc-inbox && claude plugin update cc-inbox@cc-inbox"
+	caskUpgrade   = "brew upgrade --cask yasyf/tap/cci"
 )
 
 func UpgradeCommand() string {
@@ -13,18 +19,49 @@ func UpgradeCommand() string {
 	if err != nil {
 		panic(fmt.Sprintf("locate the running cci: %v", err))
 	}
-	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-		exe = resolved
+	return upgradeCommand(resolve(exe), runtime.GOOS, runtime.GOARCH)
+}
+
+func (r Roots) UpgradeCommands(path string) ([]string, error) {
+	var cmds []string
+	add := func(cmd string) {
+		if !slices.Contains(cmds, cmd) {
+			cmds = append(cmds, cmd)
+		}
 	}
-	return upgradeCommand(exe, runtime.GOOS, runtime.GOARCH)
+	for _, dir := range filepath.SplitList(path) {
+		exe := filepath.Join(dir, "cci")
+		if info, err := os.Stat(exe); err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		add(upgradeCommand(resolve(exe), runtime.GOOS, runtime.GOARCH))
+	}
+	plugin, casks, err := r.newest()
+	if err != nil {
+		return nil, err
+	}
+	if plugin.Path != "" {
+		add(pluginUpgrade)
+	}
+	if casks.Path != "" {
+		add(caskUpgrade)
+	}
+	return cmds, nil
+}
+
+func resolve(exe string) string {
+	if resolved, err := filepath.EvalSymlinks(exe); err == nil {
+		return resolved
+	}
+	return exe
 }
 
 func upgradeCommand(exe, goos, goarch string) string {
 	switch {
 	case strings.Contains(exe, "/Caskroom/cci/"):
-		return "brew upgrade --cask yasyf/tap/cci"
-	case strings.Contains(exe, "/.daemonkit/cache/"):
-		return "claude plugin update cc-inbox@cc-inbox"
+		return caskUpgrade
+	case strings.Contains(exe, "/.daemonkit/cache/"), strings.Contains(exe, "/plugins/cache/cc-inbox/"):
+		return pluginUpgrade
 	default:
 		dir := filepath.Dir(exe)
 		return fmt.Sprintf(`d=$(mktemp -d %[1]s/.cci.XXXXXX) && gh release download --repo yasyf/cc-inbox --pattern 'cci_*_%[2]s_%[3]s.tar.gz' --output - | tar -xzf - -C "$d" cci && mv -f "$d/cci" %[1]s/cci && rmdir "$d"`, dir, goos, goarch)

@@ -21,6 +21,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 const (
@@ -79,6 +80,14 @@ func (r *Runtime) fail(c daemonkit.Ctx, err error) {
 }
 
 func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
+	roots, err := version.DefaultRoots()
+	if err != nil {
+		return nil, err
+	}
+	up := &Upgrader{Roots: roots, Running: version.String()}
+	if err := up.Check(); err != nil {
+		return nil, err
+	}
 	st, err := store.Open(c.Context, r.home)
 	if err != nil {
 		return nil, err
@@ -110,6 +119,11 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 		loop := relay.NewLoop(r.home, st, id)
 		loop.OnControl(pairing.Handler(r.home, st, id))
 		loop.Run(syncCtx)
+	})
+	loops.Go(func() {
+		if err := up.Follow(syncCtx, UpgradeInterval); err != nil {
+			r.fail(c, err)
+		}
 	})
 	go func() {
 		loops.Wait()

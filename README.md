@@ -45,6 +45,19 @@ claude plugin marketplace add yasyf/cc-inbox
 claude plugin install cc-inbox@cc-inbox
 ```
 
+After a cc-inbox release workflow finishes, move every install on the machine
+with one command:
+
+```bash
+cci upgrade
+```
+
+It runs `claude plugin marketplace update cc-inbox` and `claude plugin update`
+when the plugin is installed, `brew upgrade --cask` when the cask is, and
+replaces each standalone `cci` on `PATH`, such as `~/.local/bin/cci`, from the
+release asset. Then it runs `serve` from the newest install, which moves the
+daemon onto it.
+
 The plugin includes the [using-cci skill](plugin/skills/using-cci/SKILL.md) and
 [hooks](#plugin-hooks). Drive coordination goes to `cci`. Durable rulings,
 runbooks, and design docs stay in `cc-notes`. Use `decision` for a call a lane
@@ -326,6 +339,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`). Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
+| `cci upgrade` | Upgrade the plugin, the Homebrew cask, and each standalone `cci` on `PATH`, printing every command it runs, then run `serve` from the newest install. |
 | `cci hook` | Run a plugin hook entry point. |
 
 | Post option | Stored value or behavior |
@@ -593,6 +607,16 @@ the daemonkit supervisor for `Ensure`. It runs a copy of `cci` at
 `~/.daemonkit/a/com.yasyf.cc-inbox`. It restarts on failure. When a different
 `cci` build calls `Ensure` through `cci serve` or the `SessionStart` hook,
 daemonkit drains and replaces the running daemon.
+
+A release daemon also follows upgrades by itself. When it starts, and every 30
+seconds after, it reads the version directories of the plugin cache, skipping
+ones Claude Code marked orphaned, and of the Homebrew cask. When one holds a
+newer release than the daemon, the daemon runs that install's `cci serve` in a
+session of its own, whose `Ensure` drains the daemon and starts the newer
+build. It tries each newer install once and logs a failed hand-off to
+`~/.daemonkit/a/com.yasyf.cc-inbox/daemon.log`. A development build never
+follows. A daemon older than this behavior needs one `cci serve` or
+`cci upgrade` to reach it.
 
 The daemon keeps one SQLite store open with a 256 MiB memory map and a 64 MiB
 page cache. HTTP readers and the `digest` business operation reuse that store;
