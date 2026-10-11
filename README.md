@@ -55,8 +55,8 @@ cci upgrade
 It runs `claude plugin marketplace update cc-inbox` and `claude plugin update`
 when the plugin is installed, `brew upgrade --cask` when the cask is, and
 replaces each standalone `cci` on `PATH`, such as `~/.local/bin/cci`, from the
-release asset. Then it runs `serve` from the newest install, which moves the
-daemon onto it.
+release asset. Then it runs `serve` from the newest install, standalone copies
+included, which moves the daemon onto it.
 
 The plugin includes the [using-cci skill](plugin/skills/using-cci/SKILL.md) and
 [hooks](#plugin-hooks). Drive coordination goes to `cci`. Durable rulings,
@@ -613,8 +613,8 @@ seconds after, it reads the version directories of the plugin cache, skipping
 ones Claude Code marked orphaned, and of the Homebrew cask. When one holds a
 newer release than the daemon, the daemon runs that install's `cci serve` in a
 session of its own, whose `Ensure` drains the daemon and starts the newer
-build. It tries each newer install once and logs a failed hand-off to
-`~/.daemonkit/a/com.yasyf.cc-inbox/daemon.log`. A development build never
+build. It logs a failed hand-off or scan to
+`~/.daemonkit/a/com.yasyf.cc-inbox/daemon.log` and retries on the next check. A development build never
 follows. A daemon older than this behavior needs one `cci serve` or
 `cci upgrade` to reach it.
 

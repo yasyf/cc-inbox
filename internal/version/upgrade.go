@@ -29,12 +29,8 @@ func (r Roots) UpgradeCommands(path string) ([]string, error) {
 			cmds = append(cmds, cmd)
 		}
 	}
-	for _, dir := range filepath.SplitList(path) {
-		exe := filepath.Join(dir, "cci")
-		if info, err := os.Stat(exe); err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
-			continue
-		}
-		add(upgradeCommand(resolve(exe), runtime.GOOS, runtime.GOARCH))
+	for _, exe := range onPath(path) {
+		add(upgradeCommand(exe, runtime.GOOS, runtime.GOARCH))
 	}
 	plugin, casks, err := r.newest()
 	if err != nil {
@@ -47,6 +43,28 @@ func (r Roots) UpgradeCommands(path string) ([]string, error) {
 		add(caskUpgrade)
 	}
 	return cmds, nil
+}
+
+func Standalone(path string) []string {
+	var standalone []string
+	for _, exe := range onPath(path) {
+		if cmd := upgradeCommand(exe, runtime.GOOS, runtime.GOARCH); cmd != pluginUpgrade && cmd != caskUpgrade && !slices.Contains(standalone, exe) {
+			standalone = append(standalone, exe)
+		}
+	}
+	return standalone
+}
+
+func onPath(path string) []string {
+	var found []string
+	for _, dir := range filepath.SplitList(path) {
+		exe := filepath.Join(dir, "cci")
+		if info, err := os.Stat(exe); err != nil || info.IsDir() || info.Mode().Perm()&0o111 == 0 {
+			continue
+		}
+		found = append(found, resolve(exe))
+	}
+	return found
 }
 
 func resolve(exe string) string {

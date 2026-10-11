@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -86,7 +87,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	}
 	up := &Upgrader{Roots: roots, Running: version.String()}
 	if err := up.Check(); err != nil {
-		return nil, err
+		slog.Warn("cci daemon cannot scan for upgrades", "err", err)
 	}
 	st, err := store.Open(c.Context, r.home)
 	if err != nil {
@@ -120,11 +121,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 		loop.OnControl(pairing.Handler(r.home, st, id))
 		loop.Run(syncCtx)
 	})
-	loops.Go(func() {
-		if err := up.Follow(syncCtx, UpgradeInterval); err != nil {
-			r.fail(c, err)
-		}
-	})
+	loops.Go(func() { up.Follow(syncCtx, UpgradeInterval) })
 	go func() {
 		loops.Wait()
 		close(p.synced)

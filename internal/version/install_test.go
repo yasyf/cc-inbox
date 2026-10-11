@@ -108,4 +108,7 @@ func TestUpgradeCommandsCoverEveryInstallOnce(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("UpgradeCommands() = %q, want %q", got, want)
 	}
+	if got := Standalone(path); !slices.Equal(got, []string{filepath.Join(standalone, "cci")}) {
+		t.Fatalf("Standalone() = %q", got)
+	}
 }

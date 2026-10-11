@@ -60,13 +60,19 @@ func newUpgradeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			target := newest.Path
-			if target == "" {
-				if target, err = os.Executable(); err != nil {
-					return fmt.Errorf("locate the running cci: %w", err)
+			for _, path := range version.Standalone(os.Getenv("PATH")) {
+				out, err := exec.CommandContext(cmd.Context(), path, "--version").Output() //nolint:gosec // G204: a standalone cci found on PATH.
+				if err != nil {
+					return fmt.Errorf("%s --version: %w", path, err)
+				}
+				if v := strings.TrimSpace(string(out)); version.Newer(v, newest.Version) {
+					newest = version.Install{Path: path, Version: v}
 				}
 			}
-			return runShown(cmd, target, "serve")
+			if newest.Path == "" {
+				return errors.New("no cci install found to serve from")
+			}
+			return runShown(cmd, newest.Path, "serve")
 		},
 	}
 }
