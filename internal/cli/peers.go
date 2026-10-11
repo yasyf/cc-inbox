@@ -31,7 +31,7 @@ func newAnnounceCmd() *cobra.Command {
 		Short: "Register this session in the machine-wide peer registry so other sessions can find it with cci who",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			session, window, err := peerIdentity()
+			self, window, err := peerIdentity()
 			if err != nil {
 				return err
 			}
@@ -39,10 +39,10 @@ func newAnnounceCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve cwd: %w", err)
 			}
-			if _, err := peers.Announce(cmd.Context(), st, peers.Options{Session: session, Window: window, Cwd: cwd, Role: role, Description: description, Tags: tags, Speak: true}); err != nil {
+			if _, err := peers.Announce(cmd.Context(), st, peers.Options{Session: self.Session, Agent: self.Agent, Window: window, Cwd: cwd, Role: role, Description: description, Tags: tags, Speak: true}); err != nil {
 				return err
 			}
-			return printPeer(cmd, st, session)
+			return printPeer(cmd, st, self)
 		}),
 	}
 	cmd.Flags().StringVar(&role, "role", "", "root, lane, desk, watcher, codex or session (default: inferred from the drive binding)")
@@ -57,19 +57,19 @@ func newMeCmd() *cobra.Command {
 		Short: "Print this session's registry line, the one to paste into a handoff",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			session, _, err := peerIdentity()
+			self, _, err := peerIdentity()
 			if err != nil {
 				return err
 			}
-			return printPeer(cmd, st, session)
+			return printPeer(cmd, st, self)
 		}),
 	}
 }
 
-func printPeer(cmd *cobra.Command, st *store.Store, session string) error {
-	v, err := peers.One(cmd.Context(), st, peers.Filter{Session: session, All: true})
+func printPeer(cmd *cobra.Command, st *store.Store, self store.PeerKey) error {
+	v, err := peers.One(cmd.Context(), st, peers.KeyFilter(self))
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("session %s is not in the registry; run cci announce", session)
+		return fmt.Errorf("session %s is not in the registry; run cci announce", self)
 	}
 	if err != nil {
 		return err
@@ -132,6 +132,7 @@ func newWhoCmd() *cobra.Command {
 	}
 	fl := cmd.Flags()
 	fl.StringVar(&f.Session, "session", "", "session id or its prefix")
+	fl.StringVar(&f.Agent, "agent", "", "the subagent or teammate with this agent id or name")
 	fl.StringVar(&f.Name, "name", "", "the harness name, as ListAgents prints it")
 	fl.StringVar(&f.Role, "role", "", "root, lane, desk, watcher, codex or session")
 	fl.StringVar(&f.Drive, "drive", "", "sessions bound to this drive")
@@ -151,7 +152,7 @@ func newWhoCmd() *cobra.Command {
 }
 
 func announceSelf(ctx context.Context, st *store.Store) error {
-	session, window, err := peerIdentity()
+	self, window, err := peerIdentity()
 	if err != nil {
 		return err
 	}
@@ -159,27 +160,27 @@ func announceSelf(ctx context.Context, st *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
 	}
-	_, err = peers.Announce(ctx, st, peers.Options{Session: session, Window: window, Cwd: cwd})
+	_, err = peers.Announce(ctx, st, peers.Options{Session: self.Session, Agent: self.Agent, Window: window, Cwd: cwd})
 	return err
 }
 
-func peerIdentity() (string, store.Window, error) {
-	session := os.Getenv(sessionEnv)
-	if session == "" {
-		session = os.Getenv(codexSessionEnv)
+func peerIdentity() (store.PeerKey, store.Window, error) {
+	self := selfPeer()
+	if self.Session == "" {
+		self.Session = os.Getenv(codexSessionEnv)
 	}
-	if session == "" {
-		return "", store.Window{}, errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
+	if self.Session == "" {
+		return store.PeerKey{}, store.Window{}, errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
 	}
 	window, err := thisWindow()
 	if !errors.Is(err, errNoSession) {
-		return session, window, err
+		return self, window, err
 	}
 	if pid := procs.FindAncestor(os.Getpid(), isCodex); pid != 0 {
 		window, err = windowOf(pid)
-		return session, window, err
+		return self, window, err
 	}
-	return session, store.Window{}, nil
+	return self, store.Window{}, nil
 }
 
 func isCodex(argv []string) bool {
@@ -220,11 +221,11 @@ func (c *claimFlags) register(cmd *cobra.Command) {
 	fl.StringSliceVar(&c.refs, "ref", nil, "any other <kind>:<key> (repeatable)")
 }
 
-func (c *claimFlags) claims(session string) ([]store.Claim, error) {
+func (c *claimFlags) claims(self store.PeerKey) ([]store.Claim, error) {
 	var out []store.Claim
 	add := func(kind string, keys []string) {
 		for _, key := range keys {
-			out = append(out, store.Claim{Session: session, Rel: c.rel, Kind: kind, Key: key})
+			out = append(out, store.Claim{Session: self.Session, Agent: self.Agent, Rel: c.rel, Kind: kind, Key: key})
 		}
 	}
 	prs := make([]string, len(c.prs))
@@ -284,15 +285,15 @@ func newClaimCmd() *cobra.Command {
 		Short: "Tie this session to artifacts, so cci who --pr, --build or --ref finds it",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			session, _, err := peerIdentity()
+			self, _, err := peerIdentity()
 			if err != nil {
 				return err
 			}
-			claims, err := cf.claims(session)
+			claims, err := cf.claims(self)
 			if err != nil {
 				return err
 			}
-			if _, err := st.Peer(cmd.Context(), session); errors.Is(err, sql.ErrNoRows) {
+			if _, err := st.Peer(cmd.Context(), self); errors.Is(err, sql.ErrNoRows) {
 				if err := announceSelf(cmd.Context(), st); err != nil {
 					return err
 				}
@@ -322,11 +323,11 @@ func newUnclaimCmd() *cobra.Command {
 		Short: "Drop this session's explicit claims on artifacts; derived ones stay with their records",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			session, _, err := peerIdentity()
+			self, _, err := peerIdentity()
 			if err != nil {
 				return err
 			}
-			claims, err := cf.claims(session)
+			claims, err := cf.claims(self)
 			if err != nil {
 				return err
 			}
@@ -358,17 +359,18 @@ func resolveRecipients(ctx context.Context, st *store.Store, to []string) ([]str
 			out[i] = t
 			continue
 		}
-		v, err := peers.One(ctx, st, peers.Filter{Session: target, All: true})
+		session, agent, _ := strings.Cut(target, "/")
+		v, err := peers.One(ctx, st, peers.Filter{Session: session, Agent: agent, Root: agent == "", All: true})
 		if errors.Is(err, sql.ErrNoRows) {
-			v, err = peers.One(ctx, st, peers.Filter{Name: target, All: true})
+			v, err = peers.One(ctx, st, peers.Filter{Name: session, Agent: agent, Root: agent == "", All: true})
 		}
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("--to %s: no session has that id prefix or name; cci who --all lists them", t)
+			return nil, fmt.Errorf("--to %s: no session has that id prefix or name, or no agent of it that id or name; cci who --all lists them", t)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("--to %s: %w", t, err)
 		}
-		out[i] = store.PeerAddress(v.Session)
+		out[i] = store.PeerAddress(v.Key().String())
 	}
 	return out, nil
 }

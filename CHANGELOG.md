@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Subagents and teammates are peers of their own. Every session thread is
+  keyed by its session and the harness's `agent_id`, so `cci who` lists each
+  lane of a session apart as `session=<session>/<agent name>`, and `cci who
+  --pr` names the lane that holds a claim. The plugin's hooks announce a
+  subagent on its first tool call, name it from the harness's agent metadata,
+  deliver its own lane's records, and retire it on `SubagentStop`. `cci me`,
+  `cci claim`, `cci unclaim`, `cci drive use`, a lane's lane binding and the
+  default cursor act as the thread `CCI_AGENT_ID` names beside
+  `CLAUDE_CODE_SESSION_ID`; without it, as the root thread.
+  `peer:<session>/<agent id or name>` addresses one subagent, and a bare
+  `peer:<session>` still means the root thread. `cci who --agent` and
+  `GET /v1/peers?agent=` select one. Store schema 10 adds the agent to the
+  `sessions` and `claims` keys; existing rows become root threads.
+
 ## [0.10.3] - 2026-10-10
 
 ### Fixed

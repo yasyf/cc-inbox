@@ -14,10 +14,10 @@ import (
 func TestClaimsExplicitAndDerived(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
-	if err := st.Bind(ctx, "root-1", "d", true); err != nil {
+	if err := st.Bind(ctx, store.PeerKey{Session: "root-1"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.BindLane(ctx, "lane-1", "d", "api", clock.Now()); err != nil {
+	if err := st.BindLane(ctx, store.PeerKey{Session: "lane-1"}, "d", "api", clock.Now()); err != nil {
 		t.Fatal(err)
 	}
 	opened := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Opened, Text: "fix", Refs: store.Refs{PRs: []int{34363}, Builds: []string{"https://buildkite.com/forge/ci/builds/4860"}}})
@@ -144,10 +144,10 @@ func TestLaneCursorStartsBeforeCrossDriveRecords(t *testing.T) {
 	clock.Advance(time.Minute)
 	testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Go, Text: "go api", To: []string{"api@b"}})
 	testutil.Post(t, st, store.Record{Drive: "b", Lane: "api", Kind: kinds.State, Text: "first local post"})
-	if err := st.BindLane(ctx, "s-api", "b", "api", started); err != nil {
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s-api"}, "b", "api", started); err != nil {
 		t.Fatal(err)
 	}
-	seq, ok, err := st.Cursor(ctx, store.LaneCursor("s-api"), "b")
+	seq, ok, err := st.Cursor(ctx, store.LaneCursor(store.PeerKey{Session: "s-api"}), "b")
 	if err != nil || !ok || seq != 0 {
 		t.Fatalf("lane cursor = %d %v %v; want 0 so #1 (api@b) is delivered", seq, ok, err)
 	}

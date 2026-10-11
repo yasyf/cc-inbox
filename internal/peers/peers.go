@@ -29,13 +29,17 @@ var IdentityEnv = []string{"ORCA_TERMINAL_HANDLE", "ORCA_LAUNCH_RUN", "CLAUDE_LO
 const (
 	RoleRoot    = "root"
 	RoleLane    = "lane"
+	RoleAgent   = "agent"
 	RoleSession = "session"
 )
 
-// Options describes the announcing session. An empty Role is inferred from
-// its drive binding; Cwd is where git is read.
+// Options describes the announcing session thread: the root thread when
+// Agent is empty, else the subagent or teammate the harness calls Agent. An
+// empty Role is inferred from its drive binding; Cwd is where git is read.
 type Options struct {
 	Session     string
+	Agent       string
+	AgentName   string
 	Window      store.Window
 	Cwd         string
 	Role        string
@@ -52,7 +56,7 @@ func Announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 	if err != nil || !o.Speak || p.Drive == "" {
 		return p, err
 	}
-	v, err := One(ctx, st, Filter{Session: p.Session, All: true})
+	v, err := One(ctx, st, KeyFilter(p.Key()))
 	if err != nil {
 		return store.Peer{}, err
 	}
@@ -75,7 +79,7 @@ func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 	}
 	role := o.Role
 	if role == "" {
-		role, err = inferRole(ctx, st, o.Session)
+		role, err = inferRole(ctx, st, store.PeerKey{Session: o.Session, Agent: o.Agent})
 		if err != nil {
 			return store.Peer{}, err
 		}
@@ -88,6 +92,8 @@ func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 	}
 	return st.Announce(ctx, store.Peer{
 		Session:     o.Session,
+		Agent:       o.Agent,
+		AgentName:   o.AgentName,
 		Role:        role,
 		Description: o.Description,
 		Tags:        o.Tags,
@@ -102,15 +108,15 @@ func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 	})
 }
 
-func inferRole(ctx context.Context, st *store.Store, session string) (string, error) {
-	existing, err := st.Peer(ctx, session)
+func inferRole(ctx context.Context, st *store.Store, k store.PeerKey) (string, error) {
+	existing, err := st.Peer(ctx, k)
 	if err == nil && existing.Role != "" {
 		return "", nil
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
-	b, ok, err := st.Binding(ctx, session)
+	b, ok, err := st.Binding(ctx, k)
 	switch {
 	case err != nil:
 		return "", err
@@ -118,6 +124,8 @@ func inferRole(ctx context.Context, st *store.Store, session string) (string, er
 		return RoleRoot, nil
 	case ok && b.Lane != "":
 		return RoleLane, nil
+	case k.Agent != "":
+		return RoleAgent, nil
 	}
 	return RoleSession, nil
 }
@@ -135,10 +143,13 @@ type View struct {
 }
 
 // Filter selects peers. Every set field must match; Session matches a uuid
-// prefix. Kind, Key and Rel select by claim, and a matched peer carries the
-// claims that selected it.
+// prefix and Agent an agent id or name. Root keeps only root threads. Kind,
+// Key and Rel select by claim, and a matched peer carries the claims that
+// selected it.
 type Filter struct {
 	Session  string
+	Agent    string
+	Root     bool
 	Name     string
 	Role     string
 	Drive    string
@@ -154,6 +165,11 @@ type Filter struct {
 	All      bool
 }
 
+// KeyFilter selects exactly the thread k names, live or not.
+func KeyFilter(k store.PeerKey) Filter {
+	return Filter{Session: k.Session, Agent: k.Agent, Root: k.Agent == "", All: true}
+}
+
 func (f Filter) byClaim() bool {
 	return f.Kind != "" || f.Key != "" || f.Rel != ""
 }
@@ -165,15 +181,15 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 	if err != nil {
 		return nil, err
 	}
-	var claimed map[string][]store.Claim
+	var claimed map[store.PeerKey][]store.Claim
 	if f.byClaim() {
 		claims, err := st.Claims(ctx, store.ClaimFilter{Rel: f.Rel, Kind: f.Kind, Key: f.Key})
 		if err != nil {
 			return nil, err
 		}
-		claimed = make(map[string][]store.Claim, len(claims))
+		claimed = make(map[store.PeerKey][]store.Claim, len(claims))
 		for _, c := range claims {
-			claimed[c.Session] = append(claimed[c.Session], c)
+			claimed[c.Peer()] = append(claimed[c.Peer()], c)
 		}
 	}
 	dir, err := harness.Dir()
@@ -187,7 +203,12 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 	now := st.Now()
 	views := make([]View, 0, len(rows)+len(windows))
 	for _, p := range rows {
-		v := View{Peer: p, Live: live(p, now), Claims: claimed[p.Session]}
+		v := View{Peer: p, Live: live(p, now), Claims: claimed[p.Key()]}
+		if p.Agent != "" {
+			v.Name = p.AgentName
+			views = append(views, v)
+			continue
+		}
 		if w, ok := windows[p.Session]; ok {
 			v.Name, v.Address, v.Status, v.Live = w.Name, w.Address(), w.Status, w.Alive() && !p.Superseded
 			v.StatusAt = time.UnixMilli(w.StatusUpdatedAt).UTC()
@@ -206,7 +227,7 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 			Status:   w.Status,
 			StatusAt: time.UnixMilli(w.StatusUpdatedAt).UTC(),
 			Live:     w.Alive(),
-			Claims:   claimed[w.SessionID],
+			Claims:   claimed[store.PeerKey{Session: w.SessionID}],
 		})
 	}
 	views = slices.DeleteFunc(views, func(v View) bool { return !f.matches(v) })
@@ -245,6 +266,8 @@ func (f Filter) matches(v View) bool {
 	}
 	q := strings.ToLower(f.Query)
 	return (f.Session == "" || strings.HasPrefix(v.Session, f.Session)) &&
+		(f.Agent == "" || v.Agent == f.Agent || v.AgentName == f.Agent) &&
+		(!f.Root || v.Agent == "") &&
 		(f.Name == "" || v.Name == f.Name) &&
 		(f.Role == "" || v.Role == f.Role) &&
 		(f.Drive == "" || v.Drive == f.Drive) &&
@@ -301,7 +324,7 @@ func (v View) Line(now time.Time) string {
 	for _, t := range v.Tags {
 		fmt.Fprintf(&b, " #%s", t)
 	}
-	fmt.Fprintf(&b, " session=%s", Short(v.Session))
+	fmt.Fprintf(&b, " session=%s", v.Thread())
 	if v.Address != "" {
 		fmt.Fprintf(&b, " -> %s", v.Address)
 	}
@@ -318,6 +341,18 @@ func (v View) ClaimLines(now time.Time) []string {
 		}
 	}
 	return out
+}
+
+// Thread cites the peer as cci post --to peer: accepts it: the short session,
+// then the agent's name or id for a subagent or teammate.
+func (v View) Thread() string {
+	switch {
+	case v.AgentName != "":
+		return Short(v.Session) + "/" + v.AgentName
+	case v.Agent != "":
+		return Short(v.Session) + "/" + v.Agent
+	}
+	return Short(v.Session)
 }
 
 // Short is the eight-character prefix agents cite a session by.
@@ -355,6 +390,9 @@ func One(ctx context.Context, st *store.Store, f Filter) (View, error) {
 	names := make([]string, len(views))
 	for i, v := range views {
 		names[i] = Short(v.Session) + " " + v.Name
+		if v.Agent != "" {
+			names[i] = v.Thread()
+		}
 	}
 	return View{}, errors.New("ambiguous: " + strings.Join(names, ", "))
 }

@@ -22,7 +22,7 @@ func TestPeerRoleDerivedForRowsBoundBeforeRoles(t *testing.T) {
 		}
 	}
 	for session, want := range map[string]string{"old-root": "root", "old-lane": "lane", "old-plain": "session"} {
-		p, err := st.Peer(ctx, session)
+		p, err := st.Peer(ctx, PeerKey{Session: session})
 		if err != nil || p.Role != want {
 			t.Fatalf("Peer(%s).Role = %q, %v; want %q", session, p.Role, err, want)
 		}

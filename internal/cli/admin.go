@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -80,17 +79,17 @@ func newDriveCmd() *cobra.Command {
 		Short: "Bind this session to DRIVE so --drive defaults to it",
 		Args:  cobra.ExactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
-			session := os.Getenv(sessionEnv)
-			if session == "" {
+			self := selfPeer()
+			if self.Session == "" {
 				return errors.New(sessionEnv + " is not set; run this from a Claude Code session")
 			}
-			if err := st.Bind(cmd.Context(), session, args[0], root); err != nil {
+			if err := st.Bind(cmd.Context(), self, args[0], root); err != nil {
 				return err
 			}
 			if err := announceSelf(cmd.Context(), st); err != nil {
 				return err
 			}
-			_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s -> %s\n", session, args[0])
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "session %s -> %s\n", self, args[0])
 			return err
 		}),
 	}

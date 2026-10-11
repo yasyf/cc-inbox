@@ -120,7 +120,18 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return hook.PostToolUse(cmd.Context(), st, p, cmd.OutOrStdout())
+				return hook.PostToolUse(cmd.Context(), st, p, thisWindow, cmd.OutOrStdout())
+			}),
+		},
+		&cobra.Command{
+			Use:  "subagent-stop",
+			Args: cobra.NoArgs,
+			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+				p, err := hook.Read(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				return hook.SubagentStop(cmd.Context(), st, p)
 			}),
 		},
 		&cobra.Command{

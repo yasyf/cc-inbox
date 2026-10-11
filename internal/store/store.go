@@ -100,6 +100,46 @@ ALTER TABLE sessions ADD COLUMN seen_at INTEGER NOT NULL DEFAULT 0`,
 );
 CREATE INDEX claims_ref ON claims(kind, key)`,
 	`ALTER TABLE sessions ADD COLUMN superseded INTEGER NOT NULL DEFAULT 0`,
+	`CREATE TABLE sessions_by_agent (
+	session TEXT NOT NULL,
+	agent TEXT NOT NULL DEFAULT '',
+	agent_name TEXT NOT NULL DEFAULT '',
+	drive TEXT NOT NULL,
+	root INTEGER NOT NULL,
+	lane TEXT NOT NULL DEFAULT '',
+	role TEXT NOT NULL DEFAULT '',
+	description TEXT NOT NULL DEFAULT '',
+	tags TEXT NOT NULL DEFAULT '[]',
+	cwd TEXT NOT NULL DEFAULT '',
+	repo TEXT NOT NULL DEFAULT '',
+	worktree TEXT NOT NULL DEFAULT '',
+	branch TEXT NOT NULL DEFAULT '',
+	remote TEXT NOT NULL DEFAULT '',
+	pid INTEGER NOT NULL DEFAULT 0,
+	pid_started INTEGER NOT NULL DEFAULT 0,
+	env TEXT NOT NULL DEFAULT '{}',
+	announced_at INTEGER NOT NULL DEFAULT 0,
+	seen_at INTEGER NOT NULL DEFAULT 0,
+	superseded INTEGER NOT NULL DEFAULT 0,
+	PRIMARY KEY (session, agent)
+);
+INSERT INTO sessions_by_agent (session, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
+SELECT session, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded FROM sessions;
+DROP TABLE sessions;
+ALTER TABLE sessions_by_agent RENAME TO sessions;
+CREATE TABLE claims_by_agent (
+	session TEXT NOT NULL,
+	agent TEXT NOT NULL DEFAULT '',
+	rel TEXT NOT NULL,
+	kind TEXT NOT NULL,
+	key TEXT NOT NULL,
+	at INTEGER NOT NULL,
+	PRIMARY KEY (session, agent, rel, kind, key)
+);
+INSERT INTO claims_by_agent (session, rel, kind, key, at) SELECT session, rel, kind, key, at FROM claims;
+DROP TABLE claims;
+ALTER TABLE claims_by_agent RENAME TO claims;
+CREATE INDEX claims_ref ON claims(kind, key)`,
 }
 
 var (

@@ -3,7 +3,6 @@ package cli
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"time"
 
@@ -39,7 +38,7 @@ func newTailCmd() *cobra.Command {
 	rf.register(cmd, "", true, render.DefaultBudget)
 	rf.registerWidth(cmd)
 	rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
-	cmd.Flags().StringVar(&cursor, "cursor", os.Getenv(sessionEnv), "cursor name, read and advanced when --since is absent")
+	cmd.Flags().StringVar(&cursor, "cursor", selfPeer().String(), "cursor name, read and advanced when --since is absent")
 	return cmd
 }
 

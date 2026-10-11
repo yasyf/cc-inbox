@@ -81,8 +81,8 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if window, session, err := thisSession(); err == nil {
-				if err := st.BindLane(cmd.Context(), session, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
+			if window, _, err := thisSession(); err == nil {
+				if err := st.BindLane(cmd.Context(), selfPeer(), r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
 					return err
 				}
 			}
@@ -104,7 +104,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "at most 400 characters, also accepted as the one argument; without either, the --path file's first line")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name> reaches one session and <lane>@<drive> a lane in another drive")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents and <lane>@<drive> a lane in another drive")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given")

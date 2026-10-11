@@ -64,7 +64,9 @@ Inside Claude Code, bind the root to a drive. `cci drive use` requires
 `CLAUDE_CODE_SESSION_ID`; keep the value supplied by the session. Each bind
 sets that session's cursor to the drive's latest record, including when you
 bind the same drive again. An empty drive starts at sequence 0. Subagents
-share the parent's session ID, so give each lane a named cursor for its reads.
+share the parent's session ID; one whose Bash commands carry `CCI_AGENT_ID`
+binds, claims and reads as its own thread, and one without it acts as the
+root, so give each such lane a named cursor for its reads.
 
 ```console
 $ cci drive use release-demo --root
@@ -283,7 +285,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci drive ls` | List drives by their most recent activity. |
 | `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. |
 | `cci me` | Print this session's registry line, ending with the `uds:` address `SendMessage` accepts. |
-| `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Narrow with `--session <id or prefix>`, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
+| `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Subagents and teammates list as their own peers. Narrow with `--session <id or prefix>`, `--agent <id or name>`, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`). Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
@@ -301,7 +303,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--commit <sha>` | Set `fields.commit` to the full commit SHA. |
 | `--census '<JSON>'` | Set `fields.census`, for example `{"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["api/plat-usw2-prod"]}`. |
 | `--count <name>=<integer>` | Set entries in `fields.counts`, for example `--count deletes=0`. |
-| `--to peer:<session prefix or name>`, `--to <lane>@<drive>` | Address one session, resolved at post time, or a lane in another drive; `root@<drive>` and `main@<drive>` both reach that drive's root. Such a record reaches its recipient's reads from any drive, and `--resolves` may name it across drives. |
+| `--to peer:<session prefix or name>[/<agent id or name>]`, `--to <lane>@<drive>` | Address one session's root thread or one of its subagents, resolved at post time, or a lane in another drive; `root@<drive>` and `main@<drive>` both reach that drive's root. Such a record reaches its recipient's reads from any drive, and `--resolves` may name it across drives. |
 | `--topic <key>`, `--re <seq>` | Group related events or link a reply to an earlier record. |
 | `--resolves <seq>` | Must name an existing record in the same drive, or one addressed across drives with `peer:` or `<lane>@<drive>`. Only a later record closes the open item, regardless of the new record's kind. |
 | `--to <lane>` | Address one or more lanes. Use `--to owner` when the owner needs to act. |
@@ -524,7 +526,7 @@ The listener is fixed at `127.0.0.1:7377`.
 | `GET /v1/records?drive=D` | Array of records with computed opener `status`. Accepts repeatable `kind`, `lane`, and `topic`, plus `stack=<project>/<env>`, `target=<name>`, and `pr=<number>`. `to=<lane>` selects addressed records; `reader=<lane>` selects deliveries. `since` is a sequence number, `since_time` is an RFC 3339 timestamp, and `expired=1` includes expired records. `limit` defaults to 100 and caps at 500. |
 | `GET /v1/digest?drive=D` | Digest for the last 24 hours. Set `since_time` to an RFC 3339 timestamp to change the window. |
 | `GET /v1/lanes?drive=D` | Select each lane's latest record by time and list the results by sequence number, newest first, for liveness. Includes expired records, excludes compaction digests, and returns at most 500 lanes. Use each record's `at` timestamp to measure age. |
-| `GET /v1/peers` | Array of peers as `cci who --json` prints them. Accepts `session`, `name`, `role`, `drive`, `lane`, `tag`, `repo`, `worktree`, `branch`, `q`, one of `pr`, `build` or `ref=<kind>:<key>`, plus `rel`; `all=1` includes ended sessions. |
+| `GET /v1/peers` | Array of peers as `cci who --json` prints them. Accepts `session`, `agent`, `name`, `role`, `drive`, `lane`, `tag`, `repo`, `worktree`, `branch`, `q`, one of `pr`, `build` or `ref=<kind>:<key>`, plus `rel`; `all=1` includes ended sessions. |
 | `GET /v1/stream?drive=D` | Server-sent events with a record JSON payload and sequence number as the event ID. Starts at the current head; pass `since` to resume after a sequence number. Accepts repeatable `kind`, `lane`, and `topic`, plus `to`, `reader`, `stack`, `target`, and `pr`. |
 
 On both records and stream endpoints, `reader=<lane>` delivers records addressed

@@ -130,9 +130,9 @@ func (f Filter) crossAddresses() []any {
 	return out
 }
 
-// PeerAddress is the recipient form that reaches one session in any drive.
-func PeerAddress(session string) string {
-	return "peer:" + session
+// PeerAddress is the recipient form that reaches one session thread in any drive.
+func PeerAddress(peer string) string {
+	return "peer:" + peer
 }
 
 // CrossDrive reports whether any recipient reaches outside the record's drive.
@@ -229,7 +229,7 @@ ON CONFLICT (name, drive) DO UPDATE SET seq = MAX(seq, excluded.seq)`, name, dri
 	return nil
 }
 
-const inferredRoles = "('', 'root', 'lane', 'session')"
+const inferredRoles = "('', 'root', 'lane', 'agent', 'session')"
 
 type Binding struct {
 	Drive string
@@ -237,19 +237,19 @@ type Binding struct {
 	Lane  string
 }
 
-func (s *Store) Bind(ctx context.Context, session, drive string, root bool) error {
+func (s *Store) Bind(ctx context.Context, k PeerKey, drive string, root bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("bind session: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, role) VALUES (?, ?, ?, CASE WHEN ? THEN 'root' ELSE 'session' END)
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, root = excluded.root, lane = '',
-	role = CASE WHEN excluded.root THEN 'root' WHEN sessions.role IN `+inferredRoles+` THEN 'session' ELSE sessions.role END`, session, drive, root, root); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, drive, root, role) VALUES (?, ?, ?, ?, CASE WHEN ? THEN 'root' ELSE 'session' END)
+ON CONFLICT (session, agent) DO UPDATE SET drive = excluded.drive, root = excluded.root, lane = '',
+	role = CASE WHEN excluded.root THEN 'root' WHEN sessions.role IN `+inferredRoles+` THEN 'session' ELSE sessions.role END`, k.Session, k.Agent, drive, root, root); err != nil {
 		return fmt.Errorf("bind session: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(MAX(seq), 0) FROM records WHERE drive = ?
-ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, session, drive, drive); err != nil {
+ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, k.String(), drive, drive); err != nil {
 		return fmt.Errorf("start session cursor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -258,26 +258,26 @@ ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, session, drive, dri
 	return nil
 }
 
-func LaneCursor(session string) string {
-	return "lane-" + session
+func LaneCursor(k PeerKey) string {
+	return "lane-" + k.String()
 }
 
-func (s *Store) BindLane(ctx context.Context, session, drive, lane string, started time.Time) error {
+func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, started time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, drive, root, lane, role) VALUES (?, ?, 0, ?, 'lane')
-ON CONFLICT (session) DO UPDATE SET drive = excluded.drive, lane = excluded.lane,
-	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root`, session, drive, lane); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, drive, root, lane, role) VALUES (?, ?, ?, 0, ?, 'lane')
+ON CONFLICT (session, agent) DO UPDATE SET drive = excluded.drive, lane = excluded.lane,
+	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root`, k.Session, k.Agent, drive, lane); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(
 	(SELECT MIN(seq) - 1 FROM records WHERE at >= ?),
 	(SELECT MAX(seq) FROM records),
 	0)
-ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(session), drive, started.UnixMilli()); err != nil {
+ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli()); err != nil {
 		return fmt.Errorf("start lane cursor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -286,9 +286,9 @@ ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(session), drive, started.UnixM
 	return nil
 }
 
-func (s *Store) Binding(ctx context.Context, session string) (Binding, bool, error) {
+func (s *Store) Binding(ctx context.Context, k PeerKey) (Binding, bool, error) {
 	var b Binding
-	err := s.db.QueryRowContext(ctx, "SELECT drive, root, lane FROM sessions WHERE session = ? AND drive != ''", session).Scan(&b.Drive, &b.Root, &b.Lane)
+	err := s.db.QueryRowContext(ctx, "SELECT drive, root, lane FROM sessions WHERE session = ? AND agent = ? AND drive != ''", k.Session, k.Agent).Scan(&b.Drive, &b.Root, &b.Lane)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Binding{}, false, nil
 	}
