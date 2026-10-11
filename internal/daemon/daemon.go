@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"sync"
@@ -21,6 +22,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 const (
@@ -79,6 +81,14 @@ func (r *Runtime) fail(c daemonkit.Ctx, err error) {
 }
 
 func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
+	roots, err := version.DefaultRoots()
+	if err != nil {
+		return nil, err
+	}
+	up := &Upgrader{Roots: roots, Running: version.String()}
+	if err := up.Check(); err != nil {
+		slog.Warn("cci daemon cannot scan for upgrades", "err", err)
+	}
 	st, err := store.Open(c.Context, r.home)
 	if err != nil {
 		return nil, err
@@ -111,6 +121,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 		loop.OnControl(pairing.Handler(r.home, st, id))
 		loop.Run(syncCtx)
 	})
+	loops.Go(func() { up.Follow(syncCtx, UpgradeInterval) })
 	go func() {
 		loops.Wait()
 		close(p.synced)

@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +18,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 func newServeCmd() *cobra.Command {
@@ -31,6 +35,60 @@ func newServeCmd() *cobra.Command {
 			return err
 		},
 	}
+}
+
+func newUpgradeCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "upgrade",
+		Short: "Upgrade every cci install on this machine, then move the daemon onto the newest one",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			roots, err := version.DefaultRoots()
+			if err != nil {
+				return err
+			}
+			lines, err := roots.UpgradeCommands(os.Getenv("PATH"))
+			if err != nil {
+				return err
+			}
+			for _, line := range lines {
+				if err := runShown(cmd, "/bin/sh", "-c", line); err != nil {
+					return err
+				}
+			}
+			newest, err := roots.Newest()
+			if err != nil {
+				return err
+			}
+			for _, path := range version.Standalone(os.Getenv("PATH")) {
+				out, err := exec.CommandContext(cmd.Context(), path, "--version").Output() //nolint:gosec // G204: a standalone cci found on PATH.
+				if err != nil {
+					return fmt.Errorf("%s --version: %w", path, err)
+				}
+				if v := strings.TrimSpace(string(out)); version.Newer(v, newest.Version) {
+					newest = version.Install{Path: path, Version: v}
+				}
+			}
+			if newest.Path == "" {
+				return errors.New("no cci install found to serve from")
+			}
+			return runShown(cmd, newest.Path, "serve")
+		},
+	}
+}
+
+func runShown(cmd *cobra.Command, name string, args ...string) error {
+	line := strings.Join(append([]string{name}, args...), " ")
+	if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "$ %s\n", line); err != nil {
+		return err
+	}
+	c := exec.CommandContext(cmd.Context(), name, args...) //nolint:gosec // G204: an install path cci found or an upgrade command it composed.
+	c.Stdout = cmd.OutOrStdout()
+	c.Stderr = cmd.ErrOrStderr()
+	if err := c.Run(); err != nil {
+		return fmt.Errorf("%s: %w", line, err)
+	}
+	return nil
 }
 
 func ensureDaemon(ctx context.Context, timeout time.Duration) (daemonkit.Ensured, error) {

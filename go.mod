@@ -10,6 +10,7 @@ require (
 	github.com/yasyf/cc-interact v0.35.2
 	github.com/yasyf/daemonkit v0.32.3
 	github.com/yasyf/synckit v0.41.1
+	golang.org/x/mod v0.41.0
 	modernc.org/sqlite v1.60.1
 )
 
@@ -34,7 +35,6 @@ require (
 	github.com/vishvananda/netlink v1.2.1-beta.2 // indirect
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect

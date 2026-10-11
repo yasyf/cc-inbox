@@ -411,6 +411,11 @@ name. Run `cci serve` or start any Claude Code session with the plugin installed
 to start or reuse the daemon. Allow the next refresh to finish before reading
 appended records.
 
+After a cc-inbox release workflow finishes, run `cci upgrade` once. It moves the
+plugin, the Homebrew cask, and each standalone `cci` on `PATH`, then runs `serve`
+from the newest install. Skip hand-running `cci serve` after a release: the
+daemon hands off to a newer plugin or cask install within 30 seconds.
+
 Once lanes post directly, stop writing markdown inboxes. Open-item tracking
 includes imported openers with a stack or target ref. Imported `hold`, `defect`,
 `blocker`, and `blocked` records with either ref appear in the digest's open
