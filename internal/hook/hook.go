@@ -45,7 +45,7 @@ func (p Payload) Key() store.PeerKey {
 // beside the session transcript; an agent with no metadata has no name.
 func (p Payload) AgentName() (string, error) {
 	path := strings.TrimSuffix(p.TranscriptPath, ".jsonl") + "/subagents/agent-" + p.AgentID + ".meta.json"
-	raw, err := os.ReadFile(path)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the path is the harness's transcript directory from the hook payload.
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
