@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"slices"
 	"time"
+
+	"github.com/yasyf/synckit/syncservice"
 )
 
 const keptRevisions = 512
@@ -51,6 +53,23 @@ func (l *revisionLog) at(rev uint64) (revision, bool) {
 		return revision{}, false
 	}
 	return l.entries[i], true
+}
+
+func (l *revisionLog) acked(rev syncservice.Revision) (int64, error) {
+	value, err := rev.Uint64()
+	if err != nil {
+		return 0, err
+	}
+	entry, _ := l.at(value)
+	return entry.Seq, nil
+}
+
+func AckedSeq(home string, rev syncservice.Revision) (int64, error) {
+	log, err := openRevisions(home)
+	if err != nil {
+		return 0, err
+	}
+	return log.acked(rev)
 }
 
 func (l *revisionLog) advance(seq int64, presence string, now time.Time) (revision, error) {

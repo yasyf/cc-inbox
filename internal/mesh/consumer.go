@@ -174,6 +174,10 @@ func (c *Consumer) ackPeers(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	log, err := openRevisions(c.home)
+	if err != nil {
+		return err
+	}
 	hosts := map[string]string{}
 	for _, m := range members {
 		if m.Via == via {
@@ -185,11 +189,11 @@ func (c *Consumer) ackPeers(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		acked, err := s.Acked.Uint64()
+		acked, err := log.acked(s.Acked)
 		if err != nil {
 			return err
 		}
-		if err := c.st.Ack(ctx, peer, int64(acked)); err != nil {
+		if err := c.st.Ack(ctx, peer, acked); err != nil {
 			return err
 		}
 	}

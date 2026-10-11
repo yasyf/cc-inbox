@@ -142,11 +142,11 @@ func meshStatus(ctx context.Context, st *store.Store) (meshReport, error) {
 		}
 		if i := slices.IndexFunc(statuses, func(s delivery.PeerStatus) bool { return s.Peer == host }); i >= 0 {
 			s := statuses[i]
-			acked, err := s.Acked.Uint64()
+			acked, err := mesh.AckedSeq(st.HomeDir(), s.Acked)
 			if err != nil {
 				return meshReport{}, err
 			}
-			p.Acked, p.State, p.Pending, p.Error = int64(acked), s.State, s.Pending, s.LastError
+			p.Acked, p.State, p.Pending, p.Error = acked, s.State, s.Pending, s.LastError
 		}
 		if floor < 0 || p.Acked < floor {
 			floor = p.Acked

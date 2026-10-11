@@ -275,10 +275,11 @@ func TestExportAcksEnrolledPeersAndBoundsTheSnapshot(t *testing.T) {
 	for i := range 3 {
 		last = testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: strings.Repeat(string(rune('x'+i)), 300)})
 	}
-	a.statuses = []delivery.PeerStatus{{Peer: hostB, Acked: syncservice.NewRevision(2)}, {Peer: "yasyf@home", Acked: syncservice.NewRevision(3)}}
+	first := export(t, a, hostA, 0)
+	a.statuses = []delivery.PeerStatus{{Peer: hostB, Acked: first.SourceRevision}, {Peer: "yasyf@home", Acked: first.SourceRevision}}
 	export(t, a, hostA, 0)
 	marks, err := a.st.Watermarks(t.Context())
-	if err != nil || len(marks) != 1 || marks[b.st.Self()] != 2 {
+	if err != nil || len(marks) != 1 || marks[b.st.Self()] != last.Seq {
 		t.Fatalf("watermarks = %v, %v", marks, err)
 	}
 	rows, err := a.st.Export(t.Context(), a.st.Self(), 0, 0)
