@@ -32,7 +32,7 @@ func (u *Upgrader) Check() error {
 		return nil
 	}
 	u.tried = newest
-	cmd := exec.Command(newest.Path, "serve")
+	cmd := exec.Command(newest.Path, "serve") //nolint:gosec // G204: the path is a cci install under the plugin cache or Caskroom.
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

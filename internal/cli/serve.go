@@ -76,7 +76,7 @@ func runShown(cmd *cobra.Command, name string, args ...string) error {
 	if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "$ %s\n", line); err != nil {
 		return err
 	}
-	c := exec.CommandContext(cmd.Context(), name, args...)
+	c := exec.CommandContext(cmd.Context(), name, args...) //nolint:gosec // G204: an install path cci found or an upgrade command it composed.
 	c.Stdout = cmd.OutOrStdout()
 	c.Stderr = cmd.ErrOrStderr()
 	if err := c.Run(); err != nil {
