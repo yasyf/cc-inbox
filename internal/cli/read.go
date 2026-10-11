@@ -65,7 +65,7 @@ func newWatchCmd() *cobra.Command {
 	rf.registerWidth(cmd)
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor")
 	cmd.Flags().DurationVar(&interval, "interval", time.Second, "poll interval")
-	cmd.Flags().DurationVar(&limit, "for", 29*time.Minute, "exit after this long so a Monitor re-arms; 0 watches until interrupted")
+	cmd.Flags().DurationVar(&limit, "for", 0, "exit after this long; 0 watches until interrupted")
 	return cmd
 }
 

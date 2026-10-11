@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci watch` runs until it is interrupted. It used to exit with status `0`
+  after 29 minutes by default, which ended a persistent Monitor silently and
+  dropped records posted before the next arm. `--for` still sets a limit.
+
 ## [0.16.1] - 2026-10-11
 
 ### Fixed

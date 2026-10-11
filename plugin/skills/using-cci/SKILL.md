@@ -319,13 +319,13 @@ admits a scoped writer instead.
 
 ## Watch GO lines with a Monitor
 
-Run the watch as the Monitor's command:
+Run the watch as a persistent Monitor's command:
 
 ```bash
 cci watch --drive monitor-demo --kind go --cursor monitor
 ```
 
-It polls once a second and exits after 29 minutes. Re-arm with the same cursor.
+It polls once a second until interrupted. Restart it with the same cursor.
 A session that can take the channel subscribes once instead (next section).
 Without a saved cursor or explicit window, it starts at the current head.
 Use one cursor per filtered watch.
