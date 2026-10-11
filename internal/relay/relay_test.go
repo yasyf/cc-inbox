@@ -3,6 +3,8 @@ package relay_test
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,9 +114,9 @@ func TestPushPullEndToEnd(t *testing.T) {
 		t.Fatalf("first owner join left epoch %d, want 1", srv.Epoch())
 	}
 	testutil.Post(t, a.st, store.Record{Kind: kinds.Decision, Text: secret})
-	pushed, err := a.node.Push(context.Background(), configs(t, a))
-	if err != nil || pushed != 1 {
-		t.Fatalf("push = %d, %v; want 1", pushed, err)
+	res, err := a.node.Push(context.Background(), configs(t, a))
+	if err != nil || res.Pushed != 1 {
+		t.Fatalf("push = %+v, %v; want 1", res, err)
 	}
 	for _, p := range []*peer{b, c} {
 		if got := pull(t, p); got.Inserted != 1 {
@@ -129,8 +131,8 @@ func TestPushPullEndToEnd(t *testing.T) {
 			t.Fatalf("captured push body holds plaintext: %s", body)
 		}
 	}
-	if again, _ := a.node.Push(context.Background(), configs(t, a)); again != 0 {
-		t.Fatalf("second push resent %d records", again)
+	if again, _ := a.node.Push(context.Background(), configs(t, a)); again.Pushed != 0 {
+		t.Fatalf("second push resent %d records", again.Pushed)
 	}
 }
 
@@ -192,8 +194,8 @@ func TestRotationLocksOutDroppedMember(t *testing.T) {
 func TestPairedNodeNeverPushes(t *testing.T) {
 	srv, _, _, c := mesh(t)
 	testutil.Post(t, c.st, store.Record{Kind: kinds.Note, Text: "read-only"})
-	if pushed, err := c.node.Push(context.Background(), configs(t, c)); err != nil || pushed != 0 {
-		t.Fatalf("paired push = %d, %v; want 0, nil", pushed, err)
+	if res, err := c.node.Push(context.Background(), configs(t, c)); err != nil || res.Pushed != 0 {
+		t.Fatalf("paired push = %+v, %v; want 0, nil", res, err)
 	}
 	if len(srv.Pushes) != 0 {
 		t.Fatalf("paired node sent %d push requests", len(srv.Pushes))
@@ -259,8 +261,8 @@ func TestDelegatedInstancesWriteUnderTheirOwnOrigins(t *testing.T) {
 		}
 		job.node = n
 		testutil.Post(t, st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "from job " + id.ID()})
-		if pushed, err := n.Push(context.Background(), configs(t, job)); err != nil || pushed != 1 {
-			t.Fatalf("instance push = %d, %v; want 1", pushed, err)
+		if res, err := n.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 {
+			t.Fatalf("instance push = %+v, %v; want 1", res, err)
 		}
 		jobs = append(jobs, job)
 	}
@@ -326,5 +328,39 @@ func TestForgedWrapDoesNotShadowTheRealOne(t *testing.T) {
 	}
 	if got := pull(t, b); got.Inserted != 1 {
 		t.Fatalf("owner with a forged wrap ahead of the real one inserted %d, want 1", got.Inserted)
+	}
+}
+
+func TestSyncBackfillsADriveFromTheLog(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	for i := range 3 {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("note %d", i)})
+	}
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a, b)
+	join(t, srv, late)
+	if err := a.node.Share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := late.node.Sync(context.Background(), "d")
+	if err != nil || got.Inserted != 3 {
+		t.Fatalf("sync = %+v, %v; want 3 inserted", got, err)
+	}
+	if again, err := late.node.Sync(context.Background(), "d"); err != nil || again.Inserted != 0 || again.Duplicate != 3 {
+		t.Fatalf("second sync = %+v, %v; want 3 duplicates", again, err)
+	}
+}
+
+func TestRotateAfterIsConditional(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	if _, err := a.node.RotateAfter(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.node.RotateAfter(context.Background(), 1); !errors.Is(err, relay.ErrEpochTaken) || srv.Epoch() != 2 {
+		t.Fatalf("second rotation after epoch 1 = %v at epoch %d, want ErrEpochTaken at 2", err, srv.Epoch())
 	}
 }

@@ -2,6 +2,7 @@ package relaytest
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -12,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -79,6 +81,8 @@ func NewServer(t testing.TB) *Server {
 	s.Mux.HandleFunc("GET /v1/keys", s.signed(s.getKeys))
 	s.Mux.HandleFunc("GET /v1/members", s.signed(s.listMembers))
 	s.Mux.HandleFunc("GET /v1/status", s.signed(s.status))
+	s.Mux.HandleFunc("GET /v1/log/origins", s.signed(s.logOrigins))
+	s.Mux.HandleFunc("GET /v1/log", s.signed(s.readLog))
 	s.Server = httptest.NewServer(s.Mux)
 	t.Cleanup(s.Close)
 	return s
@@ -211,7 +215,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 	if caller.Tier == e2e.TierPaired {
 		delete(s.members, caller.ID)
 		delete(s.queues, caller.ID)
-		s.controlLocked(e2e.Control{Type: e2e.ControlUnpaired, Mesh: req.Mesh, Node: caller.ID, Reason: "violation", By: "relay"})
+		s.controlLocked(e2e.Control{Type: e2e.ControlUnpaired, Mesh: req.Mesh, Node: caller.ID, Reason: "violation", By: "relay", Epoch: s.epoch})
 		fail(w, 403, "unpaired", "paired members are read-only")
 		return
 	}
@@ -384,6 +388,43 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request, caller Member, b
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	reply(w, map[string]any{"node": caller.ID, "tier": caller.Tier, "queue": "cci-node-" + caller.ID, "queue_depth": len(s.queues[caller.ID]), "epoch": s.epoch})
+}
+
+func (s *Server) logOrigins(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
+	q := r.URL.Query()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	last := map[string]int64{}
+	for _, e := range s.log {
+		if e.Mesh == q.Get("mesh") && e.Drive == q.Get("drive") {
+			last[e.Origin] = max(last[e.Origin], e.OriginSeq)
+		}
+	}
+	out := []map[string]any{}
+	for o, n := range last {
+		out = append(out, map[string]any{"origin": o, "last": n})
+	}
+	reply(w, map[string]any{"origins": out})
+}
+
+func (s *Server) readLog(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
+	q := r.URL.Query()
+	after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []e2e.Envelope{}
+	for _, e := range s.log {
+		if e.Mesh == q.Get("mesh") && e.Drive == q.Get("drive") && e.Origin == q.Get("origin") && e.OriginSeq > after {
+			out = append(out, e)
+		}
+	}
+	slices.SortFunc(out, func(a, b e2e.Envelope) int { return cmp.Compare(a.OriginSeq, b.OriginSeq) })
+	more := len(out) > limit
+	if more {
+		out = out[:limit]
+	}
+	reply(w, map[string]any{"envelopes": out, "more": more})
 }
 
 func reply(w http.ResponseWriter, v any) {

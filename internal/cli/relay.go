@@ -17,7 +17,7 @@ import (
 
 func newRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relay", Short: "Replicate records end-to-end encrypted through the wide-area relay"}
-	cmd.AddCommand(newRelayJoinCmd(), newRelayPushCmd(), newRelayPullCmd(), newRelayRotateCmd(), newRelayStatusCmd())
+	cmd.AddCommand(newRelayJoinCmd(), newRelayPushCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd())
 	return cmd
 }
 
@@ -122,7 +122,10 @@ func newRelayJoinCmd() *cobra.Command {
 }
 
 func newRelayPushCmd() *cobra.Command {
-	var mesh string
+	var (
+		mesh, drive string
+		asJSON      bool
+	)
 	cmd := &cobra.Command{
 		Use:   "push",
 		Short: "Push this node's records the relay has not acknowledged",
@@ -132,12 +135,30 @@ func newRelayPushCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			total := relay.PushResult{Rejected: []relay.Rejection{}}
 			for _, n := range nodes {
-				pushed, err := n.Push(cmd.Context(), configs)
+				res, err := n.Push(cmd.Context(), configs)
 				if err != nil {
 					return err
 				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s: pushed %d\n", n.Config.Mesh, pushed); err != nil {
+				total.Pushed += res.Pushed
+				for _, rj := range res.Rejected {
+					if drive == "" || rj.Drive == drive {
+						total.Rejected = append(total.Rejected, rj)
+					}
+				}
+				if asJSON {
+					continue
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s: pushed %d, refused %d\n", n.Config.Mesh, res.Pushed, len(res.Rejected)); err != nil {
+					return err
+				}
+			}
+			if asJSON {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(total)
+			}
+			for _, rj := range total.Rejected {
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "refused %s #%d %s: %s\n", rj.Drive, rj.OriginSeq, rj.ID, rj.Reason); err != nil {
 					return err
 				}
 			}
@@ -145,6 +166,8 @@ func newRelayPushCmd() *cobra.Command {
 		}),
 	}
 	cmd.Flags().StringVar(&mesh, "mesh", "", "mesh to push (default: every joined mesh)")
+	cmd.Flags().StringVar(&drive, "drive", "", "report refusals for this drive only (every unpushed record is still sent)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, `print {"pushed":N,"rejected":[{"id","drive","origin_seq","reason"}]}`)
 	return cmd
 }
 
@@ -177,6 +200,42 @@ func newRelayPullCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&mesh, "mesh", "", "mesh to pull (default: every joined mesh)")
 	cmd.Flags().DurationVar(&wait, "wait", relay.PullWait, "long-poll wait, at most 20s")
+	return cmd
+}
+
+func newRelaySyncCmd() *cobra.Command {
+	var (
+		mesh, drive string
+		asJSON      bool
+	)
+	cmd := &cobra.Command{
+		Use:   "sync",
+		Short: "Backfill a drive from the relay's log: every origin, verified, decrypted and applied idempotently",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			nodes, _, err := relayNodes(st, mesh)
+			if err != nil {
+				return err
+			}
+			if len(nodes) != 1 {
+				return errors.New("pass --mesh: this node joined more than one mesh")
+			}
+			a, err := nodes[0].Sync(cmd.Context(), drive)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(a)
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %d new, %d duplicate, %d held, %d released\n",
+				nodes[0].Config.Mesh, drive, a.Inserted, a.Duplicate, a.Buffered, a.Released)
+			return err
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", "", "mesh to read (default: the only joined mesh)")
+	cmd.Flags().StringVar(&drive, "drive", "", "drive to backfill")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print the apply counts as JSON")
+	_ = cmd.MarkFlagRequired("drive")
 	return cmd
 }
 

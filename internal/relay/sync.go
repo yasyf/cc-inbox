@@ -173,19 +173,22 @@ func (n *Node) RefreshKeys(ctx context.Context) error {
 }
 
 func (n *Node) Rotate(ctx context.Context) (uint64, error) {
-	if n.Config.Tier != e2e.TierOwner {
-		return 0, fmt.Errorf("relay: only an owner node rotates the group key (this node is %s)", n.Config.Tier)
-	}
 	var kr keysResponse
 	q := url.Values{"mesh": {n.Config.Mesh}, "since": {strconv.FormatUint(n.Keyring.Latest(n.Config.Mesh)+1, 10)}}
 	if err := n.client().Call(ctx, http.MethodGet, "/v1/keys?"+q.Encode(), nil, &kr); err != nil {
 		return 0, err
 	}
-	local := n.Keyring.Latest(n.Config.Mesh)
-	if kr.Epoch < local {
-		return 0, fmt.Errorf("relay: reports epoch %d below this node's %d", kr.Epoch, local)
+	return n.RotateAfter(ctx, kr.Epoch)
+}
+
+func (n *Node) RotateAfter(ctx context.Context, base uint64) (uint64, error) {
+	if n.Config.Tier != e2e.TierOwner {
+		return 0, fmt.Errorf("relay: only an owner node rotates the group key (this node is %s)", n.Config.Tier)
 	}
-	k, err := e2e.NewGroupKey(kr.Epoch + 1)
+	if local := n.Keyring.Latest(n.Config.Mesh); base < local {
+		return 0, fmt.Errorf("%w: rotating after epoch %d, this node already holds %d", ErrEpochTaken, base, local)
+	}
+	k, err := e2e.NewGroupKey(base + 1)
 	if err != nil {
 		return 0, err
 	}
@@ -265,60 +268,135 @@ func Route(configs []Config, drive string) string {
 	return catchAll
 }
 
-func (n *Node) Push(ctx context.Context, configs []Config) (int, error) {
+type Rejection struct {
+	ID        string `json:"id,omitempty"`
+	Drive     string `json:"drive"`
+	OriginSeq int64  `json:"origin_seq"`
+	Reason    string `json:"reason"`
+}
+
+type PushResult struct {
+	Pushed   int         `json:"pushed"`
+	Rejected []Rejection `json:"rejected"`
+}
+
+func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
+	res := PushResult{Rejected: []Rejection{}}
 	if n.Config.Tier == e2e.TierPaired {
-		return 0, nil
+		return res, nil
 	}
 	marks, err := n.Store.Watermarks(ctx)
 	if err != nil {
-		return 0, err
+		return res, err
 	}
 	rows, err := n.Store.Export(ctx, n.Store.Self(), marks[Peer(n.Config.Mesh)], 0)
-	if err != nil {
-		return 0, err
-	}
-	if len(rows) == 0 {
-		return 0, nil
+	if err != nil || len(rows) == 0 {
+		return res, err
 	}
 	members, err := n.Members(ctx)
 	if err != nil {
-		return 0, err
+		return res, err
 	}
 	k, err := n.Keyring.Current(n.keyHolder(), n.Config.Mesh, members)
 	if err != nil {
-		return 0, err
+		return res, err
 	}
-	pushed := 0
 	for batch := range slices.Chunk(rows, pushBatch) {
 		var envs []e2e.Envelope
+		sent := map[int64]store.Row{}
 		for _, r := range batch {
 			if Route(configs, r.Drive) != n.Config.Mesh {
 				continue
 			}
 			e, err := SealRow(k, n.Identity, n.Config, r)
 			if err != nil {
-				return pushed, err
+				return res, err
 			}
 			envs = append(envs, e)
+			sent[r.OriginSeq] = r
 		}
 		if len(envs) > 0 {
 			var pr pushResponse
 			if err := n.client().Call(ctx, http.MethodPost, "/v1/push", pushRequest{Mesh: n.Config.Mesh, Envelopes: envs}, &pr); err != nil {
-				return pushed, err
+				return res, err
 			}
 			if err := accounted(envs, pr); err != nil {
-				return pushed, err
+				return res, err
 			}
 			for _, rj := range pr.Rejected {
+				r := sent[rj.OriginSeq]
 				slog.Warn("relay refused record", "mesh", n.Config.Mesh, "origin_seq", rj.OriginSeq, "reason", rj.Reason)
+				res.Rejected = append(res.Rejected, Rejection{ID: r.ID, Drive: r.Drive, OriginSeq: rj.OriginSeq, Reason: rj.Reason})
 			}
-			pushed += len(pr.Accepted)
+			res.Pushed += len(pr.Accepted)
 		}
 		if err := n.Store.Ack(ctx, Peer(n.Config.Mesh), batch[len(batch)-1].OriginSeq); err != nil {
-			return pushed, err
+			return res, err
 		}
 	}
-	return pushed, nil
+	return res, nil
+}
+
+func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
+	var total store.Applied
+	var oo struct {
+		Origins []struct {
+			Origin string `json:"origin"`
+		} `json:"origins"`
+	}
+	q := url.Values{"mesh": {n.Config.Mesh}, "drive": {drive}}
+	if err := n.client().Call(ctx, http.MethodGet, "/v1/log/origins?"+q.Encode(), nil, &oo); err != nil {
+		return total, err
+	}
+	if err := n.RefreshKeys(ctx); err != nil {
+		return total, err
+	}
+	members, err := n.Members(ctx)
+	if err != nil {
+		return total, err
+	}
+	keys, err := n.Keyring.Keys(n.Config.Mesh, n.keyHolder(), members)
+	if err != nil {
+		slog.Warn("relay keyring holds an unusable wrap", "mesh", n.Config.Mesh, "err", err)
+	}
+	for _, o := range oo.Origins {
+		var after int64
+		for {
+			var lr struct {
+				Envelopes []e2e.Envelope `json:"envelopes"`
+				More      bool           `json:"more"`
+			}
+			lq := url.Values{
+				"mesh": {n.Config.Mesh}, "drive": {drive}, "origin": {o.Origin},
+				"after": {strconv.FormatInt(after, 10)}, "limit": {"500"},
+			}
+			if err := n.client().Call(ctx, http.MethodGet, "/v1/log?"+lq.Encode(), nil, &lr); err != nil {
+				return total, err
+			}
+			var rows []store.Row
+			for _, e := range lr.Envelopes {
+				after = max(after, e.OriginSeq)
+				r, err := n.open(e, keys, members)
+				if err != nil {
+					slog.Warn("relay log record skipped", "mesh", n.Config.Mesh, "drive", drive, "err", err)
+					continue
+				}
+				rows = append(rows, r)
+			}
+			a, err := n.Store.Apply(ctx, rows, nil)
+			if err != nil {
+				return total, err
+			}
+			total.Inserted += a.Inserted
+			total.Duplicate += a.Duplicate
+			total.Buffered += a.Buffered
+			total.Released += a.Released
+			if !lr.More || len(lr.Envelopes) == 0 {
+				break
+			}
+		}
+	}
+	return total, nil
 }
 
 func accounted(envs []e2e.Envelope, pr pushResponse) error {
