@@ -574,11 +574,13 @@ After `cci mesh enable`, the daemon spawns `cci mesh helper`, the resident
 synckit consumer `cci`, and stops itself if the helper exits. `synckitd` sends
 each mesh host a delta of the records after the one it acknowledged. A host that
 is new, missed compacted records, or is too far behind gets a snapshot of the
-newest records that fit in 6 MiB instead. Every change carries
-this node's sessions and claims and is signed with the node key. A receiver
+newest records that fit in 7 MiB instead. Every change carries
+this node's sessions and claims, so a session change alone also reaches every
+host, and is signed with the node key. A receiver
 applies a change only when its signer is pinned at tier `owner` for the host that
 delivered it, and fences it against the last change it applied from that node.
-`synckitd host add <user@node>` pins both hosts' node keys; `synckitd host
+`synckitd host add <user@node>` pins both hosts' node keys once each has run
+`cci node endorse`; `synckitd host
 enroll <user@node>` pins a host that joined the mesh before `cci mesh enable`.
 
 ## Plugin hooks

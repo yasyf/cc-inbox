@@ -2,7 +2,9 @@ package mesh
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,13 +19,13 @@ import (
 )
 
 const (
-	Service    = "cci"
-	Channel    = "mesh"
-	itemID     = "records"
-	via        = "mesh"
-	enrolledBy = "synckitd host add"
-	signDomain = "cci.mesh.v1"
-	rowBudget  = 6 << 20
+	Service       = "cci"
+	Channel       = "mesh"
+	itemID        = "records"
+	via           = "mesh"
+	enrolledBy    = "synckitd host add"
+	signDomain    = "cci.mesh.v1"
+	payloadBudget = syncservice.MaxTransferPayload - 1<<20
 )
 
 type body struct {
@@ -38,9 +40,10 @@ type payload struct {
 }
 
 type identity struct {
-	Node        string `json:"node"`
-	Fingerprint string `json:"fingerprint"`
-	PublicKey   []byte `json:"public_key"`
+	Node        string            `json:"node"`
+	Fingerprint string            `json:"fingerprint"`
+	PublicKey   []byte            `json:"public_key"`
+	Endorsement *node.Endorsement `json:"endorsement,omitempty"`
 }
 
 type Consumer struct {
@@ -66,7 +69,11 @@ func (c *Consumer) List(ctx context.Context) ([]syncservice.WatchItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []syncservice.WatchItem{{ID: itemID, WatchDirs: []string{c.home}, Fingerprint: strconv.FormatInt(seq, 10)}}, nil
+	_, digest, err := c.presence(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return []syncservice.WatchItem{{ID: itemID, WatchDirs: []string{c.home}, Fingerprint: strconv.FormatInt(seq, 10) + ":" + digest}}, nil
 }
 
 func (c *Consumer) Reconcile(context.Context, string) (syncservice.ReconcileResult, error) {
@@ -84,38 +91,56 @@ func (c *Consumer) Export(ctx context.Context, request syncservice.ExportRequest
 	if err := c.ackPeers(ctx); err != nil {
 		return syncservice.ChangeEnvelope{}, err
 	}
-	rows, err := c.st.Export(ctx, c.st.Self(), int64(since), 0)
+	presence, digest, err := c.presence(ctx)
 	if err != nil {
 		return syncservice.ChangeEnvelope{}, err
 	}
-	source := since
-	if len(rows) > 0 {
-		source = uint64(rows[len(rows)-1].OriginSeq)
-	}
-	if source == 0 {
-		return syncservice.ChangeEnvelope{}, errors.New("mesh: this node has written no records to export")
-	}
-	kind, base := syncservice.ChangeDelta, since
-	window, err := newestWithin(rows, rowBudget)
+	log, err := openRevisions(c.home)
 	if err != nil {
+		return syncservice.ChangeEnvelope{}, err
+	}
+	head, _ := log.head()
+	newer, err := c.st.Export(ctx, c.st.Self(), head.Seq, 0)
+	if err != nil {
+		return syncservice.ChangeEnvelope{}, err
+	}
+	seq := head.Seq
+	if len(newer) > 0 {
+		seq = newer[len(newer)-1].OriginSeq
+	}
+	if head, err = log.advance(seq, digest, c.st.Now()); err != nil {
 		return syncservice.ChangeEnvelope{}, err
 	}
 	floor, err := c.st.CompactedThrough(ctx)
 	if err != nil {
 		return syncservice.ChangeEnvelope{}, err
 	}
-	if since == 0 || int64(since) < floor || len(window) < len(rows) {
-		kind, base, rows = syncservice.ChangeSnapshot, 0, window
+	kind, base, after := syncservice.ChangeDelta, since, int64(0)
+	if prior, ok := log.at(since); ok && since != 0 && prior.Seq >= floor {
+		after = prior.Seq
+	} else {
+		kind, base = syncservice.ChangeSnapshot, 0
 	}
-	presence, err := c.st.ExportPresence(ctx, node.TierOwner)
+	rows, err := c.st.Export(ctx, c.st.Self(), after, 0)
 	if err != nil {
 		return syncservice.ChangeEnvelope{}, err
 	}
-	raw, err := json.Marshal(body{Node: c.st.Self(), Rows: nonNil(rows), Presence: presence})
+	encodedPresence, err := json.Marshal(presence)
+	if err != nil {
+		return syncservice.ChangeEnvelope{}, fmt.Errorf("mesh: encode presence: %w", err)
+	}
+	window, err := newestWithin(rows, payloadBudget-len(encodedPresence))
+	if err != nil {
+		return syncservice.ChangeEnvelope{}, err
+	}
+	if len(window) < len(rows) {
+		kind, base = syncservice.ChangeSnapshot, 0
+	}
+	raw, err := json.Marshal(body{Node: c.st.Self(), Rows: nonNil(window), Presence: presence})
 	if err != nil {
 		return syncservice.ChangeEnvelope{}, fmt.Errorf("mesh: encode change: %w", err)
 	}
-	baseRev, sourceRev := syncservice.NewRevision(base), syncservice.NewRevision(source)
+	baseRev, sourceRev := syncservice.NewRevision(base), syncservice.NewRevision(head.Rev)
 	sig, err := c.st.Node().Sign(signed(kind, baseRev, sourceRev, raw))
 	if err != nil {
 		return syncservice.ChangeEnvelope{}, err
@@ -125,6 +150,19 @@ func (c *Consumer) Export(ctx context.Context, request syncservice.ExportRequest
 		return syncservice.ChangeEnvelope{}, fmt.Errorf("mesh: encode change: %w", err)
 	}
 	return syncservice.NewExportedChange(Service, c.st.SchemaFingerprint(), kind, baseRev, sourceRev, encoded)
+}
+
+func (c *Consumer) presence(ctx context.Context) (store.Presence, string, error) {
+	p, err := c.st.ExportPresence(ctx, node.TierOwner)
+	if err != nil {
+		return store.Presence{}, "", err
+	}
+	raw, err := json.Marshal([]any{p.Peers, p.Claims})
+	if err != nil {
+		return store.Presence{}, "", fmt.Errorf("mesh: encode presence: %w", err)
+	}
+	sum := sha256.Sum256(raw)
+	return p, hex.EncodeToString(sum[:]), nil
 }
 
 func (c *Consumer) ackPeers(ctx context.Context) error {
@@ -192,13 +230,13 @@ func (c *Consumer) Apply(ctx context.Context, change syncservice.ChangeEnvelope)
 	if err != nil || decision != syncservice.FenceApply {
 		return ack, err
 	}
+	if err := c.st.ApplyPresence(ctx, b.Presence); err != nil {
+		return syncservice.ApplyResult{}, err
+	}
 	receipt := change.Receipt()
 	if _, err := c.st.Apply(ctx, b.Rows, &store.Receipt{
 		Channel: Channel, Origin: b.Node, ChangeID: receipt.ChangeID, Revision: string(receipt.Revision), Digest: receipt.PayloadDigest,
 	}); err != nil {
-		return syncservice.ApplyResult{}, err
-	}
-	if err := c.st.ApplyPresence(ctx, b.Presence); err != nil {
 		return syncservice.ApplyResult{}, err
 	}
 	return syncservice.ApplyResult{AckedRevision: change.SourceRevision}, nil
@@ -238,8 +276,15 @@ func (c *Consumer) verify(ctx context.Context, change syncservice.ChangeEnvelope
 }
 
 func (c *Consumer) Identity(context.Context) ([]byte, error) {
-	n := c.st.Node()
-	return json.Marshal(identity{Node: n.ID(), Fingerprint: n.Fingerprint(), PublicKey: n.PublicKey()})
+	n, err := node.Load(c.home)
+	if err != nil {
+		return nil, err
+	}
+	id := identity{Node: n.ID(), Fingerprint: n.Fingerprint(), PublicKey: n.PublicKey()}
+	if e, ok := n.Endorsement(); ok {
+		id.Endorsement = &e
+	}
+	return json.Marshal(id)
 }
 
 func (c *Consumer) Enroll(ctx context.Context, request syncservice.EnrollRequest) error {
@@ -252,6 +297,12 @@ func (c *Consumer) Enroll(ctx context.Context, request syncservice.EnrollRequest
 	}
 	if id.Node == c.st.Self() {
 		return fmt.Errorf("mesh: %s reports this node's own identity", request.Host)
+	}
+	if id.Endorsement == nil {
+		return fmt.Errorf("mesh: node %s on %s has no Secure Enclave endorsement; run `cci node endorse` there, then `synckitd host enroll %s` here", id.Node, request.Host, request.Host)
+	}
+	if err := node.VerifyEndorsement(*id.Endorsement, id.PublicKey); err != nil {
+		return fmt.Errorf("mesh: endorsement of node %s on %s: %w", id.Node, request.Host, err)
 	}
 	members, err := c.st.Members(ctx)
 	if err != nil {
