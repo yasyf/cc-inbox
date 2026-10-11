@@ -81,7 +81,7 @@ func newRelayJoinCmd() *cobra.Command {
 					return fmt.Errorf("--owner %q is not base64: %w", o, err)
 				}
 				if err := st.PutMember(cmd.Context(), store.Member{
-					Node: node.IDOf(pub), PublicKey: pub, Tier: node.TierOwner, By: "relay join --owner", At: time.Now(),
+					Node: node.IDOf(pub), PublicKey: pub, Tier: node.TierOwner, Via: "relay", By: "relay join --owner", At: time.Now(),
 				}); err != nil {
 					return err
 				}

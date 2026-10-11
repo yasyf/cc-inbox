@@ -43,7 +43,7 @@ func pin(t *testing.T, on *peer, others ...*peer) {
 	t.Helper()
 	for _, o := range others {
 		if err := on.st.PutMember(context.Background(), store.Member{
-			Node: o.id.ID(), PublicKey: o.id.PublicKey(), Tier: o.tier, By: "test", At: time.Now(),
+			Node: o.id.ID(), PublicKey: o.id.PublicKey(), Tier: o.tier, Via: "relay", By: "test", At: time.Now(),
 		}); err != nil {
 			t.Fatal(err)
 		}
