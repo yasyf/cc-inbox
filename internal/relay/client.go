@@ -10,12 +10,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/yasyf/cc-inbox/e2e"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/yasyf/cc-inbox/e2e"
 )
 
 type StatusError struct {
@@ -72,7 +73,7 @@ func (c Client) Call(ctx context.Context, method, path string, in, out any) erro
 	if err != nil {
 		return fmt.Errorf("relay %s %s: %w", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("read relay %s %s: %w", method, path, err)

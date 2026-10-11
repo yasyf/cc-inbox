@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/yasyf/cc-inbox/e2e"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -13,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+
+	"github.com/yasyf/cc-inbox/e2e"
 )
 
 const DefaultMesh = "default"
@@ -117,7 +118,7 @@ func (k *Keyring) Save(home, mesh string) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("lock keyring: %w", err)
 	}
@@ -215,7 +216,7 @@ func (k *Keyring) Current(id e2e.Identity, mesh string, members map[string]e2e.M
 }
 
 func readJSON(path string, v any) (bool, error) {
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(path) //nolint:gosec // G304: path is a relay file under the cci home.
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
@@ -240,9 +241,9 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }()
 	if _, err := tmp.Write(b); err != nil {
-		tmp.Close()
+		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {

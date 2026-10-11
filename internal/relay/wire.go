@@ -1,8 +1,9 @@
 package relay
 
 import (
-	"github.com/yasyf/cc-inbox/e2e"
 	"time"
+
+	"github.com/yasyf/cc-inbox/e2e"
 )
 
 type relayKey struct {
@@ -78,11 +79,6 @@ type RemoteMember struct {
 type membersResponse struct {
 	Epoch   uint64         `json:"epoch"`
 	Members []RemoteMember `json:"members"`
-}
-
-type logResponse struct {
-	Envelopes []e2e.Envelope `json:"envelopes"`
-	More      bool           `json:"more"`
 }
 
 type RemoteStatus struct {

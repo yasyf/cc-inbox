@@ -84,7 +84,7 @@ func texts(t *testing.T, st *store.Store) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
+	out := make([]string, 0, len(recs))
 	for _, r := range recs {
 		out = append(out, r.Text)
 	}
@@ -238,7 +238,7 @@ func TestDelegatedInstancesWriteUnderTheirOwnOrigins(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(relay.ServiceKeyEnv, string(pemKey))
-	var jobs []*peer
+	jobs := make([]*peer, 0, 2)
 	for range 2 {
 		st, _ := testutil.Store(t)
 		id, err := node.Load(st.HomeDir())
