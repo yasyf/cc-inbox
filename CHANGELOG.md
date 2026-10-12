@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--pr` on `post`, `claim`, `who`, and the read commands takes `owner/repo#N`
+  or a GitHub pull request URL as well as a bare number, so a record can name
+  a PR in another repo. A bare number is still stored as a JSON number and a
+  qualified PR as an `owner/repo#N` string; lines render it as
+  `pr:owner/repo#N`.
+
 ## [0.16.2] - 2026-10-11
 
 ### Fixed

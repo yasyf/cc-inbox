@@ -490,3 +490,29 @@ func TestAgentThreadsClaimAndAreAddressedApart(t *testing.T) {
 		t.Fatalf("agent reader = %q, %v", out, err)
 	}
 }
+
+func TestPostAndTailTakeQualifiedPRs(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "post", "--lane", "fde", "--kind", "opened", "--pr", "Forge-FDE/iris-chime#243", "--pr", "https://github.com/Forge-AI/monorepo/pull/35198/files", "--pr", "30431", "--text", "chime fix"); err != nil || out != "#1\n" {
+		t.Fatalf("post = %q, %v", out, err)
+	}
+	out, err := run(t, "tail", "--since", "0")
+	if err != nil || !strings.Contains(out, "chime fix pr:Forge-FDE/iris-chime#243 pr:Forge-AI/monorepo#35198 pr#30431") {
+		t.Fatalf("tail = %q, %v", out, err)
+	}
+	for _, pr := range []string{"Forge-FDE/iris-chime#243", "https://github.com/Forge-FDE/iris-chime/pull/243", "30431"} {
+		if out, err := run(t, "tail", "--since", "0", "--pr", pr); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "chime fix") {
+			t.Fatalf("tail --pr %s = %q, %v", pr, out, err)
+		}
+	}
+	if out, err := run(t, "tail", "--since", "0", "--pr", "243"); err != nil || strings.Contains(out, "chime fix") {
+		t.Fatalf("tail --pr 243 = %q, %v", out, err)
+	}
+	if _, err := run(t, "post", "--lane", "fde", "--kind", "opened", "--pr", "iris-chime#243", "--text", "x"); err == nil || !strings.Contains(err.Error(), "owner/repo#N") {
+		t.Fatalf("post --pr iris-chime#243: %v", err)
+	}
+}

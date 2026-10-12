@@ -21,7 +21,7 @@ func TestResolvesClosesDefectsAndBlockedStacks(t *testing.T) {
 	defect := testutil.Post(t, st, store.Record{Lane: "walker", Kind: kinds.Defect, Text: "wave cycle blocks every held release", Refs: store.Refs{Stacks: stack}})
 	blocked := testutil.Post(t, st, store.Record{Lane: "walker", Kind: kinds.Blocked, Text: "Platy cannot deploy api", Refs: store.Refs{Stacks: stack, Targets: []string{"api"}}, Re: defect.Seq})
 	testutil.Post(t, st, store.Record{Lane: "other", Kind: kinds.State, Text: "unrelated", Refs: store.Refs{Stacks: []string{"web/plat-usw2-prod"}}})
-	fix := testutil.Post(t, st, store.Record{Lane: "wave-fix", Kind: kinds.Opened, Text: "break the cycle", Refs: store.Refs{PRs: []int{30440}, Stacks: stack}, Resolves: defect.Seq})
+	fix := testutil.Post(t, st, store.Record{Lane: "wave-fix", Kind: kinds.Opened, Text: "break the cycle", Refs: store.Refs{PRs: []store.PR{{Number: 30440}}, Stacks: stack}, Resolves: defect.Seq})
 
 	open, err := st.OpenItems(ctx, "d")
 	if err != nil {

@@ -213,7 +213,7 @@ type Refs struct {
 	CCN     string   `json:"ccn,omitempty"`
 	URL     string   `json:"url,omitempty"`
 	Board   string   `json:"board,omitempty"`
-	PRs     []int    `json:"prs,omitempty"`
+	PRs     []PR     `json:"prs,omitempty"`
 	Builds  []string `json:"builds,omitempty"`
 	Stacks  []string `json:"stacks,omitempty"`
 	Targets []string `json:"targets,omitempty"`

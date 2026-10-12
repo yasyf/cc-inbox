@@ -94,11 +94,11 @@ func (s *Server) filter(r *http.Request) (store.Filter, error) {
 		f.Limit = min(n, maxLimit)
 	}
 	if v := q.Get("pr"); v != "" {
-		n, err := strconv.Atoi(v)
+		pr, err := store.ParsePR(v)
 		if err != nil {
-			return store.Filter{}, badRequest{errors.New("pr must be a number")}
+			return store.Filter{}, badRequest{err}
 		}
-		f.PR = n
+		f.PR = pr
 	}
 	f.IncludeExpired = q.Get("expired") == "1"
 	return f, nil
