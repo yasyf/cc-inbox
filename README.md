@@ -367,7 +367,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 
 | Post option | Stored value or behavior |
 | --- | --- |
-| `--pr <number>`, `--build <URL-or-id>` | Repeat to populate `refs.prs` and `refs.builds`. |
+| `--pr <PR>`, `--build <URL-or-id>` | Repeat to populate `refs.prs` and `refs.builds`. A PR is a number, `owner/repo#N`, or a GitHub pull request URL; a URL is stored as `owner/repo#N`. |
 | `--stack <project>/<env>`, `--target <name>` | Repeat to populate `refs.stacks` and `refs.targets`. Each stack requires two nonempty parts separated by one slash. |
 | `--lane-ref <lane>` | Repeat to populate `refs.lanes`, the lanes the record is about. `--lane` identifies the writer. |
 | `--path <file>`, `--ccn <id>`, `--url <URL>`, `--board <URL>` | Set `refs.path`, `refs.ccn`, `refs.url`, and `refs.board`. Without a text argument or `--text`, the file's first line, clipped to 400 characters, becomes the text. |
@@ -394,7 +394,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--topic <topic>` | `tail`, `watch`, `grep`, `state` | Select topics; repeat for multiple topics. |
 | `--stack <project>/<env>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.stacks`. |
 | `--target <name>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.targets`. |
-| `--pr <number>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.prs`. |
+| `--pr <PR>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.prs`, written as a number, `owner/repo#N`, or a URL. A bare number matches only bare numbers. |
 | `--origin <node>` | `tail`, `watch`, `grep`, `state` | Keep only records written on that node; `cci node` prints this machine's id. |
 | `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts, including the root's own prompts for `root` and `main`. |

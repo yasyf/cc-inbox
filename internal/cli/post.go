@@ -118,7 +118,7 @@ func newPostCmd() *cobra.Command {
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
-	f.IntSliceVar(&r.Refs.PRs, "pr", nil, "pull request numbers (repeatable)")
+	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")
 	f.StringSliceVar(&r.Refs.Stacks, "stack", nil, "deploy stacks as <project>/<env> (repeatable)")
 	f.StringSliceVar(&r.Refs.Targets, "target", nil, "release targets (repeatable)")

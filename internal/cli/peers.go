@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -81,7 +80,7 @@ func printPeer(cmd *cobra.Command, st *store.Store, self store.PeerKey) error {
 func newWhoCmd() *cobra.Command {
 	var (
 		f          peers.Filter
-		pr         int
+		pr         store.PR
 		build, ref string
 		asJSON     bool
 	)
@@ -143,7 +142,7 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&f.Worktree, "worktree", "", "sessions whose worktree or cwd is this path")
 	fl.StringVar(&f.Branch, "branch", "", "sessions on this branch")
 	fl.StringVarP(&f.Query, "query", "q", "", "substring of the name, description, tags, branch, lane, drive or cwd")
-	fl.IntVar(&pr, "pr", 0, "sessions with a claim on this pull request, explicit or derived from their records")
+	fl.Var((*prFlag)(&pr), "pr", "sessions with a claim on this pull request, explicit or derived from their records: a number, owner/repo#N, or URL")
 	fl.StringVar(&build, "build", "", "sessions with a claim on this build id or URL")
 	fl.StringVar(&ref, "ref", "", "sessions with a claim on this <kind>:<key>, e.g. branch:yasyf/eng-1062 or thread:C0822AHFY3G/1759")
 	fl.StringVar(&f.Rel, "rel", "", "only claims with this relation, e.g. opened, watches, started")
@@ -195,7 +194,7 @@ func isCodex(argv []string) bool {
 
 type claimFlags struct {
 	rel       string
-	prs       []int
+	prs       []store.PR
 	builds    []string
 	branches  []string
 	worktrees []string
@@ -210,7 +209,7 @@ type claimFlags struct {
 func (c *claimFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
 	fl.StringVar(&c.rel, "rel", "owns", "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
-	fl.IntSliceVar(&c.prs, "pr", nil, "pull request numbers (repeatable)")
+	fl.Var(&prsFlag{&c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
 	fl.StringSliceVar(&c.branches, "branch", nil, "branch names (repeatable)")
 	fl.StringSliceVar(&c.worktrees, "worktree", nil, "worktree paths (repeatable)")
@@ -230,8 +229,8 @@ func (c *claimFlags) claims(self store.PeerKey) ([]store.Claim, error) {
 		}
 	}
 	prs := make([]string, len(c.prs))
-	for i, n := range c.prs {
-		prs[i] = strconv.Itoa(n)
+	for i, pr := range c.prs {
+		prs[i] = pr.String()
 	}
 	add("pr", prs)
 	add("build", c.builds)
@@ -261,10 +260,10 @@ func (c *claimFlags) claims(self store.PeerKey) ([]store.Claim, error) {
 	return out, nil
 }
 
-func refArgs(pr int, build, ref string) ([]store.Claim, error) {
+func refArgs(pr store.PR, build, ref string) ([]store.Claim, error) {
 	var out []store.Claim
-	if pr != 0 {
-		out = append(out, store.Claim{Kind: "pr", Key: strconv.Itoa(pr)})
+	if pr.Number != 0 {
+		out = append(out, store.Claim{Kind: "pr", Key: pr.String()})
 	}
 	if build != "" {
 		out = append(out, store.Claim{Kind: "build", Key: build})

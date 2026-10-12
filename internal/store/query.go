@@ -23,7 +23,7 @@ type Filter struct {
 	Topics         []string
 	Stack          string
 	Target         string
-	PR             int
+	PR             PR
 	After          int64
 	Before         int64
 	Since          time.Time
@@ -89,7 +89,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		path  string
 		value any
 		set   bool
-	}{{"$.stacks", f.Stack, f.Stack != ""}, {"$.targets", f.Target, f.Target != ""}, {"$.prs", f.PR, f.PR != 0}} {
+	}{{"$.stacks", f.Stack, f.Stack != ""}, {"$.targets", f.Target, f.Target != ""}, {"$.prs", f.PR.value(), f.PR.Number != 0}} {
 		if ref.set {
 			clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(refs, '"+ref.path+"') WHERE value = ?)")
 			params = append(params, ref.value)

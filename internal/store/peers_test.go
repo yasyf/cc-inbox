@@ -177,7 +177,7 @@ func TestAgentsAreDistinctPeers(t *testing.T) {
 	if p, _ := st.Peer(ctx, api); p.AgentName != "api" {
 		t.Fatalf("announce without a name erased it: %+v", p)
 	}
-	testutil.Post(t, st, store.Record{Lane: "web", Kind: kinds.Opened, Text: "fix", Refs: store.Refs{PRs: []int{7}}})
+	testutil.Post(t, st, store.Record{Lane: "web", Kind: kinds.Opened, Text: "fix", Refs: store.Refs{PRs: []store.PR{{Number: 7}}}})
 	if _, err := st.Claim(ctx, store.Claim{Session: "s", Agent: "aapi-1", Rel: "watches", Kind: "pr", Key: "7"}); err != nil {
 		t.Fatal(err)
 	}

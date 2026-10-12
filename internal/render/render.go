@@ -43,7 +43,11 @@ func Line(r store.Record, now time.Time) string {
 	b.WriteString(" ")
 	b.WriteString(strings.Join(strings.Fields(r.Text), " "))
 	for _, pr := range r.Refs.PRs {
-		fmt.Fprintf(&b, " pr#%d", pr)
+		if pr.Repo == "" {
+			fmt.Fprintf(&b, " pr#%d", pr.Number)
+		} else {
+			fmt.Fprintf(&b, " pr:%s", pr.String())
+		}
 	}
 	for _, stack := range r.Refs.Stacks {
 		fmt.Fprintf(&b, " stack:%s", stack)

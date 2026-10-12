@@ -99,7 +99,7 @@ type readFlags struct {
 	topics []string
 	stack  string
 	target string
-	pr     int
+	pr     store.PR
 	since  string
 	limit  int
 	budget int
@@ -117,7 +117,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringSliceVar(&f.topics, "topic", nil, "only these topics (repeatable)")
 		cmd.Flags().StringVar(&f.stack, "stack", "", "only records about this <project>/<env> stack")
 		cmd.Flags().StringVar(&f.target, "target", "", "only records about this release target")
-		cmd.Flags().IntVar(&f.pr, "pr", 0, "only records about this pull request")
+		cmd.Flags().Var((*prFlag)(&f.pr), "pr", "only records about this pull request: a number, owner/repo#N, or URL")
 		cmd.Flags().StringVar(&f.origin, "origin", "", "only records written on this node (cci node prints its id)")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), a Pacific clock time (9:00 AM, 21:30, 12:0x), or an RFC3339 time")

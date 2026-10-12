@@ -118,6 +118,10 @@ func ingestions(st *store.Store, src store.Source, abs string, chunk []byte, end
 	times := Date(entries, end)
 	items := make([]store.Ingestion, 0, len(entries))
 	for i, e := range entries {
+		prs := make([]store.PR, len(e.PRs))
+		for j, n := range e.PRs {
+			prs[j] = store.PR{Number: n}
+		}
 		r := store.Record{
 			Drive:  src.Drive,
 			Lane:   e.Lane,
@@ -126,7 +130,7 @@ func ingestions(st *store.Store, src store.Source, abs string, chunk []byte, end
 			At:     times[i].UTC(),
 			Text:   e.Text,
 			To:     e.To,
-			Refs:   store.Refs{PRs: e.PRs, Builds: e.Builds, Stacks: e.Stacks, Targets: e.Targets},
+			Refs:   store.Refs{PRs: prs, Builds: e.Builds, Stacks: e.Stacks, Targets: e.Targets},
 			Source: "import:" + abs,
 		}
 		if r.Text, r.Refs.Path, err = st.Fit(e.Text); err != nil {

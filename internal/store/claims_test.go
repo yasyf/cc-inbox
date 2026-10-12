@@ -20,10 +20,10 @@ func TestClaimsExplicitAndDerived(t *testing.T) {
 	if err := st.BindLane(ctx, store.PeerKey{Session: "lane-1"}, "d", "api", clock.Now()); err != nil {
 		t.Fatal(err)
 	}
-	opened := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Opened, Text: "fix", Refs: store.Refs{PRs: []int{34363}, Builds: []string{"https://buildkite.com/forge/ci/builds/4860"}}})
+	opened := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Opened, Text: "fix", Refs: store.Refs{PRs: []store.PR{{Number: 34363}}, Builds: []string{"https://buildkite.com/forge/ci/builds/4860"}}})
 	clock.Advance(time.Minute)
 	testutil.Post(t, st, store.Record{Lane: "api", Kind: kinds.State, Text: "deploying", Refs: store.Refs{Stacks: []string{"api/plat-usw2-prod"}, Targets: []string{"api"}}})
-	testutil.Post(t, st, store.Record{Lane: "nobody", Kind: kinds.Opened, Text: "orphan", Refs: store.Refs{PRs: []int{1}}})
+	testutil.Post(t, st, store.Record{Lane: "nobody", Kind: kinds.Opened, Text: "orphan", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}})
 	clock.Advance(time.Minute)
 	if _, err := st.Claim(ctx, store.Claim{Session: "lane-1", Rel: "watches", Kind: "pr", Key: "34363"}); err != nil {
 		t.Fatal(err)
