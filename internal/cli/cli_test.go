@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -244,9 +245,6 @@ func TestPostPathSuppliesTheTextFromItsFirstLine(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	post := []string{"post", "--drive", "release-v3", "--lane", "perf-asks", "--kind", "note"}
 	long := strings.Repeat("x", 500)
-	if _, err := run(t, append(post, "--text", long)...); err == nil || !strings.Contains(err.Error(), "cci post --lane <lane> --kind <kind> --path <file>") {
-		t.Fatalf("post --text over 400 characters: %v", err)
-	}
 	dir := t.TempDir()
 	summary := filepath.Join(dir, "summary.md")
 	if err := os.WriteFile(summary, []byte("  perf findings for api-sql  \n\n"+long+"\n"), 0o600); err != nil {
@@ -271,6 +269,50 @@ func TestPostPathSuppliesTheTextFromItsFirstLine(t *testing.T) {
 	}
 	if _, err := run(t, append(post, "--path", filepath.Join(dir, "missing.md"))...); err == nil || !strings.Contains(err.Error(), "--path") {
 		t.Errorf("post --path to a missing file: %v", err)
+	}
+}
+
+func TestPostSpillsTextOver400CharactersToAFile(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	post := []string{"post", "--drive", "release-v3", "--lane", "perf-asks", "--kind", "note"}
+	long := "perf findings for api-sql\n" + strings.Repeat("x", 500)
+	if _, err := run(t, append(post, "--text", long)...); err != nil {
+		t.Fatalf("post --text over 400 characters: %v", err)
+	}
+	out, err := run(t, "tail", "--drive", "release-v3", "--since", "0", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got struct {
+		Text string `json:"text"`
+		Refs struct {
+			Path string `json:"path"`
+		} `json:"refs"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &got); err != nil {
+		t.Fatalf("tail --json = %q: %v", out, err)
+	}
+	if got.Text != "perf findings for api-sql" {
+		t.Errorf("spilled record text = %q, want the first line", got.Text)
+	}
+	if body, err := os.ReadFile(got.Refs.Path); err != nil || string(body) != long+"\n" {
+		t.Errorf("spilled file %q = %q, %v; want the full text", got.Refs.Path, body, err)
+	}
+	if _, err := run(t, append(post, "--text", "perf findings for api-sql\n"+strings.Repeat("y", 500))...); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || strings.Count(out, "perf findings for api-sql") != 2 {
+		t.Errorf("tail after two spills sharing a first line = %q, %v; want both records", out, err)
+	}
+	if _, err := run(t, append(post, "--topic", "blank-first", "--text", "\n\n"+strings.Repeat("z", 401))...); err != nil {
+		t.Errorf("post of long text after blank lines: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "body.md")
+	if err := os.WriteFile(path, []byte("summary\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, append(post, "--text", long, "--path", path)...); err == nil || !strings.Contains(err.Error(), "exceeds 400") {
+		t.Errorf("post --text over 400 characters with --path: %v, want the text-length refusal", err)
 	}
 }
 
