@@ -253,6 +253,12 @@ cci claim --ref dispatch:ctx_6e8064160648 --rel runs
 `--ref <kind>:<key>` takes any other pair. `cci unclaim` with the same
 flags drops an explicit claim; a derived one stays with its record.
 
+`cci claim --rel opened --pr N` from a session bound to a drive also posts
+one `opened` record for each PR on that drive, so a landing desk sees the PR
+without a lane posting it. `ccx vcs ship` makes this claim for every PR it
+opens. The record's lane is the caller's bound lane, else `root` for the root
+thread, else the subagent's id. A repeat claim posts nothing new.
+
 Ask `who` by artifact, and each match lists the claims that selected it:
 
 ```bash
