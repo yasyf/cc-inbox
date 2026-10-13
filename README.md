@@ -708,7 +708,7 @@ sessions write to the same SQLite store without a daemon.
 
 | Surface | Limit |
 | --- | --- |
-| Posted text | 400 characters. Put longer bodies in a file and post it with `cci post --lane <lane> --kind <kind> --path <file>`; the file's first line becomes the text. |
+| Posted text | 400 characters. Longer text spills to a file under `blobs/`: the record carries its first line, `refs.path` names the file, and `cci post` prints the path on stderr. `--path <file>` posts a file you wrote; its first line becomes the text. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
 | `tail`, `grep`, and `state` | Default 6,144-byte budget; `--budget` sets any other size. Output stops at a whole line. |
 | Text `digest` | Default 32,000-byte budget, enough for every section at its record limit with whole records; `--budget` sets any other size. Output stops at a whole line. |

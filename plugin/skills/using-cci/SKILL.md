@@ -23,7 +23,8 @@ cci drive use release-demo --root
 
 ## Post one event
 
-Write one record per event, with text under 400 characters. Use `state` for
+Write one record per event. Text over 400 characters spills to a file: the record
+carries its first line and `cci post` prints the file's path. Use `state` for
 status, `ask` for a question, `hold` for a stop, `go` for permission, and `opened`
 or `landed` for a PR event. Use `review` with `--outcome` for a rules-review verdict.
 Address lanes with `--to`; when an action needs the owner, use `--to owner`.

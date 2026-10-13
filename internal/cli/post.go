@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
@@ -50,8 +51,17 @@ func newPostCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
 				}
-				first, _, _ := strings.Cut(string(body), "\n")
-				text = store.Clip(strings.TrimSpace(first))
+				text = store.Clip(firstLine(string(body)))
+			}
+			if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
+				_, path, err := st.Fit(text)
+				if err != nil {
+					return err
+				}
+				text, r.Refs.Path = store.Clip(firstLine(text)), path
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: text over %d characters: the record carries its first line, and the full text is at %s\n", store.MaxText, path); err != nil {
+					return err
+				}
 			}
 			k, err := kinds.Parse(kind)
 			if err != nil {
@@ -110,7 +120,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
 	f.StringVar(&lane, "lane", "", "the writing lane (required)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "at most 400 characters, also accepted as the one argument; without either, the --path file's first line")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first line; without either, the --path file's first line")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
@@ -139,6 +149,15 @@ func newPostCmd() *cobra.Command {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
+}
+
+func firstLine(text string) string {
+	for line := range strings.Lines(text) {
+		if line = strings.TrimSpace(line); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 func readBody(cmd *cobra.Command, path string) (json.RawMessage, error) {

@@ -386,6 +386,9 @@ func (s *Store) migrate(ctx context.Context) error {
 
 func Hash(r Record) string {
 	parts := []any{r.Drive, r.Lane, r.Kind, r.Topic, slices.Sorted(slices.Values(r.To)), r.Re, r.Resolves, strings.Fields(r.Text)}
+	if r.Refs.Path != "" {
+		parts = append(parts, r.Refs.Path)
+	}
 	if r.ID != "" {
 		parts = append(parts, r.ID)
 	}
