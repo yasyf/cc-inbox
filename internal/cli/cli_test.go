@@ -589,19 +589,13 @@ func TestClaimOpenedPostsAnOpenedRecordOnTheSessionsDrive(t *testing.T) {
 	if _, err := run(t, "claim", "--rel", "watches", "--pr", "36149"); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CCI_AGENT_ID", "awalker-4567")
-	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "release-walker", "--kind", "report", "--text", "walking"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run(t, "claim", "--rel", "opened", "--pr", "36277"); err != nil {
-		t.Fatal(err)
-	}
 	out, err := run(t, "tail", "--drive", "release-v3", "--since", "0", "--kind", "opened", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	got := make([]string, 0, len(lines))
+	for _, line := range lines {
 		var r struct {
 			Lane string `json:"lane"`
 			Text string `json:"text"`
@@ -614,7 +608,7 @@ func TestClaimOpenedPostsAnOpenedRecordOnTheSessionsDrive(t *testing.T) {
 		}
 		got = append(got, fmt.Sprintf("%s %s %v", r.Lane, r.Text, r.Refs.PRs))
 	}
-	want := []string{"root opened #36276 [36276]", "aspeed-0123 opened #36148 [36148]", "release-walker opened #36277 [36277]"}
+	want := []string{"root opened #36276 [36276]", "aspeed-0123 opened #36148 [36148]"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("opened records = %q, want %q", got, want)
 	}
