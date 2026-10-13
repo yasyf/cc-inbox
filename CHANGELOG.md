@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-12
+
+### Changed
+
+- `post` text over 400 characters no longer refuses: the full text spills to
+  a file under `$CCI_HOME/blobs/`, the record carries its first non-blank
+  line with `refs.path` naming the file, and `post` prints the path on
+  stderr. Two spilled posts that share a first line stay two records.
+
 ## [0.17.0] - 2026-10-11
 
 ### Added
@@ -568,7 +577,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/yasyf/cc-inbox/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/yasyf/cc-inbox/compare/v0.16.2...v0.17.0
 [0.16.2]: https://github.com/yasyf/cc-inbox/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/yasyf/cc-inbox/compare/v0.16.0...v0.16.1
