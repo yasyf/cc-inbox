@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-13
+
 ### Changed
 
 - `post` writes the record's own time into its text. A clock typed in a
@@ -599,7 +601,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/yasyf/cc-inbox/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/yasyf/cc-inbox/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/yasyf/cc-inbox/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/yasyf/cc-inbox/compare/v0.16.2...v0.17.0
