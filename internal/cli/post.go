@@ -58,7 +58,7 @@ func newPostCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
 				}
-				text = store.Clip(stamped(firstLine(string(body)), at))
+				text = store.Clip(firstLine(string(body)))
 			}
 			if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
 				_, path, err := st.Fit(text)
@@ -127,13 +127,13 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
 	f.StringVar(&lane, "lane", "", "the writing lane (required)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first line; without either, the --path file's first line")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first line; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
-	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given, stamped like --text while the file stays as written")
+	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
 	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")

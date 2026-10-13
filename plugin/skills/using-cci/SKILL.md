@@ -34,8 +34,10 @@ stored time, and a time typed from memory can run minutes off it. Where prose
 needs the time, write `{at}`, which `cci post` replaces with the record's time
 in the form readers print, such as `10:52 AM`. A clock typed in a leading
 `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way. A
-clock anywhere else in the text is stored as typed. With `--path`, only the
-first line copied into the record is stamped; the file stays as written.
+clock anywhere else in the text is stored as typed. A post that takes its
+text from a `--path` file stores the file's first line exactly as written, so
+the record's text equals that line. Leave clocks and `{at}` out of that line;
+the record's own time already dates it.
 
 Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
 `--resolves <seq>` must name an existing record in the same drive. Only a later

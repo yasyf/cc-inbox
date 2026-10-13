@@ -395,19 +395,25 @@ func TestPostSpillsTheStampedText(t *testing.T) {
 	}
 }
 
-func TestPostPathStampsTheRecordAndLeavesTheFile(t *testing.T) {
+func TestPostPathStoresTheFilesFirstLineUnstamped(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
-	body := "R84 (" + time.Now().Add(7*time.Minute).Format("3:04 PM") + ") orca-desk: relay to api, sent {at}\n\nlanded {at}\n"
+	first := "R84 (" + time.Now().Add(7*time.Minute).Format("3:04 PM") + ") orca-desk: relay to api, sent {at}"
+	body := first + "\n\n" + strings.Repeat("x", 500) + "\nlanded {at}\n"
 	path := filepath.Join(t.TempDir(), "relay.md")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	got := postJSON(t, "--path", path)
-	if want := "R84 (" + got.stamp() + ") orca-desk: relay to api, sent " + got.stamp(); got.Text != want || got.Refs.Path != path {
-		t.Errorf("post --path stored %q at %q, want %q at %q", got.Text, got.Refs.Path, want, path)
+	kept, err := os.ReadFile(path)
+	if err != nil || string(kept) != body {
+		t.Fatalf("--path file after the post = %q, %v; want it as written", kept, err)
 	}
-	if kept, err := os.ReadFile(path); err != nil || string(kept) != body {
-		t.Errorf("--path file after the post = %q, %v; want it as written", kept, err)
+	if line, _, _ := strings.Cut(string(kept), "\n"); got.Text != first || got.Text != line || got.Refs.Path != path {
+		t.Errorf("post --path stored %q at %q, want the file's first line %q at %q", got.Text, got.Refs.Path, line, path)
+	}
+	summary := postJSON(t, "--path", path, "--text", "relay summary, sent {at}")
+	if want := "relay summary, sent " + summary.stamp(); summary.Text != want || summary.Refs.Path != path {
+		t.Errorf("post --text with --path stored %q at %q, want %q at %q", summary.Text, summary.Refs.Path, want, path)
 	}
 }
 

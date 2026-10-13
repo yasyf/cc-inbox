@@ -12,8 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   leading `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced with
   that time in the form readers print, and `{at}` anywhere in the text
   becomes it. The stored text, a spilled file, and the duplicate checks read
-  the stamped text; a `--path` file stays as written. A keyless repost that
-  carries a stamp or `{at}` is a duplicate only within the same clock minute.
+  the stamped text. Only text given as `--text` or the one argument is
+  stamped. A post that takes its text from a `--path` file stores the file's
+  first line as written, so the record's text still equals that line. A
+  keyless repost that carries a stamp or `{at}` is a duplicate only within
+  the same clock minute.
 
 ## [0.19.0] - 2026-10-13
 
