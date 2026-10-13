@@ -318,6 +318,112 @@ func TestPostSpillsTextOver400CharactersToAFile(t *testing.T) {
 	}
 }
 
+type posted struct {
+	Seq  int64     `json:"seq"`
+	At   time.Time `json:"at"`
+	Text string    `json:"text"`
+	Refs struct {
+		Path string `json:"path"`
+	} `json:"refs"`
+}
+
+func (p posted) stamp() string {
+	return p.At.In(time.Local).Format("3:04 PM")
+}
+
+func postJSON(t *testing.T, args ...string) posted {
+	t.Helper()
+	out, err := run(t, append([]string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note"}, args...)...)
+	if err != nil {
+		t.Fatalf("post %v: %v", args, err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var got posted
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &got); err != nil {
+		t.Fatalf("post --json %v = %q: %v", args, out, err)
+	}
+	return got
+}
+
+func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	ahead := time.Now().Add(7 * time.Minute)
+	for _, tt := range []struct {
+		name, text, want string
+	}{
+		{"twelve-hour clock", "R84 (" + ahead.Format("3:04 PM") + ") orca-desk: relay to api: hold", "R84 ({at}) orca-desk: relay to api: hold"},
+		{"clock without a space", "R85 (" + ahead.Format("3:04pm") + ") orca-desk: relay to api: hold", "R85 ({at}) orca-desk: relay to api: hold"},
+		{"24-hour clock", "R86 (" + ahead.Format("15:04") + ") orca-desk: relay to api: hold", "R86 ({at}) orca-desk: relay to api: hold"},
+		{"fuzzy minute", "R87 (10:5x AM) orca-desk: relay to api: hold", "R87 ({at}) orca-desk: relay to api: hold"},
+		{"clock with a zone", "R92 (3:36 PM PT) orca-desk: launch api-fix NOW", "R92 ({at}) orca-desk: launch api-fix NOW"},
+		{"lettered key", "R88a (" + ahead.Format("3:04 PM") + ") orca-desk: relay to api: hold", "R88a ({at}) orca-desk: relay to api: hold"},
+		{"token in prose", "api landed {at}, live since {at}", "api landed {at}, live since {at}"},
+		{"neither", "ship it", "ship it"},
+		{"clock in prose", "R89 said the deploy began at 10:52 AM (not 10:45 AM)", "R89 said the deploy began at 10:52 AM (not 10:45 AM)"},
+		{"stamp past the start", "relay R90 (10:52 AM) was late", "relay R90 (10:52 AM) was late"},
+		{"parenthesis without a clock", "R91 (orca-desk, 10:52 AM) relay to api", "R91 (orca-desk, 10:52 AM) relay to api"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := postJSON(t, tt.text)
+			want := strings.ReplaceAll(tt.want, "{at}", got.stamp())
+			if got.Text != want {
+				t.Fatalf("post %q stored %q, want %q", tt.text, got.Text, want)
+			}
+			line := got.stamp() + " NOTE root " + want
+			if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, line) {
+				t.Errorf("tail after post %q = %q, %v; want %q", tt.text, out, err, line)
+			}
+		})
+	}
+}
+
+func TestPostSpillsTheStampedText(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	typed := time.Now().Add(7 * time.Minute).Format("3:04 PM")
+	rest := "\n" + strings.Repeat("x", 500) + "\nlive since "
+	got := postJSON(t, "R84 ("+typed+") orca-desk: relay to api"+rest+"{at}")
+	first := "R84 (" + got.stamp() + ") orca-desk: relay to api"
+	if got.Text != first {
+		t.Errorf("spilled record text = %q, want %q", got.Text, first)
+	}
+	if body, err := os.ReadFile(got.Refs.Path); err != nil || string(body) != first+rest+got.stamp()+"\n" {
+		t.Errorf("spilled file %q = %q, %v; want the stamped text", got.Refs.Path, body, err)
+	}
+	grown := postJSON(t, strings.Repeat("y", 396)+"{at}")
+	if body, err := os.ReadFile(grown.Refs.Path); err != nil || string(body) != strings.Repeat("y", 396)+grown.stamp()+"\n" {
+		t.Errorf("text that passes 400 characters once stamped spilled to %q = %q, %v", grown.Refs.Path, body, err)
+	}
+}
+
+func TestPostPathStampsTheRecordAndLeavesTheFile(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	body := "R84 (" + time.Now().Add(7*time.Minute).Format("3:04 PM") + ") orca-desk: relay to api, sent {at}\n\nlanded {at}\n"
+	path := filepath.Join(t.TempDir(), "relay.md")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := postJSON(t, "--path", path)
+	if want := "R84 (" + got.stamp() + ") orca-desk: relay to api, sent " + got.stamp(); got.Text != want || got.Refs.Path != path {
+		t.Errorf("post --path stored %q at %q, want %q at %q", got.Text, got.Refs.Path, want, path)
+	}
+	if kept, err := os.ReadFile(path); err != nil || string(kept) != body {
+		t.Errorf("--path file after the post = %q, %v; want it as written", kept, err)
+	}
+}
+
+func TestPostWithAnIDReturnsTheStoredStampedRecord(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	ahead := time.Now().Add(7 * time.Minute)
+	first := postJSON(t, "--id", "relay-84", "R84 ("+ahead.Format("3:04 PM")+") orca-desk: relay to api")
+	if want := "R84 (" + first.stamp() + ") orca-desk: relay to api"; first.Text != want {
+		t.Fatalf("post --id stored %q, want %q", first.Text, want)
+	}
+	again := postJSON(t, "--id", "relay-84", "R84 ("+ahead.Add(7*time.Minute).Format("15:04")+") orca-desk: relay to api, retried")
+	if again.Seq != first.Seq || again.Text != first.Text {
+		t.Errorf("repost with the same --id = #%d %q, want the stored #%d %q", again.Seq, again.Text, first.Seq, first.Text)
+	}
+}
+
 func TestAnnounceMeWho(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-2222-3333")

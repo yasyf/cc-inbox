@@ -334,7 +334,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 
 | Command | Behavior |
 | --- | --- |
-| `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument; prints its sequence number. |
+| `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument; prints its sequence number. `{at}` in the text becomes the record's own time in the form readers print, such as `10:52 AM`. A clock typed in a leading `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced with that time. |
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second until interrupted; `--for` exits after a duration. |
 | `cci subscribe` | Deliver records for `--reader`, plus other lanes' broadcasts of each `--kind`, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
@@ -370,7 +370,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--pr <PR>`, `--build <URL-or-id>` | Repeat to populate `refs.prs` and `refs.builds`. A PR is a number, `owner/repo#N`, or a GitHub pull request URL; a URL is stored as `owner/repo#N`. |
 | `--stack <project>/<env>`, `--target <name>` | Repeat to populate `refs.stacks` and `refs.targets`. Each stack requires two nonempty parts separated by one slash. |
 | `--lane-ref <lane>` | Repeat to populate `refs.lanes`, the lanes the record is about. `--lane` identifies the writer. |
-| `--path <file>`, `--ccn <id>`, `--url <URL>`, `--board <URL>` | Set `refs.path`, `refs.ccn`, `refs.url`, and `refs.board`. Without a text argument or `--text`, the file's first line, clipped to 400 characters, becomes the text. |
+| `--path <file>`, `--ccn <id>`, `--url <URL>`, `--board <URL>` | Set `refs.path`, `refs.ccn`, `refs.url`, and `refs.board`. Without a text argument or `--text`, the file's first line, clipped to 400 characters, becomes the text. `cci post` stamps that line with the record's time and leaves the file as written. |
 | `--env <environment>` | Repeat to populate `fields.envs`. |
 | `--mode <mode>` | Set `fields.mode`: `platy`, `cli`, `manual`, or `walker`. |
 | `--outcome <outcome>` | Set `fields.outcome`: `passed`, `failed`, `pending`, or `cancelled`. |
@@ -523,7 +523,10 @@ call already made, and imported `DECISION` lines use this kind.
 
 Posts require a known kind. A duplicate with the same drive, lane, kind, and
 whitespace-normalized text within ten minutes returns the existing sequence
-number. Refs and pairing fields do not distinguish duplicates.
+number. Refs and pairing fields do not distinguish duplicates. The text compared
+is the stamped text, so a repost carrying `{at}` or a leading stamp is a
+duplicate only within the same clock minute; `--id` identifies a record across
+minutes.
 
 ## Record JSON
 
@@ -708,7 +711,7 @@ sessions write to the same SQLite store without a daemon.
 
 | Surface | Limit |
 | --- | --- |
-| Posted text | 400 characters. Longer text spills to a file under `blobs/`: the record carries its first line, `refs.path` names the file, and `cci post` prints the path on stderr. `--path <file>` posts a file you wrote; its first line becomes the text. |
+| Posted text | 400 characters, counted after `{at}` and a leading stamp take the record's time. Longer text spills to a file under `blobs/` as stamped. The record carries its first line, `refs.path` names the file, and `cci post` prints the path on stderr. `--path <file>` posts a file you wrote; its first line becomes the text. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
 | `tail`, `grep`, and `state` | Default 6,144-byte budget; `--budget` sets any other size. Output stops at a whole line. |
 | Text `digest` | Default 32,000-byte budget, enough for every section at its record limit with whole records; `--budget` sets any other size. Output stops at a whole line. |

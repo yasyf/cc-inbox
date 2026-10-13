@@ -79,6 +79,25 @@ func TestDedupeWindow(t *testing.T) {
 	}
 }
 
+func TestPostAtStoresTheCallersTime(t *testing.T) {
+	st, c := open(t)
+	ctx := context.Background()
+	at := c.Now()
+	c.Advance(3 * time.Minute)
+	first, dup, err := st.PostAt(ctx, withDrive(store.Record{ID: "relay-84", Kind: kinds.Note, Text: "R84 (3:00 PM) relay to api"}), 0, at)
+	if err != nil || dup || !first.At.Equal(at) {
+		t.Fatalf("PostAt() = at %s, dup=%v, %v; want a new record at %s", first.At, dup, err, at)
+	}
+	if stored, err := st.Get(ctx, first.Seq); err != nil || !stored.At.Equal(at) {
+		t.Fatalf("stored record at %s, %v; want %s", stored.At, err, at)
+	}
+	c.Advance(time.Hour)
+	again, dup, err := st.PostAt(ctx, withDrive(store.Record{ID: "relay-84", Kind: kinds.Note, Text: "R84 (4:03 PM) relay to api"}), 0, c.Now())
+	if err != nil || !dup || again.Seq != first.Seq || again.Text != first.Text || !again.At.Equal(at) {
+		t.Fatalf("repost with the same id an hour later = #%d %q at %s, dup=%v, %v; want the stored #%d %q at %s", again.Seq, again.Text, again.At, dup, err, first.Seq, first.Text, at)
+	}
+}
+
 func TestDedupeKeysAddressing(t *testing.T) {
 	st, _ := open(t)
 	ctx := context.Background()

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -14,10 +15,13 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
+
+var typedStamp = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
 
 func newPostCmd() *cobra.Command {
 	var (
@@ -43,15 +47,18 @@ func newPostCmd() *cobra.Command {
 			return nil
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			at := st.Now()
 			switch {
 			case len(args) == 1:
-				text = args[0]
-			case !cmd.Flags().Changed("text"):
+				text = stamped(args[0], at)
+			case cmd.Flags().Changed("text"):
+				text = stamped(text, at)
+			default:
 				body, err := os.ReadFile(r.Refs.Path)
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
 				}
-				text = store.Clip(firstLine(string(body)))
+				text = store.Clip(stamped(firstLine(string(body)), at))
 			}
 			if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
 				_, path, err := st.Fit(text)
@@ -95,7 +102,7 @@ func newPostCmd() *cobra.Command {
 			if r.To, err = resolveRecipients(cmd.Context(), st, r.To); err != nil {
 				return err
 			}
-			got, dup, err := st.Post(cmd.Context(), r, ttl)
+			got, dup, err := st.PostAt(cmd.Context(), r, ttl, at)
 			if err != nil {
 				return err
 			}
@@ -120,13 +127,13 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
 	f.StringVar(&lane, "lane", "", "the writing lane (required)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first line; without either, the --path file's first line")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first line; without either, the --path file's first line")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
-	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given")
+	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given, stamped like --text while the file stays as written")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
 	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")
@@ -149,6 +156,14 @@ func newPostCmd() *cobra.Command {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
+}
+
+func stamped(text string, at time.Time) string {
+	stamp := render.Stamp(at, at)
+	if m := typedStamp.FindStringSubmatchIndex(text); m != nil && importer.ParseClock(text[m[2]:m[3]]) != nil {
+		text = text[:m[2]] + stamp + text[m[3]:]
+	}
+	return strings.ReplaceAll(text, "{at}", stamp)
 }
 
 func firstLine(text string) string {

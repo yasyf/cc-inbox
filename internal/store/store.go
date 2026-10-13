@@ -455,6 +455,12 @@ func validateFields(f Fields) error {
 }
 
 func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, bool, error) {
+	return s.PostAt(ctx, r, ttl, s.Now())
+}
+
+// PostAt posts r as written at the given time, for a caller that already
+// read the clock to put that same time in the record's text.
+func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time.Time) (Record, bool, error) {
 	if r.Kind.Spec().Internal {
 		return Record{}, false, fmt.Errorf("kind %s is written only by cci itself", r.Kind)
 	}
@@ -471,7 +477,7 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 		}
 	}
 	r.Origin, r.OriginSeq = "", 0
-	r.At = s.Now().UTC()
+	r.At = at.UTC()
 	r.ExpiresAt = expiry(r, ttl)
 	hash := Hash(r)
 	tx, err := s.db.BeginTx(ctx, nil)
