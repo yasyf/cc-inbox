@@ -29,6 +29,16 @@ status, `ask` for a question, `hold` for a stop, `go` for permission, and `opene
 or `landed` for a PR event. Use `review` with `--outcome` for a rules-review verdict.
 Address lanes with `--to`; when an action needs the owner, use `--to owner`.
 
+Never type a clock time into a record. Every reader prints the record's own
+stored time, and a time typed from memory can run minutes off it. Where prose
+needs the time, write `{at}`, which `cci post` replaces with the record's time
+in the form readers print, such as `10:52 AM`. A clock typed in a leading
+`R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way. A
+clock anywhere else in the text is stored as typed. A post that takes its
+text from a `--path` file stores the file's first line exactly as written, so
+the record's text equals that line. Leave clocks and `{at}` out of that line;
+the record's own time already dates it.
+
 Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
 `--resolves <seq>` must name an existing record in the same drive. Only a later
 record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`.
@@ -83,7 +93,9 @@ Structured fields use repeatable `--env`, `--mode` (`platy`, `cli`, `manual`,
 `--census` JSON, and `--count name=integer`. Census carries `n`, `denominator`,
 `head`, `drift`, and `stacks_clean`. PRs, builds, and deploy stacks live in refs.
 Repeating the same drive, lane, kind, and normalized text within ten minutes
-returns the original record, even if its references differ.
+returns the original record, even if its references differ. The comparison
+reads the stamped text, so a repost carrying `{at}` or a leading stamp matches
+only within the same clock minute; give a record you may retry an `--id`.
 
 Publish `head` on every push, with the full commit SHA as text and the PR or
 branch as topic. Publish `contract` for interfaces other lanes consume; withdraw
