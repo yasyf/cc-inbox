@@ -14,6 +14,7 @@ import (
 
 	"github.com/yasyf/cc-interact/procs"
 
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -309,11 +310,45 @@ func newClaimCmd() *cobra.Command {
 					return err
 				}
 			}
+			if cf.rel == string(kinds.Opened) {
+				return postOpened(cmd.Context(), st, self, cf.prs)
+			}
 			return nil
 		}),
 	}
 	cf.register(cmd)
 	return cmd
+}
+
+func postOpened(ctx context.Context, st *store.Store, self store.PeerKey, prs []store.PR) error {
+	b, ok, err := st.Binding(ctx, self)
+	if err != nil {
+		return err
+	}
+	if !ok && self.Agent != "" {
+		if b, ok, err = st.Binding(ctx, store.PeerKey{Session: self.Session}); err != nil {
+			return err
+		}
+		b.Lane = ""
+	}
+	if !ok {
+		return nil
+	}
+	lane := b.Lane
+	switch {
+	case lane != "":
+	case self.Agent == "":
+		lane = "root"
+	default:
+		lane = self.Agent
+	}
+	for _, pr := range prs {
+		r := store.Record{ID: "opened:" + pr.String(), Drive: b.Drive, Lane: lane, Kind: kinds.Opened, Text: "opened #" + pr.String(), Source: "claim", Refs: store.Refs{PRs: []store.PR{pr}}}
+		if _, _, err := st.Post(ctx, r, 0); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newUnclaimCmd() *cobra.Command {
