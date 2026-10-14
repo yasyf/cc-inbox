@@ -286,6 +286,35 @@ func TestLaneHookDeliversPeerRecords(t *testing.T) {
 	}
 }
 
+func TestLaneRebindToAnotherDriveSkipsDeliveredPeerRecords(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	k := store.PeerKey{Session: "s-api"}
+	started := st.Now().Add(-time.Hour)
+	if err := st.BindLane(ctx, k, "a", "api", started); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Drive: "other", Lane: "root", Kind: kinds.Go, Text: "peer go", To: []string{store.PeerAddress("s-api")}})
+	testutil.Post(t, st, store.Record{Drive: "b", Lane: "root", Kind: kinds.Hold, Text: "hold on b", To: []string{"api"}})
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s-api", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "peer go") || strings.Contains(got, "hold on b") {
+		t.Fatalf("drive a delivery = %q", got)
+	}
+	if err := st.BindLane(ctx, k, "b", "api", started); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s-api", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); strings.Contains(got, "peer go") || !strings.Contains(got, "hold on b") {
+		t.Fatalf("drive b delivery = %q", got)
+	}
+}
+
 func noWindow() (store.Window, error) {
 	return store.Window{}, nil
 }
