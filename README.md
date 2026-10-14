@@ -335,7 +335,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | Command | Behavior |
 | --- | --- |
 | `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument; prints its sequence number. `{at}` in that text becomes the record's own time in the form readers print, such as `10:52 AM`. A clock typed in a leading `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced with that time. Text taken from a `--path` file is stored as written. |
-| `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is `CLAUDE_CODE_SESSION_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
+| `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is the session, `CLAUDE_CODE_SESSION_ID` or else `CODEX_THREAD_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second until interrupted; `--for` exits after a duration. |
 | `cci subscribe` | Deliver records for `--reader`, plus other lanes' broadcasts of each `--kind`, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
 | `cci unsubscribe` | Stop this window's channel delivery. |
@@ -345,7 +345,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain, and so does any record a peer node has not acked. |
 | `cci cursor set <name> <seq>` | Move a named cursor to `seq`, backwards included, so a restarted reader replays from the point it committed. |
-| `cci drive use` | Bind the current Claude Code session and reset its cursor to the drive's latest record in one transaction. `--root` enables owner-prompt capture. |
+| `cci drive use` | Bind the current Claude Code session, or the Codex session named by `CODEX_THREAD_ID` when `CLAUDE_CODE_SESSION_ID` is unset, and reset its cursor to the drive's latest record in one transaction. `--root` enables owner-prompt capture. |
 | `cci drive ls` | List drives by their most recent activity. |
 | `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. |
 | `cci me` | Print this session's registry line, ending with the `uds:` address `SendMessage` accepts. |

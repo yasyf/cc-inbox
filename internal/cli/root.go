@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
@@ -17,9 +19,12 @@ import (
 )
 
 const (
-	sessionEnv = "CLAUDE_CODE_SESSION_ID"
-	agentEnv   = "CCI_AGENT_ID"
+	sessionEnv      = "CLAUDE_CODE_SESSION_ID"
+	codexSessionEnv = "CODEX_THREAD_ID"
+	agentEnv        = "CCI_AGENT_ID"
 )
+
+var errNoPeerSession = errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
 
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
@@ -175,7 +180,7 @@ func parseSince(s string, now time.Time) (int64, time.Time, error) {
 }
 
 func selfPeer() store.PeerKey {
-	session := os.Getenv(sessionEnv)
+	session := cmp.Or(os.Getenv(sessionEnv), os.Getenv(codexSessionEnv))
 	if session == "" {
 		return store.PeerKey{}
 	}

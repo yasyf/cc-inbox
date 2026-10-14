@@ -12,7 +12,9 @@ in `cc-notes`, linked with `--ccn`. Use `decision` for a call already made and
 Use the task's drive and lane names. Pass `--drive` or bind the current Claude
 Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`; subagents share their
 parent's value and add `CCI_AGENT_ID` to it, so each subagent or teammate binds,
-claims and reads as its own thread. Each `cci drive use` sets the session's cursor to the selected
+claims and reads as its own thread. A Codex lane has no `CLAUDE_CODE_SESSION_ID`;
+its `CODEX_THREAD_ID` is the session, so `cci drive use` binds it and later
+`post`, `tail` and `watch` calls resolve the drive without `--drive`. Each `cci drive use` sets the session's cursor to the selected
 drive's latest record, including when rebinding the same drive. An empty drive
 starts at sequence 0. A root binding also enables owner-prompt capture through
 the plugin:

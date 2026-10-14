@@ -118,6 +118,26 @@ func TestTailLimitPrintsTheNewestRecords(t *testing.T) {
 	}
 }
 
+func TestCodexSessionBindsADrive(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CCI_AGENT_ID", "")
+	t.Setenv("CODEX_THREAD_ID", "01a13b89-codex")
+	if out, err := run(t, "drive", "use", "release-v3"); err != nil || out != "session 01a13b89-codex -> release-v3\n" {
+		t.Fatalf("drive use = %q, %v", out, err)
+	}
+	if out, err := run(t, "post", "--lane", "fix-lane", "--kind", "note", "--text", "shipped the fix"); err != nil || out != "#1\n" {
+		t.Fatalf("post = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail"); err != nil || !strings.Contains(out, "shipped the fix") {
+		t.Fatalf("tail = %q, %v", out, err)
+	}
+	t.Setenv("CODEX_THREAD_ID", "")
+	if _, err := run(t, "drive", "use", "release-v3"); err == nil || !strings.Contains(err.Error(), "neither CLAUDE_CODE_SESSION_ID nor CODEX_THREAD_ID is set") {
+		t.Fatalf("drive use without a session: %v", err)
+	}
+}
+
 func TestGrepMatchesWholeRecordLines(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
