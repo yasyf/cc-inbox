@@ -25,6 +25,7 @@ type Filter struct {
 	Target         string
 	PR             PR
 	After          int64
+	PeerAfter      int64
 	Before         int64
 	Since          time.Time
 	Until          time.Time
@@ -33,9 +34,9 @@ type Filter struct {
 	Limit          int
 }
 
-// where renders the filter. Records in the drive pass the lane, kind and
-// topic selectors; records addressed across drives, to peer:<Peer> or to
-// <reader>@<Drive>, pass whatever drive they sit in.
+// where renders the filter. Records in the drive pass the selectors;
+// <reader>@<Drive> records, and peer:<Peer> records past PeerAfter, pass
+// whatever drive they sit in.
 func (f Filter) where(self string, now time.Time) (string, []any) {
 	scoped := []string{"drive = ?"}
 	params := []any{f.Drive}
@@ -74,13 +75,21 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		scoped = append(scoped, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(names))+"))")
 		params = append(params, names...)
 	}
-	var clauses []string
-	if cross := f.crossAddresses(self); len(cross) > 0 {
-		clauses = append(clauses, "(("+strings.Join(scoped, " AND ")+") OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(cross))+")))")
-		params = append(params, cross...)
-	} else {
-		clauses = scoped
+	branches := []string{"(" + strings.Join(scoped, " AND ") + ")"}
+	if peers := f.peerAddresses(self); len(peers) > 0 {
+		branch := "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(peers)) + "))"
+		params = append(params, peers...)
+		if f.PeerAfter > 0 {
+			branch = "(" + branch + " AND seq > ?)"
+			params = append(params, f.PeerAfter)
+		}
+		branches = append(branches, branch)
 	}
+	if readers := f.readerAddresses(); len(readers) > 0 {
+		branches = append(branches, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(readers))+"))")
+		params = append(params, readers...)
+	}
+	clauses := []string{"(" + strings.Join(branches, " OR ") + ")"}
 	if f.Origin != "" {
 		clauses = append(clauses, "origin = ?")
 		params = append(params, f.Origin)
@@ -118,11 +127,15 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	return strings.Join(clauses, " AND "), params
 }
 
-func (f Filter) crossAddresses(self string) []any {
-	var out []any
-	if f.Peer != "" {
-		out = append(out, PeerAddress(f.Peer), PeerAddressOn(self, f.Peer))
+func (f Filter) peerAddresses(self string) []any {
+	if f.Peer == "" {
+		return nil
 	}
+	return []any{PeerAddress(f.Peer), PeerAddressOn(self, f.Peer)}
+}
+
+func (f Filter) readerAddresses() []any {
+	var out []any
 	reader := f.To
 	if reader == "" {
 		reader = f.For
@@ -248,6 +261,16 @@ ON CONFLICT (name, drive) DO UPDATE SET seq = MAX(seq, excluded.seq)`, name, dri
 		return fmt.Errorf("write cursor %s: %w", name, err)
 	}
 	return nil
+}
+
+// CursorPeak is the furthest seq cursor name reached in any drive: every
+// peer:<session> record at or before it was already delivered to its reader.
+func (s *Store) CursorPeak(ctx context.Context, name string) (int64, error) {
+	var seq int64
+	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM cursors WHERE name = ?", name).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("read cursor %s peak: %w", name, err)
+	}
+	return seq, nil
 }
 
 // MoveCursor sets a cursor to seq exactly, backwards included, so a reader

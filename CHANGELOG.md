@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The `PostToolUse` hook no longer redelivers a `peer:<session>` record after
+  the lane's session posts on another drive. Each drive keeps its own lane
+  cursor, and a fresh one starts at the session's start, so every peer record
+  since then came back in pages of three, once per newly used drive. A read
+  now skips peer records at or before the furthest position the reader's
+  cursor reached in any drive.
+
 ## [0.20.0] - 2026-10-13
 
 ### Changed

@@ -46,6 +46,11 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		if !ok {
 			f.Since = st.Now().Add(-FreshCursor)
 		}
+		if f.Peer != "" {
+			if f.PeerAfter, err = st.CursorPeak(ctx, opts.Cursor); err != nil {
+				return TailResult{}, err
+			}
+		}
 	}
 	f.Limit = pageRows
 	if opts.Limit > 0 {
