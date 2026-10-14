@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci drive use` works from a Codex session. With `CLAUDE_CODE_SESSION_ID`
+  unset, the session is `CODEX_THREAD_ID`, the key `cci announce` already
+  used for Codex lanes, so the binding holds and later `post`, `tail`,
+  `watch` and `digest` calls resolve the drive and default cursor without
+  `--drive`. Before, it refused with `CLAUDE_CODE_SESSION_ID is not set`.
+
 ## [0.20.1] - 2026-10-13
 
 ### Fixed

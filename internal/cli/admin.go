@@ -2,7 +2,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -81,7 +80,7 @@ func newDriveCmd() *cobra.Command {
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			self := selfPeer()
 			if self.Session == "" {
-				return errors.New(sessionEnv + " is not set; run this from a Claude Code session")
+				return errNoPeerSession
 			}
 			if err := st.Bind(cmd.Context(), self, args[0], root); err != nil {
 				return err

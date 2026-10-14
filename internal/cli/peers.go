@@ -19,8 +19,6 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const codexSessionEnv = "CODEX_THREAD_ID"
-
 func newAnnounceCmd() *cobra.Command {
 	var (
 		role, description string
@@ -168,10 +166,7 @@ func announceSelf(ctx context.Context, st *store.Store) error {
 func peerIdentity() (store.PeerKey, store.Window, error) {
 	self := selfPeer()
 	if self.Session == "" {
-		self.Session = os.Getenv(codexSessionEnv)
-	}
-	if self.Session == "" {
-		return store.PeerKey{}, store.Window{}, errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
+		return store.PeerKey{}, store.Window{}, errNoPeerSession
 	}
 	window, err := thisWindow()
 	if !errors.Is(err, errNoSession) {
