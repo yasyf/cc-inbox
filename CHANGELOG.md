@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `GET /v1/records` and the `--json` reads (`cci tail`, `watch` and `grep`)
+  work out each record's `status` from the openers on the page. Before, every
+  call loaded every opener each of the page's drives had ever held and matched
+  each one against every closer, so the work grew with the drive's history,
+  not the page. Now only the page's tracked openers are matched, against
+  their drive's closers and resolvers read fresh on each call, and a drive
+  whose page records open nothing tracked is skipped. Every `status` value is
+  unchanged.
+
 ## [0.20.4] - 2026-10-15
 
 ### Fixed

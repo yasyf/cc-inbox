@@ -23,11 +23,9 @@ func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, err
 	return s.open(ctx, drive, func(r Record) bool { return r.Kind == kinds.Hold && !r.Tracked() })
 }
 
-func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
-	openers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Openers(), IncludeExpired: true})
-	if err != nil {
-		return nil, err
-	}
+// Unclosed returns, in order, the openers no closer or resolver has closed.
+// Every opener must sit in drive, whose closers and resolvers it reads fresh.
+func (s *Store) Unclosed(ctx context.Context, drive string, openers []Record) ([]Record, error) {
 	closers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Closers(), IncludeExpired: true})
 	if err != nil {
 		return nil, err
@@ -38,9 +36,6 @@ func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) 
 	}
 	var open []Record
 	for _, o := range openers {
-		if !keep(o) {
-			continue
-		}
 		if by, ok := resolved[o.Seq]; ok && by > o.Seq {
 			continue
 		}
@@ -49,6 +44,14 @@ func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) 
 		}
 	}
 	return open, nil
+}
+
+func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
+	openers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Openers(), IncludeExpired: true})
+	if err != nil {
+		return nil, err
+	}
+	return s.Unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !keep(o) }))
 }
 
 func closed(opener Record, closers []Record) bool {
