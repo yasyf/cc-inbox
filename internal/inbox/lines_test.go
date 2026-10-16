@@ -179,7 +179,7 @@ func TestAnnotateReadsNoOpenerOffThePage(t *testing.T) {
 			}
 		}
 	}
-	testutil.Post(t, st, store.Record{Drive: "a", Kind: kinds.Ask, Text: "page ask", To: []string{"reader"}})
+	pageAsk := testutil.Post(t, st, store.Record{Drive: "a", Kind: kinds.Ask, Text: "page ask", To: []string{"reader"}})
 	testutil.Post(t, st, store.Record{Drive: "a", Kind: kinds.Hold, Text: "page hold", Topic: "#p", To: []string{"reader"}})
 	testutil.Post(t, st, store.Record{Drive: "a", Lane: "root", Kind: kinds.Lift, Text: "lift the page hold", Topic: "#p"})
 	testutil.Post(t, st, store.Record{Drive: "c", Kind: kinds.State, Text: "state on c for the reader", To: []string{"reader@a"}})
@@ -212,6 +212,104 @@ func TestAnnotateReadsNoOpenerOffThePage(t *testing.T) {
 		if _, err := st.OpenItems(ctx, drive); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("decode refs of #%d", first[drive])) {
 			t.Errorf("OpenItems(%s) = %v; want the full-history read to fail on poisoned #%d", drive, err, first[drive])
 		}
+	}
+	if _, err := db.ExecContext(ctx, "UPDATE records SET refs = '{' WHERE seq = ?", pageAsk.Seq); err != nil {
+		t.Fatal(err)
+	}
+	if err := inbox.Annotate(ctx, st, page); err == nil || !strings.Contains(err.Error(), fmt.Sprintf("decode refs of #%d", pageAsk.Seq)) {
+		t.Errorf("Annotate() = %v; want the reread of page opener #%d to fail on its poisoned refs", err, pageAsk.Seq)
+	}
+}
+
+func TestAnnotateRereadsARetainedPage(t *testing.T) {
+	ctx := context.Background()
+	ingest := func(t *testing.T, st *store.Store, refs store.Refs) store.Ingestion {
+		t.Helper()
+		defect := store.Ingestion{Record: store.Record{Drive: "d", Lane: "importer", Kind: kinds.Defect, At: st.Now(), Text: "imported defect", Refs: refs, Source: "import:/inbox/d.md"}, LineHash: "defect"}
+		if _, err := st.IngestAll(ctx, []store.Ingestion{defect}); err != nil {
+			t.Fatal(err)
+		}
+		return defect
+	}
+	reparse := func(t *testing.T, st *store.Store, defect store.Ingestion) {
+		t.Helper()
+		if updated, _, err := st.Reparse(ctx, []store.Ingestion{defect}, false); err != nil || updated != 1 {
+			t.Fatalf("Reparse() = %d, %v; want one record updated in place", updated, err)
+		}
+	}
+	fixLive := func(t *testing.T, st *store.Store, stack string) {
+		t.Helper()
+		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.FixLive, Text: "fix live on " + stack, Refs: store.Refs{Stacks: []string{stack}}})
+	}
+	for _, tt := range []struct {
+		name  string
+		setup func(t *testing.T, st *store.Store, clock *testutil.Clock) func()
+		want  string
+	}{
+		{"a reparse onto a fixed stack", func(t *testing.T, st *store.Store, _ *testutil.Clock) func() {
+			defect := ingest(t, st, store.Refs{Stacks: []string{"old/prod"}})
+			fixLive(t, st, "new/prod")
+			return func() {
+				defect.Record.Refs.Stacks = []string{"new/prod"}
+				reparse(t, st, defect)
+			}
+		}, "defect:closed fix-live:"},
+		{"a reparse off a fixed stack", func(t *testing.T, st *store.Store, _ *testutil.Clock) func() {
+			defect := ingest(t, st, store.Refs{Stacks: []string{"new/prod"}})
+			fixLive(t, st, "new/prod")
+			return func() {
+				defect.Record.Refs.Stacks = []string{"old/prod"}
+				reparse(t, st, defect)
+			}
+		}, "defect:open fix-live:"},
+		{"a reparse out of tracking", func(t *testing.T, st *store.Store, _ *testutil.Clock) func() {
+			defect := ingest(t, st, store.Refs{Stacks: []string{"old/prod"}})
+			return func() {
+				defect.Record.Refs = store.Refs{}
+				reparse(t, st, defect)
+			}
+		}, "defect:closed"},
+		{"a reparse out of the opener kinds", func(t *testing.T, st *store.Store, _ *testutil.Clock) func() {
+			defect := ingest(t, st, store.Refs{Stacks: []string{"old/prod"}})
+			return func() {
+				defect.Record.Kind = kinds.State
+				reparse(t, st, defect)
+			}
+		}, "defect:closed"},
+		{"a compaction folding the opener and its closer", func(t *testing.T, st *store.Store, clock *testutil.Clock) func() {
+			ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "ask answered before compaction"})
+			testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Answer, Text: "answer before compaction", Re: ask.Seq})
+			return func() {
+				clock.Advance(72 * time.Hour)
+				if res, err := st.Compact(ctx, "d", 48*time.Hour); err != nil || res != (store.CompactResult{Folded: 2, Digests: 1}) {
+					t.Fatalf("Compact() = %+v, %v; want the ask and its answer folded into one digest", res, err)
+				}
+			}
+		}, "ask:closed answer:"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			st, clock := testutil.Store(t)
+			mutate := tt.setup(t, st, clock)
+			page, err := st.Query(ctx, store.Filter{Drive: "d", IncludeExpired: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			mutate()
+			want := fullHistoryAnnotation(t, st, page)
+			if err := inbox.Annotate(ctx, st, page); err != nil {
+				t.Fatal(err)
+			}
+			got := make([]string, 0, len(page))
+			for i, r := range page {
+				got = append(got, fmt.Sprintf("%s:%s", r.Kind, r.Status))
+				if render.JSON(r) != render.JSON(want[i]) {
+					t.Errorf("annotated #%d = %s, want %s", r.Seq, render.JSON(r), render.JSON(want[i]))
+				}
+			}
+			if strings.Join(got, " ") != tt.want {
+				t.Fatalf("page = %v, want %s", got, tt.want)
+			}
+		})
 	}
 }
 

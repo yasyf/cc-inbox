@@ -22,15 +22,15 @@ var replyMarks = map[kinds.Kind]string{
 }
 
 func Annotate(ctx context.Context, st *store.Store, records []store.Record) error {
-	tracked := map[string][]store.Record{}
+	tracked := map[string][]int64{}
 	for _, r := range records {
 		if r.Kind.Opens() && r.Tracked() {
-			tracked[r.Drive] = append(tracked[r.Drive], r)
+			tracked[r.Drive] = append(tracked[r.Drive], r.Seq)
 		}
 	}
 	live := map[int64]bool{}
 	for _, drive := range slices.Sorted(maps.Keys(tracked)) {
-		open, err := st.Unclosed(ctx, drive, tracked[drive])
+		open, err := st.OpenAmong(ctx, drive, tracked[drive])
 		if err != nil {
 			return err
 		}
