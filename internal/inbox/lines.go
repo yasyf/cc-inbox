@@ -3,6 +3,7 @@ package inbox
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -21,17 +22,15 @@ var replyMarks = map[kinds.Kind]string{
 }
 
 func Annotate(ctx context.Context, st *store.Store, records []store.Record) error {
-	if !slices.ContainsFunc(records, func(r store.Record) bool { return r.Kind.Opens() }) {
-		return nil
+	tracked := map[string][]int64{}
+	for _, r := range records {
+		if r.Kind.Opens() && r.Tracked() {
+			tracked[r.Drive] = append(tracked[r.Drive], r.Seq)
+		}
 	}
 	live := map[int64]bool{}
-	seen := map[string]bool{}
-	for _, r := range records {
-		if seen[r.Drive] {
-			continue
-		}
-		seen[r.Drive] = true
-		open, err := st.OpenItems(ctx, r.Drive)
+	for _, drive := range slices.Sorted(maps.Keys(tracked)) {
+		open, err := st.OpenAmong(ctx, drive, tracked[drive])
 		if err != nil {
 			return err
 		}

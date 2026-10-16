@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.5] - 2026-10-16
+
+### Fixed
+
+- `GET /v1/records` and the `--json` reads (`cci tail`, `watch` and `grep`)
+  work out each record's `status` from the openers on the page. Before, every
+  call loaded every opener each of the page's drives had ever held and matched
+  each one against every closer, so the work grew with the drive's history,
+  not the page. Now each call rereads only the page's tracked openers by seq
+  and matches them against their drive's closers and resolvers, all read
+  fresh, and a drive whose page records open nothing tracked is skipped. An
+  opener reparsed or compacted after the page was read gets the same `status`
+  as before. A malformed opener elsewhere in the drive's history no longer
+  fails the page.
+
 ## [0.20.4] - 2026-10-15
 
 ### Fixed
@@ -652,7 +667,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.20.4...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.20.5...HEAD
+[0.20.5]: https://github.com/yasyf/cc-inbox/compare/v0.20.4...v0.20.5
 [0.20.4]: https://github.com/yasyf/cc-inbox/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/yasyf/cc-inbox/compare/v0.20.2...v0.20.3
 [0.20.2]: https://github.com/yasyf/cc-inbox/compare/v0.20.1...v0.20.2

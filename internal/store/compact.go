@@ -23,11 +23,45 @@ func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, err
 	return s.open(ctx, drive, func(r Record) bool { return r.Kind == kinds.Hold && !r.Tracked() })
 }
 
-func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
-	openers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Openers(), IncludeExpired: true})
+// OpenAmong returns, in seq order, the tracked openers among seqs that sit in
+// drive and that no closer or resolver has closed. It rereads those openers
+// and the drive's closers and resolvers, so a seq that a reparse took out of
+// the opener kinds or out of tracking, or that compaction folded, is not
+// returned. seqs travels as one JSON array parameter, so its length is not
+// bounded by SQLite's limit on bound variables.
+func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
+	openers, err := s.openersAmong(ctx, drive, seqs)
 	if err != nil {
 		return nil, err
 	}
+	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() }))
+}
+
+func (s *Store) openersAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
+	openers := kinds.Openers()
+	ids, _ := json.Marshal(seqs)
+	params := make([]any, 0, 2+len(openers))
+	params = append(params, drive, string(ids))
+	for _, k := range openers {
+		params = append(params, string(k))
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE drive = ? AND seq IN (SELECT value FROM json_each(?)) AND kind IN ("+placeholders(len(openers))+") ORDER BY seq", params...)
+	if err != nil {
+		return nil, fmt.Errorf("read openers: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Record
+	for rows.Next() {
+		r, err := s.scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([]Record, error) {
 	closers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Closers(), IncludeExpired: true})
 	if err != nil {
 		return nil, err
@@ -38,9 +72,6 @@ func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) 
 	}
 	var open []Record
 	for _, o := range openers {
-		if !keep(o) {
-			continue
-		}
 		if by, ok := resolved[o.Seq]; ok && by > o.Seq {
 			continue
 		}
@@ -49,6 +80,14 @@ func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) 
 		}
 	}
 	return open, nil
+}
+
+func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
+	openers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Openers(), IncludeExpired: true})
+	if err != nil {
+		return nil, err
+	}
+	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !keep(o) }))
 }
 
 func closed(opener Record, closers []Record) bool {
