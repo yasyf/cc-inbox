@@ -99,7 +99,7 @@ func newPostCmd() *cobra.Command {
 					r.Fields.Counts[key] = n
 				}
 			}
-			if r.To, err = resolveRecipients(cmd.Context(), st, r.To); err != nil {
+			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
 			got, dup, err := st.PostAt(cmd.Context(), r, ttl, at)
@@ -124,12 +124,12 @@ func newPostCmd() *cobra.Command {
 		}),
 	}
 	f := cmd.Flags()
-	f.StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
+	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (required)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first line; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")

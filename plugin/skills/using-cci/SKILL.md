@@ -138,7 +138,9 @@ records after compaction. Both reads use a 400-character width, with a
 2,500-byte digest budget and 1,500-byte tail budget.
 
 A lane needs no reader setup: its first `cci post --lane <lane>` binds the
-session, and from then on every record addressed to the lane, whatever its
+session, and later posts keep that drive: `--drive` on a post or cursor
+applies to that one call, and only `cci drive use` moves the binding. From
+then on every record addressed to the lane, whatever its
 kind, arrives as hook context after the next tool call, including records
 posted since the window started. A `stopped`, `hold`, or `owner` record
 addressed to you lands mid-task; act on it before your next edit.
@@ -296,7 +298,11 @@ same query at `GET /v1/peers`.
 `--to` reaches across drives in two forms. `peer:<session prefix or name>`
 resolves to one session at post time and fails when the prefix matches
 none or several. `<lane>@<drive>` reaches a lane in a named drive, with
-`root@<drive>` and `main@<drive>` both reaching that drive's root.
+`root@<drive>` and `main@<drive>` both reaching that drive's root. A bare
+lane that no live thread reads in the posting drive, but one reads in exactly
+one other drive, is addressed `<lane>@<that drive>` and the post says so on
+stderr; when live threads read it in several other drives, the post fails and
+names them.
 
 ```bash
 cci post --lane root --kind ask --to peer:900424b6 "can you take #34363?"

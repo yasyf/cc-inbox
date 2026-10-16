@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 func run(t *testing.T, args ...string) (string, error) {
@@ -616,6 +618,57 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	}
 	if out, err = run(t, "state"); err != nil || !strings.Contains(out, "no head, contract, or state") {
 		t.Fatalf("state = %q, %v", out, err)
+	}
+}
+
+func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
+	if _, err := run(t, "drive", "use", "drive-a", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range []struct{ session, drive, lane string }{
+		{"bbbb2222-owner", "drive-b", "release-owner-4"},
+		{"bbbb2222-desk", "drive-b", "desk"},
+		{"aaaa1111-desk", "drive-a", "desk"},
+		{"bbbb2222-walker", "drive-b", "walker"},
+		{"cccc3333-walker", "drive-c", "walker"},
+		{"bbbb2222-root", "drive-b", "root"},
+	} {
+		k := store.PeerKey{Session: b.session, Agent: "a" + b.lane}
+		if err := st.BindLane(ctx, k, b.drive, b.lane, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
+	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#1\n" {
+		t.Fatalf("post to a lane reading another drive = %q, %v", out, err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "walker", "--text", "x"); err == nil || !strings.Contains(err.Error(), "read drive-b, drive-c; address one as walker@<drive>") {
+		t.Fatalf("post to a lane live in two other drives: %v", err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-owner")
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "release-owner-4"); err != nil || !strings.Contains(out, "GO root -> release-owner-4@drive-b,desk,root,nobody GO promote") || strings.Count(out, "\n") != 1 {
+		t.Fatalf("drive-b reader release-owner-4 = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "desk"); err != nil || out != "" {
+		t.Fatalf("drive-b reader desk got a record addressed to drive-a's desk: %q, %v", out, err)
 	}
 }
 

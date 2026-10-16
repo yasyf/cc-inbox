@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -381,36 +383,79 @@ func newUnclaimCmd() *cobra.Command {
 	return cmd
 }
 
-func resolveRecipients(ctx context.Context, st *store.Store, to []string) ([]string, error) {
+func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []string, notices io.Writer) ([]string, error) {
 	out := make([]string, len(to))
+	var reading map[string][]string
 	for i, t := range to {
-		target, ok := strings.CutPrefix(t, "peer:")
-		if !ok {
+		var err error
+		switch target, ok := strings.CutPrefix(t, "peer:"); {
+		case ok:
+			out[i], err = resolvePeer(ctx, st, t, target)
+		case strings.Contains(t, "@") || store.RootName(t):
 			out[i] = t
-			continue
-		}
-		origin, rest := store.SplitPeer(target)
-		if origin == "" || origin == st.Self() {
-			origin = peers.LocalOrigin
-		}
-		session, agent, _ := strings.Cut(rest, "/")
-		v, err := peers.One(ctx, st, peers.Filter{Origin: origin, Session: session, Agent: agent, Root: agent == "", All: true})
-		if errors.Is(err, sql.ErrNoRows) {
-			v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Name: session, Root: true, All: true})
-			if err == nil && agent != "" {
-				v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Session: v.Session, Agent: agent, All: true})
+		default:
+			if reading == nil {
+				reading, err = laneDrives(ctx, st)
+			}
+			if err == nil {
+				out[i], err = routeLane(t, drive, reading[t], notices)
 			}
 		}
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("--to %s: no session has that id prefix or name, or no agent of it that id or name; cci who --all lists them", t)
-		}
 		if err != nil {
-			return nil, fmt.Errorf("--to %s: %w", t, err)
-		}
-		out[i] = store.PeerAddress(v.Key().String())
-		if v.Origin != "" {
-			out[i] = store.PeerAddressOn(v.Origin, v.Key().String())
+			return nil, err
 		}
 	}
 	return out, nil
+}
+
+func resolvePeer(ctx context.Context, st *store.Store, t, target string) (string, error) {
+	origin, rest := store.SplitPeer(target)
+	if origin == "" || origin == st.Self() {
+		origin = peers.LocalOrigin
+	}
+	session, agent, _ := strings.Cut(rest, "/")
+	v, err := peers.One(ctx, st, peers.Filter{Origin: origin, Session: session, Agent: agent, Root: agent == "", All: true})
+	if errors.Is(err, sql.ErrNoRows) {
+		v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Name: session, Root: true, All: true})
+		if err == nil && agent != "" {
+			v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Session: v.Session, Agent: agent, All: true})
+		}
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("--to %s: no session has that id prefix or name, or no agent of it that id or name; cci who --all lists them", t)
+	}
+	if err != nil {
+		return "", fmt.Errorf("--to %s: %w", t, err)
+	}
+	if v.Origin != "" {
+		return store.PeerAddressOn(v.Origin, v.Key().String()), nil
+	}
+	return store.PeerAddress(v.Key().String()), nil
+}
+
+func laneDrives(ctx context.Context, st *store.Store) (map[string][]string, error) {
+	views, err := peers.Resolve(ctx, st, peers.Filter{Origin: peers.LocalOrigin})
+	if err != nil {
+		return nil, err
+	}
+	out := map[string][]string{}
+	for _, v := range views {
+		if v.Lane != "" && v.Drive != "" && !slices.Contains(out[v.Lane], v.Drive) {
+			out[v.Lane] = append(out[v.Lane], v.Drive)
+		}
+	}
+	return out, nil
+}
+
+func routeLane(lane, drive string, reading []string, notices io.Writer) (string, error) {
+	switch {
+	case len(reading) == 0 || slices.Contains(reading, drive):
+		return lane, nil
+	case len(reading) > 1:
+		slices.Sort(reading)
+		return "", fmt.Errorf("--to %s: no live %s reads drive %s, and the live ones read %s; address one as %s@<drive>", lane, lane, drive, strings.Join(reading, ", "), lane)
+	}
+	addr := lane + "@" + reading[0]
+	_, err := fmt.Fprintf(notices, "cci: --to %s: %s reads drive %s, not %s; addressed %s\n", lane, lane, reading[0], drive, addr)
+	return addr, err
 }
