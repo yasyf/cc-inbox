@@ -124,7 +124,7 @@ func TestAnnotateMatchesFullHistoryAnnotation(t *testing.T) {
 			if len(page) != tt.size {
 				t.Fatalf("page holds %d records, want %d", len(page), tt.size)
 			}
-			want := fullHistoryAnnotation(t, st, page)
+			want := fullHistoryAnnotation(ctx, t, st, page)
 			if err := inbox.Annotate(ctx, st, page); err != nil {
 				t.Fatal(err)
 			}
@@ -140,11 +140,11 @@ func TestAnnotateMatchesFullHistoryAnnotation(t *testing.T) {
 	}
 }
 
-func fullHistoryAnnotation(t *testing.T, st *store.Store, page []store.Record) []store.Record {
+func fullHistoryAnnotation(ctx context.Context, t *testing.T, st *store.Store, page []store.Record) []store.Record {
 	t.Helper()
 	open := map[int64]bool{}
 	for _, r := range page {
-		items, err := st.OpenItems(context.Background(), r.Drive)
+		items, err := st.OpenItems(ctx, r.Drive)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -295,7 +295,7 @@ func TestAnnotateRereadsARetainedPage(t *testing.T) {
 				t.Fatal(err)
 			}
 			mutate()
-			want := fullHistoryAnnotation(t, st, page)
+			want := fullHistoryAnnotation(ctx, t, st, page)
 			if err := inbox.Annotate(ctx, st, page); err != nil {
 				t.Fatal(err)
 			}
