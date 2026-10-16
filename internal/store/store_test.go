@@ -340,6 +340,31 @@ func TestBindingSurvivesReopen(t *testing.T) {
 	}
 }
 
+func TestBindLaneNeverMovesABoundDrive(t *testing.T) {
+	st, clock := open(t)
+	ctx := context.Background()
+	k := store.PeerKey{Session: "s", Agent: "a-owner"}
+	if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent}); err != nil {
+		t.Fatal(err)
+	}
+	for _, step := range []struct {
+		bind func() error
+		want store.Binding
+	}{
+		{func() error { return st.BindLane(ctx, k, "a", "owner", clock.Now()) }, store.Binding{Drive: "a", Lane: "owner"}},
+		{func() error { return st.BindLane(ctx, k, "b", "owner", clock.Now()) }, store.Binding{Drive: "a", Lane: "owner"}},
+		{func() error { return st.Bind(ctx, k, "b", false) }, store.Binding{Drive: "b"}},
+		{func() error { return st.BindLane(ctx, k, "b", "owner", clock.Now()) }, store.Binding{Drive: "b", Lane: "owner"}},
+	} {
+		if err := step.bind(); err != nil {
+			t.Fatal(err)
+		}
+		if b, ok, err := st.Binding(ctx, k); err != nil || !ok || b != step.want {
+			t.Fatalf("Binding() = %+v %v %v; want %+v", b, ok, err, step.want)
+		}
+	}
+}
+
 func TestDeploymentRefsCloseOnlyMatchingLaterBlocks(t *testing.T) {
 	st, c := open(t)
 	ctx := context.Background()

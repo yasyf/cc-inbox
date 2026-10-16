@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A record addressed to a bare lane that reads another drive now reaches it.
+  `cci post --to <lane>` checks the live threads on this node. When none
+  writes as that lane in the posting drive and one does in exactly one other
+  drive, the recipient becomes `<lane>@<that drive>` and the post says so on
+  stderr. That lane's `tail --reader`, `watch`, `subscribe` and hook reads
+  already deliver `<lane>@<drive>`. When live threads read it in several other
+  drives, the post fails and names them. Before, a GO posted on one drive to a
+  lane bound to another sat unread until someone grepped for it.
+- `cci post --drive` no longer moves the session's drive binding. A lane that
+  posted once with `--drive` on another drive had every later bare post land
+  there. The binding moves only through `cci drive use`; a session with no
+  binding still binds on its first post.
+
 ## [0.20.2] - 2026-10-14
 
 ### Fixed

@@ -303,6 +303,9 @@ func TestLaneRebindToAnotherDriveSkipsDeliveredPeerRecords(t *testing.T) {
 	if got := out.String(); !strings.Contains(got, "peer go") || strings.Contains(got, "hold on b") {
 		t.Fatalf("drive a delivery = %q", got)
 	}
+	if err := st.Bind(ctx, k, "b", false); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.BindLane(ctx, k, "b", "api", started); err != nil {
 		t.Fatal(err)
 	}
