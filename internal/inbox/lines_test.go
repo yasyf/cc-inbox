@@ -237,9 +237,18 @@ func TestAnnotateRereadsARetainedPage(t *testing.T) {
 			t.Fatalf("Reparse() = %d, %v; want one record updated in place", updated, err)
 		}
 	}
+	post := func(t *testing.T, st *store.Store, r store.Record) store.Record {
+		t.Helper()
+		r.Drive = "d"
+		got, _, err := st.Post(ctx, r, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
 	fixLive := func(t *testing.T, st *store.Store, stack string) {
 		t.Helper()
-		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.FixLive, Text: "fix live on " + stack, Refs: store.Refs{Stacks: []string{stack}}})
+		post(t, st, store.Record{Lane: "root", Kind: kinds.FixLive, Text: "fix live on " + stack, Refs: store.Refs{Stacks: []string{stack}}})
 	}
 	for _, tt := range []struct {
 		name  string
@@ -277,8 +286,8 @@ func TestAnnotateRereadsARetainedPage(t *testing.T) {
 			}
 		}, "defect:closed"},
 		{"a compaction folding the opener and its closer", func(t *testing.T, st *store.Store, clock *testutil.Clock) func() {
-			ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "ask answered before compaction"})
-			testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Answer, Text: "answer before compaction", Re: ask.Seq})
+			ask := post(t, st, store.Record{Lane: "lane-a", Kind: kinds.Ask, Text: "ask answered before compaction"})
+			post(t, st, store.Record{Lane: "root", Kind: kinds.Answer, Text: "answer before compaction", Re: ask.Seq})
 			return func() {
 				clock.Advance(72 * time.Hour)
 				if res, err := st.Compact(ctx, "d", 48*time.Hour); err != nil || res != (store.CompactResult{Folded: 2, Digests: 1}) {
@@ -287,8 +296,8 @@ func TestAnnotateRereadsARetainedPage(t *testing.T) {
 			}
 		}, "ask:closed answer:"},
 	} {
+		st, clock := testutil.Store(t)
 		t.Run(tt.name, func(t *testing.T) {
-			st, clock := testutil.Store(t)
 			mutate := tt.setup(t, st, clock)
 			page, err := st.Query(ctx, store.Filter{Drive: "d", IncludeExpired: true})
 			if err != nil {
@@ -354,6 +363,50 @@ func TestAnnotateSeesNewClosersAndReparses(t *testing.T) {
 		}
 		if strings.Join(got, " ") != step.want {
 			t.Fatalf("%s: page = %v, want %s", step.name, got, step.want)
+		}
+	}
+}
+
+func TestAnnotateTakesAPageWiderThanSQLiteBinds(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "open ask"})
+	answered := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "answered ask"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Answer, Text: "answer", Re: answered.Seq})
+	stored, err := st.Query(ctx, store.Filter{Drive: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fullHistoryAnnotation(ctx, t, st, stored)
+	page := slices.Clone(stored)
+	last := stored[len(stored)-1].Seq
+	for i := range testutil.VariableLimit(ctx, t, st) + 1 {
+		r := stored[0]
+		if i%2 == 1 {
+			r.Seq = last + int64(i)
+		}
+		page = append(page, r)
+	}
+	if err := inbox.Annotate(ctx, st, page); err != nil {
+		t.Fatalf("Annotate(%d records) = %v; want no limit on the page's width", len(page), err)
+	}
+	got := make([]string, 0, len(stored))
+	for i, r := range page[:len(stored)] {
+		got = append(got, fmt.Sprintf("%s:%s", r.Kind, r.Status))
+		if render.JSON(r) != render.JSON(want[i]) {
+			t.Errorf("annotated #%d = %s, want %s", r.Seq, render.JSON(r), render.JSON(want[i]))
+		}
+	}
+	if strings.Join(got, " ") != "ask:open ask:closed answer:" {
+		t.Fatalf("page = %v, want ask:open ask:closed answer:", got)
+	}
+	for i, r := range page[len(stored):] {
+		status := "open"
+		if i%2 == 1 {
+			status = "closed"
+		}
+		if r.Status != status {
+			t.Fatalf("widened record %d #%d status = %q, want %q", i, r.Seq, r.Status, status)
 		}
 	}
 }

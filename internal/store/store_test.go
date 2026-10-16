@@ -281,6 +281,26 @@ func TestOpenItems(t *testing.T) {
 	}
 }
 
+func TestOpenAmongTakesMoreSeqsThanSQLiteBinds(t *testing.T) {
+	st, _ := open(t)
+	ctx := context.Background()
+	ask := post(t, st, store.Record{Kind: kinds.Ask, Text: "the one tracked opener"})
+	seqs := make([]int64, testutil.VariableLimit(ctx, t, st)+1)
+	for i := range seqs {
+		seqs[i] = ask.Seq
+		if i%2 == 1 {
+			seqs[i] += int64(i)
+		}
+	}
+	got, err := st.OpenAmong(ctx, "d", seqs)
+	if err != nil {
+		t.Fatalf("OpenAmong(%d seqs) = %v; want no limit on how many seqs it takes", len(seqs), err)
+	}
+	if len(got) != 1 || got[0].Seq != ask.Seq || got[0].Text != ask.Text {
+		t.Fatalf("OpenAmong(%d seqs) = %+v; want only the tracked opener #%d", len(seqs), got, ask.Seq)
+	}
+}
+
 func TestCompact(t *testing.T) {
 	st, c := open(t)
 	ctx := context.Background()

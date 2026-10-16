@@ -27,7 +27,8 @@ func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, err
 // drive and that no closer or resolver has closed. It rereads those openers
 // and the drive's closers and resolvers, so a seq that a reparse took out of
 // the opener kinds or out of tracking, or that compaction folded, is not
-// returned.
+// returned. seqs travels as one JSON array parameter, so its length is not
+// bounded by SQLite's limit on bound variables.
 func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
 	openers, err := s.openersAmong(ctx, drive, seqs)
 	if err != nil {
@@ -38,15 +39,13 @@ func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Re
 
 func (s *Store) openersAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
 	openers := kinds.Openers()
-	params := make([]any, 0, 1+len(seqs)+len(openers))
-	params = append(params, drive)
-	for _, seq := range seqs {
-		params = append(params, seq)
-	}
+	ids, _ := json.Marshal(seqs)
+	params := make([]any, 0, 2+len(openers))
+	params = append(params, drive, string(ids))
 	for _, k := range openers {
 		params = append(params, string(k))
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE drive = ? AND seq IN ("+placeholders(len(seqs))+") AND kind IN ("+placeholders(len(openers))+") ORDER BY seq", params...)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE drive = ? AND seq IN (SELECT value FROM json_each(?)) AND kind IN ("+placeholders(len(openers))+") ORDER BY seq", params...)
 	if err != nil {
 		return nil, fmt.Errorf("read openers: %w", err)
 	}
