@@ -2,8 +2,10 @@ package store_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -392,5 +394,56 @@ func TestDeploymentRefsCloseOnlyMatchingLaterBlocks(t *testing.T) {
 	}
 	if want := []string{"native hold", "regression after that fix", "tenant a plan red"}; !slices.Equal(got, want) {
 		t.Fatalf("open = %q, want %q (hold #%d)", got, want, hold.Seq)
+	}
+}
+
+func TestPostRedactsTokens(t *testing.T) {
+	st, _ := open(t)
+	ctx := context.Background()
+	github := "ghs_" + strings.Repeat("Xq7Rt2", 6)
+	buildkite := "bkua_" + strings.Repeat("3f9a0c1e", 5)
+	posted := post(t, st, store.Record{
+		Kind:   kinds.Note,
+		Text:   "clone with https://x-access-token:" + github + "@github.com and BUILDKITE_TOKEN=" + buildkite,
+		Refs:   store.Refs{URL: "https://example.com/?token=" + github},
+		Fields: store.Fields{Attrs: map[string]string{"token": buildkite}},
+		Body:   []byte(`{"auth":"` + github + `"}`),
+	})
+	got, err := st.Get(ctx, posted.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := string(raw)
+	for _, token := range []string{github, buildkite} {
+		if strings.Contains(stored, token) {
+			t.Fatalf("stored record carries %s: %s", token, stored)
+		}
+	}
+	if want := "clone with https://x-access-token:[redacted:github-token]@github.com and BUILDKITE_TOKEN=[redacted:buildkite-token]"; got.Text != want {
+		t.Fatalf("Text = %q, want %q", got.Text, want)
+	}
+	if got.Refs.URL != "https://example.com/?token=[redacted:github-token]" || got.Fields.Attrs["token"] != "[redacted:buildkite-token]" || string(got.Body) != `{"auth":"[redacted:github-token]"}` {
+		t.Fatalf("refs, fields or body unredacted: %s", stored)
+	}
+
+	text, path, err := st.Fit(strings.Repeat("long ", 100) + github + " " + buildkite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{github, buildkite} {
+		if strings.Contains(string(blob), token) || strings.Contains(text, token) {
+			t.Fatalf("blob carries %s: %s", token, blob)
+		}
+	}
+	if !strings.Contains(string(blob), "[redacted:github-token] [redacted:buildkite-token]") {
+		t.Fatalf("blob = %q, want both markers", blob)
 	}
 }

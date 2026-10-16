@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.4] - 2026-10-15
+
+### Fixed
+
+- cci redacts GitHub and Buildkite tokens before it stores a record. Every
+  write (`cci post`, imports, hook posts, and rows replicated from a peer)
+  replaces `ghp_`, `gho_`, `ghs_`, `ghu_`, `ghr_` and `github_pat_` tokens with
+  `[redacted:github-token]`, and `bkua_` tokens with
+  `[redacted:buildkite-token]`. That covers the text, topic, refs, fields and
+  body, and the blob `post` writes for text over 400 characters. Before, a
+  token pasted into a post sat in the store and reached every node the mesh or
+  relay replicated it to.
+
 ## [0.20.3] - 2026-10-15
 
 ### Fixed
@@ -639,7 +652,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.20.3...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.20.4...HEAD
+[0.20.4]: https://github.com/yasyf/cc-inbox/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/yasyf/cc-inbox/compare/v0.20.2...v0.20.3
 [0.20.2]: https://github.com/yasyf/cc-inbox/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/yasyf/cc-inbox/compare/v0.20.0...v0.20.1
