@@ -632,7 +632,7 @@ func reparseArgs(r Record, lineHash string) []any {
 	if t := r.Kind.Spec().TTL; t > 0 {
 		ttl = t.Milliseconds()
 	}
-	return []any{r.Lane, string(r.Kind), r.Text, r.Topic, string(recipients), string(refs), Hash(r), ttl, lineHash}
+	return []any{r.Lane, string(r.Kind), redact(r.Text), redact(r.Topic), string(recipients), redact(string(refs)), Hash(r), ttl, lineHash}
 }
 
 func expiry(r Record, ttl time.Duration) *time.Time {
@@ -689,9 +689,9 @@ func (s *Store) args(r Record, hash string, lineHash *string) []any {
 		id = r.ID
 	}
 	if len(r.Body) > 0 {
-		body = string(r.Body)
+		body = redact(string(r.Body))
 	}
-	return []any{s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), r.Text, r.Topic, string(recipients), r.Re, r.Resolves, string(refs), string(fields), expires, r.Source, hash, line, body}
+	return []any{s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), redact(r.Text), redact(r.Topic), string(recipients), r.Re, r.Resolves, redact(string(refs)), redact(string(fields)), expires, r.Source, hash, line, body}
 }
 
 const columns = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, '')"
@@ -792,6 +792,7 @@ func Clip(text string) string {
 }
 
 func (s *Store) Fit(text string) (string, string, error) {
+	text = redact(text)
 	if utf8.RuneCountInString(text) <= MaxText {
 		return text, "", nil
 	}
