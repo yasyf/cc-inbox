@@ -186,7 +186,7 @@ func TestDigest(t *testing.T) {
 	old := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "stale question"})
 	c.Advance(30 * time.Hour)
 	ask := testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Ask, Text: "which env?"})
-	testutil.Post(t, st, store.Record{Kind: kinds.Hold, Text: "hold #1", Topic: "#1"})
+	testutil.Post(t, st, store.Record{Kind: kinds.Hold, Text: "hold #1", Topic: "#1", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}})
 	testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.State, Text: "green"})
 	v, err := inbox.Digest(context.Background(), st, "d", st.Now().Add(-inbox.DigestWindow))
 	if err != nil {

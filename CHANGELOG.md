@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.6] - 2026-10-16
+
+### Changed
+
+- `cci post` refuses a `hold`, `blocker`, or `blocked` record whose text or
+  topic names `#<number>` without a matching `--pr <number>`. Merge-queue
+  guards bind a hold through the record's pull request refs, so a hold that
+  named its PR only in prose went unseen. The error names each missing
+  `--pr`. A record that names no PR still posts as before.
+
 ## [0.20.5] - 2026-10-16
 
 ### Fixed

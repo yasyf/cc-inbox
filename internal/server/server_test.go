@@ -36,7 +36,7 @@ func get(t *testing.T, srv *httptest.Server, path string, want int, into any) {
 func TestReadEndpoints(t *testing.T) {
 	st, _ := testutil.Store(t)
 	first := testutil.Post(t, st, store.Record{Kind: kinds.Opened, Text: "opened", Refs: store.Refs{PRs: []store.PR{{Number: 30431}}}})
-	testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Hold, Text: "hold", Topic: "#30431"})
+	testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Hold, Text: "hold", Topic: "#30431", Refs: store.Refs{PRs: []store.PR{{Number: 30431}}}})
 	srv := httptest.NewServer(server.New(st, 10*time.Millisecond).Handler())
 	defer srv.Close()
 
