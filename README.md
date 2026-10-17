@@ -666,6 +666,10 @@ delivered it, and fences it against the last change it applied from that node.
 `synckitd host add <user@node>` pins both hosts' node keys once each has run
 `cci node endorse`; `synckitd host
 enroll <user@node>` pins a host that joined the mesh before `cci mesh enable`.
+Two hosts replicate only when their schema fingerprints match. The fingerprint
+covers the store migrations and the change wire format, and `cci mesh enable`
+registers it, so each Mac re-runs `cci mesh enable` after an upgrade that
+changes it.
 
 ## Plugin hooks
 

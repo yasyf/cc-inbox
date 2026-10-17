@@ -1,0 +1,121 @@
+{
+  "node": "0123456789abcdef",
+  "rows": [
+    {
+      "origin": "0123456789abcdef",
+      "origin_seq": 42,
+      "id": "deploy-42",
+      "drive": "page:1",
+      "lane": "ic",
+      "kind": "note",
+      "at": "2026-10-16T05:11:44.123456789Z",
+      "text": "rolled forward",
+      "topic": "deploy",
+      "to": [
+        "root"
+      ],
+      "re": {
+        "origin": "fedcba9876543210",
+        "seq": 7
+      },
+      "resolves": {
+        "origin": "0123456789abcdef",
+        "seq": 41
+      },
+      "refs": {
+        "path": "/work/notes/deploy.md",
+        "ccn": "ccn-3",
+        "url": "https://example.com/runs/9",
+        "board": "board-2",
+        "prs": [
+          61,
+          "yasyf/cc-inbox#79"
+        ],
+        "builds": [
+          "https://example.com/builds/9"
+        ],
+        "stacks": [
+          "yasyf/cci-wire"
+        ],
+        "targets": [
+          "forge"
+        ],
+        "lanes": [
+          "ic"
+        ]
+      },
+      "fields": {
+        "attrs": {
+          "service": "api"
+        },
+        "envs": [
+          "prod"
+        ],
+        "mode": "cli",
+        "outcome": "passed",
+        "commit": "585c82a",
+        "census": {
+          "n": 3,
+          "denominator": 4,
+          "head": "585c82a",
+          "drift": 1,
+          "stacks_clean": [
+            "yasyf/cci-wire"
+          ]
+        },
+        "counts": {
+          "rows": 2
+        }
+      },
+      "expires_at": "2026-10-18T05:11:44.123456789Z",
+      "source": "post",
+      "body": {
+        "detail": "full"
+      }
+    }
+  ],
+  "presence": {
+    "origin": "0123456789abcdef",
+    "at": "2026-10-16T05:11:44.123456789Z",
+    "peers": [
+      {
+        "session": "3785cb11-d400-486b",
+        "agent": "agent-1",
+        "agent_name": "reviewer",
+        "origin": "0123456789abcdef",
+        "drive": "page:1",
+        "root": true,
+        "lane": "ic",
+        "role": "lane",
+        "description": "reviews the wire format",
+        "tags": [
+          "review"
+        ],
+        "cwd": "/work/cc-inbox",
+        "repo": "yasyf/cc-inbox",
+        "worktree": "/work/cci-wire",
+        "branch": "yasyf/cci-wire",
+        "remote": "origin",
+        "pid": 4242,
+        "pid_started": 1760591504,
+        "env": {
+          "TERM": "xterm"
+        },
+        "announced_at": "2026-10-16T05:11:44.123456789Z",
+        "seen_at": "2026-10-16T05:12:44.123456789Z",
+        "superseded": true
+      }
+    ],
+    "claims": [
+      {
+        "session": "3785cb11-d400-486b",
+        "agent": "agent-1",
+        "rel": "opened",
+        "kind": "pr",
+        "key": "79",
+        "at": "2026-10-16T05:11:44.123456789Z",
+        "source": "claim"
+      }
+    ]
+  }
+}

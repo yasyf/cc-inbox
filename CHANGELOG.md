@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The mesh schema fingerprint covers the wire format of a change as well as
+  the store migrations. v0.17.0 started sending repo-qualified pull requests
+  in `refs.prs` as `owner/repo#N` strings and kept the fingerprint, so a peer
+  running an older binary accepted the change and then failed to decode it
+  with `json: cannot unmarshal string into Go struct field Refs.rows.refs.prs
+  of type int`. A peer on another wire format is refused at the fingerprint
+  check instead. Every Mac must run `cci mesh enable` after upgrading, so synckitd
+  registers the new fingerprint. Until both ends of a host pair upgrade, that
+  pair's lane sits in synckit's backoff with the schema-mismatch error; the
+  sender keeps the change staged, so nothing is lost.
+
 ## [0.20.7] - 2026-10-16
 
 ### Changed

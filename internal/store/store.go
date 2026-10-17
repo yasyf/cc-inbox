@@ -29,6 +29,10 @@ const (
 	DedupWindow = 10 * time.Minute
 )
 
+// WireFormat versions the JSON encoding of the rows and presence a mesh change
+// carries; SchemaFingerprint folds it in so a peer encoding them differently is refused.
+const WireFormat = 2
+
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS records (
 	seq INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -324,10 +328,15 @@ func (s *Store) HomeDir() string {
 	return s.home
 }
 
-// SchemaFingerprint names the store schema this binary writes: the hex
-// SHA-256 of its migrations, so two nodes replicate only on the same schema.
+// SchemaFingerprint names the store schema and wire format this binary
+// writes: the hex SHA-256 of its migrations and WireFormat, so two nodes
+// replicate only when both match.
 func (s *Store) SchemaFingerprint() string {
-	sum := sha256.Sum256([]byte(strings.Join(migrations, "\x00")))
+	return fingerprint(migrations, WireFormat)
+}
+
+func fingerprint(migrations []string, wire int) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s\x00wire %d", strings.Join(migrations, "\x00"), wire))
 	return hex.EncodeToString(sum[:])
 }
 
