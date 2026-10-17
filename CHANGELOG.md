@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-17
+
 ### Changed
 
 - The mesh `records` item fires only for `inbox.db` and `inbox.db-wal`.
@@ -718,7 +720,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.20.5...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/yasyf/cc-inbox/compare/v0.20.7...v0.21.0
+[0.20.7]: https://github.com/yasyf/cc-inbox/compare/v0.20.6...v0.20.7
+[0.20.6]: https://github.com/yasyf/cc-inbox/compare/v0.20.5...v0.20.6
 [0.20.5]: https://github.com/yasyf/cc-inbox/compare/v0.20.4...v0.20.5
 [0.20.4]: https://github.com/yasyf/cc-inbox/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/yasyf/cc-inbox/compare/v0.20.2...v0.20.3
