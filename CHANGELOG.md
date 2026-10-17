@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-10-17
+
+### Fixed
+
+- Deciding which asks, decisions, holds, incidents, blockers, and defects are
+  still open no longer checks every opener against every closer. Before, each
+  read compared each opener in the drive with each closer, so one drive with
+  5,277 openers and 7,010 closers ran up to 36,991,770 pair checks per read. A
+  digest from the daemon or the session hook ran two of those reads, one for
+  open items and one for untracked holds, and marking the open records among
+  printed lines ran a third. cci now indexes the drive's closers once per read
+  by the record they reply to, their topic, their stacks, and their targets,
+  and checks each opener only against the closers it shares one of those with.
+  The same records count as open as before.
+
 ## [0.21.0] - 2026-10-17
 
 ### Changed
@@ -720,7 +735,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/yasyf/cc-inbox/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/yasyf/cc-inbox/compare/v0.20.7...v0.21.0
 [0.20.7]: https://github.com/yasyf/cc-inbox/compare/v0.20.6...v0.20.7
 [0.20.6]: https://github.com/yasyf/cc-inbox/compare/v0.20.5...v0.20.6
