@@ -70,12 +70,13 @@ func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([
 	if err != nil {
 		return nil, err
 	}
+	ix := indexClosers(closers)
 	var open []Record
 	for _, o := range openers {
 		if by, ok := resolved[o.Seq]; ok && by > o.Seq {
 			continue
 		}
-		if !closed(o, closers) {
+		if !ix.closed(o) {
 			open = append(open, o)
 		}
 	}
@@ -90,28 +91,113 @@ func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) 
 	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !keep(o) }))
 }
 
-func closed(opener Record, closers []Record) bool {
+type closerIndex struct {
+	byRe              seqBuckets[int64]
+	byTopic           seqBuckets[string]
+	byStack           stampBuckets
+	byTarget          stampBuckets
+	byUnstackedTarget stampBuckets
+}
+
+func indexClosers(closers []Record) closerIndex {
+	ix := closerIndex{
+		byRe:              seqBuckets[int64]{},
+		byTopic:           seqBuckets[string]{},
+		byStack:           stampBuckets{},
+		byTarget:          stampBuckets{},
+		byUnstackedTarget: stampBuckets{},
+	}
 	for _, c := range closers {
-		if c.Seq > opener.Seq && c.Kind.Closes(opener.Kind) && (c.Re == opener.Seq || (c.Topic != "" && c.Topic == opener.Topic)) {
+		ix.byRe.add(c.Re, c)
+		if c.Topic != "" {
+			ix.byTopic.add(c.Topic, c)
+		}
+		for _, stack := range c.Refs.Stacks {
+			ix.byStack.add(stack, c)
+		}
+		for _, target := range c.Refs.Targets {
+			ix.byTarget.add(target, c)
+			if len(c.Refs.Stacks) == 0 {
+				ix.byUnstackedTarget.add(target, c)
+			}
+		}
+	}
+	return ix
+}
+
+func (ix closerIndex) closed(opener Record) bool {
+	if ix.byRe.closes(opener.Seq, opener) || ix.byTopic.closes(opener.Topic, opener) {
+		return true
+	}
+	byTarget := ix.byTarget
+	if len(opener.Refs.Stacks) > 0 {
+		if ix.byStack.closes(opener.Refs.Stacks, opener) {
 			return true
 		}
-		if closesByRef(opener, c) {
+		byTarget = ix.byUnstackedTarget
+	}
+	return byTarget.closes(opener.Refs.Targets, opener)
+}
+
+type seqBuckets[K comparable] map[K]map[kinds.Kind]int64
+
+func (b seqBuckets[K]) add(key K, c Record) {
+	latest, ok := b[key]
+	if !ok {
+		latest = map[kinds.Kind]int64{}
+		b[key] = latest
+	}
+	if seq, ok := latest[c.Kind]; !ok || c.Seq > seq {
+		latest[c.Kind] = c.Seq
+	}
+}
+
+func (b seqBuckets[K]) closes(key K, opener Record) bool {
+	for kind, seq := range b[key] {
+		if seq > opener.Seq && kind.Closes(opener.Kind) {
 			return true
 		}
 	}
 	return false
 }
 
-func closesByRef(opener, c Record) bool {
-	pairs := c.Kind.Closes(opener.Kind) || c.Kind.ClosesByRef() && strings.HasPrefix(opener.Source, "import:")
-	later := c.At.After(opener.At) || c.At.Equal(opener.At) && c.Seq > opener.Seq
-	if !pairs || !later {
-		return false
+type stamp struct {
+	at  time.Time
+	seq int64
+}
+
+func (a stamp) after(b stamp) bool {
+	return a.at.After(b.at) || a.at.Equal(b.at) && a.seq > b.seq
+}
+
+type stampBuckets map[string]map[kinds.Kind]stamp
+
+func (b stampBuckets) add(key string, c Record) {
+	latest, ok := b[key]
+	if !ok {
+		latest = map[kinds.Kind]stamp{}
+		b[key] = latest
 	}
-	if len(opener.Refs.Stacks) > 0 && len(c.Refs.Stacks) > 0 {
-		return slices.ContainsFunc(opener.Refs.Stacks, func(s string) bool { return slices.Contains(c.Refs.Stacks, s) })
+	at := stamp{c.At, c.Seq}
+	if cur, ok := latest[c.Kind]; !ok || at.after(cur) {
+		latest[c.Kind] = at
 	}
-	return slices.ContainsFunc(opener.Refs.Targets, func(t string) bool { return slices.Contains(c.Refs.Targets, t) })
+}
+
+func (b stampBuckets) closes(keys []string, opener Record) bool {
+	since := stamp{opener.At, opener.Seq}
+	for _, key := range keys {
+		for kind, at := range b[key] {
+			if at.after(since) && pairsByRef(kind, opener) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func pairsByRef(kind kinds.Kind, opener Record) bool {
+	return kind.Closes(opener.Kind) || kind.ClosesByRef() && strings.HasPrefix(opener.Source, "import:")
 }
 
 type CompactResult struct {
