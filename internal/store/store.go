@@ -27,6 +27,7 @@ const (
 	MaxText     = 400
 	MaxBody     = 64 << 10
 	DedupWindow = 10 * time.Minute
+	DBFile      = "inbox.db"
 )
 
 // WireFormat versions the JSON encoding of the rows and presence a mesh change
@@ -294,7 +295,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := "file:" + filepath.Join(home, "inbox.db") + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
+	dsn := "file:" + filepath.Join(home, DBFile) + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)

@@ -9,7 +9,7 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/yasyf/cc-interact v0.35.2
 	github.com/yasyf/daemonkit v0.32.3
-	github.com/yasyf/synckit v0.41.1
+	github.com/yasyf/synckit v0.42.0
 	golang.org/x/mod v0.41.0
 	modernc.org/sqlite v1.60.1
 )

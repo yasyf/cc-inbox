@@ -6,8 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-10-17
+
+### Changed
+
+- The mesh `records` item fires only for `inbox.db` and `inbox.db-wal`.
+  Before, synckitd watched the whole cci home recursively, so every blob,
+  subscription, relay, or `mesh/revisions.json` write woke the item and cost
+  a `List` call, and its 30-second sweep listed every file in `blobs`, 9,913
+  on one host. cci now declares the home with synckit's `watch_names`, which
+  synckitd 0.42.0 and newer honor by watching the home without its
+  subdirectories. An older synckitd ignores the field and keeps the recursive
+  watch, so cci and synckitd can upgrade in either order.
+- A first `cci mesh enable` registers a 5s watch debounce instead of 1s.
+
 ### Fixed
 
+- `cci mesh enable` keeps the watch debounce `synckitd` already has registered
+  for `cci`. Before, every run wrote a fresh manifest with a 1s debounce and
+  `synckitd register` replaced the registered copy, so a debounce tuned in
+  `~/.config/synckit/manifests/cci.json` reset to 1s. A registered manifest
+  that fails to load now stops the command instead of being overwritten.
+  Every Mac still runs `cci mesh enable` after upgrading, as the fingerprint
+  entry that follows requires, and that run no longer resets a tuned debounce.
 - The mesh schema fingerprint covers the wire format of a change as well as
   the store migrations. v0.17.0 started sending repo-qualified pull requests
   in `refs.prs` as `owner/repo#N` strings and kept the fingerprint, so a peer
@@ -699,7 +720,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.20.5...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/yasyf/cc-inbox/compare/v0.20.7...v0.21.0
+[0.20.7]: https://github.com/yasyf/cc-inbox/compare/v0.20.6...v0.20.7
+[0.20.6]: https://github.com/yasyf/cc-inbox/compare/v0.20.5...v0.20.6
 [0.20.5]: https://github.com/yasyf/cc-inbox/compare/v0.20.4...v0.20.5
 [0.20.4]: https://github.com/yasyf/cc-inbox/compare/v0.20.3...v0.20.4
 [0.20.3]: https://github.com/yasyf/cc-inbox/compare/v0.20.2...v0.20.3

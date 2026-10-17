@@ -20,13 +20,13 @@ import (
 )
 
 const (
-	debounce          = time.Second
+	DefaultDebounce   = 5 * time.Second
 	helperReadyWithin = 10 * time.Second
 )
 
 var HelperArgs = []string{"mesh", "helper"}
 
-func Manifest(schema string) manifest.Manifest {
+func Manifest(schema string, debounce time.Duration) manifest.Manifest {
 	return manifest.Manifest{
 		Name:    Service,
 		Binary:  Service,
@@ -39,8 +39,8 @@ func ManifestPath(home string) string {
 	return filepath.Join(home, "mesh", Service+".json")
 }
 
-func WriteManifest(home, schema string) (string, error) {
-	m := Manifest(schema)
+func WriteManifest(home, schema string, debounce time.Duration) (string, error) {
+	m := Manifest(schema, debounce)
 	if err := m.Validate(); err != nil {
 		return "", err
 	}
