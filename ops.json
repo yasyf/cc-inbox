@@ -1,1 +1,1 @@
-{"v":1,"lamport":4,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"8cc6169133155bc5430d48f933ae277e","status":"met","note":"mesh.DefaultDebounce = 5s when the registered manifest is absent (#97)"}]}
+{"v":1,"lamport":5,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"2dee5028796ceadfac2be0064f365f05","status":"met","note":"only os.ErrNotExist falls back; any other load error fails enable before staging or register (#97)"}]}
