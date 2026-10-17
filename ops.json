@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"d0d415f75dea9a5d2334baba35bb5e06","status":"met","note":"writeMeshManifest loads hostregistry.RegisteredPath(cci) and reuses Watch.Debounce (#97, e9d7e30)"}]}
+{"v":1,"lamport":4,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"8cc6169133155bc5430d48f933ae277e","status":"met","note":"mesh.DefaultDebounce = 5s when the registered manifest is absent (#97)"}]}
