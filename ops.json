@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"90ed858ce7d54a6f6a42bb03a272149d","status":"met","note":"store.WireFormat = 2 folded into fingerprint (#94, e88c347)"}]}
+{"v":1,"lamport":4,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"ead70fb439a0d00f318c3e895853a4fa","status":"met","note":"internal/mesh/wire_test.go TestWireFormatGolden with bare 61 and yasyf/cc-inbox#79 PR refs, reflect walk over every field"}]}
