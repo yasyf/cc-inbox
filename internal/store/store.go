@@ -414,6 +414,16 @@ func Validate(r Record) error {
 	if spec.NeedsPR && len(r.Refs.PRs) == 0 {
 		return fmt.Errorf("kind %s requires --pr", r.Kind)
 	}
+	if spec.NeedsMentionedPRs {
+		if missing := unboundPRs(r); len(missing) > 0 {
+			named, flags := make([]string, len(missing)), make([]string, len(missing))
+			for i, n := range missing {
+				named[i], flags[i] = fmt.Sprintf("#%d", n), fmt.Sprintf("--pr %d", n)
+			}
+			return fmt.Errorf("%s names %s without --pr: add %s so guards that read the record's pull requests see it (write a record seq without its #)",
+				r.Kind, strings.Join(named, ", "), strings.Join(flags, " "))
+		}
+	}
 	if spec.NeedsRef && r.Re == 0 && r.Topic == "" && r.Resolves == 0 {
 		return fmt.Errorf("kind %s requires --re, --resolves or --topic", r.Kind)
 	}

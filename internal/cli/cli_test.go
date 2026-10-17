@@ -62,7 +62,7 @@ func TestPostTailDigest(t *testing.T) {
 	}{
 		{[]string{"post", "--lane", "landing-desk", "--kind", "opened", "--pr", "30431", "--text", "release: read published versions"}, "#1\n"},
 		{[]string{"post", "--lane", "landing-desk", "--kind", "opened", "--pr", "30431", "--text", "release: read published versions"}, "#1 (duplicate)\n"},
-		{[]string{"post", "--lane", "root", "--kind", "hold", "--topic", "#30431", "--to", "landing-desk", "--text", "hold until the walker reports"}, "#2\n"},
+		{[]string{"post", "--lane", "root", "--kind", "hold", "--topic", "#30431", "--pr", "30431", "--to", "landing-desk", "--text", "hold until the walker reports"}, "#2\n"},
 	}
 	for _, tt := range tests {
 		out, err := run(t, tt.args...)
@@ -85,6 +85,9 @@ func TestPostTailDigest(t *testing.T) {
 	}
 	if _, err = run(t, "post", "--lane", "l", "--kind", "nope", "--text", "x"); err == nil || !strings.Contains(err.Error(), "unknown kind") {
 		t.Fatalf("unknown kind: %v", err)
+	}
+	if _, err = run(t, "post", "--lane", "root", "--kind", "hold", "--text", "HOLD #39489 until the canary clears"); err == nil || !strings.Contains(err.Error(), "add --pr 39489") {
+		t.Fatalf("hold naming an unbound pr: %v", err)
 	}
 	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "#2 ") {
 		t.Fatalf("grep = %q, %v", out, err)

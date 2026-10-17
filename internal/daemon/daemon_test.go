@@ -28,7 +28,7 @@ func TestDaemonServesDigestAndHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "desk", Kind: kinds.Hold, Text: "hold #1", Topic: "#1"}, 0); err != nil {
+	if _, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "desk", Kind: kinds.Hold, Text: "hold #1", Topic: "#1", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}}, 0); err != nil {
 		t.Fatal(err)
 	}
 	_ = st.Close()

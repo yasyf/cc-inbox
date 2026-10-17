@@ -41,6 +41,11 @@ func TestPostValidation(t *testing.T) {
 		{"opened needs pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Opened, Text: "x"}, "requires --pr"},
 		{"answer needs re", store.Record{Drive: "d", Lane: "l", Kind: kinds.Answer, Text: "x"}, "requires --re, --resolves or --topic"},
 		{"digest is internal", store.Record{Drive: "d", Lane: "l", Kind: kinds.Digest, Text: "x"}, "written only by cci"},
+		{"hold names a pr in text", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "HOLD #39489 until the canary clears"}, "hold names #39489 without --pr: add --pr 39489"},
+		{"hold names a pr in topic", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold"}, "add --pr 39489"},
+		{"hold binds only some prs", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold #1 and #2, then #2 again", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}}, "names #2 without --pr: add --pr 2 so"},
+		{"blocker names a pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Blocker, Text: "red lint on yasyf/cc-inbox#93"}, "blocker names #93"},
+		{"blocked names a pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Blocked, Text: "waits on #7 and #8"}, "add --pr 7 --pr 8"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,6 +57,15 @@ func TestPostValidation(t *testing.T) {
 	}
 	if _, _, err := st.Post(context.Background(), store.Record{Drive: "d", Lane: "l", Kind: kinds.Note, Text: strings.Repeat("é", 400)}, 0); err != nil {
 		t.Fatalf("400-rune text rejected: %v", err)
+	}
+	for _, r := range []store.Record{
+		{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold the queue"},
+		{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold #39489", Refs: store.Refs{PRs: []store.PR{{Repo: "Forge-AI/monorepo", Number: 39489}}}},
+		{Drive: "d", Lane: "l", Kind: kinds.Note, Text: "watching #39489"},
+	} {
+		if _, _, err := st.Post(context.Background(), r, 0); err != nil {
+			t.Fatalf("Post(%+v) = %v", r, err)
+		}
 	}
 }
 
@@ -258,7 +272,7 @@ func TestOpenItems(t *testing.T) {
 	ctx := context.Background()
 	ask := post(t, st, store.Record{Kind: kinds.Ask, Text: "which bucket?"})
 	decide := post(t, st, store.Record{Kind: kinds.Decide, Text: "A or B", Topic: "#30427"})
-	hold := post(t, st, store.Record{Kind: kinds.Hold, Text: "hold the queue", Topic: "#30431"})
+	hold := post(t, st, store.Record{Kind: kinds.Hold, Text: "hold the queue", Topic: "#30431", Refs: store.Refs{PRs: []store.PR{{Number: 30431}}}})
 	incident := post(t, st, store.Record{Kind: kinds.Incident, Text: "sanddb down", Topic: "hsbc-2147"})
 	imported := []store.Ingestion{{Record: store.Record{Drive: "d", Lane: "runner", Kind: kinds.Decide, At: st.Now(), Text: "imported question", Source: "import:/inbox/runner.md"}, LineHash: "h1"}}
 	if _, err := st.IngestAll(ctx, imported); err != nil {
@@ -306,7 +320,7 @@ func TestCompact(t *testing.T) {
 	ctx := context.Background()
 	post(t, st, store.Record{Kind: kinds.Go, Text: "old go"})
 	post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Note, Text: "old note"})
-	hold := post(t, st, store.Record{Kind: kinds.Hold, Text: "still held", Topic: "#1"})
+	hold := post(t, st, store.Record{Kind: kinds.Hold, Text: "still held", Topic: "#1", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}})
 	c.Advance(72 * time.Hour)
 	fresh := post(t, st, store.Record{Kind: kinds.Go, Text: "new go"})
 	res, err := st.Compact(ctx, "d", 48*time.Hour)

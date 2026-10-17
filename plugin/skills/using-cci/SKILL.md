@@ -51,7 +51,11 @@ Every `defect`, `matrix`, `hold`, `go`, or `opened` record about a stack carries
 `--stack <project>/<env>`, `--target <name>`, or both. Attach them to related records
 too, so a stack or target query finds both the problem and the work addressing it.
 `--stack` names a deploy stack, such as `api/plat-usw2-prod`. Use repeated `--pr`
-flags for pull requests; `opened` and `landed` require at least one.
+flags for pull requests; `opened` and `landed` require at least one. A `hold`,
+`blocker`, or `blocked` record that names `#<number>` in its text or topic needs
+`--pr <number>` for each one, because merge-queue guards read the record's pull
+requests, never its prose. Post refuses the record otherwise. Write a record
+sequence number without its `#`.
 
 Use `blocked` when a stack or target cannot deploy. Close it with `unblock`
 using `--re` or the same `--topic`, or with a resolver.
@@ -401,11 +405,11 @@ TTL means time to live; `--ttl` overrides defaults.
 | --- | --- | --- |
 | `ask`, `decide` | None | Open until `answer`, `go`, or `withdraw`. |
 | `decision` | None | A call already made; not open. Imported `DECISION` uses it. |
-| `blocker` | None | Open until `withdraw`, `answer`, or `done`. |
-| `blocked` / `unblock` | None | A deploy block stays open until unblock or a resolver. |
+| `blocker` | None | Open until `withdraw`, `answer`, or `done`. Each `#<number>` in its text or topic needs `--pr`. |
+| `blocked` / `unblock` | None | A deploy block stays open until unblock or a resolver. Each `#<number>` in a `blocked` record needs `--pr`. |
 | `answer`, `withdraw` | None | Close asks, decision requests, or blockers; require a link. |
 | `go` | None | Closes a matching ask or decision request. |
-| `hold` / `lift` | None | Lift closes hold and requires a link. |
+| `hold` / `lift` | None | Lift closes hold and requires a link. Each `#<number>` in a hold's text or topic needs `--pr`. |
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `review` | None | A rules-review verdict. |

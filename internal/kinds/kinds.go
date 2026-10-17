@@ -66,10 +66,11 @@ const (
 const EphemeralTTL = 24 * time.Hour
 
 type Spec struct {
-	TTL      time.Duration
-	NeedsPR  bool
-	NeedsRef bool
-	Internal bool
+	TTL               time.Duration
+	NeedsPR           bool
+	NeedsMentionedPRs bool
+	NeedsRef          bool
+	Internal          bool
 }
 
 var specs = map[Kind]Spec{
@@ -79,7 +80,7 @@ var specs = map[Kind]Spec{
 	Decision:   {},
 	Ask:        {},
 	Answer:     {NeedsRef: true},
-	Hold:       {},
+	Hold:       {NeedsMentionedPRs: true},
 	Lift:       {NeedsRef: true},
 	Incident:   {},
 	Mechanism:  {},
@@ -95,7 +96,7 @@ var specs = map[Kind]Spec{
 	Done:       {},
 	Head:       {},
 	Contract:   {},
-	Blocker:    {},
+	Blocker:    {NeedsMentionedPRs: true},
 	Withdraw:   {NeedsRef: true},
 	Digest:     {Internal: true},
 	Claim:      {TTL: EphemeralTTL},
@@ -104,7 +105,7 @@ var specs = map[Kind]Spec{
 	Matrix:     {TTL: EphemeralTTL},
 	Report:     {TTL: EphemeralTTL},
 	Peer:       {TTL: EphemeralTTL},
-	Blocked:    {},
+	Blocked:    {NeedsMentionedPRs: true},
 	Unblock:    {NeedsRef: true},
 	Review:     {},
 	Retro:      {},
