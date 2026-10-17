@@ -62,8 +62,8 @@ github.com/yasyf/cc-interact v0.35.2 h1:V3ArT/Pt0nAMWmdUN/jH1dwmD+sVCEsfd6+h7V7j
 github.com/yasyf/cc-interact v0.35.2/go.mod h1:1w5e7BD8LFysFvsEnpeVMTnm7xboVNcsrdl01uvjgiI=
 github.com/yasyf/daemonkit v0.32.3 h1:uGzbk0hsCCun/NxbPmi9QiWYkasxvtrvhqn1tMdNG1c=
 github.com/yasyf/daemonkit v0.32.3/go.mod h1:3qcpiMyByFCbb9WcrzMYLcES/u/iUmE9UWBQb644ubo=
-github.com/yasyf/synckit v0.41.1 h1:sqHnw2RbGlKMAy/QxxxQhAiA+Z3J+5N049Xpc94Vf0c=
-github.com/yasyf/synckit v0.41.1/go.mod h1:NQUUFEC04zDKbjudVxPvobqA+zfgBc9xzetrNvIju/4=
+github.com/yasyf/synckit v0.42.0 h1:8D62WIISrbx+LzL3ClfgyOhE6u67kypu58JMR/nBtbg=
+github.com/yasyf/synckit v0.42.0/go.mod h1:NQUUFEC04zDKbjudVxPvobqA+zfgBc9xzetrNvIju/4=
 github.com/yusufpapurcu/wmi v1.2.4 h1:zFUKzehAFReQwLys1b/iSMl+JQGSCSjtVqQn9bBrPo0=
 github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQmPyzfmi0=
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=

@@ -73,7 +73,12 @@ func (c *Consumer) List(ctx context.Context) ([]syncservice.WatchItem, error) {
 	if err != nil {
 		return nil, err
 	}
-	return []syncservice.WatchItem{{ID: itemID, WatchDirs: []string{c.home}, Fingerprint: strconv.FormatInt(seq, 10) + ":" + digest}}, nil
+	return []syncservice.WatchItem{{
+		ID:          itemID,
+		WatchDirs:   []string{c.home},
+		WatchNames:  []string{store.DBFile, store.DBFile + "-wal"},
+		Fingerprint: strconv.FormatInt(seq, 10) + ":" + digest,
+	}}, nil
 }
 
 func (c *Consumer) Reconcile(context.Context, string) (syncservice.ReconcileResult, error) {

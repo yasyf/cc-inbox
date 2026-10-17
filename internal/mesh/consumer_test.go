@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -290,6 +291,29 @@ func TestExportAcksEnrolledPeersAndBoundsTheSnapshot(t *testing.T) {
 	window, err := newestWithin(rows, 2*len(one)+2)
 	if err != nil || len(window) != 2 || window[1].OriginSeq != last.Seq {
 		t.Fatalf("newestWithin = %d rows ending %+v, %v", len(window), window, err)
+	}
+}
+
+func TestListWatchesOnlyTheDatabaseInHome(t *testing.T) {
+	n := newMeshNode(t)
+	testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "one"})
+	testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "two"})
+	_, digest, err := n.consumer.presence(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := n.consumer.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []syncservice.WatchItem{{
+		ID:          "records",
+		WatchDirs:   []string{n.st.HomeDir()},
+		WatchNames:  []string{"inbox.db", "inbox.db-wal"},
+		Fingerprint: "2:" + digest,
+	}}
+	if !reflect.DeepEqual(items, want) {
+		t.Fatalf("List() = %+v, want %+v", items, want)
 	}
 }
 

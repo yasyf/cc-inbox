@@ -3,8 +3,10 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"slices"
 	"text/tabwriter"
@@ -13,6 +15,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/yasyf/synckit/delivery"
 	"github.com/yasyf/synckit/hostregistry"
+	"github.com/yasyf/synckit/manifest"
 
 	"github.com/yasyf/cc-inbox/internal/mesh"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -44,8 +47,9 @@ func newMeshEnableCmd() *cobra.Command {
 		Use:   "enable",
 		Short: "Register cci with synckitd and start the mesh helper in the cci daemon",
 		Long: `enable writes the synckit manifest for service cci, registers it with synckitd,
-and ensures the cci daemon, which starts the resident mesh helper. Peers pin each
-other's node keys when they join the mesh:
+and ensures the cci daemon, which starts the resident mesh helper. The manifest
+keeps the watch debounce of the registration synckitd already holds, or 5s when
+there is none. Peers pin each other's node keys when they join the mesh:
 
     synckitd host add <user@node>     a new peer
     synckitd host enroll <user@node>  a peer already in the mesh`,
@@ -59,7 +63,7 @@ other's node keys when they join the mesh:
 			if err != nil {
 				return err
 			}
-			path, err := mesh.WriteManifest(st.HomeDir(), st.SchemaFingerprint())
+			path, err := writeMeshManifest(st.HomeDir(), st.SchemaFingerprint())
 			_ = st.Close()
 			if err != nil {
 				return err
@@ -74,6 +78,22 @@ other's node keys when they join the mesh:
 			return err
 		},
 	}
+}
+
+func writeMeshManifest(home, schema string) (string, error) {
+	registeredPath, err := hostregistry.RegisteredPath(mesh.Service)
+	if err != nil {
+		return "", err
+	}
+	debounce := mesh.DefaultDebounce
+	registered, err := manifest.Load(registeredPath)
+	switch {
+	case err == nil:
+		debounce = time.Duration(registered.Watch.Debounce)
+	case !errors.Is(err, os.ErrNotExist):
+		return "", fmt.Errorf("keep the registered debounce: %w", err)
+	}
+	return mesh.WriteManifest(home, schema, debounce)
 }
 
 type meshPeer struct {
