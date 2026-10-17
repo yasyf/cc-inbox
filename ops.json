@@ -1,1 +1,1 @@
-{"v":1,"lamport":5,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"96c4f97287031daf7b70939c427e861b","status":"met","note":"CHANGELOG 0.21.0 Fixed entry states the every-Mac re-enable and backoff-until-upgraded"}]}
+{"v":1,"lamport":6,"session":"8d9186e0-fba7-4817-bcc6-e16df6c05e3e","ops":[{"kind":"set_criterion_status","id":"72677c8403027756398bff4541339a41","status":"met","note":"no fallback decoder; PR refs unchanged"}]}
