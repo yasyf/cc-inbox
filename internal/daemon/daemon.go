@@ -51,7 +51,7 @@ func Definition() (daemonkit.Daemon, error) {
 type Product struct {
 	st       *store.Store
 	http     *http.Server
-	done     chan error
+	done     chan struct{}
 	stopSync context.CancelFunc
 	synced   chan struct{}
 }
@@ -96,7 +96,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	p := &Product{
 		st:     st,
 		http:   &http.Server{Handler: server.New(st, time.Second).Handler(), ReadHeaderTimeout: 5 * time.Second},
-		done:   make(chan error, 1),
+		done:   make(chan struct{}),
 		synced: make(chan struct{}),
 	}
 	id, err := node.Load(r.home)
@@ -131,7 +131,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 		if !errors.Is(err, http.ErrServerClosed) {
 			r.fail(c, fmt.Errorf("http listener: %w", err))
 		}
-		p.done <- nil
+		close(p.done)
 	}()
 	return p, nil
 }
