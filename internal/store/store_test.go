@@ -44,8 +44,7 @@ func TestPostValidation(t *testing.T) {
 		{"hold names a pr in text", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "HOLD #39489 until the canary clears"}, "hold names #39489 without --pr: add --pr 39489"},
 		{"hold names a pr in topic", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold"}, "add --pr 39489"},
 		{"hold binds only some prs", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold #1 and #2, then #2 again", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}}, "names #2 without --pr: add --pr 2 so"},
-		{"blocker names a pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Blocker, Text: "red lint on yasyf/cc-inbox#93"}, "blocker names #93"},
-		{"blocked names a pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Blocked, Text: "waits on #7 and #8"}, "add --pr 7 --pr 8"},
+		{"hold names an owner/repo pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold yasyf/cc-inbox#93"}, "hold names #93"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,6 +61,8 @@ func TestPostValidation(t *testing.T) {
 		{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold the queue"},
 		{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold #39489", Refs: store.Refs{PRs: []store.PR{{Repo: "Forge-AI/monorepo", Number: 39489}}}},
 		{Drive: "d", Lane: "l", Kind: kinds.Note, Text: "watching #39489"},
+		{Drive: "d", Lane: "l", Kind: kinds.Blocker, Text: "waits on #89603 and #7"},
+		{Drive: "d", Lane: "l", Kind: kinds.Blocked, Topic: "#89604", Text: "blocked per #89603"},
 	} {
 		if _, _, err := st.Post(context.Background(), r, 0); err != nil {
 			t.Fatalf("Post(%+v) = %v", r, err)

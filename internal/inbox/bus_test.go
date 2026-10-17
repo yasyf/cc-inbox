@@ -136,8 +136,8 @@ func TestStateFold(t *testing.T) {
 
 func TestDigestOpenBlockers(t *testing.T) {
 	st, _ := testutil.Store(t)
-	blocker := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Blocker, Topic: "#30001", To: []string{"api"}, Text: "red lint on #30001", Refs: store.Refs{PRs: []store.PR{{Number: 30001}}}})
-	testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Blocker, Topic: "#30002", Text: "cleared", Refs: store.Refs{PRs: []store.PR{{Number: 30002}}}})
+	blocker := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Blocker, Topic: "#30001", To: []string{"api"}, Text: "red lint on #30001"})
+	testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Blocker, Topic: "#30002", Text: "cleared"})
 	testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Withdraw, Topic: "#30002", Text: "green now"})
 	v, err := inbox.Digest(context.Background(), st, "d", st.Now().Add(-time.Hour))
 	if err != nil {

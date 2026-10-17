@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.7] - 2026-10-16
+
+### Changed
+
+- The `--pr` refusal from 0.20.6 applies to `hold` records only. `blocker`
+  and `blocked` records cite record sequence numbers as `#<seq>` all the time,
+  and those look like pull request numbers, so refusing them stalled lanes.
+  A hold that names `#<number>` without a matching `--pr` is still refused.
+
 ## [0.20.6] - 2026-10-16
 
 ### Changed
