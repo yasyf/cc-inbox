@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -48,6 +49,12 @@ func newPostCmd() *cobra.Command {
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
+			if r.Refs.Path != "" {
+				var err error
+				if r.Refs.Path, err = keepPath(cmd, st, r.Refs.Path); err != nil {
+					return err
+				}
+			}
 			switch {
 			case len(args) == 1:
 				text = stamped(args[0], at)
@@ -133,7 +140,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
 	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
-	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
+	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
 	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")
@@ -173,6 +180,36 @@ func firstLine(text string) string {
 		}
 	}
 	return ""
+}
+
+func keepPath(cmd *cobra.Command, st *store.Store, path string) (string, error) {
+	var (
+		body []byte
+		err  error
+	)
+	if path == "-" {
+		body, err = io.ReadAll(cmd.InOrStdin())
+	} else {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return "", fmt.Errorf("--path: %w", statErr)
+		}
+		abs, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return "", fmt.Errorf("--path: %w", absErr)
+		}
+		if info.Mode().IsRegular() && !strings.HasPrefix(abs, "/dev/") && !strings.HasPrefix(abs, "/proc/") {
+			return abs, nil
+		}
+		body, err = os.ReadFile(path) //nolint:gosec // G304: the caller names its own body file.
+	}
+	if err != nil {
+		return "", fmt.Errorf("--path %s: %w", path, err)
+	}
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "", fmt.Errorf("--path %s: empty body", path)
+	}
+	return st.Blob(string(body))
 }
 
 func readBody(cmd *cobra.Command, path string) (json.RawMessage, error) {
