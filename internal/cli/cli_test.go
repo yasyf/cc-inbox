@@ -442,6 +442,75 @@ func TestPostPathStoresTheFilesFirstLineUnstamped(t *testing.T) {
 	}
 }
 
+func TestPostPathFromStdinOrAPipeKeepsTheBody(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	body := "relay summary\n\n" + strings.Repeat("x", 500) + "\n"
+	post := []string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note"}
+	stdin := func(args ...string) (posted, error) {
+		var out bytes.Buffer
+		root := cli.NewRootCmd()
+		root.SetIn(strings.NewReader(body))
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs(append(post, args...))
+		if err := root.Execute(); err != nil {
+			return posted{}, err
+		}
+		var got posted
+		err := json.Unmarshal(out.Bytes(), &got)
+		return got, err
+	}
+	pipe := func() string {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = r.Close() })
+		if _, err := w.WriteString(body); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return fmt.Sprintf("/dev/fd/%d", r.Fd())
+	}
+	for _, tt := range []struct {
+		name string
+		args func() []string
+		text string
+	}{
+		{"-", func() []string { return []string{"--path", "-"} }, "relay summary"},
+		{"- with --text", func() []string { return []string{"--path", "-", "--text", "relay"} }, "relay"},
+		{"a pipe", func() []string { return []string{"--path", pipe()} }, "relay summary"},
+	} {
+		got, err := stdin(tt.args()...)
+		if err != nil {
+			t.Fatalf("post --path %s: %v", tt.name, err)
+		}
+		kept, err := os.ReadFile(got.Refs.Path)
+		if got.Text != tt.text || !strings.HasPrefix(got.Refs.Path, filepath.Join(home, "blobs")) || err != nil || string(kept) != body {
+			t.Errorf("post --path %s stored %q at %q holding %q, %v; want %q at a blob holding the body", tt.name, got.Text, got.Refs.Path, kept, err, tt.text)
+		}
+	}
+	if _, err := stdin("--path", os.DevNull, "--text", "relay"); err == nil || !strings.Contains(err.Error(), "empty body") {
+		t.Errorf("post --path %s: %v, want the empty-body refusal", os.DevNull, err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "relay.md"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	got, err := stdin("--path", "relay.md")
+	if err != nil {
+		t.Fatalf("post --path relay.md: %v", err)
+	}
+	want, _ := os.Stat(filepath.Join(dir, "relay.md"))
+	if stored, err := os.Stat(got.Refs.Path); !filepath.IsAbs(got.Refs.Path) || err != nil || !os.SameFile(stored, want) {
+		t.Errorf("post --path relay.md stored %q, %v; want the file's absolute path", got.Refs.Path, err)
+	}
+}
+
 func TestPostWithAnIDReturnsTheStoredStampedRecord(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	ahead := time.Now().Add(7 * time.Minute)

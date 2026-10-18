@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-10-18
+
+### Fixed
+
+- `cci post --path /dev/stdin` now keeps the body. Before, the record stored
+  `/dev/stdin` as its path, so a reader opening it got its own stdin and the
+  body was gone; with `--text`, cci never read stdin at all. `--path -` failed
+  with no such file. cci now reads `-` as stdin, copies `-`, `/dev/stdin`,
+  process substitutions, and any other path that is not a regular file to a
+  file under `$CCI_HOME/blobs`, and stores that file's path. A regular file's
+  path is stored as an absolute path, a missing file is refused even with
+  `--text`, and an empty body is refused.
+
 ## [0.21.1] - 2026-10-17
 
 ### Fixed
@@ -735,7 +748,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.21.2...HEAD
+[0.21.2]: https://github.com/yasyf/cc-inbox/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/yasyf/cc-inbox/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/yasyf/cc-inbox/compare/v0.20.7...v0.21.0
 [0.20.7]: https://github.com/yasyf/cc-inbox/compare/v0.20.6...v0.20.7

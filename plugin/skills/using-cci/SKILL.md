@@ -92,7 +92,9 @@ PR in another repo, such as `--pr Forge-FDE/iris-chime#243`.
 `--lane-ref` names lanes the record is about; `--lane` names its writer.
 `--path`, `--ccn`, `--url`, and `--board` also set refs. Put long bodies in a file
 and post it with `--path <file>`; without `--text`, the file's first line becomes
-the text, so open the file with a one-line summary.
+the text, so open the file with a one-line summary. `--path -` reads the body
+from stdin, and cci copies stdin, `/dev/stdin`, and other pipes to a file under
+`$CCI_HOME/blobs` so the record keeps the body.
 
 Structured fields use repeatable `--env`, `--mode` (`platy`, `cli`, `manual`,
 `walker`), `--outcome` (`passed`, `failed`, `pending`, `cancelled`), `--commit`,

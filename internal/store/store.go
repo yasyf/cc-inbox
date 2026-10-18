@@ -816,14 +816,23 @@ func (s *Store) Fit(text string) (string, string, error) {
 	if utf8.RuneCountInString(text) <= MaxText {
 		return text, "", nil
 	}
-	sum := sha256.Sum256([]byte(text))
-	dir := filepath.Join(s.home, "blobs")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return "", "", fmt.Errorf("create blob dir: %w", err)
-	}
-	path := filepath.Join(dir, hex.EncodeToString(sum[:8])+".txt")
-	if err := os.WriteFile(path, []byte(text+"\n"), 0o600); err != nil {
-		return "", "", fmt.Errorf("write blob: %w", err)
+	path, err := s.Blob(text + "\n")
+	if err != nil {
+		return "", "", err
 	}
 	return Clip(text), path, nil
+}
+
+func (s *Store) Blob(body string) (string, error) {
+	body = redact(body)
+	sum := sha256.Sum256([]byte(body))
+	dir := filepath.Join(s.home, "blobs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create blob dir: %w", err)
+	}
+	path := filepath.Join(dir, hex.EncodeToString(sum[:8])+".txt")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return "", fmt.Errorf("write blob: %w", err)
+	}
+	return path, nil
 }
