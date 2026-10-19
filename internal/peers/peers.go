@@ -28,10 +28,11 @@ const StaleAfter = 15 * time.Minute
 var IdentityEnv = []string{"ORCA_TERMINAL_HANDLE", "ORCA_LAUNCH_RUN", "CLAUDE_LONG_RUNNING_DRIVE", "CODEX_THREAD_ID"}
 
 const (
-	RoleRoot    = "root"
-	RoleLane    = "lane"
-	RoleAgent   = "agent"
-	RoleSession = "session"
+	RoleRoot     = "root"
+	RoleLane     = "lane"
+	RoleAgent    = "agent"
+	RoleWorkflow = "workflow"
+	RoleSession  = "session"
 )
 
 // Options describes the announcing session thread: the root thread when

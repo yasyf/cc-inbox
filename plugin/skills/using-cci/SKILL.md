@@ -247,6 +247,23 @@ is the root thread. Its own `cci` calls carry `CCI_AGENT_ID`, the payload's
 binding and default cursor are its own. Without `CCI_AGENT_ID` a command
 acts as the root thread.
 
+### Message a running Workflow agent
+
+A Workflow tool agent is named by its label and announced with role
+`workflow`. It never runs `cci subscribe`: a subagent bound to no lane gets
+every record addressed to its peer address in its next tool result. From the
+root, `peer:<label>` reaches one of the root's own agents, a live one before
+an ended run's agent with the same label:
+
+```bash
+cci who --role workflow --session <your session prefix>
+cci post --lane root --kind go --to peer:apply:box-and-capture "stop after this file"
+```
+
+When two live agents share a label, the post fails and names both; address
+one by its agent id. Never `SendMessage` a running workflow agent by its id:
+that resumes a second copy instead of reaching the live one.
+
 Paste `cci me` into a handoff instead of a session name or a PR list:
 
 ```bash

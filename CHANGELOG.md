@@ -6,6 +6,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A root can message a running Workflow tool agent. The session hooks now name
+  each workflow agent by its label and announce it with role `workflow`, so
+  `cci who --role workflow` lists them. A subagent bound to no lane gets the
+  records addressed to its peer address in its next tool result, with no
+  `cci subscribe`. `cci post --to peer:<agent id or label>` reaches one of the
+  posting session's own agents. Before, a workflow agent had no name in the
+  registry and never received records, and `SendMessage` by its id resumed a
+  second copy of it.
+
+### Changed
+
+- `--to peer:` resolves among live sessions and agents first, then among
+  ended ones, so a label reused by a finished workflow run still names the
+  running agent.
+
 ## [0.21.2] - 2026-10-18
 
 ### Fixed

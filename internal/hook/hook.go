@@ -2,6 +2,7 @@ package hook
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -10,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
@@ -41,24 +43,47 @@ func (p Payload) Key() store.PeerKey {
 	return store.PeerKey{Session: p.SessionID, Agent: p.AgentID}
 }
 
-// AgentName reads the subagent's name from the metadata the harness writes
-// beside the session transcript; an agent with no metadata has no name.
-func (p Payload) AgentName() (string, error) {
-	path := strings.TrimSuffix(p.TranscriptPath, ".jsonl") + "/subagents/agent-" + p.AgentID + ".meta.json"
-	raw, err := os.ReadFile(path) //nolint:gosec // G304: the path is the harness's transcript directory from the hook payload.
-	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
+// Agent describes a subagent from the metadata the harness writes beside the
+// session transcript: a teammate's under subagents/, a workflow agent's under
+// its workflow's directory there, named by its label. An agent with no
+// metadata has no name.
+type Agent struct {
+	Name     string
+	Workflow bool
+}
+
+const workflowAgentType = "workflow-subagent"
+
+func (p Payload) Agent() (Agent, error) {
+	dir := strings.TrimSuffix(p.TranscriptPath, ".jsonl") + "/subagents"
+	file := "agent-" + p.AgentID + ".meta.json"
+	path := filepath.Join(dir, file)
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		matches, err := filepath.Glob(filepath.Join(dir, "workflows", "*", file))
+		if err != nil {
+			return Agent{}, fmt.Errorf("find workflow agent metadata: %w", err)
+		}
+		if len(matches) == 0 {
+			return Agent{}, nil
+		}
+		path = matches[0]
 	}
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the path is the harness's transcript directory from the hook payload.
 	if err != nil {
-		return "", fmt.Errorf("read agent metadata: %w", err)
+		return Agent{}, fmt.Errorf("read agent metadata: %w", err)
 	}
 	var meta struct {
-		Name string `json:"name"`
+		AgentType   string `json:"agentType"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		return "", fmt.Errorf("decode %s: %w", path, err)
+		return Agent{}, fmt.Errorf("decode %s: %w", path, err)
 	}
-	return meta.Name, nil
+	if meta.AgentType == workflowAgentType {
+		return Agent{Name: meta.Description, Workflow: true}, nil
+	}
+	return Agent{Name: meta.Name}, nil
 }
 
 func Read(r io.Reader) (Payload, error) {
@@ -95,9 +120,12 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 	return additionalContext(w, "SessionStart", out.String())
 }
 
-// PostToolUse marks the thread active and delivers its lane's records. A
-// subagent or teammate the registry does not list as live is announced as
-// its own peer first, with window naming the harness process it runs in.
+// PostToolUse marks the thread active and delivers its lane's records, or,
+// for a subagent bound to no lane, the records addressed to its peer address,
+// so a workflow agent that never subscribes still hears cci post --to
+// peer:<session>/<label>. A subagent or teammate the registry does not list as
+// live is announced as its own peer first, with window naming the harness
+// process it runs in.
 func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() (store.Window, error), w io.Writer) error {
 	if p.AgentID != "" {
 		if err := announceAgent(ctx, st, p, window); err != nil {
@@ -108,10 +136,15 @@ func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() 
 		return err
 	}
 	b, ok, err := st.Binding(ctx, p.Key())
-	if err != nil || !ok || b.Lane == "" {
+	switch {
+	case err != nil:
 		return err
+	case ok && b.Lane != "":
+		return deliver(ctx, st, p.Key(), b, p.Event, w)
+	case p.AgentID != "":
+		return deliver(ctx, st, p.Key(), store.Binding{}, p.Event, w)
 	}
-	return deliver(ctx, st, p.Key(), b, p.Event, w)
+	return nil
 }
 
 func announceAgent(ctx context.Context, st *store.Store, p Payload, window func() (store.Window, error)) error {
@@ -120,7 +153,7 @@ func announceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}
-	name, err := p.AgentName()
+	agent, err := p.Agent()
 	if err != nil {
 		return err
 	}
@@ -128,10 +161,14 @@ func announceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 	if err != nil {
 		return err
 	}
-	if found && existing.PID == win.PID && existing.PIDStarted == win.Started && !existing.Superseded && (existing.AgentName != "" || name == "") {
+	if found && existing.PID == win.PID && existing.PIDStarted == win.Started && !existing.Superseded && (existing.AgentName != "" || agent.Name == "") {
 		return nil
 	}
-	_, err = peers.Announce(ctx, st, peers.Options{Session: p.SessionID, Agent: p.AgentID, AgentName: name, Window: win, Cwd: p.Cwd})
+	o := peers.Options{Session: p.SessionID, Agent: p.AgentID, AgentName: agent.Name, Window: win, Cwd: p.Cwd}
+	if agent.Workflow {
+		o.Role = peers.RoleWorkflow
+	}
+	_, err = peers.Announce(ctx, st, o)
 	return err
 }
 
@@ -142,7 +179,7 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload) error {
 
 func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, w io.Writer) error {
 	var out bytes.Buffer
-	out.WriteString("cci records addressed to " + b.Lane + "; act on each:\n")
+	out.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
 	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call"}, &out)
 	if err != nil || res.Printed == 0 {
 		return err

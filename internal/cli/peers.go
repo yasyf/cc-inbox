@@ -135,7 +135,7 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&f.Agent, "agent", "", "the subagent or teammate with this agent id or name")
 	fl.StringVar(&f.Origin, "origin", "", "sessions on this node, by id or prefix; - for this machine's own")
 	fl.StringVar(&f.Name, "name", "", "the harness name, as ListAgents prints it")
-	fl.StringVar(&f.Role, "role", "", "root, lane, desk, watcher, codex or session")
+	fl.StringVar(&f.Role, "role", "", "root, lane, desk, watcher, codex, agent, workflow or session; workflow lists Workflow tool agents by label")
 	fl.StringVar(&f.Drive, "drive", "", "sessions bound to this drive")
 	fl.StringVar(&f.Lane, "lane", "", "sessions bound as this lane")
 	fl.StringVar(&f.Tag, "tag", "", "sessions announced with this tag")
@@ -414,15 +414,18 @@ func resolvePeer(ctx context.Context, st *store.Store, t, target string) (string
 		origin = peers.LocalOrigin
 	}
 	session, agent, _ := strings.Cut(rest, "/")
-	v, err := peers.One(ctx, st, peers.Filter{Origin: origin, Session: session, Agent: agent, Root: agent == "", All: true})
+	v, err := onePeer(ctx, st, peers.Filter{Origin: origin, Session: session, Agent: agent, Root: agent == ""})
 	if errors.Is(err, sql.ErrNoRows) {
-		v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Name: session, Root: true, All: true})
+		v, err = onePeer(ctx, st, peers.Filter{Origin: origin, Name: session, Root: true})
 		if err == nil && agent != "" {
-			v, err = peers.One(ctx, st, peers.Filter{Origin: origin, Session: v.Session, Agent: agent, All: true})
+			v, err = onePeer(ctx, st, peers.Filter{Origin: origin, Session: v.Session, Agent: agent})
 		}
 	}
+	if self := selfPeer(); errors.Is(err, sql.ErrNoRows) && origin == peers.LocalOrigin && self.Session != "" {
+		v, err = onePeer(ctx, st, peers.Filter{Origin: origin, Session: self.Session, Agent: rest})
+	}
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", fmt.Errorf("--to %s: no session has that id prefix or name, or no agent of it that id or name; cci who --all lists them", t)
+		return "", fmt.Errorf("--to %s: no session has that id prefix or name, no agent of it that id or name, and no agent of this session that id or name; cci who --all lists them", t)
 	}
 	if err != nil {
 		return "", fmt.Errorf("--to %s: %w", t, err)
@@ -431,6 +434,17 @@ func resolvePeer(ctx context.Context, st *store.Store, t, target string) (string
 		return store.PeerAddressOn(v.Origin, v.Key().String()), nil
 	}
 	return store.PeerAddress(v.Key().String()), nil
+}
+
+// onePeer resolves f among live peers first, so a workflow label reused by a
+// finished run still names the running agent, then among ended ones.
+func onePeer(ctx context.Context, st *store.Store, f peers.Filter) (peers.View, error) {
+	v, err := peers.One(ctx, st, f)
+	if !errors.Is(err, sql.ErrNoRows) {
+		return v, err
+	}
+	f.All = true
+	return peers.One(ctx, st, f)
 }
 
 func laneDrives(ctx context.Context, st *store.Store) (map[string][]string, error) {
