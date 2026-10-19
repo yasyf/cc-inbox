@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A record filter's `--pr <number>` now matches a
+  record that names that pull request as `owner/repo#<number>`. It matched only
+  records that stored the bare number, so once `ccx vcs ship` claims its pull
+  requests with their repo, `cci tail --kind opened --pr 40339` would have
+  missed `opened Forge-AI/monorepo#40339`. A qualified filter still matches only
+  its own repo.
+
 ## [0.22.1] - 2026-10-19
 
 ### Fixed
