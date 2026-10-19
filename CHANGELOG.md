@@ -8,12 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A record filter's `--pr <number>` now matches a
-  record that names that pull request as `owner/repo#<number>`. It matched only
-  records that stored the bare number, so once `ccx vcs ship` claims its pull
-  requests with their repo, `cci tail --kind opened --pr 40339` would have
-  missed `opened Forge-AI/monorepo#40339`. A qualified filter still matches only
-  its own repo.
+- A record filter's `--pr owner/repo#N` now also matches records that name
+  the pull request as the bare number `N`, which says nothing about its repo.
+  A reader can ask for one repo's pull request with one query and still find
+  the records written before their posters qualified them, as `ccx vcs ship`'s
+  `cci claim` now does. A bare `--pr N` still matches only the bare number.
 
 ## [0.22.1] - 2026-10-19
 

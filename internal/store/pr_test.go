@@ -44,13 +44,13 @@ func TestPRRefsKeepBareNumbersAsJSONNumbers(t *testing.T) {
 	}
 }
 
-func TestABarePRFilterMatchesTheNumberInAnyRepo(t *testing.T) {
+func TestAQualifiedPRFilterAlsoMatchesTheBareNumber(t *testing.T) {
 	st, _ := open(t)
 	for text, pr := range map[string]store.PR{
 		"bare":      {Number: 40339},
 		"qualified": {Repo: "Forge-AI/monorepo", Number: 40339},
-		"elsewhere": {Repo: "yasyf/cc-context", Number: 428},
-		"suffix":    {Repo: "Forge-AI/monorepo", Number: 140339},
+		"elsewhere": {Repo: "yasyf/cc-context", Number: 40339},
+		"other":     {Repo: "Forge-AI/monorepo", Number: 40340},
 	} {
 		post(t, st, store.Record{Kind: kinds.Opened, Text: text, Refs: store.Refs{PRs: []store.PR{pr}}})
 	}
@@ -58,9 +58,9 @@ func TestABarePRFilterMatchesTheNumberInAnyRepo(t *testing.T) {
 		pr   store.PR
 		want string
 	}{
-		{store.PR{Number: 40339}, "bare,qualified"},
-		{store.PR{Repo: "Forge-AI/monorepo", Number: 40339}, "qualified"},
-		{store.PR{Number: 428}, "elsewhere"},
+		{store.PR{Repo: "Forge-AI/monorepo", Number: 40339}, "bare,qualified"},
+		{store.PR{Number: 40339}, "bare"},
+		{store.PR{Repo: "yasyf/cc-context", Number: 40339}, "bare,elsewhere"},
 	} {
 		got, err := st.Query(context.Background(), store.Filter{Drive: "d", PR: tt.pr})
 		if err != nil {
