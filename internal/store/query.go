@@ -209,8 +209,10 @@ func placeholders(n int) string {
 	return strings.TrimSuffix(strings.Repeat("?,", n), ",")
 }
 
+// Query reads the records f selects. A filter with no drive must name a Peer,
+// and then reads only the records addressed to it, from every drive.
 func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
-	if f.Drive == "" {
+	if f.Drive == "" && f.Peer == "" {
 		return nil, ErrNoDrive
 	}
 	where, params := f.where(s.Self(), s.Now())
