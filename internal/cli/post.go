@@ -113,8 +113,8 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if window, _, err := thisSession(); err == nil {
-				if err := st.BindLane(cmd.Context(), selfPeer(), r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
+			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
+				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
 					return err
 				}
 			}

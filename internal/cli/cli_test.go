@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -904,5 +905,45 @@ func TestClaimOpenedPostsAnOpenedRecordOnTheSessionsDrive(t *testing.T) {
 	want := []string{"root opened #36276 [36276]", "aspeed-0123 opened #36148 [36148]"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("opened records = %q, want %q", got, want)
+	}
+}
+
+func TestPostBindsACodexSessionsLaneSoClaimOpenedPostsUnderIt(t *testing.T) {
+	if os.Getenv("CCI_TEST_CODEX_LANE") == "1" {
+		if _, err := run(t, "post", "--drive", "release-v3", "--lane", "inc-unrun-fix-2", "--kind", "mechanism", "--text", "MECHANISM inc-unrun-fix-2: x"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run(t, "claim", "--rel", "opened", "--pr", "40359"); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	home, config := t.TempDir(), t.TempDir()
+	codex := exec.Command(os.Args[0], "-test.run=^TestPostBindsACodexSessionsLaneSoClaimOpenedPostsUnderIt$", "codex")
+	codex.Env = append(os.Environ(), "CCI_TEST_CODEX_LANE=1", "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+config, "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CODEX_THREAD_ID=019a3c3e-codex-thread")
+	for _, name := range peers.IdentityEnv {
+		if name != "CODEX_THREAD_ID" {
+			codex.Env = append(codex.Env, name+"=")
+		}
+	}
+	if out, err := codex.CombinedOutput(); err != nil {
+		t.Fatalf("codex session: %v\n%s", err, out)
+	}
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "eeee5555-reader")
+	out, err := run(t, "tail", "--drive", "release-v3", "--since", "0", "--kind", "opened", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		Lane string `json:"lane"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &r); err != nil || r.Lane != "inc-unrun-fix-2" || r.Text != "opened #40359" {
+		t.Fatalf("opened = %q (%+v), %v", out, r, err)
 	}
 }
