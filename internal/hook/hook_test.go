@@ -395,3 +395,42 @@ func TestPostToolUseAnnouncesAgentsAndDeliversTheirLanes(t *testing.T) {
 		t.Fatalf("agent in a new process kept its old window: %+v", got)
 	}
 }
+
+func TestPostToolUseNamesWorkflowAgentsAndDeliversTheirPeerRecords(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	projects := t.TempDir()
+	transcript := filepath.Join(projects, "s1.jsonl")
+	wf := filepath.Join(projects, "s1", "subagents", "workflows", "wf_0c95122f-2e2")
+	if err := os.MkdirAll(wf, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wf, "agent-a7bb-0123.meta.json"), []byte(`{"agentType":"workflow-subagent","description":"apply:box-and-capture","workflowPhase":"Apply"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	agent := hook.Payload{SessionID: "s1", AgentID: "a7bb-0123", TranscriptPath: transcript, Cwd: t.TempDir(), Event: "PostToolUse"}
+	window := func() (store.Window, error) { return store.Window{PID: 42, Started: 7}, nil }
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, agent, window, &out); err != nil || out.Len() != 0 {
+		t.Fatalf("first tool call wrote %q, %v", out.String(), err)
+	}
+	if got, err := st.Peer(ctx, agent.Key()); err != nil || got.AgentName != "apply:box-and-capture" || got.Role != "workflow" {
+		t.Fatalf("announced workflow agent = %+v, %v", got, err)
+	}
+	testutil.Post(t, st, store.Record{Drive: "d", Lane: "root", Kind: kinds.Go, To: []string{store.PeerAddress(agent.Key().String())}, Text: "stop after this file"})
+	testutil.Post(t, st, store.Record{Drive: "d", Lane: "root", Kind: kinds.Go, To: []string{"api"}, Text: "for a lane"})
+	if err := hook.PostToolUse(ctx, st, agent, window, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "addressed to peer:s1/a7bb-0123") || !strings.Contains(got, "stop after this file") || strings.Contains(got, "for a lane") {
+		t.Fatalf("workflow agent's delivery = %q", got)
+	}
+	out.Reset()
+	if err := hook.PostToolUse(ctx, st, agent, window, &out); err != nil || out.Len() != 0 {
+		t.Fatalf("redelivered %q, %v", out.String(), err)
+	}
+	var root bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, window, &root); err != nil || root.Len() != 0 {
+		t.Fatalf("unbound root thread got %q, %v", root.String(), err)
+	}
+}

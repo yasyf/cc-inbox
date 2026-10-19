@@ -792,6 +792,42 @@ func TestAgentThreadsClaimAndAreAddressedApart(t *testing.T) {
 	}
 }
 
+func TestPostReachesOwnWorkflowAgentByLabel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-2222-3333")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "mesh", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, agent := range []string{"aold-0001", "anew-0002"} {
+		if _, err := st.Announce(ctx, store.Peer{Session: "aaaa1111-2222-3333", Agent: agent, AgentName: "apply:api", Role: peers.RoleWorkflow}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Retire(ctx, store.PeerKey{Session: "aaaa1111-2222-3333", Agent: "aold-0001"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "peer:apply:api", "--json", "--text", "ship it"); err != nil || !strings.Contains(out, `"peer:aaaa1111-2222-3333/anew-0002"`) {
+		t.Fatalf("post to the live agent labelled apply:api = %q, %v", out, err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "peer:apply:web", "--text", "x"); err == nil || !strings.Contains(err.Error(), "no agent of this session") {
+		t.Fatalf("post to an unknown label: %v", err)
+	}
+}
+
 func TestPostAndTailTakeQualifiedPRs(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
