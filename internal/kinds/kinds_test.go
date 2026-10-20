@@ -18,7 +18,9 @@ func TestParseAcceptsDottedServiceKinds(t *testing.T) {
 			t.Errorf("Parse(%q) accepted a malformed kind", s)
 		}
 	}
-	if k, err := kinds.Parse("ask"); err != nil || k.Service() {
-		t.Errorf("Parse(ask) = %q, %v", k, err)
+	for s, want := range map[string]kinds.Kind{"ask": kinds.Ask, "STATE": kinds.State, "Fix-Live": kinds.FixLive} {
+		if k, err := kinds.Parse(s); err != nil || k != want {
+			t.Errorf("Parse(%q) = %q, %v; want %q", s, k, err, want)
+		}
 	}
 }
