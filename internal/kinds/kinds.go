@@ -159,8 +159,11 @@ const ServiceTTL = 14 * 24 * time.Hour
 var service = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$`)
 
 func Parse(s string) (Kind, error) {
-	k := Kind(s)
-	if _, ok := specs[k]; ok || k.Service() {
+	lower := Kind(strings.ToLower(s))
+	if _, ok := specs[lower]; ok {
+		return lower, nil
+	}
+	if k := Kind(s); k.Service() {
 		return k, nil
 	}
 	return "", fmt.Errorf("unknown kind %q (known: %s, or a dotted service kind such as oncall.fix.status)", s, strings.Join(Names(), ", "))

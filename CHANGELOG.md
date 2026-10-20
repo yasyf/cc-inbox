@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A reader can ask for one repo's pull request with one query and still find
   the records written before their posters qualified them, as `ccx vcs ship`'s
   `cci claim` now does. A bare `--pr N` still matches only the bare number.
+- `--kind` accepts a kind name in any case, so `cci post --kind STATE` posts
+  a `state` record instead of failing with `unknown kind "STATE"`. Dotted
+  service kinds such as `oncall.fix.status` stay lower-case only.
 
 ## [0.22.1] - 2026-10-19
 
