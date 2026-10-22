@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cci claim --for <lane>@<drive>` and `cci unclaim --for` act on the claims
+  of the one live local session bound as that lane in that drive, instead of
+  the caller's. A desk or runner process that reads a lane's `release --build`
+  record can now claim the build for the lane, so `cci who --build` names the
+  lane that started it rather than the runner. The flag refuses a lane with
+  no live session or with more than one, and needs no session of the caller's.
+
 ### Fixed
 
 - A record filter's `--pr owner/repo#N` now also matches records that name

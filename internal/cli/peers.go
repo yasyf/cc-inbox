@@ -191,6 +191,7 @@ func isCodex(argv []string) bool {
 }
 
 type claimFlags struct {
+	forLane   string
 	rel       string
 	prs       []store.PR
 	builds    []string
@@ -206,6 +207,7 @@ type claimFlags struct {
 
 func (c *claimFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
+	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive")
 	fl.StringVar(&c.rel, "rel", "owns", "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
 	fl.Var(&prsFlag{&c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
@@ -217,6 +219,32 @@ func (c *claimFlags) register(cmd *cobra.Command) {
 	fl.StringSliceVar(&c.targets, "target", nil, "release targets (repeatable)")
 	fl.StringSliceVar(&c.systems, "subsystem", nil, "subsystems such as sandsql (repeatable)")
 	fl.StringSliceVar(&c.refs, "ref", nil, "any other <kind>:<key> (repeatable)")
+}
+
+func (c *claimFlags) holder(ctx context.Context, st *store.Store) (store.PeerKey, error) {
+	if c.forLane == "" {
+		self, _, err := peerIdentity()
+		return self, err
+	}
+	lane, drive, ok := strings.Cut(c.forLane, "@")
+	if !ok || lane == "" || drive == "" {
+		return store.PeerKey{}, fmt.Errorf("--for %s: name the lane as <lane>@<drive>", c.forLane)
+	}
+	views, err := peers.Resolve(ctx, st, peers.Filter{Origin: peers.LocalOrigin, Drive: drive, Lane: lane})
+	if err != nil {
+		return store.PeerKey{}, err
+	}
+	switch len(views) {
+	case 1:
+		return views[0].Key(), nil
+	case 0:
+		return store.PeerKey{}, fmt.Errorf("--for %s: no live session on this machine is bound as lane %s in drive %s; cci who --all --drive %s --lane %s lists ended ones", c.forLane, lane, drive, drive, lane)
+	}
+	keys := make([]string, len(views))
+	for i, v := range views {
+		keys[i] = v.Key().String()
+	}
+	return store.PeerKey{}, fmt.Errorf("--for %s: %d live sessions are bound as that lane (%s); claim from the lane's own session", c.forLane, len(views), strings.Join(keys, ", "))
 }
 
 func (c *claimFlags) claims(self store.PeerKey) ([]store.Claim, error) {
@@ -280,18 +308,18 @@ func newClaimCmd() *cobra.Command {
 	var cf claimFlags
 	cmd := &cobra.Command{
 		Use:   "claim",
-		Short: "Tie this session to artifacts, so cci who --pr, --build or --ref finds it",
+		Short: "Tie this session, or with --for another lane's, to artifacts, so cci who --pr, --build or --ref finds it",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			self, _, err := peerIdentity()
+			holder, err := cf.holder(cmd.Context(), st)
 			if err != nil {
 				return err
 			}
-			claims, err := cf.claims(self)
+			claims, err := cf.claims(holder)
 			if err != nil {
 				return err
 			}
-			if _, err := st.Peer(cmd.Context(), self); errors.Is(err, sql.ErrNoRows) {
+			if _, err := st.Peer(cmd.Context(), holder); errors.Is(err, sql.ErrNoRows) {
 				if err := announceSelf(cmd.Context(), st); err != nil {
 					return err
 				}
@@ -308,7 +336,7 @@ func newClaimCmd() *cobra.Command {
 				}
 			}
 			if cf.rel == string(kinds.Opened) {
-				return postOpened(cmd.Context(), st, self, cf.prs)
+				return postOpened(cmd.Context(), st, holder, cf.prs)
 			}
 			return nil
 		}),
@@ -352,14 +380,14 @@ func newUnclaimCmd() *cobra.Command {
 	var cf claimFlags
 	cmd := &cobra.Command{
 		Use:   "unclaim",
-		Short: "Drop this session's explicit claims on artifacts; derived ones stay with their records",
+		Short: "Drop this session's, or with --for another lane's, explicit claims on artifacts; derived ones stay with their records",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			self, _, err := peerIdentity()
+			holder, err := cf.holder(cmd.Context(), st)
 			if err != nil {
 				return err
 			}
-			claims, err := cf.claims(self)
+			claims, err := cf.claims(holder)
 			if err != nil {
 				return err
 			}
