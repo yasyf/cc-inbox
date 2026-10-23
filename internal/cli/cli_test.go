@@ -947,3 +947,56 @@ func TestPostBindsACodexSessionsLaneSoClaimOpenedPostsUnderIt(t *testing.T) {
 		t.Fatalf("opened = %q (%+v), %v", out, r, err)
 	}
 }
+
+func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CCI_AGENT_ID", "")
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range []struct{ session, agent, drive, lane string }{
+		{"bbbb2222-walker", "awalker", "drive-b", "walker"},
+		{"cccc3333-walker", "awalker", "drive-c", "walker"},
+		{"bbbb2222-desk", "adesk-1", "drive-b", "desk"},
+		{"bbbb2222-desk", "adesk-2", "drive-b", "desk"},
+	} {
+		k := store.PeerKey{Session: b.session, Agent: b.agent}
+		if err := st.BindLane(ctx, k, b.drive, b.lane, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "claim", "--for", "walker@drive-b", "--build", "8748", "--rel", "started"); err != nil || out != "started build:8748\n" {
+		t.Fatalf("claim --for = %q, %v", out, err)
+	}
+	out, err := run(t, "who", "--all", "--json", "--build", "8748")
+	if err != nil || !strings.Contains(out, `"session":"bbbb2222-walker"`) || strings.Contains(out, "cccc3333-walker") || strings.Count(out, "\n") != 1 {
+		t.Fatalf("who --build after claim --for = %q, %v", out, err)
+	}
+	for _, tt := range []struct{ lane, want string }{
+		{"walker", "name the lane as <lane>@<drive>"},
+		{"@drive-b", "name the lane as <lane>@<drive>"},
+		{"ghost@drive-b", "no live session on this machine is bound as lane ghost in drive drive-b"},
+		{"desk@drive-b", "2 live sessions are bound as that lane"},
+	} {
+		if out, err := run(t, "claim", "--for", tt.lane, "--build", "1"); err == nil || !strings.Contains(err.Error(), tt.want) {
+			t.Fatalf("claim --for %s = %q, %v; want %q", tt.lane, out, err, tt.want)
+		}
+	}
+	if out, err := run(t, "unclaim", "--for", "walker@drive-b", "--build", "8748", "--rel", "started"); err != nil || out != "started build:8748 removed\n" {
+		t.Fatalf("unclaim --for = %q, %v", out, err)
+	}
+}

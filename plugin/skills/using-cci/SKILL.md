@@ -292,6 +292,12 @@ cci claim --ref dispatch:ctx_6e8064160648 --rel runs
 `--ref <kind>:<key>` takes any other pair. `cci unclaim` with the same
 flags drops an explicit claim; a derived one stays with its record.
 
+`--for <lane>@<drive>` makes the claim the lane's instead of the caller's,
+so a desk or runner that learns of a lane's artifact can tie it to that lane:
+`cci claim --for walker@release-v3 --build 8748 --rel started`. It names the
+one live session on this machine bound as that lane in that drive, and
+refuses when none is live or more than one is, and needs no session of its own.
+
 `cci claim --rel opened --pr N` from a session bound to a drive also posts
 one `opened` record for each PR on that drive, so a landing desk sees the PR
 without a lane posting it. `ccx vcs ship` makes this claim for every PR it
