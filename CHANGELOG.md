@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-22
+
 ### Added
 
 - `cci claim --for <lane>@<drive>` and `cci unclaim --for` act on the claims
@@ -14,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record can now claim the build for the lane, so `cci who --build` names the
   lane that started it rather than the runner. The flag refuses a lane with
   no live session or with more than one, and needs no session of the caller's.
+
+## [0.22.2] - 2026-10-19
 
 ### Fixed
 
@@ -795,7 +799,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.22.1...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/yasyf/cc-inbox/compare/v0.22.2...v0.23.0
+[0.22.2]: https://github.com/yasyf/cc-inbox/compare/v0.22.1...v0.22.2
 [0.22.1]: https://github.com/yasyf/cc-inbox/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/yasyf/cc-inbox/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/yasyf/cc-inbox/compare/v0.21.1...v0.21.2
