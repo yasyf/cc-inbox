@@ -194,7 +194,7 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 	}
 	var out bytes.Buffer
 	if b.Lane != "" {
-		open, err := st.OpenTo(ctx, b.Drive, b.Lane, askKinds)
+		open, err := owed(ctx, st, b.Drive, b.Lane)
 		if err != nil {
 			return err
 		}
@@ -202,6 +202,29 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 	}
 	_, _ = tail.WriteTo(&out)
 	return additionalContext(w, event, out.String())
+}
+
+func owed(ctx context.Context, st *store.Store, drive, reader string) ([]store.Record, error) {
+	open, err := st.OpenTo(ctx, drive, reader, askKinds)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(open, func(r store.Record) bool {
+		first, _, _ := strings.Cut(r.To[0], "@")
+		return !sameLane(first, reader) || sameLane(r.Lane, reader) || r.Kind == kinds.Decide && !strings.HasSuffix(strings.TrimSpace(r.Text), "?")
+	}), nil
+}
+
+func sameLane(a, b string) bool {
+	return a == b || store.RootName(a) && store.RootName(b)
+}
+
+func watermark(ctx context.Context, st *store.Store, cursor, drive string) error {
+	head, err := st.MaxSeq(ctx)
+	if err != nil {
+		return err
+	}
+	return st.SetCursor(ctx, cursor, drive, head)
 }
 
 func writeOpen(w io.Writer, open []store.Record, reader string, now time.Time) {
@@ -218,20 +241,24 @@ func writeOpen(w io.Writer, open []store.Record, reader string, now time.Time) {
 	}
 }
 
-// Stop blocks a lane's thread's stop once per ask, about the newest ask,
-// decide or blocker addressed to it that has waited past overdue; the next
-// stop passes.
+// Stop blocks a lane's thread's stop once per record, about the newest open
+// ask, blocker or question-ending decide that names the lane first, came from
+// another lane, and has waited past overdue; the next stop passes. A thread's
+// first stop only records the head, so older records never block.
 func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 	b, ok, err := st.Binding(ctx, p.Key())
 	if err != nil || !ok || b.Lane == "" {
 		return err
 	}
-	open, err := st.OpenTo(ctx, b.Drive, b.Lane, askKinds)
+	cursor := "stop-" + p.Key().String()
+	nudged, ok, err := st.Cursor(ctx, cursor, b.Drive)
 	if err != nil {
 		return err
 	}
-	cursor := "stop-" + p.Key().String()
-	nudged, _, err := st.Cursor(ctx, cursor, b.Drive)
+	if !ok {
+		return watermark(ctx, st, cursor, b.Drive)
+	}
+	open, err := owed(ctx, st, b.Drive, b.Lane)
 	if err != nil {
 		return err
 	}
