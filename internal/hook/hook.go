@@ -218,8 +218,9 @@ func writeOpen(w io.Writer, open []store.Record, reader string, now time.Time) {
 	}
 }
 
-// Stop nudges a lane's thread, once per ask, about the newest ask, decide or
-// blocker addressed to it that has waited past overdue. It never blocks.
+// Stop blocks a lane's thread's stop once per ask, about the newest ask,
+// decide or blocker addressed to it that has waited past overdue; the next
+// stop passes.
 func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 	b, ok, err := st.Binding(ctx, p.Key())
 	if err != nil || !ok || b.Lane == "" {
@@ -243,11 +244,11 @@ func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 	if err := st.SetCursor(ctx, cursor, b.Drive, newest.Seq); err != nil {
 		return err
 	}
-	text := fmt.Sprintf("cci: this ask to %s has waited %dm unanswered: %s; answer it with cci post --re %d --kind answer, or close it with cci post --resolves %d", b.Lane, int(now.Sub(newest.At).Minutes()), render.Clip(render.Line(newest, now), openWidth), newest.Seq, newest.Seq)
+	reason := fmt.Sprintf("cci #%d %s from %s to %s has waited %dm unanswered: %s. Answer it, then close it with cci post --resolves %d.", newest.Seq, strings.ToUpper(string(newest.Kind)), newest.Lane, b.Lane, int(now.Sub(newest.At).Minutes()), render.Clip(strings.Join(strings.Fields(newest.Text), " "), openWidth), newest.Seq)
 	if len(late) > 1 {
-		text += fmt.Sprintf(" (%d older overdue asks also wait)", len(late)-1)
+		reason += fmt.Sprintf(" %d older overdue asks also wait.", len(late)-1)
 	}
-	return additionalContext(w, "Stop", text)
+	return json.NewEncoder(w).Encode(map[string]string{"decision": "block", "reason": reason})
 }
 
 func additionalContext(w io.Writer, event, text string) error {

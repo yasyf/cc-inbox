@@ -13,9 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   at most, each with its age in minutes. An ask posted now no longer waits
   behind hours of older records replayed three at a time from a lagging
   cursor.
-- A `Stop` hook adds one line to the model's context naming the newest ask,
-  decide or blocker addressed to the lane that has waited ten minutes
-  unanswered. It nudges once per record and never blocks.
+- A `Stop` hook blocks the stop once when an ask, decide or blocker
+  addressed to the lane has waited ten minutes unanswered. Its reason names
+  the newest such record, its lane and age, and `cci post --resolves <seq>`.
+  Each record blocks one stop; the next stop passes.
 
 ### Fixed
 
