@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.1] - 2026-10-25
+
 ### Fixed
 
 - The open-asks section and the `Stop` block count only records the lane
@@ -832,7 +834,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/yasyf/cc-inbox/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/yasyf/cc-inbox/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/yasyf/cc-inbox/compare/v0.22.2...v0.23.0
 [0.22.2]: https://github.com/yasyf/cc-inbox/compare/v0.22.1...v0.22.2
