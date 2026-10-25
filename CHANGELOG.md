@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The open-asks section and the `Stop` block count only records the lane
+  owes: an ask, a blocker, or a decide ending in a question mark, whose first
+  addressee is the lane and whose author is another lane. A status decide
+  that copies the root, or an ask that names the root after the lane that
+  owes it, no longer counts. One drive's root had 415 such records listed.
+- The `Stop` hook's first run in a thread records the drive's head and blocks
+  nothing, so records posted before the hook was installed never block a
+  stop.
+
 ## [0.24.0] - 2026-10-25
 
 ### Added
