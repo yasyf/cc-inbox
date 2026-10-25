@@ -499,7 +499,11 @@ func TestStopNudgesOnceAboutEachOverdueAsk(t *testing.T) {
 		if out.Len() == 0 {
 			return ""
 		}
-		return hookContext(t, &out, "Stop")
+		var got struct{ Decision, Reason string }
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Decision != "block" {
+			t.Fatalf("Stop output %q: %v", out.String(), err)
+		}
+		return got.Reason
 	}
 	first := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "where does the PR go?"})
 	clock.Advance(9 * time.Minute)
@@ -507,7 +511,7 @@ func TestStopNudgesOnceAboutEachOverdueAsk(t *testing.T) {
 		t.Fatalf("nudged before ten minutes: %q", got)
 	}
 	clock.Advance(2 * time.Minute)
-	if got := stop(); !strings.Contains(got, "has waited 11m unanswered") || !strings.Contains(got, fmt.Sprintf("--re %d", first.Seq)) || !strings.Contains(got, "where does the PR go?") {
+	if got := stop(); !strings.Contains(got, fmt.Sprintf("cci #%d ASK from lane-a to root has waited 11m unanswered", first.Seq)) || !strings.Contains(got, fmt.Sprintf("--resolves %d", first.Seq)) || !strings.Contains(got, "where does the PR go?") {
 		t.Fatalf("overdue nudge = %q", got)
 	}
 	if got := stop(); got != "" {
