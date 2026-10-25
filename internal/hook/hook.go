@@ -208,13 +208,13 @@ func writeOpen(w io.Writer, open []store.Record, reader string, now time.Time) {
 	if len(open) == 0 {
 		return
 	}
-	fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", reader)
+	_, _ = fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", reader)
 	for i, r := range slices.Backward(open) {
 		if i < len(open)-openShown {
-			fmt.Fprintf(w, "... %d older open asks\n", i+1)
+			_, _ = fmt.Fprintf(w, "... %d older open asks\n", i+1)
 			break
 		}
-		fmt.Fprintf(w, "%s (open %dm)\n", render.Clip(render.Line(r, now), openWidth), int(now.Sub(r.At).Minutes()))
+		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Clip(render.Line(r, now), openWidth), int(now.Sub(r.At).Minutes()))
 	}
 }
 
