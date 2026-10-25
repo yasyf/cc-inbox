@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci post` with a repeated `--resolves` or `--re` kept only the last seq
+  and dropped the rest without a word, so a sweep that passed 40
+  `--resolves` closed one record. Both flags now accumulate, and a comma list
+  works too: the post writes one record per seq, with the same text, and
+  prints each record's seq. An `--id` becomes `<id>#<seq>` on each record so
+  a repost stays idempotent. A post that repeats both flags is refused.
+
 ## [0.24.1] - 2026-10-25
 
 ### Fixed

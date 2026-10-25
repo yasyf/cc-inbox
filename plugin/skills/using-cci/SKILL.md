@@ -46,6 +46,8 @@ Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
 record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`.
 `go`, `opened`, `landed`, and `fix-live` can all carry `--resolves`.
 `answer`, `lift`, `withdraw`, and `unblock` require `--re`, `--topic`, or `--resolves`.
+Repeat `--resolves`, or give a comma list, to close several at once: each seq
+gets its own record.
 
 Every `defect`, `matrix`, `hold`, `go`, or `opened` record about a stack carries
 `--stack <project>/<env>`, `--target <name>`, or both. Attach them to related records

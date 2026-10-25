@@ -32,6 +32,7 @@ func newPostCmd() *cobra.Command {
 		census, bodyFile        string
 		ttl                     time.Duration
 		asJSON                  bool
+		re, resolves            []int64
 	)
 	cmd := &cobra.Command{
 		Use:   "post [TEXT]",
@@ -109,25 +110,23 @@ func newPostCmd() *cobra.Command {
 			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
-			got, dup, err := st.PostAt(cmd.Context(), r, ttl, at)
+			records, err := perTarget(r, re, resolves)
 			if err != nil {
 				return err
 			}
-			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
-				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
+			for _, rec := range records {
+				got, dup, err := st.PostAt(cmd.Context(), rec, ttl, at)
+				if err != nil {
+					return err
+				}
+				if err := printPosted(cmd.OutOrStdout(), got, dup, asJSON); err != nil {
 					return err
 				}
 			}
-			if asJSON {
-				_, err = fmt.Fprintln(cmd.OutOrStdout(), render.JSON(got))
-				return err
+			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
+				return st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started))
 			}
-			suffix := ""
-			if dup {
-				suffix = " (duplicate)"
-			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "#%d%s\n", got.Seq, suffix)
-			return err
+			return nil
 		}),
 	}
 	f := cmd.Flags()
@@ -138,8 +137,8 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
-	f.Int64Var(&r.Re, "re", 0, "seq this record answers or closes")
-	f.Int64Var(&r.Resolves, "resolves", 0, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves")
+	f.Int64SliceVar(&re, "re", nil, "seq this record answers or closes; repeated, each seq gets its own record")
+	f.Int64SliceVar(&resolves, "resolves", nil, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated, each seq gets its own record")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
 	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
@@ -163,6 +162,49 @@ func newPostCmd() *cobra.Command {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
+}
+
+var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of the repeated flag becomes its own record")
+
+func perTarget(r store.Record, re, resolves []int64) ([]store.Record, error) {
+	if len(re) > 1 && len(resolves) > 1 {
+		return nil, errManyTargets
+	}
+	if len(re) > 0 {
+		r.Re = re[0]
+	}
+	if len(resolves) > 0 {
+		r.Resolves = resolves[0]
+	}
+	seqs, set := resolves, func(r *store.Record, seq int64) { r.Resolves = seq }
+	if len(re) > 1 {
+		seqs, set = re, func(r *store.Record, seq int64) { r.Re = seq }
+	}
+	if len(seqs) <= 1 {
+		return []store.Record{r}, nil
+	}
+	out := make([]store.Record, len(seqs))
+	for i, seq := range seqs {
+		out[i] = r
+		set(&out[i], seq)
+		if r.ID != "" {
+			out[i].ID = fmt.Sprintf("%s#%d", r.ID, seq)
+		}
+	}
+	return out, nil
+}
+
+func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
+	if asJSON {
+		_, err := fmt.Fprintln(w, render.JSON(got))
+		return err
+	}
+	suffix := ""
+	if dup {
+		suffix = " (duplicate)"
+	}
+	_, err := fmt.Fprintf(w, "#%d%s\n", got.Seq, suffix)
+	return err
 }
 
 func stamped(text string, at time.Time) string {
