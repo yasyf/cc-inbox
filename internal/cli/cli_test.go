@@ -1018,3 +1018,30 @@ func TestSubagentCannotReplaceTheWindowSubscription(t *testing.T) {
 		t.Fatalf("a subagent touched the subscriptions: %v", err)
 	}
 }
+
+func TestRepeatedResolvesClosesEverySeq(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	for _, text := range []string{"first?", "second?", "third?"} {
+		if _, err := run(t, "post", "--lane", "lane-a", "--kind", "ask", "--to", "root", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1", "--resolves", "2,3", "--id", "sweep", "--text", "stale")
+	if err != nil || out != "#4\n#5\n#6\n" {
+		t.Fatalf("post with three --resolves = %q, %v", out, err)
+	}
+	if out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1", "--resolves", "2", "--id", "sweep", "--text", "stale"); err != nil || out != "#4 (duplicate)\n#5 (duplicate)\n" {
+		t.Fatalf("repost = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail", "--since", "0", "--kind", "ask"); err != nil || strings.Count(out, "[RESOLVED #") != 3 {
+		t.Fatalf("tail after closing all three = %q, %v", out, err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "answer", "--re", "1", "--re", "2", "--resolves", "1", "--resolves", "3", "--text", "x"); err == nil || !strings.Contains(err.Error(), "not both") {
+		t.Fatalf("several --re and --resolves together = %v", err)
+	}
+}
