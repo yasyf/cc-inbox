@@ -1000,3 +1000,21 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 		t.Fatalf("unclaim --for = %q, %v", out, err)
 	}
 }
+
+func TestSubagentCannotReplaceTheWindowSubscription(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	t.Setenv("CCI_AGENT_ID", "aconversion-0123")
+	for _, args := range [][]string{
+		{"subscribe", "--drive", "d", "--reader", "conversion", "--kind", "review"},
+		{"unsubscribe"},
+	} {
+		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "a subagent or teammate cannot subscribe") {
+			t.Fatalf("%v from a subagent = %v", args, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "subscriptions")); !os.IsNotExist(err) {
+		t.Fatalf("a subagent touched the subscriptions: %v", err)
+	}
+}

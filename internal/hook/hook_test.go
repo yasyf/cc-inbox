@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -432,5 +433,94 @@ func TestPostToolUseNamesWorkflowAgentsAndDeliversTheirPeerRecords(t *testing.T)
 	var root bytes.Buffer
 	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, window, &root); err != nil || root.Len() != 0 {
 		t.Fatalf("unbound root thread got %q, %v", root.String(), err)
+	}
+}
+
+func bindRoot(t *testing.T, st *store.Store) hook.Payload {
+	t.Helper()
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "s1"}, "d", "root", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	return hook.Payload{SessionID: "s1", Event: "PostToolUse"}
+}
+
+func TestPostToolUseLeadsWithTheOpenAsksBehindABacklog(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	p := bindRoot(t, st)
+	answered := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "answered ask"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Answer, Re: answered.Seq, Text: "yes"})
+	resolved := testutil.Post(t, st, store.Record{Kind: kinds.Blocker, To: []string{"main"}, Text: "resolved blocker"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Resolves: resolved.Seq, Text: "cleared"})
+	testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"lane-b"}, Text: "ask for another lane"})
+	for i := range 6 {
+		testutil.Post(t, st, store.Record{Kind: kinds.Decide, To: []string{"root"}, Text: fmt.Sprintf("decide %d", i)})
+	}
+	for i := range 40 {
+		testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.State, To: []string{"root"}, Text: fmt.Sprintf("backlog %d", i)})
+	}
+	clock.Advance(3 * time.Minute)
+	fresh := testutil.Post(t, st, store.Record{Lane: "lane-c", Kind: kinds.Ask, To: []string{"main"}, Text: "which branch?"})
+	clock.Advance(2 * time.Minute)
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, p, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	lines := strings.Split(got, "\n")
+	if !strings.HasPrefix(lines[0], "open asks addressed to root, newest first") || !strings.HasPrefix(lines[1], fmt.Sprintf("#%d ", fresh.Seq)) || !strings.HasSuffix(lines[1], "which branch? (open 2m)") {
+		t.Fatalf("the newest open ask does not lead: %q", got)
+	}
+	open, replay, ok := strings.Cut(got, "cci records addressed to root; act on each:\n")
+	if !ok || strings.Contains(replay, "backlog 39") || strings.Contains(replay, "which branch?") {
+		t.Fatalf("cursor replay changed: %q", got)
+	}
+	if !strings.Contains(open, "decide 5") || strings.Contains(open, "decide 1 ") || !strings.Contains(open, "... 2 older open asks") {
+		t.Fatalf("open section is not capped at five: %q", open)
+	}
+	for _, closed := range []string{"answered ask", "resolved blocker", "ask for another lane"} {
+		if strings.Contains(open, closed) {
+			t.Fatalf("open section carries %q: %q", closed, open)
+		}
+	}
+}
+
+func TestStopNudgesOnceAboutEachOverdueAsk(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	p := bindRoot(t, st)
+	p.Event = "Stop"
+	stop := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := hook.Stop(ctx, st, p, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Len() == 0 {
+			return ""
+		}
+		return hookContext(t, &out, "Stop")
+	}
+	first := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "where does the PR go?"})
+	clock.Advance(9 * time.Minute)
+	if got := stop(); got != "" {
+		t.Fatalf("nudged before ten minutes: %q", got)
+	}
+	clock.Advance(2 * time.Minute)
+	if got := stop(); !strings.Contains(got, "has waited 11m unanswered") || !strings.Contains(got, fmt.Sprintf("--re %d", first.Seq)) || !strings.Contains(got, "where does the PR go?") {
+		t.Fatalf("overdue nudge = %q", got)
+	}
+	if got := stop(); got != "" {
+		t.Fatalf("nudged twice about one ask: %q", got)
+	}
+	second := testutil.Post(t, st, store.Record{Kind: kinds.Decide, To: []string{"main"}, Text: "merge now?"})
+	clock.Advance(11 * time.Minute)
+	if got := stop(); !strings.Contains(got, fmt.Sprintf("--resolves %d", second.Seq)) || strings.Contains(got, "older overdue") {
+		t.Fatalf("second nudge = %q", got)
+	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"lane-b"}, Text: "not for root"})
+	clock.Advance(11 * time.Minute)
+	if got := stop(); got != "" {
+		t.Fatalf("nudged about another lane's ask: %q", got)
 	}
 }

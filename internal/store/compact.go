@@ -19,6 +19,16 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 	return s.open(ctx, drive, Record.Tracked)
 }
 
+// OpenTo returns, in seq order, the tracked openers of ks addressed to reader
+// that no closer or resolver has closed.
+func (s *Store) OpenTo(ctx context.Context, drive, reader string, ks []kinds.Kind) ([]Record, error) {
+	openers, err := s.Query(ctx, Filter{Drive: drive, To: reader, Kinds: ks, IncludeExpired: true})
+	if err != nil {
+		return nil, err
+	}
+	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() || !slices.Contains(ks, o.Kind) }))
+}
+
 func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, error) {
 	return s.open(ctx, drive, func(r Record) bool { return r.Kind == kinds.Hold && !r.Tracked() })
 }

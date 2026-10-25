@@ -107,9 +107,15 @@ func newChannelCmd() *cobra.Command {
 	}
 }
 
-var errNoSession = errors.New("run this from a Claude Code session: no claude ancestor process or " + sessionEnv)
+var (
+	errNoSession    = errors.New("run this from a Claude Code session: no claude ancestor process or " + sessionEnv)
+	errAgentChannel = errors.New("a subagent or teammate cannot subscribe or unsubscribe (" + agentEnv + " is set): the channel belongs to the Claude Code window and delivers only to its main thread, so this would replace the root's subscription; the PostToolUse hook already delivers records addressed to your lane, and cci tail --reader <lane> reads them")
+)
 
 func thisSession() (store.Window, string, error) {
+	if os.Getenv(agentEnv) != "" {
+		return store.Window{}, "", errAgentChannel
+	}
 	window, err := thisWindow()
 	session := os.Getenv(sessionEnv)
 	if err != nil || session == "" {
