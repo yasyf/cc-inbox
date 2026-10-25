@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A lane's `PostToolUse` delivery leads with the asks, decides and blockers
+  addressed to it that nothing has answered or resolved, newest first, five
+  at most, each with its age in minutes. An ask posted now no longer waits
+  behind hours of older records replayed three at a time from a lagging
+  cursor.
+- A `Stop` hook adds one line to the model's context naming the newest ask,
+  decide or blocker addressed to the lane that has waited ten minutes
+  unanswered. It nudges once per record and never blocks.
+
+### Fixed
+
+- `cci subscribe` and `cci unsubscribe` refuse to run in a subagent or
+  teammate. The subscription belongs to the Claude Code window, which its
+  in-process agents share, so a teammate subscribing as its own lane replaced
+  the root's subscription. The root then received only that lane's records
+  and broadcasts, and asks addressed to it stopped arriving for hours.
+
 ## [0.23.0] - 2026-10-22
 
 ### Added

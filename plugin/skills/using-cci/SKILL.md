@@ -406,7 +406,9 @@ Each tag's body is one record line, and its `seq`, `kind`, and `lane`
 attributes repeat the header. Delivery is at-least-once, so skip a seq you
 have already handled. The subscription survives compaction and `/clear`, and
 the `SessionStart` hook carries it into a resumed session. Re-running
-`cci subscribe` replaces it, and `cci unsubscribe` ends it.
+`cci subscribe` replaces it, and `cci unsubscribe` ends it. Only the main
+thread subscribes: both commands refuse to run in a subagent or teammate,
+whose lane records reach it through the `PostToolUse` hook instead.
 The cursor starts at the head when you subscribe and defaults to
 `channel-<session>`. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.

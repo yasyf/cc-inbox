@@ -182,6 +182,17 @@ func newHookCmd() *cobra.Command {
 			}),
 		},
 		&cobra.Command{
+			Use:  "stop",
+			Args: cobra.NoArgs,
+			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+				p, err := hook.Read(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				return hook.Stop(cmd.Context(), st, p, cmd.OutOrStdout())
+			}),
+		},
+		&cobra.Command{
 			Use:  "subagent-stop",
 			Args: cobra.NoArgs,
 			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {

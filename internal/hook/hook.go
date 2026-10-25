@@ -12,11 +12,14 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -24,7 +27,12 @@ const (
 	digestBudget = 2500
 	tailBudget   = 1500
 	recordWidth  = 400
+	openShown    = 5
+	openWidth    = 300
+	overdue      = 10 * time.Minute
 )
+
+var askKinds = []kinds.Kind{kinds.Ask, kinds.Decide, kinds.Blocker}
 
 type Payload struct {
 	SessionID      string `json:"session_id"`
@@ -178,13 +186,68 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload) error {
 }
 
 func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, w io.Writer) error {
-	var out bytes.Buffer
-	out.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call"}, &out)
+	var tail bytes.Buffer
+	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call"}, &tail)
 	if err != nil || res.Printed == 0 {
 		return err
 	}
+	var out bytes.Buffer
+	if b.Lane != "" {
+		open, err := st.OpenTo(ctx, b.Drive, b.Lane, askKinds)
+		if err != nil {
+			return err
+		}
+		writeOpen(&out, open, b.Lane, st.Now())
+	}
+	_, _ = tail.WriteTo(&out)
 	return additionalContext(w, event, out.String())
+}
+
+func writeOpen(w io.Writer, open []store.Record, reader string, now time.Time) {
+	if len(open) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", reader)
+	for i, r := range slices.Backward(open) {
+		if i < len(open)-openShown {
+			fmt.Fprintf(w, "... %d older open asks\n", i+1)
+			break
+		}
+		fmt.Fprintf(w, "%s (open %dm)\n", render.Clip(render.Line(r, now), openWidth), int(now.Sub(r.At).Minutes()))
+	}
+}
+
+// Stop nudges a lane's thread, once per ask, about the newest ask, decide or
+// blocker addressed to it that has waited past overdue. It never blocks.
+func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
+	b, ok, err := st.Binding(ctx, p.Key())
+	if err != nil || !ok || b.Lane == "" {
+		return err
+	}
+	open, err := st.OpenTo(ctx, b.Drive, b.Lane, askKinds)
+	if err != nil {
+		return err
+	}
+	cursor := "stop-" + p.Key().String()
+	nudged, _, err := st.Cursor(ctx, cursor, b.Drive)
+	if err != nil {
+		return err
+	}
+	now := st.Now()
+	late := slices.DeleteFunc(open, func(r store.Record) bool { return r.Seq <= nudged || now.Sub(r.At) < overdue })
+	if len(late) == 0 {
+		return nil
+	}
+	newest := late[len(late)-1]
+	if err := st.SetCursor(ctx, cursor, b.Drive, newest.Seq); err != nil {
+		return err
+	}
+	text := fmt.Sprintf("cci: this ask to %s has waited %dm unanswered: %s; answer it with cci post --re %d --kind answer, or close it with cci post --resolves %d", b.Lane, int(now.Sub(newest.At).Minutes()), render.Clip(render.Line(newest, now), openWidth), newest.Seq, newest.Seq)
+	if len(late) > 1 {
+		text += fmt.Sprintf(" (%d older overdue asks also wait)", len(late)-1)
+	}
+	return additionalContext(w, "Stop", text)
 }
 
 func additionalContext(w io.Writer, event, text string) error {

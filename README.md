@@ -166,7 +166,10 @@ its own cursor. When a Monitor watched the same records, stop it after
 subscribing; records in the overlap arrive twice. A subscription belongs to the
 Claude Code window: compaction and `/clear` keep it, and the `SessionStart`
 hook moves it to the new window when the session is resumed.
-`cci unsubscribe` stops delivery.
+`cci unsubscribe` stops delivery. Subagents and teammates share the window
+but never see its channel tags, so both commands refuse to run where
+`CCI_AGENT_ID` is set rather than replace the root's subscription with a
+lane's.
 
 Claude Code delivers channel tags only from plugins named in `--channels` at
 launch. An organization whose managed settings set `allowedChannelPlugins`
@@ -692,7 +695,8 @@ Each entry invokes the plugin's `bin/cci`;
 | --- | --- | --- |
 | `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
 | `SessionStart` | `cci hook announce` | Announce the session in the peer registry: role inferred from its binding unless already set, worktree, branch and `origin` slug from git, process identity, Orca and long-running variables. A separate hook so a missing `git` never costs a session its digest. |
-| `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | Refresh the session's `seen_at` in the peer registry. In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. |
+| `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | Refresh the session's `seen_at` in the peer registry. In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. When anything is unseen, the injection leads with the five newest asks, decides and blockers addressed to the lane that nothing has answered or resolved, each with its age in minutes, so a fresh ask never waits behind the cursor's backlog. |
+| `Stop` | `cci hook stop` | In a lane session, when an ask, decide or blocker addressed to the lane has gone unanswered for ten minutes, add one line naming the newest such record to the model's context. It nudges once per record and never blocks the stop. |
 | `UserPromptSubmit` | `cci hook prompt` | Refresh the session's `seen_at` in the peer registry. In a session bound with `--root`, record ordinary user prompts as `owner` records with source `hook:root`. Lanes receive them as broadcasts; `--reader root` and `--reader main` never get them back. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
 
 A session becomes a lane session the first time `cci post --lane <lane>` runs
