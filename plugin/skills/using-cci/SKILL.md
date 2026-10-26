@@ -26,7 +26,8 @@ cci drive use release-demo --root
 ## Post one event
 
 Write one record per event. Text over 400 characters spills to a file: the record
-carries its first line and `cci post` prints the file's path. Use `state` for
+carries its first 400 characters, cut at a word and ended with `…`, then the
+file's path, and `cci post` prints that path. Read the file for the rest. Use `state` for
 status, `ask` for a question, `hold` for a stop, `go` for permission, and `opened`
 or `landed` for a PR event. Use `review` with `--outcome` for a rules-review verdict.
 Address lanes with `--to`; when an action needs the owner, use `--to owner`.
@@ -46,8 +47,8 @@ Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
 record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`.
 `go`, `opened`, `landed`, and `fix-live` can all carry `--resolves`.
 `answer`, `lift`, `withdraw`, and `unblock` require `--re`, `--topic`, or `--resolves`.
-Repeat `--resolves`, or give a comma list, to close several at once: each seq
-gets its own record.
+Repeat `--resolves`, or give a comma list, to close several at once: one record
+resolves every seq, and its line reads `resolves #<a>,#<b>,#<c>`.
 
 Every `defect`, `matrix`, `hold`, `go`, or `opened` record about a stack carries
 `--stack <project>/<env>`, `--target <name>`, or both. Attach them to related records

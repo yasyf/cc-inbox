@@ -386,7 +386,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--body-file <file>` | Set `body` to the file's JSON, at most 64 KiB; `-` reads stdin. |
 | `--to peer:<session prefix or name>[/<agent id or name>]`, `--to peer:<agent id or label>`, `--to peer:<node>/<session>[/<agent>]`, `--to <lane>@<drive>` | Address one session's root thread or one of its subagents, one of the posting session's own subagents or Workflow agents (by label, live ones first), on this machine or another node, resolved at post time, or a lane in another drive; `root@<drive>` and `main@<drive>` both reach that drive's root. A bare lane that no live thread reads in the posting drive, but one reads in exactly one other drive, becomes `<lane>@<that drive>`, with a note on stderr; one read in several other drives fails the post. Such a record reaches its recipient's reads from any drive, and `--resolves` may name it across drives. |
 | `--topic <key>`, `--re <seq>` | Group related events or link a reply to an earlier record. |
-| `--resolves <seq>` | Must name an existing record in the same drive, or one addressed across drives with `peer:` or `<lane>@<drive>`. Only a later record closes the open item, regardless of the new record's kind. Repeat the flag, or give a comma list, to close several: each seq gets its own record with the same text, and an `--id` becomes `<id>#<seq>` on each. Repeated `--re` works the same way; a post cannot repeat both. |
+| `--resolves <seq>` | Must name an existing record in the same drive, or one addressed across drives with `peer:` or `<lane>@<drive>`. Only a later record closes the open item, regardless of the new record's kind. Repeat the flag, or give a comma list, to close several: the one record resolves every seq, and its line reads `resolves #<a>,#<b>`. A repeated `--re` writes one record per seq with the same text, and an `--id` becomes `<id>#<seq>` on each; a post cannot repeat both. |
 | `--to <lane>` | Address one or more lanes. Use `--to owner` when the owner needs to act. |
 
 | Read option | Commands | Behavior |
@@ -732,7 +732,7 @@ sessions write to the same SQLite store without a daemon.
 
 | Surface | Limit |
 | --- | --- |
-| Posted text | 400 characters, counted after `{at}` and a leading stamp take the record's time. Longer text spills to a file under `blobs/` as stamped. The record carries its first line, `refs.path` names the file, and `cci post` prints the path on stderr. `--path <file>` posts a file you wrote; its first line becomes the text as written. |
+| Posted text | 400 characters, counted after `{at}` and a leading stamp take the record's time. Longer text spills to a file under `blobs/` as stamped. The record carries its first 400 characters with whitespace collapsed, cut at a word and ended with `…`; `refs.path` names the file, and `cci post` prints the path on stderr. `--path <file>` posts a file you wrote; its first line becomes the text as written. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
 | `tail`, `grep`, and `state` | Default 6,144-byte budget; `--budget` sets any other size. Output stops at a whole line. |
 | Text `digest` | Default 32,000-byte budget, enough for every section at its record limit with whole records; `--budget` sets any other size. Output stops at a whole line. |

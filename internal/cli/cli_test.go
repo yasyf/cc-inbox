@@ -320,11 +320,20 @@ func TestPostSpillsTextOver400CharactersToAFile(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(out)), &got); err != nil {
 		t.Fatalf("tail --json = %q: %v", out, err)
 	}
-	if got.Text != "perf findings for api-sql" {
-		t.Errorf("spilled record text = %q, want the first line", got.Text)
+	if want := "perf findings for api-sql " + strings.Repeat("x", 373) + "…"; got.Text != want {
+		t.Errorf("spilled record text = %q, want the first 400 characters", got.Text)
 	}
 	if body, err := os.ReadFile(got.Refs.Path); err != nil || string(body) != long+"\n" {
 		t.Errorf("spilled file %q = %q, %v; want the full text", got.Refs.Path, body, err)
+	}
+	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, got.Text+" "+got.Refs.Path) {
+		t.Errorf("tail of the spilled record = %q, %v; want the whole excerpt then the path", out, err)
+	}
+	if _, err := run(t, append(post, "--topic", "words", "--text", strings.Repeat("words ", 80))...); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0", "--json", "--topic", "words"); err != nil || !strings.Contains(out, `"text":"`+strings.Repeat("words ", 65)+`words…"`) {
+		t.Errorf("spilled prose = %q, %v; want it cut at the last word before 400 characters", out, err)
 	}
 	if _, err := run(t, append(post, "--text", "perf findings for api-sql\n"+strings.Repeat("y", 500))...); err != nil {
 		t.Fatal(err)
@@ -1031,15 +1040,21 @@ func TestRepeatedResolvesClosesEverySeq(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1", "--resolves", "2,3", "--id", "sweep", "--text", "stale")
-	if err != nil || out != "#4\n#5\n#6\n" {
-		t.Fatalf("post with three --resolves = %q, %v", out, err)
+	out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1", "--resolves", "2,3,2", "--id", "sweep", "--text", "stale")
+	if err != nil || out != "#4\n" {
+		t.Fatalf("post with three --resolves = %q, %v; want one record", out, err)
 	}
-	if out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1", "--resolves", "2", "--id", "sweep", "--text", "stale"); err != nil || out != "#4 (duplicate)\n#5 (duplicate)\n" {
+	if out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1,2,3", "--id", "sweep", "--text", "stale"); err != nil || out != "#4 (duplicate)\n" {
 		t.Fatalf("repost = %q, %v", out, err)
 	}
-	if out, err := run(t, "tail", "--since", "0", "--kind", "ask"); err != nil || strings.Count(out, "[RESOLVED #") != 3 {
+	if out, err := run(t, "tail", "--since", "0", "--kind", "ask"); err != nil || strings.Count(out, "[RESOLVED #4]") != 3 {
 		t.Fatalf("tail after closing all three = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail", "--since", "0", "--kind", "note"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "stale resolves #1,#2,#3") {
+		t.Fatalf("tail of the closing note = %q, %v; want one line naming all three", out, err)
+	}
+	if out, err := run(t, "digest"); err != nil || strings.Contains(out, "open asks") {
+		t.Fatalf("digest after closing all three = %q, %v; want no open asks", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "answer", "--re", "1", "--re", "2", "--resolves", "1", "--resolves", "3", "--text", "x"); err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("several --re and --resolves together = %v", err)

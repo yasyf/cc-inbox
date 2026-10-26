@@ -18,26 +18,27 @@ type Pointer struct {
 	Seq    int64  `json:"seq"`
 }
 
-// Row is a record as it travels between nodes. Its re and resolves are
+// Row is a record as it travels between nodes. Its re, resolves and also_resolves are
 // pointers; Apply rewrites them to the receiving store's seqs.
 type Row struct {
-	Origin    string          `json:"origin"`
-	OriginSeq int64           `json:"origin_seq"`
-	ID        string          `json:"id,omitempty"`
-	Drive     string          `json:"drive"`
-	Lane      string          `json:"lane"`
-	Kind      kinds.Kind      `json:"kind"`
-	At        time.Time       `json:"at"`
-	Text      string          `json:"text"`
-	Topic     string          `json:"topic,omitempty"`
-	To        []string        `json:"to,omitempty"`
-	Re        *Pointer        `json:"re,omitempty"`
-	Resolves  *Pointer        `json:"resolves,omitempty"`
-	Refs      Refs            `json:"refs"`
-	Fields    Fields          `json:"fields"`
-	ExpiresAt *time.Time      `json:"expires_at,omitempty"`
-	Source    string          `json:"source"`
-	Body      json.RawMessage `json:"body,omitempty"`
+	Origin       string          `json:"origin"`
+	OriginSeq    int64           `json:"origin_seq"`
+	ID           string          `json:"id,omitempty"`
+	Drive        string          `json:"drive"`
+	Lane         string          `json:"lane"`
+	Kind         kinds.Kind      `json:"kind"`
+	At           time.Time       `json:"at"`
+	Text         string          `json:"text"`
+	Topic        string          `json:"topic,omitempty"`
+	To           []string        `json:"to,omitempty"`
+	Re           *Pointer        `json:"re,omitempty"`
+	Resolves     *Pointer        `json:"resolves,omitempty"`
+	AlsoResolves []Pointer       `json:"also_resolves,omitempty"`
+	Refs         Refs            `json:"refs"`
+	Fields       Fields          `json:"fields"`
+	ExpiresAt    *time.Time      `json:"expires_at,omitempty"`
+	Source       string          `json:"source"`
+	Body         json.RawMessage `json:"body,omitempty"`
 }
 
 // Receipt is the last change a transport channel applied completely from
@@ -59,7 +60,7 @@ type Applied struct {
 	Released  int `json:"released"`
 }
 
-const exportColumns = columns + ", re_origin, re_origin_seq, resolves_origin, resolves_origin_seq"
+const exportColumns = columns + ", re_origin, re_origin_seq, resolves_origin, resolves_origin_seq, COALESCE(also_resolves_origin, '')"
 
 // Export returns origin's rows with origin_seq above since, oldest first,
 // leaving out the digests compaction writes; limit 0 returns them all.
@@ -77,17 +78,24 @@ func (s *Store) Export(ctx context.Context, origin string, since int64, limit in
 	for rows.Next() {
 		var (
 			re, resolves Pointer
+			alsoOrigins  string
 			extra        exportScanner
 		)
-		extra.row, extra.tail = rows, []any{&re.Origin, &re.Seq, &resolves.Origin, &resolves.Seq}
+		extra.row, extra.tail = rows, []any{&re.Origin, &re.Seq, &resolves.Origin, &resolves.Seq, &alsoOrigins}
 		r, err := s.scan(extra)
 		if err != nil {
 			return nil, err
 		}
+		var also []Pointer
+		if alsoOrigins != "" {
+			if err := json.Unmarshal([]byte(alsoOrigins), &also); err != nil {
+				return nil, fmt.Errorf("decode also_resolves_origin of #%d: %w", r.Seq, err)
+			}
+		}
 		out = append(out, Row{
 			Origin: s.origin(r.Origin), OriginSeq: originSeq(r), ID: r.ID,
 			Drive: r.Drive, Lane: r.Lane, Kind: r.Kind, At: r.At, Text: r.Text, Topic: r.Topic, To: r.To,
-			Re: pointer(r.Re, re), Resolves: pointer(r.Resolves, resolves),
+			Re: pointer(r.Re, re), Resolves: pointer(r.Resolves, resolves), AlsoResolves: also,
 			Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body,
 		})
 	}
@@ -189,6 +197,17 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 	if waiting == nil {
 		waiting = waitingResolves
 	}
+	also := make([]int64, 0, len(row.AlsoResolves))
+	for _, p := range row.AlsoResolves {
+		seq, waitingAlso, err := s.target(ctx, tx, &p)
+		if err != nil {
+			return err
+		}
+		if waiting == nil {
+			waiting = waitingAlso
+		}
+		also = append(also, seq)
+	}
 	if waiting != nil {
 		raw, _ := json.Marshal(row)
 		if _, err := tx.ExecContext(ctx, "INSERT INTO pending (origin, origin_seq, wait_origin, wait_seq, row) VALUES (?, ?, ?, ?, ?)",
@@ -204,6 +223,9 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 		Origin: row.Origin, OriginSeq: row.OriginSeq, ID: row.ID,
 		Drive: row.Drive, Lane: row.Lane, Kind: row.Kind, At: row.At, Text: row.Text, Topic: row.Topic, To: row.To,
 		Re: re, Resolves: resolves, Refs: row.Refs, Fields: row.Fields, ExpiresAt: row.ExpiresAt, Source: row.Source, Body: row.Body,
+	}
+	if len(also) > 0 {
+		r.AlsoResolves, r.alsoOrigins = also, row.AlsoResolves
 	}
 	seq, err := s.insert(ctx, tx, r, Hash(r), nil)
 	if err != nil {

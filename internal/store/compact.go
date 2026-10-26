@@ -244,7 +244,7 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 	}
 	days := map[string][]Record{}
 	for _, r := range old {
-		if r.Kind == kinds.Digest || keepSeq[r.Seq] || elsewhere[r.Seq] || keepSeq[r.Re] || keepSeq[r.Resolves] {
+		if r.Kind == kinds.Digest || keepSeq[r.Seq] || elsewhere[r.Seq] || keepSeq[r.Re] || slices.ContainsFunc(r.Closes(), func(seq int64) bool { return keepSeq[seq] }) {
 			continue
 		}
 		day := r.At.In(time.Local).Format(time.DateOnly)
@@ -270,7 +270,8 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 }
 
 func (s *Store) foreignResolvers(ctx context.Context, drive string) (map[int64]bool, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT r.seq FROM records r JOIN records t ON t.seq = r.resolves WHERE r.drive = ? AND t.drive != ?", drive, drive)
+	rows, err := s.db.QueryContext(ctx, `SELECT r.seq FROM records r JOIN records t ON t.seq = r.resolves WHERE r.drive = ? AND t.drive != ?
+UNION SELECT r.seq FROM records r, json_each(r.also_resolves) j JOIN records t ON t.seq = j.value WHERE r.drive = ? AND t.drive != ?`, drive, drive, drive, drive)
 	if err != nil {
 		return nil, fmt.Errorf("read cross-drive resolvers: %w", err)
 	}

@@ -336,3 +336,39 @@ func TestApplyRefusesAFoldedRow(t *testing.T) {
 		t.Fatalf("replayed folded row = %+v, %v", got, err)
 	}
 }
+
+func TestOneRecordClosingSeveralSeqsReplicatesEveryClosure(t *testing.T) {
+	ctx := context.Background()
+	a, _ := testutil.Store(t)
+	b, _ := testutil.Store(t)
+	first := testutil.Post(t, a, store.Record{Kind: kinds.Ask, Text: "first?"})
+	second := testutil.Post(t, a, store.Record{Kind: kinds.Ask, Text: "second?"})
+	testutil.Post(t, b, store.Record{Kind: kinds.Note, Text: "moves b's seqs off a's"})
+	closer := testutil.Post(t, a, store.Record{Lane: "root", Kind: kinds.Note, Text: "both stale", Resolves: first.Seq, AlsoResolves: []int64{second.Seq}})
+	rows, err := a.Export(ctx, a.Self(), 0, 0)
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("a exports %+v, %v", rows, err)
+	}
+	if got := rows[2].AlsoResolves; len(got) != 1 || got[0] != (store.Pointer{Origin: a.Self(), Seq: second.Seq}) {
+		t.Fatalf("closer #%d exports also_resolves %+v; want a pointer at a's #%d", closer.Seq, got, second.Seq)
+	}
+	if got, err := b.Apply(ctx, []store.Row{rows[0], rows[2]}, nil); err != nil || got != (store.Applied{Inserted: 1, Buffered: 1}) {
+		t.Fatalf("Apply(closer before its second target) = %+v, %v", got, err)
+	}
+	if got, err := b.Apply(ctx, rows[1:2], nil); err != nil || got != (store.Applied{Inserted: 1, Released: 1}) {
+		t.Fatalf("Apply(second target) = %+v, %v", got, err)
+	}
+	local, err := b.Query(ctx, store.Filter{Drive: "d", Origin: a.Self()})
+	if err != nil || len(local) != 3 {
+		t.Fatalf("b holds %+v, %v", local, err)
+	}
+	asks := map[string]int64{local[0].Text: local[0].Seq, local[1].Text: local[1].Seq}
+	got := local[2]
+	if got.Resolves != asks["first?"] || len(got.AlsoResolves) != 1 || got.AlsoResolves[0] != asks["second?"] {
+		t.Fatalf("closer on b = resolves %d also %v; want %d and [%d]", got.Resolves, got.AlsoResolves, asks["first?"], asks["second?"])
+	}
+	resolved, err := b.Resolvers(ctx, "d")
+	if err != nil || resolved[asks["first?"]] != got.Seq || resolved[asks["second?"]] != got.Seq {
+		t.Fatalf("Resolvers(d) = %v, %v; want both asks resolved by #%d", resolved, err, got.Seq)
+	}
+}

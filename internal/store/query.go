@@ -467,12 +467,13 @@ func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, 
 	if len(seqs) == 0 {
 		return out, nil
 	}
-	params := make([]any, 0, 2*len(seqs))
+	params := make([]any, 0, 3*len(seqs))
 	for _, seq := range seqs {
 		params = append(params, seq)
 	}
-	params = append(params, params...)
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE re IN ("+placeholders(len(seqs))+") OR resolves IN ("+placeholders(len(seqs))+") ORDER BY seq", params...)
+	params = append(params, append(params, params...)...)
+	in := placeholders(len(seqs))
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", params...)
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
@@ -485,15 +486,18 @@ func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, 
 		if r.Re != 0 {
 			out[r.Re] = append(out[r.Re], r)
 		}
-		if r.Resolves != 0 && r.Resolves != r.Re {
-			out[r.Resolves] = append(out[r.Resolves], r)
+		for _, seq := range r.Closes() {
+			if seq != r.Re {
+				out[seq] = append(out[seq], r)
+			}
 		}
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT resolves, seq FROM records WHERE resolves != 0 AND (drive = ? OR resolves IN (SELECT seq FROM records WHERE drive = ?))", drive, drive)
+	rows, err := s.db.QueryContext(ctx, `SELECT resolves, seq FROM records WHERE resolves != 0 AND (drive = ? OR resolves IN (SELECT seq FROM records WHERE drive = ?))
+UNION ALL SELECT j.value, r.seq FROM records r, json_each(r.also_resolves) j WHERE r.drive = ? OR j.value IN (SELECT seq FROM records WHERE drive = ?)`, drive, drive, drive, drive)
 	if err != nil {
 		return nil, fmt.Errorf("read resolvers: %w", err)
 	}
@@ -504,7 +508,7 @@ func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, e
 		if err := rows.Scan(&target, &seq); err != nil {
 			return nil, fmt.Errorf("scan resolver: %w", err)
 		}
-		out[target] = seq
+		out[target] = max(out[target], seq)
 	}
 	return out, rows.Err()
 }
