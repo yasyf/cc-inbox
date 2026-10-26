@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -146,7 +147,14 @@ func (f ClaimFilter) query() (string, []any) {
 }
 
 func keyMatch(kind, key, value string) (string, []any) {
-	return "(" + key + " = ? OR (" + kind + " = 'build' AND " + key + ` LIKE '%/builds/' || ? ESCAPE '\'))`, []any{value, likeLiteral(value)}
+	alternatives := []string{key + " = ?", "(" + kind + " = 'build' AND " + key + ` LIKE '%/builds/' || ? ESCAPE '\')`}
+	params := []any{value, likeLiteral(value)}
+	if pr, err := ParsePR(value); err == nil {
+		text, param := pr.textMatch(key)
+		alternatives = append(alternatives, "("+kind+" = 'pr' AND ("+key+" = ? OR "+text+"))")
+		params = append(params, strconv.Itoa(pr.Number), param)
+	}
+	return "(" + strings.Join(alternatives, " OR ") + ")", params
 }
 
 func where(clauses []string) string {

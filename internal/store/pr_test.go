@@ -44,7 +44,7 @@ func TestPRRefsKeepBareNumbersAsJSONNumbers(t *testing.T) {
 	}
 }
 
-func TestAQualifiedPRFilterAlsoMatchesTheBareNumber(t *testing.T) {
+func TestPRFilterMatchesBareAndQualifiedRefs(t *testing.T) {
 	st, _ := open(t)
 	for text, pr := range map[string]store.PR{
 		"bare":      {Number: 40339},
@@ -59,7 +59,7 @@ func TestAQualifiedPRFilterAlsoMatchesTheBareNumber(t *testing.T) {
 		want string
 	}{
 		{store.PR{Repo: "Forge-AI/monorepo", Number: 40339}, "bare,qualified"},
-		{store.PR{Number: 40339}, "bare"},
+		{store.PR{Number: 40339}, "bare,qualified,elsewhere"},
 		{store.PR{Repo: "yasyf/cc-context", Number: 40339}, "bare,elsewhere"},
 	} {
 		got, err := st.Query(context.Background(), store.Filter{Drive: "d", PR: tt.pr})
