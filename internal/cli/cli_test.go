@@ -912,7 +912,7 @@ func TestClaimOpenedPostsAnOpenedRecordOnTheSessionsDrive(t *testing.T) {
 		}
 		got = append(got, fmt.Sprintf("%s %s %v", r.Lane, r.Text, r.Refs.PRs))
 	}
-	want := []string{"root opened #36276 [36276]", "aspeed-0123 opened #36148 [36148]"}
+	want := []string{"root opened #36276 [36276]", "root opened #36148 [36148]"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("opened records = %q, want %q", got, want)
 	}
@@ -1059,5 +1059,46 @@ func TestRepeatedResolvesClosesEverySeq(t *testing.T) {
 	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "answer", "--re", "1", "--re", "2", "--resolves", "1", "--resolves", "3", "--text", "x"); err == nil || !strings.Contains(err.Error(), "not both") {
 		t.Fatalf("several --re and --resolves together = %v", err)
+	}
+}
+
+func TestClaimsPostAsTheOwningLane(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "bbbb2222-lane"}, "drive-a", "web", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: "bbbb2222-lane"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-lane")
+	t.Setenv("CCI_AGENT_ID", "ada0addbf41f1f196")
+	if _, err := run(t, "claim", "--rel", "opened", "--pr", "owner/repo#7"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "claim", "--for", "web@drive-a", "--pr", "8"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "tail", "--drive", "drive-a", "--since", "0")
+	if err != nil || !strings.Contains(out, "OPENED web opened #owner/repo#7") || !strings.Contains(out, "CLAIM web claim: web owns #8") || strings.Contains(out, "ada0addbf41f1f196") {
+		t.Fatalf("records of a lane subagent's claims = %q, %v; want both posted as lane web", out, err)
+	}
+	out, err = run(t, "who", "--all", "--pr", "owner/repo#7")
+	if err != nil || !strings.Contains(out, " lane=web ") || !strings.Contains(out, "session=bbbb2222\n  opened pr:owner/repo#7 ") || strings.Contains(out, "ada0addbf41f1f196") {
+		t.Fatalf("who --pr owner/repo#7 = %q, %v; want the lane's thread", out, err)
 	}
 }

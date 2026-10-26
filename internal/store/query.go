@@ -372,6 +372,38 @@ func (s *Store) Binding(ctx context.Context, k PeerKey) (Binding, bool, error) {
 	return b, true, nil
 }
 
+// SetParent records the agent that spawned k, "" for the session's root thread.
+func (s *Store) SetParent(ctx context.Context, k PeerKey, parent string) error {
+	if _, err := s.db.ExecContext(ctx, "UPDATE sessions SET parent = ? WHERE session = ? AND agent = ? AND origin = ?", parent, k.Session, k.Agent, s.Self()); err != nil {
+		return fmt.Errorf("record parent of %s: %w", k, err)
+	}
+	return nil
+}
+
+// Owner is the thread whose lane answers for k's work: k once it is bound as
+// a lane or as its drive's root, else the nearest such thread among the
+// agents that spawned it, up to the session's root thread, which answers
+// whenever it is bound to a drive. A k with no such thread owns itself, unbound.
+func (s *Store) Owner(ctx context.Context, k PeerKey) (PeerKey, Binding, bool, error) {
+	for at := k; ; {
+		b, ok, err := s.Binding(ctx, at)
+		switch {
+		case err != nil:
+			return PeerKey{}, Binding{}, false, err
+		case ok && (b.Lane != "" || b.Root || at.Agent == ""):
+			return at, b, true, nil
+		case at.Agent == "":
+			return k, Binding{}, false, nil
+		}
+		err = s.db.QueryRowContext(ctx, "SELECT parent FROM sessions WHERE session = ? AND agent = ? AND origin = ?", at.Session, at.Agent, s.Self()).Scan(&at.Agent)
+		if errors.Is(err, sql.ErrNoRows) {
+			at.Agent = ""
+		} else if err != nil {
+			return PeerKey{}, Binding{}, false, fmt.Errorf("read parent of %s: %w", at, err)
+		}
+	}
+}
+
 type Source struct {
 	Path   string
 	Drive  string

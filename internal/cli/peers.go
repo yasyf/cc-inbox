@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -190,6 +191,8 @@ func isCodex(argv []string) bool {
 	return false
 }
 
+const relOwns = "owns"
+
 type claimFlags struct {
 	forLane   string
 	rel       string
@@ -208,7 +211,7 @@ type claimFlags struct {
 func (c *claimFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
 	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive")
-	fl.StringVar(&c.rel, "rel", "owns", "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
+	fl.StringVar(&c.rel, "rel", relOwns, "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
 	fl.Var(&prsFlag{&c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
 	fl.StringSliceVar(&c.branches, "branch", nil, "branch names (repeatable)")
@@ -335,8 +338,11 @@ func newClaimCmd() *cobra.Command {
 					return err
 				}
 			}
-			if cf.rel == string(kinds.Opened) {
+			switch {
+			case cf.rel == string(kinds.Opened):
 				return postOpened(cmd.Context(), st, holder, cf.prs)
+			case cf.rel == relOwns && cf.forLane != "":
+				return postAssigned(cmd.Context(), st, holder, cf.prs)
 			}
 			return nil
 		}),
@@ -345,35 +351,36 @@ func newClaimCmd() *cobra.Command {
 	return cmd
 }
 
-func postOpened(ctx context.Context, st *store.Store, self store.PeerKey, prs []store.PR) error {
-	b, ok, err := st.Binding(ctx, self)
-	if err != nil {
+func postOpened(ctx context.Context, st *store.Store, holder store.PeerKey, prs []store.PR) error {
+	drive, lane, ok, err := ownerLane(ctx, st, holder)
+	if err != nil || !ok {
 		return err
 	}
-	if !ok && self.Agent != "" {
-		if b, ok, err = st.Binding(ctx, store.PeerKey{Session: self.Session}); err != nil {
-			return err
-		}
-		b.Lane = ""
-	}
-	if !ok {
-		return nil
-	}
-	lane := b.Lane
-	switch {
-	case lane != "":
-	case self.Agent == "":
-		lane = "root"
-	default:
-		lane = self.Agent
-	}
 	for _, pr := range prs {
-		r := store.Record{ID: "opened:" + pr.String(), Drive: b.Drive, Lane: lane, Kind: kinds.Opened, Text: "opened #" + pr.String(), Source: "claim", Refs: store.Refs{PRs: []store.PR{pr}}}
+		r := store.Record{ID: "opened:" + pr.String(), Drive: drive, Lane: lane, Kind: kinds.Opened, Text: "opened #" + pr.String(), Source: "claim", Refs: store.Refs{PRs: []store.PR{pr}}}
 		if _, _, err := st.Post(ctx, r, 0); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func postAssigned(ctx context.Context, st *store.Store, holder store.PeerKey, prs []store.PR) error {
+	drive, lane, ok, err := ownerLane(ctx, st, holder)
+	if err != nil || !ok || len(prs) == 0 {
+		return err
+	}
+	names := make([]string, len(prs))
+	for i, pr := range prs {
+		names[i] = "#" + pr.String()
+	}
+	_, _, err = st.Post(ctx, store.Record{Drive: drive, Lane: lane, Kind: kinds.Claim, Text: store.Clip("claim: " + lane + " owns " + strings.Join(names, " ")), Source: "claim", Refs: store.Refs{PRs: prs}}, 0)
+	return err
+}
+
+func ownerLane(ctx context.Context, st *store.Store, k store.PeerKey) (drive, lane string, ok bool, err error) {
+	_, b, ok, err := st.Owner(ctx, k)
+	return b.Drive, cmp.Or(b.Lane, "root"), ok, err
 }
 
 func newUnclaimCmd() *cobra.Command {

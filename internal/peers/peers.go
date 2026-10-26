@@ -147,7 +147,8 @@ type View struct {
 // Filter selects peers. Every set field must match; Session and Origin match
 // a prefix, Origin "-" matches this node's own sessions, and Agent matches an
 // agent id or name. Root keeps only root threads. Kind, Key and Rel select by
-// claim, and a matched peer carries the claims that selected it. Viewer is
+// claim, and a matched peer carries the claims that selected it; a claim made
+// by a subagent of a lane selects the lane's thread. Viewer is
 // the tier of whoever reads the result: a paired viewer sees no process,
 // environment or filesystem detail.
 type Filter struct {
@@ -200,8 +201,16 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 			return nil, err
 		}
 		claimed = make(map[store.PeerKey][]store.Claim, len(claims))
+		holders := map[store.PeerKey]store.PeerKey{}
 		for _, c := range claims {
-			claimed[c.Peer()] = append(claimed[c.Peer()], c)
+			holder, ok := holders[c.Peer()]
+			if !ok {
+				if holder, err = laneHolder(ctx, st, c.Peer()); err != nil {
+					return nil, err
+				}
+				holders[c.Peer()] = holder
+			}
+			claimed[holder] = append(claimed[holder], c)
 		}
 	}
 	dir, err := harness.Dir()
@@ -261,6 +270,14 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 		return strings.Compare(b.lastSeen().Format(time.RFC3339Nano), a.lastSeen().Format(time.RFC3339Nano))
 	})
 	return views, nil
+}
+
+func laneHolder(ctx context.Context, st *store.Store, k store.PeerKey) (store.PeerKey, error) {
+	owner, b, _, err := st.Owner(ctx, k)
+	if err != nil || b.Lane == "" {
+		return k, err
+	}
+	return owner, nil
 }
 
 func live(p store.Peer, now time.Time) bool {
