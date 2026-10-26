@@ -27,12 +27,13 @@ const (
 	MaxText     = 400
 	MaxBody     = 64 << 10
 	DedupWindow = 10 * time.Minute
+	wordSlack   = 40
 	DBFile      = "inbox.db"
 )
 
 // WireFormat versions the JSON encoding of the rows and presence a mesh change
 // carries; SchemaFingerprint folds it in so a peer encoding them differently is refused.
-const WireFormat = 2
+const WireFormat = 3
 
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS records (
@@ -206,6 +207,8 @@ CREATE TABLE aliases (origin TEXT NOT NULL, origin_seq INTEGER NOT NULL, seq INT
 CREATE TABLE folded (origin TEXT NOT NULL, origin_seq INTEGER NOT NULL, PRIMARY KEY (origin, origin_seq)) WITHOUT ROWID;
 CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 INSERT INTO meta (key, value) SELECT 'compacted_through', MAX(seq) FROM records WHERE kind = 'digest' HAVING MAX(seq) IS NOT NULL`,
+	`ALTER TABLE records ADD COLUMN also_resolves TEXT;
+ALTER TABLE records ADD COLUMN also_resolves_origin TEXT`,
 }
 
 var (
@@ -244,25 +247,35 @@ type Fields struct {
 }
 
 type Record struct {
-	Seq       int64           `json:"seq"`
-	Origin    string          `json:"origin,omitempty"`
-	OriginSeq int64           `json:"origin_seq,omitempty"`
-	ID        string          `json:"id,omitempty"`
-	Drive     string          `json:"drive"`
-	Lane      string          `json:"lane"`
-	Kind      kinds.Kind      `json:"kind"`
-	At        time.Time       `json:"at"`
-	Text      string          `json:"text"`
-	Topic     string          `json:"topic,omitempty"`
-	To        []string        `json:"to,omitempty"`
-	Re        int64           `json:"re,omitempty"`
-	Resolves  int64           `json:"resolves,omitempty"`
-	Refs      Refs            `json:"refs"`
-	Fields    Fields          `json:"fields"`
-	ExpiresAt *time.Time      `json:"expires_at,omitempty"`
-	Source    string          `json:"source"`
-	Body      json.RawMessage `json:"body,omitempty"`
-	Status    string          `json:"status,omitempty"`
+	Seq          int64           `json:"seq"`
+	Origin       string          `json:"origin,omitempty"`
+	OriginSeq    int64           `json:"origin_seq,omitempty"`
+	ID           string          `json:"id,omitempty"`
+	Drive        string          `json:"drive"`
+	Lane         string          `json:"lane"`
+	Kind         kinds.Kind      `json:"kind"`
+	At           time.Time       `json:"at"`
+	Text         string          `json:"text"`
+	Topic        string          `json:"topic,omitempty"`
+	To           []string        `json:"to,omitempty"`
+	Re           int64           `json:"re,omitempty"`
+	Resolves     int64           `json:"resolves,omitempty"`
+	AlsoResolves []int64         `json:"also_resolves,omitempty"`
+	Refs         Refs            `json:"refs"`
+	Fields       Fields          `json:"fields"`
+	ExpiresAt    *time.Time      `json:"expires_at,omitempty"`
+	Source       string          `json:"source"`
+	Body         json.RawMessage `json:"body,omitempty"`
+	Status       string          `json:"status,omitempty"`
+
+	alsoOrigins []Pointer
+}
+
+func (r Record) Closes() []int64 {
+	if r.Resolves == 0 {
+		return nil
+	}
+	return append([]int64{r.Resolves}, r.AlsoResolves...)
 }
 
 func (r Record) Tracked() bool {
@@ -399,6 +412,9 @@ func Hash(r Record) string {
 	if r.Refs.Path != "" {
 		parts = append(parts, r.Refs.Path)
 	}
+	if len(r.AlsoResolves) > 0 {
+		parts = append(parts, r.AlsoResolves)
+	}
 	if r.ID != "" {
 		parts = append(parts, r.ID)
 	}
@@ -433,6 +449,9 @@ func Validate(r Record) error {
 			return fmt.Errorf("%s names %s without --pr: add %s so guards that read the record's pull requests see it (write a record seq without its #)",
 				r.Kind, strings.Join(named, ", "), strings.Join(flags, " "))
 		}
+	}
+	if len(r.AlsoResolves) > 0 && r.Resolves == 0 {
+		return errors.New("also_resolves needs resolves")
 	}
 	if spec.NeedsRef && r.Re == 0 && r.Topic == "" && r.Resolves == 0 {
 		return fmt.Errorf("kind %s requires --re, --resolves or --topic", r.Kind)
@@ -487,13 +506,17 @@ func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time
 	if err := Validate(r); err != nil {
 		return Record{}, false, err
 	}
-	if r.Resolves != 0 {
-		target, err := s.Get(ctx, r.Resolves)
+	r.alsoOrigins = nil
+	for i, seq := range r.Closes() {
+		target, err := s.Get(ctx, seq)
 		if errors.Is(err, sql.ErrNoRows) || err == nil && target.Drive != r.Drive && !CrossDrive(target.To) {
-			return Record{}, false, fmt.Errorf("--resolves #%d names no record in drive %s", r.Resolves, r.Drive)
+			return Record{}, false, fmt.Errorf("--resolves #%d names no record in drive %s", seq, r.Drive)
 		}
 		if err != nil {
 			return Record{}, false, err
+		}
+		if i > 0 {
+			r.alsoOrigins = append(r.alsoOrigins, Pointer{Origin: s.origin(target.Origin), Seq: originSeq(target)})
 		}
 	}
 	r.Origin, r.OriginSeq = "", 0
@@ -666,8 +689,8 @@ func expiry(r Record, ttl time.Duration) *time.Time {
 	return &t
 }
 
-const insertSQL = `INSERT INTO records (origin, origin_seq, id, drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash, body)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+const insertSQL = `INSERT INTO records (origin, origin_seq, id, drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash, body, also_resolves, also_resolves_origin)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 const reparseSQL = `UPDATE records SET lane = ?, kind = ?, text = ?, topic = ?, recipients = ?, refs = ?, hash = ?, expires_at = at + ?
 WHERE line_hash = ?`
@@ -711,10 +734,17 @@ func (s *Store) args(r Record, hash string, lineHash *string) []any {
 	if len(r.Body) > 0 {
 		body = redact(string(r.Body))
 	}
-	return []any{s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), redact(r.Text), redact(r.Topic), string(recipients), r.Re, r.Resolves, redact(string(refs)), redact(string(fields)), expires, r.Source, hash, line, body}
+	var also, alsoOrigins any
+	if len(r.AlsoResolves) > 0 {
+		raw, _ := json.Marshal(r.AlsoResolves)
+		also = string(raw)
+		raw, _ = json.Marshal(r.alsoOrigins)
+		alsoOrigins = string(raw)
+	}
+	return []any{s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), redact(r.Text), redact(r.Topic), string(recipients), r.Re, r.Resolves, redact(string(refs)), redact(string(fields)), expires, r.Source, hash, line, body, also, alsoOrigins}
 }
 
-const columns = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, '')"
+const columns = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, '')"
 
 type scanner interface {
 	Scan(dest ...any) error
@@ -722,13 +752,18 @@ type scanner interface {
 
 func (s *Store) scan(row scanner) (Record, error) {
 	var (
-		r                                Record
-		kind, recipients, refs, fs, body string
-		at                               int64
-		expires                          sql.NullInt64
+		r                                      Record
+		kind, recipients, refs, fs, body, also string
+		at                                     int64
+		expires                                sql.NullInt64
 	)
-	if err := row.Scan(&r.Seq, &r.Origin, &r.OriginSeq, &r.ID, &r.Drive, &r.Lane, &kind, &at, &r.Text, &r.Topic, &recipients, &r.Re, &r.Resolves, &refs, &fs, &expires, &r.Source, &body); err != nil {
+	if err := row.Scan(&r.Seq, &r.Origin, &r.OriginSeq, &r.ID, &r.Drive, &r.Lane, &kind, &at, &r.Text, &r.Topic, &recipients, &r.Re, &r.Resolves, &refs, &fs, &expires, &r.Source, &body, &also); err != nil {
 		return Record{}, fmt.Errorf("scan record: %w", err)
+	}
+	if also != "" {
+		if err := json.Unmarshal([]byte(also), &r.AlsoResolves); err != nil {
+			return Record{}, fmt.Errorf("decode also_resolves of #%d: %w", r.Seq, err)
+		}
 	}
 	if r.Origin = s.local(r.Origin); r.Origin == "" {
 		r.OriginSeq = 0
@@ -820,7 +855,25 @@ func (s *Store) Fit(text string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return Clip(text), path, nil
+	return Excerpt(text), path, nil
+}
+
+func Excerpt(text string) string {
+	text = strings.Join(strings.Fields(text), " ")
+	r := []rune(text)
+	if len(r) <= MaxText {
+		return text
+	}
+	cut := r[:MaxText-1]
+	if r[MaxText-1] != ' ' {
+		for i := len(cut) - 1; i > 0 && i >= len(cut)-wordSlack; i-- {
+			if cut[i] == ' ' {
+				cut = cut[:i]
+				break
+			}
+		}
+	}
+	return string(cut) + "…"
 }
 
 func (s *Store) Blob(body string) (string, error) {

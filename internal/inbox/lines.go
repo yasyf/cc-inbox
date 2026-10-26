@@ -84,7 +84,7 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON 
 func marks(seq int64, replies []store.Record) string {
 	var b strings.Builder
 	for _, r := range replies {
-		if r.Resolves == seq {
+		if slices.Contains(r.Closes(), seq) {
 			fmt.Fprintf(&b, " [RESOLVED #%d]", r.Seq)
 			continue
 		}

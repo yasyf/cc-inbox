@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -69,12 +70,12 @@ func newPostCmd() *cobra.Command {
 				text = store.Clip(firstLine(string(body)))
 			}
 			if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
-				_, path, err := st.Fit(text)
+				excerpt, path, err := st.Fit(text)
 				if err != nil {
 					return err
 				}
-				text, r.Refs.Path = store.Clip(firstLine(text)), path
-				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: text over %d characters: the record carries its first line, and the full text is at %s\n", store.MaxText, path); err != nil {
+				text, r.Refs.Path = excerpt, path
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: text over %d characters: the record carries its first %d, and the full text is at %s\n", store.MaxText, store.MaxText, path); err != nil {
 					return err
 				}
 			}
@@ -133,12 +134,12 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (required)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first line; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64SliceVar(&re, "re", nil, "seq this record answers or closes; repeated, each seq gets its own record")
-	f.Int64SliceVar(&resolves, "resolves", nil, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated, each seq gets its own record")
+	f.Int64SliceVar(&resolves, "resolves", nil, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every seq")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
 	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
@@ -164,29 +165,30 @@ func newPostCmd() *cobra.Command {
 	return cmd
 }
 
-var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of the repeated flag becomes its own record")
+var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")
 
 func perTarget(r store.Record, re, resolves []int64) ([]store.Record, error) {
 	if len(re) > 1 && len(resolves) > 1 {
 		return nil, errManyTargets
 	}
-	if len(re) > 0 {
-		r.Re = re[0]
+	for _, seq := range resolves {
+		switch {
+		case r.Resolves == 0:
+			r.Resolves = seq
+		case seq != r.Resolves && !slices.Contains(r.AlsoResolves, seq):
+			r.AlsoResolves = append(r.AlsoResolves, seq)
+		}
 	}
-	if len(resolves) > 0 {
-		r.Resolves = resolves[0]
-	}
-	seqs, set := resolves, func(r *store.Record, seq int64) { r.Resolves = seq }
-	if len(re) > 1 {
-		seqs, set = re, func(r *store.Record, seq int64) { r.Re = seq }
-	}
-	if len(seqs) <= 1 {
+	if len(re) <= 1 {
+		if len(re) == 1 {
+			r.Re = re[0]
+		}
 		return []store.Record{r}, nil
 	}
-	out := make([]store.Record, len(seqs))
-	for i, seq := range seqs {
+	out := make([]store.Record, len(re))
+	for i, seq := range re {
 		out[i] = r
-		set(&out[i], seq)
+		out[i].Re = seq
 		if r.ID != "" {
 			out[i].ID = fmt.Sprintf("%s#%d", r.ID, seq)
 		}

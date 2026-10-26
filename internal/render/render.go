@@ -55,8 +55,12 @@ func Line(r store.Record, now time.Time) string {
 	for _, target := range r.Refs.Targets {
 		fmt.Fprintf(&b, " target:%s", target)
 	}
-	if r.Resolves != 0 {
-		fmt.Fprintf(&b, " resolves #%d", r.Resolves)
+	for i, seq := range r.Closes() {
+		if i == 0 {
+			fmt.Fprintf(&b, " resolves #%d", seq)
+		} else {
+			fmt.Fprintf(&b, ",#%d", seq)
+		}
 	}
 	if r.Refs.CCN != "" {
 		fmt.Fprintf(&b, " ccn:%s", r.Refs.CCN)
