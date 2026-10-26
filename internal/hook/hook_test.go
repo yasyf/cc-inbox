@@ -319,6 +319,30 @@ func TestLaneRebindToAnotherDriveSkipsDeliveredPeerRecords(t *testing.T) {
 	}
 }
 
+func TestPostToolUseRecordsTheAgentThatSpawnedASubagent(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	projects := t.TempDir()
+	transcript := filepath.Join(projects, "s1.jsonl")
+	if err := os.MkdirAll(filepath.Join(projects, "s1", "subagents"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(projects, "s1", "subagents", "agent-aship-0001.meta.json"), []byte(`{"agentType":"ship-pr","parentAgentId":"aapi-0123"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	api := store.PeerKey{Session: "s1", Agent: "aapi-0123"}
+	if err := st.BindLane(ctx, api, "d", "api", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	ship := hook.Payload{SessionID: "s1", AgentID: "aship-0001", TranscriptPath: transcript, Cwd: t.TempDir(), Event: "PostToolUse"}
+	if err := hook.PostToolUse(ctx, st, ship, noWindow, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if owner, b, ok, err := st.Owner(ctx, ship.Key()); err != nil || !ok || owner != api || b.Lane != "api" {
+		t.Fatalf("Owner(%s) = %s %+v %v, %v; want the spawning lane %s", ship.Key(), owner, b, ok, err, api)
+	}
+}
+
 func noWindow() (store.Window, error) {
 	return store.Window{}, nil
 }

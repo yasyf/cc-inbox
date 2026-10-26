@@ -53,11 +53,12 @@ func (p Payload) Key() store.PeerKey {
 
 // Agent describes a subagent from the metadata the harness writes beside the
 // session transcript: a teammate's under subagents/, a workflow agent's under
-// its workflow's directory there, named by its label. An agent with no
-// metadata has no name.
+// its workflow's directory there, named by its label, with the agent that
+// spawned it. An agent with no metadata has no name and no parent.
 type Agent struct {
 	Name     string
 	Workflow bool
+	Parent   string
 }
 
 const workflowAgentType = "workflow-subagent"
@@ -84,14 +85,15 @@ func (p Payload) Agent() (Agent, error) {
 		AgentType   string `json:"agentType"`
 		Name        string `json:"name"`
 		Description string `json:"description"`
+		Parent      string `json:"parentAgentId"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		return Agent{}, fmt.Errorf("decode %s: %w", path, err)
 	}
 	if meta.AgentType == workflowAgentType {
-		return Agent{Name: meta.Description, Workflow: true}, nil
+		return Agent{Name: meta.Description, Workflow: true, Parent: meta.Parent}, nil
 	}
-	return Agent{Name: meta.Name}, nil
+	return Agent{Name: meta.Name, Parent: meta.Parent}, nil
 }
 
 func Read(r io.Reader) (Payload, error) {
@@ -176,8 +178,10 @@ func announceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 	if agent.Workflow {
 		o.Role = peers.RoleWorkflow
 	}
-	_, err = peers.Announce(ctx, st, o)
-	return err
+	if _, err := peers.Announce(ctx, st, o); err != nil {
+		return err
+	}
+	return st.SetParent(ctx, p.Key(), agent.Parent)
 }
 
 // SubagentStop retires the subagent's peer until its next tool call.

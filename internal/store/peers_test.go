@@ -214,3 +214,57 @@ func TestAgentsAreDistinctPeers(t *testing.T) {
 		t.Fatalf("root announce from the same process superseded its agent: %+v", p)
 	}
 }
+
+func TestOwnerIsTheNearestThreadBoundAsALaneOrRoot(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	type thread struct {
+		key    store.PeerKey
+		parent string
+	}
+	root := func(agent, parent string) thread {
+		return thread{store.PeerKey{Session: "root-s", Agent: agent}, parent}
+	}
+	lane := func(agent string) thread { return thread{store.PeerKey{Session: "lane-s", Agent: agent}, ""} }
+	loose := thread{store.PeerKey{Session: "free-s", Agent: "afree"}, ""}
+	teammate, ship, grandchild, rootChild := root("aapi", ""), root("aship", "aapi"), root("agrand", "aship"), root("aloose", "")
+	laneChild := lane("aweb-ship")
+	for _, th := range []thread{teammate, ship, grandchild, rootChild, laneChild, loose} {
+		if _, err := st.Announce(ctx, store.Peer{Session: th.key.Session, Agent: th.key.Agent}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetParent(ctx, th.key, th.parent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Bind(ctx, store.PeerKey{Session: "root-s"}, "d", true); err != nil {
+		t.Fatal(err)
+	}
+	for k, l := range map[store.PeerKey]string{teammate.key: "api", {Session: "lane-s"}: "web"} {
+		if err := st.BindLane(ctx, k, "d", l, clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tests := []struct {
+		name  string
+		from  thread
+		owner store.PeerKey
+		lane  string
+		bound bool
+	}{
+		{"a bound lane owns itself", teammate, teammate.key, "api", true},
+		{"a teammate's subagent answers as the teammate", ship, teammate.key, "api", true},
+		{"the chain is walked to the bound ancestor", grandchild, teammate.key, "api", true},
+		{"the root's own subagent answers as the root", rootChild, store.PeerKey{Session: "root-s"}, "", true},
+		{"a lane session's subagent answers as the lane", laneChild, store.PeerKey{Session: "lane-s"}, "web", true},
+		{"an agent of an unbound session owns itself", loose, loose.key, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			owner, b, ok, err := st.Owner(ctx, tt.from.key)
+			if err != nil || owner != tt.owner || b.Lane != tt.lane || ok != tt.bound {
+				t.Fatalf("Owner(%s) = %s %+v %v, %v; want %s lane %q bound %v", tt.from.key, owner, b, ok, err, tt.owner, tt.lane, tt.bound)
+			}
+		})
+	}
+}
