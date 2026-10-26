@@ -78,33 +78,8 @@ type ClaimFilter struct {
 // first. A record's refs tie its lane's bound sessions to each pr, build, stack
 // and target it names, with the rel the record's kind implies.
 func (s *Store) Claims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
-	var (
-		clauses []string
-		params  []any
-	)
-	if len(f.Sessions) > 0 {
-		clauses = append(clauses, "session IN ("+placeholders(len(f.Sessions))+")")
-		for _, v := range f.Sessions {
-			params = append(params, v)
-		}
-	}
-	if f.Rel != "" {
-		clauses = append(clauses, "rel = ?")
-		params = append(params, f.Rel)
-	}
-	if f.Kind != "" {
-		clauses = append(clauses, "kind = ?")
-		params = append(params, f.Kind)
-	}
-	if f.Key != "" {
-		clauses = append(clauses, `(key = ? OR (kind = 'build' AND key LIKE '%/builds/' || ? ESCAPE '\'))`)
-		params = append(params, f.Key, likeLiteral(f.Key))
-	}
-	where := ""
-	if len(clauses) > 0 {
-		where = " WHERE " + strings.Join(clauses, " AND ")
-	}
-	rows, err := s.db.QueryContext(ctx, "SELECT session, agent, rel, kind, key, at, source FROM ("+claimsUnion+")"+where+" ORDER BY at DESC, source", params...)
+	query, params := f.query()
+	rows, err := s.db.QueryContext(ctx, query, params...)
 	if err != nil {
 		return nil, fmt.Errorf("list claims: %w", err)
 	}
@@ -124,6 +99,63 @@ func (s *Store) Claims(ctx context.Context, f ClaimFilter) ([]Claim, error) {
 	return out, rows.Err()
 }
 
+// query filters each record's refs by kind and key before joining the lane's
+// sessions, so a lookup by ref never pairs every record with every session.
+func (f ClaimFilter) query() (string, []any) {
+	var (
+		branches []string
+		params   []any
+	)
+	var explicit []string
+	if f.Kind != "" {
+		explicit = append(explicit, "kind = ?")
+		params = append(params, f.Kind)
+	}
+	if f.Key != "" {
+		match, p := keyMatch("kind", "key", f.Key)
+		explicit = append(explicit, match)
+		params = append(params, p...)
+	}
+	branches = append(branches, "SELECT session, agent, rel, kind, key, at, 'claim' AS source FROM claims"+where(explicit))
+	for _, ref := range derivedRefs {
+		if f.Kind != "" && f.Kind != ref.kind {
+			continue
+		}
+		for _, join := range laneJoins {
+			clauses := []string{"s.origin = r.origin", "s.drive = r.drive", join}
+			if f.Key != "" {
+				match, p := keyMatch("'"+ref.kind+"'", refKey, f.Key)
+				clauses = append(clauses, match)
+				params = append(params, p...)
+			}
+			branches = append(branches, "SELECT s.session, s.agent, "+derivedRel+", '"+ref.kind+"', "+refKey+", r.at, '#' || r.seq FROM records r CROSS JOIN json_each(r.refs, '"+ref.path+"') j CROSS JOIN sessions s"+where(clauses))
+		}
+	}
+	var outer []string
+	if len(f.Sessions) > 0 {
+		outer = append(outer, "session IN ("+placeholders(len(f.Sessions))+")")
+		for _, v := range f.Sessions {
+			params = append(params, v)
+		}
+	}
+	if f.Rel != "" {
+		outer = append(outer, "rel = ?")
+		params = append(params, f.Rel)
+	}
+	return "SELECT session, agent, rel, kind, key, at, source FROM (" + strings.Join(branches, " UNION ALL ") + ")" + where(outer) + " ORDER BY at DESC, source", params
+}
+
+func keyMatch(kind, key, value string) (string, []any) {
+	return "(" + key + " = ? OR (" + kind + " = 'build' AND " + key + ` LIKE '%/builds/' || ? ESCAPE '\'))`, []any{value, likeLiteral(value)}
+}
+
+func where(clauses []string) string {
+	if len(clauses) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(clauses, " AND ")
+}
+
 func likeLiteral(v string) string {
 	return strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(v)
 }
@@ -138,16 +170,9 @@ const derivedRel = `CASE r.kind
 	WHEN 'handoff' THEN 'handed-off'
 	ELSE 'mentioned' END`
 
-const laneSessions = `JOIN sessions s ON s.origin = r.origin AND s.drive = r.drive AND (s.lane = r.lane OR (s.root AND r.lane IN ('root', 'main')))`
+const refKey = "CAST(j.value AS TEXT)"
 
-var claimsUnion = strings.Join([]string{
-	"SELECT session, agent, rel, kind, key, at, 'claim' AS source FROM claims",
-	derived("pr", "$.prs"),
-	derived("build", "$.builds"),
-	derived("stack", "$.stacks"),
-	derived("target", "$.targets"),
-}, " UNION ALL ")
-
-func derived(kind, path string) string {
-	return "SELECT s.session, s.agent, " + derivedRel + ", '" + kind + "', CAST(j.value AS TEXT), r.at, '#' || r.seq FROM records r, json_each(r.refs, '" + path + "') j " + laneSessions
-}
+var (
+	derivedRefs = []struct{ kind, path string }{{"pr", "$.prs"}, {"build", "$.builds"}, {"stack", "$.stacks"}, {"target", "$.targets"}}
+	laneJoins   = []string{"s.lane = r.lane", "s.lane = '' AND s.root AND r.lane IN ('root', 'main')"}
+)
