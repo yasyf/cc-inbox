@@ -374,7 +374,7 @@ func postAssigned(ctx context.Context, st *store.Store, holder store.PeerKey, pr
 	for i, pr := range prs {
 		names[i] = "#" + pr.String()
 	}
-	_, _, err = st.Post(ctx, store.Record{Drive: drive, Lane: lane, Kind: kinds.Claim, Text: "claim: " + lane + " owns " + strings.Join(names, " "), Source: "claim", Refs: store.Refs{PRs: prs}}, 0)
+	_, _, err = st.Post(ctx, store.Record{Drive: drive, Lane: lane, Kind: kinds.Claim, Text: store.Clip("claim: " + lane + " owns " + strings.Join(names, " ")), Source: "claim", Refs: store.Refs{PRs: prs}}, 0)
 	return err
 }
 

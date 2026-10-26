@@ -172,7 +172,7 @@ func announceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 		return err
 	}
 	if found && existing.PID == win.PID && existing.PIDStarted == win.Started && !existing.Superseded && (existing.AgentName != "" || agent.Name == "") {
-		return nil
+		return st.SetParent(ctx, p.Key(), agent.Parent)
 	}
 	o := peers.Options{Session: p.SessionID, Agent: p.AgentID, AgentName: agent.Name, Window: win, Cwd: p.Cwd}
 	if agent.Workflow {

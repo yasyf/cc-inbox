@@ -912,7 +912,7 @@ func TestClaimOpenedPostsAnOpenedRecordOnTheSessionsDrive(t *testing.T) {
 		}
 		got = append(got, fmt.Sprintf("%s %s %v", r.Lane, r.Text, r.Refs.PRs))
 	}
-	want := []string{"root opened #36276 [36276]", "aspeed-0123 opened #36148 [36148]"}
+	want := []string{"root opened #36276 [36276]", "root opened #36148 [36148]"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("opened records = %q, want %q", got, want)
 	}
