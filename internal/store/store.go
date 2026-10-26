@@ -209,6 +209,7 @@ CREATE TABLE meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 INSERT INTO meta (key, value) SELECT 'compacted_through', MAX(seq) FROM records WHERE kind = 'digest' HAVING MAX(seq) IS NOT NULL`,
 	`ALTER TABLE records ADD COLUMN also_resolves TEXT;
 ALTER TABLE records ADD COLUMN also_resolves_origin TEXT`,
+	`CREATE INDEX sessions_lane ON sessions(origin, drive, lane)`,
 }
 
 var (
