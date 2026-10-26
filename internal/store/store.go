@@ -33,7 +33,7 @@ const (
 
 // WireFormat versions the JSON encoding of the rows and presence a mesh change
 // carries; SchemaFingerprint folds it in so a peer encoding them differently is refused.
-const WireFormat = 2
+const WireFormat = 3
 
 var migrations = []string{
 	`CREATE TABLE IF NOT EXISTS records (

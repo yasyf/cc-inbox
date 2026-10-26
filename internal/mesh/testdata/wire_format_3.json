@@ -22,6 +22,12 @@
         "origin": "0123456789abcdef",
         "seq": 41
       },
+      "also_resolves": [
+        {
+          "origin": "fedcba9876543210",
+          "seq": 8
+        }
+      ],
       "refs": {
         "path": "/work/notes/deploy.md",
         "ccn": "ccn-3",

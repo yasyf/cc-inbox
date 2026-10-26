@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closed record `[RESOLVED #<seq>]` with that one seq, the open sections of
   `digest` and the stop hook drop all of them, and the record's line reads
   `resolves #<a>,#<b>,#<c>`. The extra seqs live in the record's
-  `also_resolves` list and replicate across the mesh as pointers. A repeated
-  `--re` still writes one record per seq.
+  `also_resolves` list and replicate across the mesh as pointers, so the mesh wire format moves to
+  3 and nodes on different versions refuse each other's changes until both
+  upgrade. A repeated `--re` still writes one record per seq.
 - Text over 400 characters spilled to a blob and the record kept only its
   first line, so a one-paragraph post arrived as its first clause. The record
   now carries the first 400 characters, whitespace collapsed and cut at a

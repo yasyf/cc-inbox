@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/peers"
@@ -418,8 +419,8 @@ func TestPostSpillsTheStampedText(t *testing.T) {
 	rest := "\n" + strings.Repeat("x", 500) + "\nlive since "
 	got := postJSON(t, "R84 ("+typed+") orca-desk: relay to api"+rest+"{at}")
 	first := "R84 (" + got.stamp() + ") orca-desk: relay to api"
-	if got.Text != first {
-		t.Errorf("spilled record text = %q, want %q", got.Text, first)
+	if want := first + " " + strings.Repeat("x", store.MaxText-2-utf8.RuneCountInString(first)) + "…"; got.Text != want {
+		t.Errorf("spilled record text = %q, want %q", got.Text, want)
 	}
 	if body, err := os.ReadFile(got.Refs.Path); err != nil || string(body) != first+rest+got.stamp()+"\n" {
 		t.Errorf("spilled file %q = %q, %v; want the stamped text", got.Refs.Path, body, err)
