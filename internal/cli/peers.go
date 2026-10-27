@@ -242,9 +242,21 @@ func (c *claimFlags) holder(ctx context.Context, st *store.Store) (store.PeerKey
 		if err != nil {
 			return store.PeerKey{}, err
 		}
-		named = slices.DeleteFunc(named, func(v peers.View) bool { return v.Lane != "" || v.Drive != "" && v.Drive != drive })
-		if len(named) == 1 {
-			return named[0].Key(), st.BindLane(ctx, named[0].Key(), drive, lane, named[0].AnnouncedAt)
+		var unbound []peers.View
+		for _, v := range named {
+			if v.Root || v.Lane != "" || v.Drive != "" && v.Drive != drive {
+				continue
+			}
+			_, b, owned, err := st.Owner(ctx, v.Key())
+			if err != nil {
+				return store.PeerKey{}, err
+			}
+			if !owned || b.Drive == drive {
+				unbound = append(unbound, v)
+			}
+		}
+		if len(unbound) == 1 {
+			return unbound[0].Key(), st.BindLane(ctx, unbound[0].Key(), drive, lane, unbound[0].AnnouncedAt)
 		}
 	}
 	switch len(views) {

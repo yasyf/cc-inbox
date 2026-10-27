@@ -989,6 +989,14 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 	if _, err := st.Announce(ctx, store.Peer{Session: "aaaa1111-root", Agent: "asuccessor-2-0123", AgentName: "successor-2"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.Bind(ctx, store.PeerKey{Session: "eeee5555-root"}, "drive-c", true); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []store.Peer{{Session: "eeee5555-root"}, {Session: "eeee5555-root", Agent: "aother-1", AgentName: "other"}} {
+		if _, err := st.Announce(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -1013,6 +1021,7 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 		{"@drive-b", "name the lane as <lane>@<drive>"},
 		{"ghost@drive-b", "no live session on this machine is bound as lane ghost in drive drive-b"},
 		{"desk@drive-b", "2 live sessions are bound as that lane"},
+		{"other@drive-b", "no one live teammate is named other with no lane yet"},
 	} {
 		if out, err := run(t, "claim", "--for", tt.lane, "--build", "1"); err == nil || !strings.Contains(err.Error(), tt.want) {
 			t.Fatalf("claim --for %s = %q, %v; want %q", tt.lane, out, err, tt.want)
