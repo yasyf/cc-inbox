@@ -125,7 +125,7 @@ func section(b *render.Budget, title string, records []store.Record, limit int, 
 			b.Line(fmt.Sprintf("  +%d more", len(newest)-limit))
 			return
 		}
-		if !b.Line("  " + render.Clip(render.Line(r, now), width)) {
+		if !b.Line("  " + render.Brief(r, now, width)) {
 			return
 		}
 	}

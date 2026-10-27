@@ -269,13 +269,22 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 		return nil
 	}
 	now := st.Now()
+	if shown > 0 {
+		newest := open[max(0, len(open)-openShown):]
+		ids := make([]string, len(newest))
+		for i, r := range newest {
+			ids[len(newest)-1-i] = fmt.Sprintf("#%d %s %dm", r.Seq, r.Lane, int(now.Sub(r.At).Minutes()))
+		}
+		_, _ = fmt.Fprintf(w, "%d open asks addressed to %s, changed since the last list; newest: %s; cci show <seq> prints one, cci digest lists them\n", len(open), b.Lane, strings.Join(ids, ", "))
+		return nil
+	}
 	_, _ = fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", b.Lane)
 	for i, r := range slices.Backward(open) {
 		if i < len(open)-openShown {
 			_, _ = fmt.Fprintf(w, "... %d older open asks\n", i+1)
 			break
 		}
-		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Clip(render.Line(r, now), openWidth), int(now.Sub(r.At).Minutes()))
+		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Brief(r, now, openWidth), int(now.Sub(r.At).Minutes()))
 	}
 	return nil
 }

@@ -58,6 +58,7 @@ type view struct {
 	Width    int
 	Fold     int
 	Untagged bool
+	Whole    bool
 }
 
 func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
@@ -83,15 +84,20 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 	if err != nil {
 		return nil, nil, err
 	}
-	line := render.Line
-	if v.Untagged {
-		line = render.Untagged
-	}
 	now := st.Now()
+	line := func(r store.Record, width int) string {
+		switch {
+		case v.Whole:
+			return render.Clip(render.Line(r, now), width)
+		case v.Untagged:
+			return render.Untagged(r, now, width)
+		}
+		return render.Brief(r, now, width)
+	}
 	for i, r := range records {
-		text := render.Clip(line(r, now), v.Width)
+		text := line(r, v.Width)
 		if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) && utf8.RuneCountInString(text) > v.Fold {
-			text, folded[i] = render.Clip(text, v.Fold), true
+			text, folded[i] = line(r, v.Fold), true
 		}
 		out[i] = text + marks(r.Seq, replies[r.Seq])
 	}

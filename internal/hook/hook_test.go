@@ -582,7 +582,7 @@ func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
 		}
 		return hookContext(t, &out, event)
 	}
-	const listed, unchanged = "open asks addressed to root, newest first", "1 open asks addressed to root, unchanged since the last list; cci digest lists them"
+	const listed, unchanged, changed = "open asks addressed to root, newest first", "1 open asks addressed to root, unchanged since the last list; cci digest lists them", "2 open asks addressed to root, changed since the last list; newest: #"
 	for _, tt := range []struct {
 		event string
 		post  store.Record
@@ -592,7 +592,7 @@ func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
 		{"PostToolUse", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "a note changes no ask"}, unchanged},
 		{"SessionStart", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "after a compaction"}, listed},
 		{"PostToolUse", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "still the one ask"}, unchanged},
-		{"PostToolUse", store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "which env?"}, listed},
+		{"PostToolUse", store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "which env?"}, changed},
 	} {
 		testutil.Post(t, st, tt.post)
 		got := deliver(tt.event)

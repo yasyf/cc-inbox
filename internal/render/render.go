@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -27,14 +30,36 @@ func Stamp(t, now time.Time) string {
 }
 
 func Line(r store.Record, now time.Time) string {
-	return fmt.Sprintf("#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane) + rest(r)
+	return header(r, now) + rest(r, false)
 }
 
-func Untagged(r store.Record, now time.Time) string {
-	return Stamp(r.At, now) + rest(r)
+func Brief(r store.Record, now time.Time, width int) string {
+	return fit(header(r, now), r, width)
 }
 
-func rest(r store.Record) string {
+func Untagged(r store.Record, now time.Time, width int) string {
+	return fit(Stamp(r.At, now), r, width)
+}
+
+func fit(head string, r store.Record, width int) string {
+	if s := head + rest(r, true); width <= 0 || utf8.RuneCountInString(s) <= width {
+		return s
+	}
+	return Clip(head+rest(r, false), width)
+}
+
+func header(r store.Record, now time.Time) string {
+	return fmt.Sprintf("#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
+}
+
+func rest(r store.Record, brief bool) string {
+	var words []string
+	if brief {
+		words = strings.FieldsFunc(r.Text, func(c rune) bool { return unicode.IsSpace(c) || strings.ContainsRune(",;()[]", c) })
+		for i, w := range words {
+			words[i] = strings.TrimRight(w, ".:!?")
+		}
+	}
 	var b strings.Builder
 	if r.Origin != "" {
 		fmt.Fprintf(&b, " origin:%s", r.Origin)
@@ -45,12 +70,15 @@ func rest(r store.Record) string {
 	if r.Re != 0 {
 		fmt.Fprintf(&b, " re #%d", r.Re)
 	}
-	if r.Topic != "" {
+	if r.Topic != "" && !slices.Contains(words, r.Topic) {
 		fmt.Fprintf(&b, " [%s]", r.Topic)
 	}
 	b.WriteString(" ")
 	b.WriteString(strings.Join(strings.Fields(r.Text), " "))
 	for _, pr := range r.Refs.PRs {
+		if slices.Contains(words, "#"+pr.String()) || pr.Repo != "" && slices.Contains(words, pr.String()) {
+			continue
+		}
 		if pr.Repo == "" {
 			fmt.Fprintf(&b, " pr#%d", pr.Number)
 		} else {
