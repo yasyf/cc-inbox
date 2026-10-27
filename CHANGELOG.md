@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `PostToolUse` hook prints a lane's open asks only when the set changed
+  since the last delivery. It no longer adds a "unchanged since the last list"
+  line to every delivery, and a set that emptied and then refilled prints the
+  one-line seq list instead of the full list again. Only a session start or a
+  compaction prints the full list.
+
 ## [0.30.3] - 2026-10-27
 
 ### Fixed

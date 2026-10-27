@@ -244,7 +244,7 @@ func openAsksCursor(k store.PeerKey) string {
 
 func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKey, b store.Binding, open []store.Record) error {
 	name := openAsksCursor(k)
-	shown, _, err := st.Cursor(ctx, name, b.Drive)
+	shown, listedBefore, err := st.Cursor(ctx, name, b.Drive)
 	if err != nil {
 		return err
 	}
@@ -257,9 +257,6 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 		listed = 0
 	}
 	if listed == shown {
-		if len(open) > 0 {
-			_, _ = fmt.Fprintf(w, "%d open asks addressed to %s, unchanged since the last list; cci digest lists them\n", len(open), b.Lane)
-		}
 		return nil
 	}
 	if err := st.MoveCursor(ctx, name, b.Drive, listed); err != nil {
@@ -269,7 +266,7 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 		return nil
 	}
 	now := st.Now()
-	if shown > 0 {
+	if listedBefore && shown >= 0 {
 		newest := open[max(0, len(open)-openShown):]
 		ids := make([]string, len(newest))
 		for i, r := range newest {
