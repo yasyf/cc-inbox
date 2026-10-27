@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"database/sql"
@@ -10,7 +11,6 @@ import (
 	"os"
 	"regexp"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -181,7 +181,10 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.
 		} else if err != nil {
 			return fmt.Errorf("show #%d: %w", records[i].Seq, err)
 		}
-		if _, err := fmt.Fprintf(w, "%s\n", strings.TrimRight(string(body), "\n")); err != nil {
+		if !bytes.HasSuffix(body, []byte("\n")) {
+			body = append(body, '\n')
+		}
+		if _, err := w.Write(body); err != nil {
 			return err
 		}
 	}
