@@ -461,6 +461,38 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 	}
 }
 
+func TestPostRewritesALeadingTimeLabelAheadOfTheClock(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	for _, tt := range []struct {
+		name    string
+		label   time.Time
+		rewrite bool
+	}{
+		{"ahead of the clock", time.Now().Add(7 * time.Minute), true},
+		{"before the clock", time.Now().Add(-30 * time.Minute), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			typed := tt.label.Format("3:04 PM")
+			out, err := run(t, "post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", typed+": live on dev")
+			if err != nil {
+				t.Fatal(err)
+			}
+			lines := strings.Split(strings.TrimSpace(out), "\n")
+			var got posted
+			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &got); err != nil {
+				t.Fatalf("post --json = %q: %v", out, err)
+			}
+			want, note := typed+": live on dev", ""
+			if tt.rewrite {
+				want, note = got.stamp()+": live on dev", "cci: time label "+typed+" rewritten to "+got.stamp()
+			}
+			if stderr := strings.Join(lines[:len(lines)-1], "\n"); got.Text != want || stderr != note {
+				t.Errorf("post %q stored %q with stderr %q, want %q with stderr %q", typed+": live on dev", got.Text, stderr, want, note)
+			}
+		})
+	}
+}
+
 func TestPostSpillsTheStampedText(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	typed := time.Now().Add(7 * time.Minute).Format("3:04 PM")

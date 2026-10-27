@@ -24,7 +24,10 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-var typedStamp = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
+var (
+	typedStamp   = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
+	leadingLabel = regexp.MustCompile(`^\s*(\d{1,2}:\d{2} ?[AaPp][Mm])\b`)
+)
 
 func newPostCmd() *cobra.Command {
 	var (
@@ -52,17 +55,21 @@ func newPostCmd() *cobra.Command {
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
+			var err error
 			if r.Refs.Path != "" {
-				var err error
 				if r.Refs.Path, err = keepPath(cmd, st, r.Refs.Path); err != nil {
 					return err
 				}
 			}
 			switch {
 			case len(args) == 1:
-				text = stamped(args[0], at)
+				if text, err = stamped(cmd.ErrOrStderr(), args[0], at); err != nil {
+					return err
+				}
 			case cmd.Flags().Changed("text"):
-				text = stamped(text, at)
+				if text, err = stamped(cmd.ErrOrStderr(), text, at); err != nil {
+					return err
+				}
 			default:
 				body, err := os.ReadFile(r.Refs.Path)
 				if err != nil {
@@ -140,7 +147,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to, else its channel subscription's reader, else root for a drive's root session)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time, as is a leading H:MM AM/PM label more than a minute ahead of it; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
@@ -244,12 +251,21 @@ func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
 	return err
 }
 
-func stamped(text string, at time.Time) string {
+func stamped(w io.Writer, text string, at time.Time) (string, error) {
 	stamp := render.Stamp(at, at)
 	if m := typedStamp.FindStringSubmatchIndex(text); m != nil && importer.ParseClock(text[m[2]:m[3]]) != nil {
 		text = text[:m[2]] + stamp + text[m[3]:]
+	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil {
+		typed := text[m[2]:m[3]]
+		now := at.Truncate(time.Minute)
+		if importer.ParseClock(typed).Latest(now.Add(12*time.Hour)).Sub(now) > time.Minute {
+			text = text[:m[2]] + stamp + text[m[3]:]
+			if _, err := fmt.Fprintf(w, "cci: time label %s rewritten to %s\n", typed, stamp); err != nil {
+				return "", err
+			}
+		}
 	}
-	return strings.ReplaceAll(text, "{at}", stamp)
+	return strings.ReplaceAll(text, "{at}", stamp), nil
 }
 
 func firstLine(text string) string {
