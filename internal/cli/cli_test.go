@@ -461,19 +461,18 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 	}
 }
 
-func TestPostRewritesALeadingTimeLabelAheadOfTheClock(t *testing.T) {
+func TestPostRewritesOnlyALeadingTimeLabelAheadOfTheClock(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
+	ahead, before := time.Now().Add(7*time.Minute).Format("3:04 PM"), time.Now().Add(-30*time.Minute).Format("3:04 PM")
 	for _, tt := range []struct {
-		name    string
-		label   time.Time
-		rewrite bool
+		name, text, want, stderr string
 	}{
-		{"ahead of the clock", time.Now().Add(7 * time.Minute), true},
-		{"before the clock", time.Now().Add(-30 * time.Minute), false},
+		{"leading label ahead of the clock", ahead + ": live on dev", "{at}: live on dev", "cci: time label " + ahead + " rewritten to {at}"},
+		{"leading label before the clock", before + ": live on dev", before + ": live on dev", ""},
+		{"later time inside the text", "live on dev, read " + ahead, "live on dev, read " + ahead, "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			typed := tt.label.Format("3:04 PM")
-			out, err := run(t, "post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", typed+": live on dev")
+			out, err := run(t, "post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", tt.text)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -482,12 +481,9 @@ func TestPostRewritesALeadingTimeLabelAheadOfTheClock(t *testing.T) {
 			if err := json.Unmarshal([]byte(lines[len(lines)-1]), &got); err != nil {
 				t.Fatalf("post --json = %q: %v", out, err)
 			}
-			want, note := typed+": live on dev", ""
-			if tt.rewrite {
-				want, note = got.stamp()+": live on dev", "cci: time label "+typed+" rewritten to "+got.stamp()
-			}
+			want, note := strings.ReplaceAll(tt.want, "{at}", got.stamp()), strings.ReplaceAll(tt.stderr, "{at}", got.stamp())
 			if stderr := strings.Join(lines[:len(lines)-1], "\n"); got.Text != want || stderr != note {
-				t.Errorf("post %q stored %q with stderr %q, want %q with stderr %q", typed+": live on dev", got.Text, stderr, want, note)
+				t.Errorf("post %q stored %q with stderr %q, want %q with stderr %q", tt.text, got.Text, stderr, want, note)
 			}
 		})
 	}
