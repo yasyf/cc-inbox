@@ -15,9 +15,10 @@ import (
 )
 
 const (
-	DefaultBudget  = 6144
-	FoldWidth      = 160
-	trailerReserve = 96
+	DefaultBudget   = 6144
+	FoldWidth       = 160
+	trailerReserve  = 96
+	shownRecipients = 8
 )
 
 func Stamp(t, now time.Time) string {
@@ -30,7 +31,7 @@ func Stamp(t, now time.Time) string {
 }
 
 func Line(r store.Record, now time.Time) string {
-	return header(r, now) + rest(r, false)
+	return header(r, now) + rest(r, false, false)
 }
 
 func Brief(r store.Record, now time.Time, width int) string {
@@ -42,19 +43,19 @@ func Untagged(r store.Record, now time.Time, width int) string {
 }
 
 func fit(head string, r store.Record, width int) string {
-	if s := head + rest(r, true); width <= 0 || utf8.RuneCountInString(s) <= width {
+	if s := head + rest(r, true, true); width <= 0 || utf8.RuneCountInString(s) <= width {
 		return s
 	}
-	return Clip(head+rest(r, false), width)
+	return Clip(head+rest(r, true, false), width)
 }
 
 func header(r store.Record, now time.Time) string {
 	return fmt.Sprintf("#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
 }
 
-func rest(r store.Record, brief bool) string {
+func rest(r store.Record, brief, elide bool) string {
 	var words []string
-	if brief {
+	if elide {
 		words = strings.FieldsFunc(r.Text, func(c rune) bool { return unicode.IsSpace(c) || strings.ContainsRune(",;()[]", c) })
 		for i, w := range words {
 			words[i] = strings.TrimRight(w, ".:!?")
@@ -64,8 +65,12 @@ func rest(r store.Record, brief bool) string {
 	if r.Origin != "" {
 		fmt.Fprintf(&b, " origin:%s", r.Origin)
 	}
-	if len(r.To) > 0 {
-		fmt.Fprintf(&b, " -> %s", strings.Join(recipients(r.To), ","))
+	to := recipients(r.To)
+	if brief && len(to) > shownRecipients {
+		to = append(to[:shownRecipients:shownRecipients], fmt.Sprintf("+%d more", len(to)-shownRecipients))
+	}
+	if len(to) > 0 {
+		fmt.Fprintf(&b, " -> %s", strings.Join(to, ","))
 	}
 	if r.Re != 0 {
 		fmt.Fprintf(&b, " re #%d", r.Re)

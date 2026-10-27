@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `cci tail`, `cci watch`, the channel, the hooks, `cci digest` and `cci state`
+  name a record's first eight recipients and count the rest, as
+  `-> a,b,c,d,e,f,g,h,+45 more`. A record sent to 50 lanes used to fill the
+  hook's 400-character line with names and show none of its text. `cci show`
+  and `cci grep` still print every recipient.
+
 ## [0.29.0] - 2026-10-27
 
 ### Changed
