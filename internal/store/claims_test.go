@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -167,5 +168,43 @@ func TestCompactKeepsCrossDriveResolvers(t *testing.T) {
 	open, err := st.OpenItems(ctx, "a")
 	if err != nil || len(open) != 0 {
 		t.Fatalf("OpenItems(a) after compacting b = %+v, %v; want the ask still resolved", open, err)
+	}
+}
+
+func TestClaimsMatchBareAndQualifiedPRs(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	if err := st.BindLane(ctx, store.PeerKey{Session: "lane-1"}, "d", "api", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: "api", Kind: kinds.Opened, Text: "qualified", Refs: store.Refs{PRs: []store.PR{{Repo: "Forge-AI/monorepo", Number: 43101}}}})
+	testutil.Post(t, st, store.Record{Lane: "api", Kind: kinds.Opened, Text: "other number", Refs: store.Refs{PRs: []store.PR{{Repo: "Forge-AI/monorepo", Number: 143101}}}})
+	clock.Advance(time.Minute)
+	if _, err := st.Claim(ctx, store.Claim{Session: "lane-1", Rel: "watches", Kind: "pr", Key: "43101"}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Minute)
+	if _, err := st.Claim(ctx, store.Claim{Session: "lane-1", Rel: "reviews", Kind: "pr", Key: "yasyf/cc-inbox#43101"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		key  string
+		want []string
+	}{
+		{"43101", []string{"reviews yasyf/cc-inbox#43101", "watches 43101", "opened Forge-AI/monorepo#43101"}},
+		{"Forge-AI/monorepo#43101", []string{"watches 43101", "opened Forge-AI/monorepo#43101"}},
+		{"143101", []string{"opened Forge-AI/monorepo#143101"}},
+	} {
+		got, err := st.Claims(ctx, store.ClaimFilter{Kind: "pr", Key: tt.key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		claims := make([]string, len(got))
+		for i, c := range got {
+			claims[i] = c.Rel + " " + c.Key
+		}
+		if !slices.Equal(claims, tt.want) {
+			t.Errorf("Claims(pr %s) = %q, want %q", tt.key, claims, tt.want)
+		}
 	}
 }

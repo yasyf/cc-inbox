@@ -852,13 +852,13 @@ func TestPostAndTailTakeQualifiedPRs(t *testing.T) {
 	if err != nil || !strings.Contains(out, "chime fix pr:Forge-FDE/iris-chime#243 pr:Forge-AI/monorepo#35198 pr#30431") {
 		t.Fatalf("tail = %q, %v", out, err)
 	}
-	for _, pr := range []string{"Forge-FDE/iris-chime#243", "https://github.com/Forge-FDE/iris-chime/pull/243", "30431"} {
+	for _, pr := range []string{"Forge-FDE/iris-chime#243", "https://github.com/Forge-FDE/iris-chime/pull/243", "30431", "243"} {
 		if out, err := run(t, "tail", "--since", "0", "--pr", pr); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "chime fix") {
 			t.Fatalf("tail --pr %s = %q, %v", pr, out, err)
 		}
 	}
-	if out, err := run(t, "tail", "--since", "0", "--pr", "243"); err != nil || strings.Contains(out, "chime fix") {
-		t.Fatalf("tail --pr 243 = %q, %v", out, err)
+	if out, err := run(t, "tail", "--since", "0", "--pr", "24"); err != nil || strings.Contains(out, "chime fix") {
+		t.Fatalf("tail --pr 24 = %q, %v", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "fde", "--kind", "opened", "--pr", "iris-chime#243", "--text", "x"); err == nil || !strings.Contains(err.Error(), "owner/repo#N") {
 		t.Fatalf("post --pr iris-chime#243: %v", err)

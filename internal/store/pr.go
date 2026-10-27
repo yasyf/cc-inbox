@@ -41,6 +41,13 @@ func (p PR) String() string {
 	return fmt.Sprintf("%s#%d", p.Repo, p.Number)
 }
 
+func (p PR) textMatch(column string) (string, any) {
+	if p.Repo != "" {
+		return column + " = ?", p.String()
+	}
+	return column + " LIKE '%#' || ?", strconv.Itoa(p.Number)
+}
+
 func (p PR) value() any {
 	if p.Repo == "" {
 		return p.Number

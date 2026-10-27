@@ -98,15 +98,16 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		path  string
 		value any
 		set   bool
-	}{{"$.stacks", f.Stack, f.Stack != ""}, {"$.targets", f.Target, f.Target != ""}, {"$.prs", f.PR.value(), f.PR.Repo == "" && f.PR.Number != 0}} {
+	}{{"$.stacks", f.Stack, f.Stack != ""}, {"$.targets", f.Target, f.Target != ""}} {
 		if ref.set {
 			clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(refs, '"+ref.path+"') WHERE value = ?)")
 			params = append(params, ref.value)
 		}
 	}
-	if f.PR.Repo != "" {
-		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(refs, '$.prs') WHERE (type = 'text' AND value = ?) OR (type = 'integer' AND value = ?))")
-		params = append(params, f.PR.String(), f.PR.Number)
+	if f.PR.Number != 0 {
+		text, param := f.PR.textMatch("value")
+		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(refs, '$.prs') WHERE (type = 'integer' AND value = ?) OR (type = 'text' AND "+text+"))")
+		params = append(params, f.PR.Number, param)
 	}
 	if f.After > 0 {
 		clauses = append(clauses, "seq > ?")
