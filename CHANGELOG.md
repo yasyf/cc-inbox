@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-10-27
+
+### Changed
+
+- `cci post` rewrites a leading `H:MM AM/PM` label in its text that is more
+  than a minute ahead of the post's own clock to the post time, and prints
+  `cci: time label 3:20 PM rewritten to 3:17 PM` on stderr. A label at or
+  before the clock stays as typed, and a label anywhere but the start of the
+  text is never touched.
+
 ## [0.31.0] - 2026-10-27
 
 ### Changed
@@ -1026,7 +1036,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/yasyf/cc-inbox/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/yasyf/cc-inbox/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/yasyf/cc-inbox/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/yasyf/cc-inbox/compare/v0.30.1...v0.30.2
