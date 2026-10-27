@@ -62,11 +62,19 @@ func newPostCmd() *cobra.Command {
 				}
 			}
 			switch {
-			case len(args) == 1:
-				if text, err = stamped(cmd.ErrOrStderr(), args[0], at); err != nil {
-					return err
+			case len(args) == 1 || cmd.Flags().Changed("text"):
+				if len(args) == 1 {
+					text = args[0]
 				}
-			case cmd.Flags().Changed("text"):
+				if text == "-" {
+					stdin, err := io.ReadAll(cmd.InOrStdin())
+					if err != nil {
+						return fmt.Errorf("post -: %w", err)
+					}
+					if text = strings.TrimSpace(string(stdin)); text == "" {
+						return errors.New("post -: stdin is empty")
+					}
+				}
 				if text, err = stamped(cmd.ErrOrStderr(), text, at); err != nil {
 					return err
 				}
@@ -147,7 +155,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to, else its channel subscription's reader, else root for a drive's root session)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time, as is a leading H:MM AM/PM label more than a minute ahead of it; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time, as is a leading H:MM AM/PM label more than a minute ahead of it; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
