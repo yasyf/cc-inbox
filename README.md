@@ -411,8 +411,8 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. |
 | `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width. Records print whole by default. JSON ignores it. |
 
-Broadcasts have an empty `to` list. With `--reader`, kind, lane, and topic filters
-apply only to broadcasts; records addressed only to other lanes are excluded.
+Broadcasts have an empty `to` list or one that names `all`. With `--reader`, kind,
+lane, and topic filters apply only to broadcasts; records addressed only to other lanes are excluded.
 Stack, target, and PR filters apply to addressed records too. Each takes one
 value per read; when combined, all must match.
 

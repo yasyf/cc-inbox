@@ -126,8 +126,8 @@ cci tail --cursor api --reader api
 
 On `tail`, `watch`, `grep`, and `state`, `--reader` delivers records addressed
 to the lane regardless of kind, lane, or topic filters, plus other lanes'
-broadcasts matching those filters. Broadcasts have empty `to`; your own never
-come back. Repeat `--topic` or `--lane` to select topics or posting lanes.
+broadcasts matching those filters. A broadcast omits `--to` or posts `--to all`;
+your own never come back. Repeat `--topic` or `--lane` to select topics or posting lanes.
 Use `--kind` on tail, watch, or grep to select broadcast kinds. Repeat the flag
 or separate kinds with commas, such as `--kind hold,defect`. `--to` selects
 addressed records only. Stack, target, and PR filters apply to all deliveries.

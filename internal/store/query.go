@@ -63,7 +63,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	if f.For != "" {
 		names := addressees(f.For)
 		in := "(" + placeholders(len(names)) + ")"
-		broadcast := append([]string{"recipients = '[]'", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
+		broadcast := append([]string{"(recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all'))", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
 		scoped = append(scoped, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN "+in+") OR ("+strings.Join(broadcast, " AND ")+"))")
 		params = append(append(append(append(params, names...), names...), hookSources(names)...), selected...)
 	} else {
