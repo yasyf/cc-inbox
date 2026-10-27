@@ -47,6 +47,35 @@ func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Re
 	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() }))
 }
 
+// ReplacedAmong returns the seqs among seqs of a kind whose newest record on a
+// topic replaces the earlier ones, that a later record of the same drive, lane,
+// kind, topic and recipients has replaced. A record with no topic is never
+// replaced.
+func (s *Store) ReplacedAmong(ctx context.Context, drive string, seqs []int64) (map[int64]bool, error) {
+	latest := kinds.Latests()
+	ids, _ := json.Marshal(seqs)
+	params := make([]any, 0, 2+len(latest))
+	params = append(params, drive, string(ids))
+	for _, k := range latest {
+		params = append(params, string(k))
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT r.seq FROM records r WHERE r.drive = ? AND r.seq IN (SELECT value FROM json_each(?)) AND r.topic != '' AND r.kind IN (`+placeholders(len(latest))+`)
+AND EXISTS (SELECT 1 FROM records l WHERE l.drive = r.drive AND l.kind = r.kind AND l.seq > r.seq AND l.lane = r.lane AND l.topic = r.topic AND l.recipients = r.recipients)`, params...)
+	if err != nil {
+		return nil, fmt.Errorf("read replaced records: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	replaced := map[int64]bool{}
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, err
+		}
+		replaced[seq] = true
+	}
+	return replaced, rows.Err()
+}
+
 func (s *Store) openersAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
 	openers := kinds.Openers()
 	ids, _ := json.Marshal(seqs)
