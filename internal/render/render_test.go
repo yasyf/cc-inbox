@@ -1,6 +1,7 @@
 package render_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -70,5 +71,23 @@ func TestBriefKeepsTheFieldsAClipWouldHideInTheText(t *testing.T) {
 	}
 	if got := render.Brief(r, at, 0); strings.Contains(got, "[rollout]") {
 		t.Fatalf("unclipped line %q repeats the topic its text names", got)
+	}
+}
+
+func TestBriefNamesTheFirstRecipientsOfABroadcast(t *testing.T) {
+	at := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	to := make([]string, 50)
+	for i := range to {
+		to[i] = fmt.Sprintf("lane-%02d", i)
+	}
+	r := store.Record{Seq: 7, At: at, Lane: "root", Kind: kinds.Decision, To: to, Text: "register extended rule/3f34533 " + strings.Repeat("why ", 80)}
+	const shown = " -> lane-00,lane-01,lane-02,lane-03,lane-04,lane-05,lane-06,lane-07,+42 more register extended rule/3f34533 "
+	for _, got := range []string{render.Brief(r, at, 0), render.Untagged(r, at, 0), render.Brief(r, at, 200), render.Untagged(r, at, 200)} {
+		if !strings.Contains(got, shown) {
+			t.Fatalf("broadcast line %q, want it to contain %q", got, shown)
+		}
+	}
+	if got := render.Line(r, at); !strings.Contains(got, ",lane-49 register") {
+		t.Fatalf("Line() = %q, want every recipient", got)
 	}
 }
