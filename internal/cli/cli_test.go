@@ -986,8 +986,20 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if _, err := st.Announce(ctx, store.Peer{Session: "aaaa1111-root", Agent: "asuccessor-2-0123", AgentName: "successor-2"}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
+	}
+	if out, err := run(t, "claim", "--for", "successor-2@drive-b", "--pr", "owner/repo#9"); err != nil || out != "owns pr:owner/repo#9\n" {
+		t.Fatalf("claim --for a teammate that never posted = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0"); err != nil || !strings.Contains(out, "CLAIM successor-2 claim: successor-2 owns #owner/repo#9") {
+		t.Fatalf("claim record for a teammate that never posted = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--drive", "drive-b", "--lane", "successor-2", "--json"); err != nil || !strings.Contains(out, `"agent":"asuccessor-2-0123"`) {
+		t.Fatalf("who --lane after claim --for bound the teammate = %q, %v", out, err)
 	}
 	if out, err := run(t, "claim", "--for", "walker@drive-b", "--build", "8748", "--rel", "started"); err != nil || out != "started build:8748\n" {
 		t.Fatalf("claim --for = %q, %v", out, err)
