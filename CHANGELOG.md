@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line to every delivery, and a set that emptied and then refilled prints the
   one-line seq list instead of the full list again. Only a session start or a
   compaction prints the full list.
+- The `PostToolUse` hook delivers only the newest `state` or `report` record on
+  a topic. When a lane posts several to the same recipients under one topic
+  before the reader's next tool call, such as a runner's heartbeat or its
+  report about one PR, the earlier ones are skipped. A record with no topic is
+  always delivered, and `cci tail`, `cci watch` and the channel still print
+  every record.
 
 ## [0.30.3] - 2026-10-27
 

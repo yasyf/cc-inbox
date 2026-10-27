@@ -663,3 +663,40 @@ func TestStopNudgesOnceAboutEachOverdueAsk(t *testing.T) {
 		t.Fatalf("nudged about a record root does not owe: %q", got)
 	}
 }
+
+func TestPostToolUseDeliversOnlyTheNewestStatusOnATopic(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	p := bindRoot(t, st)
+	deliver := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := hook.PostToolUse(ctx, st, p, noWindow, &out); err != nil {
+			t.Fatal(err)
+		}
+		return hookContext(t, &out, "PostToolUse")
+	}
+	for i := range 3 {
+		testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Report, Topic: "go-unqueued:42", To: []string{"root"}, Text: fmt.Sprintf("GO-UNQUEUED pass %d", i)})
+		testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.State, Topic: "orca", To: []string{"root"}, Text: fmt.Sprintf("orca alive pass %d", i)})
+		testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.State, To: []string{"root"}, Text: fmt.Sprintf("untopiced state %d", i)})
+		testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Note, Topic: "orca", To: []string{"root"}, Text: fmt.Sprintf("note on the topic %d", i)})
+	}
+	testutil.Post(t, st, store.Record{Lane: "other", Kind: kinds.Report, Topic: "go-unqueued:42", To: []string{"root"}, Text: "another lane's report"})
+	testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Report, Topic: "go-unqueued:42", To: []string{"root", "lane-b"}, Text: "copied to lane-b"})
+	got := deliver() + deliver() + deliver()
+	for _, want := range []string{"GO-UNQUEUED pass 2", "orca alive pass 2", "untopiced state 0", "untopiced state 2", "note on the topic 0", "note on the topic 2", "another lane's report", "copied to lane-b"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("delivery lacks %q: %q", want, got)
+		}
+	}
+	for _, replaced := range []string{"GO-UNQUEUED pass 0", "GO-UNQUEUED pass 1", "orca alive pass 0", "orca alive pass 1"} {
+		if strings.Contains(got, replaced) {
+			t.Fatalf("delivery carries %q, which a newer record on its topic replaced: %q", replaced, got)
+		}
+	}
+	testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.State, Topic: "orca", To: []string{"root"}, Text: "orca alive pass 3"})
+	if got := deliver(); !strings.Contains(got, "orca alive pass 3") {
+		t.Fatalf("a status after a delivered one on its topic is missing: %q", got)
+	}
+}

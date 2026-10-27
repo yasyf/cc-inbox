@@ -67,6 +67,7 @@ const EphemeralTTL = 24 * time.Hour
 
 type Spec struct {
 	TTL               time.Duration
+	Latest            bool
 	NeedsPR           bool
 	NeedsMentionedPRs bool
 	NeedsRef          bool
@@ -101,9 +102,9 @@ var specs = map[Kind]Spec{
 	Digest:     {Internal: true},
 	Claim:      {TTL: EphemeralTTL},
 	Note:       {TTL: EphemeralTTL},
-	State:      {TTL: EphemeralTTL},
+	State:      {TTL: EphemeralTTL, Latest: true},
 	Matrix:     {TTL: EphemeralTTL},
-	Report:     {TTL: EphemeralTTL},
+	Report:     {TTL: EphemeralTTL, Latest: true},
 	Peer:       {TTL: EphemeralTTL},
 	Blocked:    {},
 	Unblock:    {NeedsRef: true},
@@ -205,6 +206,17 @@ func Openers() []Kind {
 	out := make([]Kind, 0, len(openers))
 	for k := range openers {
 		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func Latests() []Kind {
+	var out []Kind
+	for k, spec := range specs {
+		if spec.Latest {
+			out = append(out, k)
+		}
 	}
 	slices.Sort(out)
 	return out
