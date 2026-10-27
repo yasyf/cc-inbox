@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `--reader` on `cci tail`, `cci watch`, `cci grep`, `cci state` and the
+  channel delivers a record posted `--to all` as a broadcast, subject to
+  `--kind`, `--lane` and `--topic`. It used to deliver only records with an
+  empty `to` list, so a lane reading with `--reader` missed the root's
+  drive-wide rulings. `--to` is unchanged.
+
 ## [0.30.0] - 2026-10-27
 
 ### Changed

@@ -22,13 +22,16 @@ func TestReaderDelivery(t *testing.T) {
 	broadcastContract := testutil.Post(t, st, store.Record{Lane: "api", Kind: kinds.Contract, Topic: "schema", Text: "v2 shape"})
 	testutil.Post(t, st, store.Record{Lane: "api", Kind: kinds.Head, Topic: "#30001", Text: "abc"})
 	testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Contract, Topic: "schema", Text: "my own broadcast"})
+	toAll := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, Text: "drive-wide ruling", To: []string{"all"}})
+	testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Decide, Text: "my own ruling to all", To: []string{"all"}})
 	tests := []struct {
 		name string
 		f    store.Filter
 		want []int64
 	}{
-		{"everything for me", store.Filter{Drive: "d", For: "desk"}, []int64{toMe.Seq, broadcastContract.Seq, broadcastContract.Seq + 1}},
+		{"everything for me", store.Filter{Drive: "d", For: "desk"}, []int64{toMe.Seq, broadcastContract.Seq, broadcastContract.Seq + 1, toAll.Seq}},
 		{"subscribed to contracts", store.Filter{Drive: "d", For: "desk", Kinds: []kinds.Kind{kinds.Contract}}, []int64{toMe.Seq, broadcastContract.Seq}},
+		{"subscribed to decides", store.Filter{Drive: "d", For: "desk", Kinds: []kinds.Kind{kinds.Decide}}, []int64{toMe.Seq, toAll.Seq}},
 		{"subscribed to a topic", store.Filter{Drive: "d", For: "desk", Topics: []string{"#30001"}}, []int64{toMe.Seq, broadcastContract.Seq + 1}},
 		{"plain topic filter", store.Filter{Drive: "d", Topics: []string{"schema"}}, []int64{broadcastContract.Seq, broadcastContract.Seq + 2}},
 	}
