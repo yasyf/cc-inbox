@@ -6,6 +6,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-26
+
+### Fixed
+
+- `cci who --pr` ran for minutes at full CPU on a large store and never
+  answered: the claims it derives from records paired every session with
+  every record before filtering by the pull request. Each derived branch now
+  filters the record's refs first, and a new `sessions(origin, drive, lane)`
+  index answers the session lookup. On a store of 117k records it answers in
+  about 0.2 s. The store schema moves to 14, so mesh nodes on different
+  versions refuse each other's changes until both upgrade.
+- A pull request opened by a lane's subagent was recorded under the
+  subagent's agent id. `cci claim --rel opened` now posts the `opened` record
+  as the lane that owns the thread: the thread itself when it is bound as a
+  lane, else the nearest bound agent that spawned it, up to its session's
+  root thread. The `PostToolUse` hook records each subagent's parent from the
+  harness metadata. `cci who --pr` lists a lane subagent's claim under the
+  lane's thread.
+- `cci claim --for <lane>@<drive> --pr N` also posts a `claim` record as that
+  lane, reading `claim: <lane> owns #N`, so a reader of the drive's records
+  learns the owner by its lane name.
+- A bare `--pr N` matched only refs stored as that bare number, missing every
+  `owner/repo#N` ref. It now matches N in any repository, in `tail`, `grep`,
+  `digest`, `state` and `who`.
+- A post with another `--lane` rebound the posting thread to that lane, so it
+  started receiving that lane's mail. A thread's lane is now set once, by its
+  first post as itself; `cci drive use` still resets it.
+
 ## [0.25.0] - 2026-10-26
 
 ### Fixed
@@ -863,7 +891,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/yasyf/cc-inbox/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/yasyf/cc-inbox/compare/v0.24.2...v0.25.0
 [0.24.2]: https://github.com/yasyf/cc-inbox/compare/v0.24.1...v0.24.2
 [0.24.1]: https://github.com/yasyf/cc-inbox/compare/v0.24.0...v0.24.1
