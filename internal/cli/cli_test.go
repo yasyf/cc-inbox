@@ -533,6 +533,25 @@ func TestPostPathStoresTheFilesFirstLineUnstamped(t *testing.T) {
 	}
 }
 
+func TestPostReadsItsTextFromStdinWhenItIsADash(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	for _, args := range [][]string{{"-"}, {"--text", "-"}} {
+		var out bytes.Buffer
+		root := cli.NewRootCmd()
+		root.SetIn(strings.NewReader("relay to api landed {at}\n"))
+		root.SetOut(&out)
+		root.SetErr(&out)
+		root.SetArgs(append([]string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note"}, args...))
+		if err := root.Execute(); err != nil {
+			t.Fatalf("post %v: %v", args, err)
+		}
+		var got posted
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Text != "relay to api landed "+got.stamp() {
+			t.Errorf("post %v with a heredoc on stdin stored %q, %v; want the heredoc's text", args, got.Text, err)
+		}
+	}
+}
+
 func TestPostPathFromStdinOrAPipeKeepsTheBody(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)

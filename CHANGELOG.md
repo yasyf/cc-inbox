@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-10-27
+
+### Fixed
+
+- `cci post -` and `cci post --text -` read the text from stdin, so a heredoc
+  body becomes the record's text. Before, the record stored a literal `-`.
+
 ## [0.32.0] - 2026-10-27
 
 ### Changed
@@ -1036,7 +1043,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.32.1...HEAD
+[0.32.1]: https://github.com/yasyf/cc-inbox/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/yasyf/cc-inbox/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/yasyf/cc-inbox/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/yasyf/cc-inbox/compare/v0.30.2...v0.30.3
