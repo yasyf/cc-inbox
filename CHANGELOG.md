@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.2] - 2026-10-27
+
+### Fixed
+
+- A post or read with no `--drive` from a subagent whose own thread never ran
+  `cci drive use` takes the drive of the nearest thread that spawned it, up to
+  the session's root thread, so a fresh lane's first `cci post` works. A
+  session bound to no drive takes `CLAUDE_LONG_RUNNING_DRIVE` when it is set.
+
 ## [0.30.1] - 2026-10-27
 
 ### Fixed
@@ -986,7 +995,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.30.1...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.30.2...HEAD
+[0.30.2]: https://github.com/yasyf/cc-inbox/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/yasyf/cc-inbox/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/yasyf/cc-inbox/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/yasyf/cc-inbox/compare/v0.28.0...v0.29.0

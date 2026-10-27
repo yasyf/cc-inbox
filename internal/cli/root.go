@@ -22,6 +22,7 @@ const (
 	sessionEnv      = "CLAUDE_CODE_SESSION_ID"
 	codexSessionEnv = "CODEX_THREAD_ID"
 	agentEnv        = "CCI_AGENT_ID"
+	driveEnv        = "CLAUDE_LONG_RUNNING_DRIVE"
 )
 
 var errNoPeerSession = errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
@@ -81,18 +82,22 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 	if drive != "" {
 		return drive, nil
 	}
-	self := selfPeer()
-	if self.Session == "" {
-		return "", store.ErrNoDrive
+	if self := selfPeer(); self.Session != "" {
+		b, ok, err := st.Binding(ctx, self)
+		if err == nil && !ok {
+			_, b, ok, err = st.Owner(ctx, self)
+		}
+		if err != nil {
+			return "", err
+		}
+		if ok {
+			return b.Drive, nil
+		}
 	}
-	b, ok, err := st.Binding(ctx, self)
-	if err != nil {
-		return "", err
+	if d := os.Getenv(driveEnv); d != "" {
+		return d, nil
 	}
-	if !ok {
-		return "", store.ErrNoDrive
-	}
-	return b.Drive, nil
+	return "", store.ErrNoDrive
 }
 
 type readFlags struct {
