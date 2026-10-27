@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-10-27
+
 ### Changed
 
 - The `PostToolUse` hook prints a lane's open asks only when the set changed
@@ -1024,7 +1026,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.30.3...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/yasyf/cc-inbox/compare/v0.30.3...v0.31.0
 [0.30.3]: https://github.com/yasyf/cc-inbox/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/yasyf/cc-inbox/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/yasyf/cc-inbox/compare/v0.30.0...v0.30.1
