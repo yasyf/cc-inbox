@@ -191,6 +191,10 @@ func RootName(lane string) bool {
 	return slices.Contains(rootNames, any(lane))
 }
 
+func SameLane(a, b string) bool {
+	return a == b || RootName(a) && RootName(b)
+}
+
 func addressees(lane string) []any {
 	if RootName(lane) {
 		return rootNames
@@ -330,6 +334,10 @@ ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, k.String(), drive, 
 
 func LaneCursor(k PeerKey) string {
 	return "lane-" + k.String()
+}
+
+func LaneMail(k PeerKey, b Binding) Filter {
+	return Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}
 }
 
 // BindLane names the lane k writes as in drive and starts its lane cursor. A

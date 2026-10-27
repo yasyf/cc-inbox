@@ -564,6 +564,44 @@ func TestPostToolUseLeadsWithTheOpenAsksBehindABacklog(t *testing.T) {
 	}
 }
 
+func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	p := bindRoot(t, st)
+	deliver := func(event string) string {
+		t.Helper()
+		var out bytes.Buffer
+		var err error
+		if event == "SessionStart" {
+			err = hook.SessionStart(ctx, st, p, store.Window{}, &out)
+		} else {
+			err = hook.PostToolUse(ctx, st, p, noWindow, &out)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		return hookContext(t, &out, event)
+	}
+	const listed, unchanged = "open asks addressed to root, newest first", "1 open asks addressed to root, unchanged since the last list; cci digest lists them"
+	for _, tt := range []struct {
+		event string
+		post  store.Record
+		want  string
+	}{
+		{"PostToolUse", store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "which branch?"}, listed},
+		{"PostToolUse", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "a note changes no ask"}, unchanged},
+		{"SessionStart", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "after a compaction"}, listed},
+		{"PostToolUse", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "still the one ask"}, unchanged},
+		{"PostToolUse", store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "which env?"}, listed},
+	} {
+		testutil.Post(t, st, tt.post)
+		got := deliver(tt.event)
+		if !strings.HasPrefix(got, tt.want) || !strings.Contains(got, tt.post.Text) {
+			t.Fatalf("after %q: additionalContext = %q, want it to lead with %q", tt.post.Text, got, tt.want)
+		}
+	}
+}
+
 func TestStopNudgesOnceAboutEachOverdueAsk(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()

@@ -3,7 +3,9 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/shirou/gopsutil/v4/process"
@@ -102,7 +104,7 @@ func newChannelCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return channel.Serve(cmd.Context(), st, window, cmd.InOrStdin(), cmd.OutOrStdout())
+			return channel.Serve(cmd.Context(), st, window, channelsOn(window.PID), cmd.InOrStdin(), cmd.OutOrStdout())
 		}),
 	}
 }
@@ -142,6 +144,45 @@ func windowOf(pid int) (store.Window, error) {
 		return store.Window{}, fmt.Errorf("start time of claude pid %d: %w", pid, err)
 	}
 	return store.Window{PID: pid, Started: started}, nil
+}
+
+func channelsOn(pid int) bool {
+	p, err := process.NewProcess(int32(pid)) //nolint:gosec // G115: OS pids fit in int32.
+	if err != nil {
+		slog.Warn("cci channel: read claude's arguments", "pid", pid, "err", err)
+		return false
+	}
+	args, err := p.CmdlineSlice()
+	if err != nil {
+		slog.Warn("cci channel: read claude's arguments", "pid", pid, "err", err)
+		return false
+	}
+	return slices.Contains(channelArgs(args), "plugin:cc-inbox@")
+}
+
+func channelArgs(args []string) []string {
+	var out []string
+	listing := false
+	for _, a := range args {
+		flag, value, inline := strings.Cut(a, "=")
+		switch {
+		case flag == "--channels" || flag == "--dangerously-load-development-channels":
+			listing = !inline
+			if inline {
+				out = append(out, strings.Split(value, ",")...)
+			}
+		case strings.HasPrefix(a, "-"):
+			listing = false
+		case listing:
+			out = append(out, a)
+		}
+	}
+	for i, c := range out {
+		if name, _, ok := strings.Cut(c, "@"); ok {
+			out[i] = name + "@"
+		}
+	}
+	return out
 }
 
 func kindList(ks []kinds.Kind) string {

@@ -32,6 +32,7 @@ type TailOptions struct {
 	JSON   bool
 	Resume string
 	Open   bool
+	Fold   int
 }
 
 type TailResult struct {
@@ -69,7 +70,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if f.Descending {
 		slices.Reverse(records)
 	}
-	rendered, err := lines(ctx, st, records, opts.JSON, opts.Width)
+	rendered, folded, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold})
 	if err != nil {
 		return TailResult{}, err
 	}
@@ -79,6 +80,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	b := render.NewBudget(w, opts.Budget)
 	res := TailResult{Last: f.After}
+	shortened := 0
 	for i, r := range records {
 		if closed[r.Seq] {
 			res.Last = r.Seq
@@ -87,8 +89,14 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		if !b.Line(rendered[i]) {
 			break
 		}
+		if folded[i] {
+			shortened++
+		}
 		res.Printed++
 		res.Last = r.Seq
+	}
+	if shortened > 0 {
+		b.Trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
 	}
 	rest := f
 	rest.Limit = 0
@@ -133,7 +141,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 				hits = append(hits, r)
 			}
 		}
-		rendered, err := lines(ctx, st, hits, asJSON, 0)
+		rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON})
 		if err != nil {
 			return err
 		}
@@ -176,7 +184,7 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.
 		}
 		records[i] = r
 	}
-	rendered, err := lines(ctx, st, records, asJSON, 0)
+	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON})
 	if err != nil {
 		return err
 	}

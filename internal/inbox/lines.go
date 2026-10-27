@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -52,19 +53,27 @@ func Annotate(ctx context.Context, st *store.Store, records []store.Record) erro
 	return nil
 }
 
-func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON bool, width int) ([]string, error) {
+type view struct {
+	JSON     bool
+	Width    int
+	Fold     int
+	Untagged bool
+}
+
+func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
 	out := make([]string, len(records))
-	if asJSON {
+	folded := make([]bool, len(records))
+	if v.JSON {
 		if err := Annotate(ctx, st, records); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for i, r := range records {
 			out[i] = render.JSON(r)
 		}
-		return out, nil
+		return out, folded, nil
 	}
 	if len(records) == 0 {
-		return out, nil
+		return out, folded, nil
 	}
 	seqs := make([]int64, len(records))
 	for i, r := range records {
@@ -72,13 +81,25 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, asJSON 
 	}
 	replies, err := st.Replies(ctx, seqs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+	line := render.Line
+	if v.Untagged {
+		line = render.Untagged
 	}
 	now := st.Now()
 	for i, r := range records {
-		out[i] = render.Clip(render.Line(r, now), width) + marks(r.Seq, replies[r.Seq])
+		text := render.Clip(line(r, now), v.Width)
+		if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) && utf8.RuneCountInString(text) > v.Fold {
+			text, folded[i] = render.Clip(text, v.Fold), true
+		}
+		out[i] = text + marks(r.Seq, replies[r.Seq])
 	}
-	return out, nil
+	return out, folded, nil
+}
+
+func resolved(seq int64, replies []store.Record) bool {
+	return slices.ContainsFunc(replies, func(r store.Record) bool { return slices.Contains(r.Closes(), seq) })
 }
 
 func marks(seq int64, replies []store.Record) string {

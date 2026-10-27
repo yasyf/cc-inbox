@@ -19,6 +19,7 @@ func newTailCmd() *cobra.Command {
 	var (
 		rf     readFlags
 		cursor string
+		all    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "tail",
@@ -33,10 +34,15 @@ func newTailCmd() *cobra.Command {
 			if cmd.Flags().Changed("since") {
 				name = ""
 			}
-			_, err = inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json}, cmd.OutOrStdout())
+			fold := render.FoldWidth
+			if all {
+				fold = 0
+			}
+			_, err = inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json, Fold: fold}, cmd.OutOrStdout())
 			return err
 		}),
 	}
+	cmd.Flags().BoolVar(&all, "all", false, fmt.Sprintf("print resolved records whole; by default a record a later one resolved is cut to %d characters", render.FoldWidth))
 	rf.register(cmd, "", true, render.DefaultBudget)
 	rf.registerWidth(cmd)
 	rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
