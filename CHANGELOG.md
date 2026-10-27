@@ -6,6 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.3] - 2026-10-27
+
+### Fixed
+
+- `cci post` no longer answers `(duplicate)` for a record whose text matches an
+  earlier one but whose refs, fields or body differ. The dedup key now also
+  covers the refs (`--pr`, `--url`, `--board` and the rest, but not `--path`),
+  the fields (`--commit`, `--outcome` and the rest) and the body, so a post with
+  a corrected `--commit` creates a new record instead of keeping the old sha.
+
 ## [0.30.2] - 2026-10-27
 
 ### Fixed
@@ -995,7 +1005,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.30.2...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.30.3...HEAD
+[0.30.3]: https://github.com/yasyf/cc-inbox/compare/v0.30.2...v0.30.3
 [0.30.2]: https://github.com/yasyf/cc-inbox/compare/v0.30.1...v0.30.2
 [0.30.1]: https://github.com/yasyf/cc-inbox/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/yasyf/cc-inbox/compare/v0.29.0...v0.30.0
