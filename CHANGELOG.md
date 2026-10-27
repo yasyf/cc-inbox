@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.1] - 2026-10-27
+
 ### Fixed
 
 - `--reader` on `cci tail`, `cci watch`, `cci grep`, `cci state` and the
@@ -984,7 +986,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.30.1...HEAD
+[0.30.1]: https://github.com/yasyf/cc-inbox/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/yasyf/cc-inbox/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/yasyf/cc-inbox/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/yasyf/cc-inbox/compare/v0.27.2...v0.28.0
