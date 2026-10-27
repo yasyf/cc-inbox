@@ -210,7 +210,7 @@ type claimFlags struct {
 
 func (c *claimFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
-	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive")
+	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive, else the one live teammate named that lane with no lane yet, which it binds")
 	fl.StringVar(&c.rel, "rel", relOwns, "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
 	fl.Var(&prsFlag{&c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
@@ -237,11 +237,33 @@ func (c *claimFlags) holder(ctx context.Context, st *store.Store) (store.PeerKey
 	if err != nil {
 		return store.PeerKey{}, err
 	}
+	if len(views) == 0 {
+		named, err := peers.Resolve(ctx, st, peers.Filter{Origin: peers.LocalOrigin, Agent: lane})
+		if err != nil {
+			return store.PeerKey{}, err
+		}
+		var unbound []peers.View
+		for _, v := range named {
+			if v.Root || v.Lane != "" || v.Drive != "" && v.Drive != drive {
+				continue
+			}
+			_, b, owned, err := st.Owner(ctx, v.Key())
+			if err != nil {
+				return store.PeerKey{}, err
+			}
+			if !owned || b.Drive == drive {
+				unbound = append(unbound, v)
+			}
+		}
+		if len(unbound) == 1 {
+			return unbound[0].Key(), st.BindLane(ctx, unbound[0].Key(), drive, lane, unbound[0].AnnouncedAt)
+		}
+	}
 	switch len(views) {
 	case 1:
 		return views[0].Key(), nil
 	case 0:
-		return store.PeerKey{}, fmt.Errorf("--for %s: no live session on this machine is bound as lane %s in drive %s; cci who --all --drive %s --lane %s lists ended ones", c.forLane, lane, drive, drive, lane)
+		return store.PeerKey{}, fmt.Errorf("--for %s: no live session on this machine is bound as lane %s in drive %s, and no one live teammate is named %s with no lane yet; cci who --all --drive %s --lane %s lists ended ones", c.forLane, lane, drive, lane, drive, lane)
 	}
 	keys := make([]string, len(views))
 	for i, v := range views {
