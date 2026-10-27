@@ -58,6 +58,7 @@ type view struct {
 	Width    int
 	Fold     int
 	Untagged bool
+	Whole    bool
 }
 
 func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
@@ -83,8 +84,11 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 	if err != nil {
 		return nil, nil, err
 	}
-	line := render.Line
-	if v.Untagged {
+	line := render.Brief
+	switch {
+	case v.Whole:
+		line = render.Line
+	case v.Untagged:
 		line = render.Untagged
 	}
 	now := st.Now()

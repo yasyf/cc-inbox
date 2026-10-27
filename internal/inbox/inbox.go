@@ -141,7 +141,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 				hits = append(hits, r)
 			}
 		}
-		rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON})
+		rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON, Whole: true})
 		if err != nil {
 			return err
 		}
@@ -184,7 +184,7 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.
 		}
 		records[i] = r
 	}
-	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON})
+	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON, Whole: true})
 	if err != nil {
 		return err
 	}
