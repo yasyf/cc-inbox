@@ -568,9 +568,8 @@ func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
 	p := bindRoot(t, st)
-	deliver := func(event string, post store.Record) string {
+	deliver := func(event string) string {
 		t.Helper()
-		testutil.Post(t, st, post)
 		var out bytes.Buffer
 		var err error
 		if event == "SessionStart" {
@@ -595,7 +594,8 @@ func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
 		{"PostToolUse", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "still the one ask"}, unchanged},
 		{"PostToolUse", store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "which env?"}, listed},
 	} {
-		got := deliver(tt.event, tt.post)
+		testutil.Post(t, st, tt.post)
+		got := deliver(tt.event)
 		if !strings.HasPrefix(got, tt.want) || !strings.Contains(got, tt.post.Text) {
 			t.Fatalf("after %q: additionalContext = %q, want it to lead with %q", tt.post.Text, got, tt.want)
 		}

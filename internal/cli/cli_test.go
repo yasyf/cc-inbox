@@ -1186,7 +1186,7 @@ func TestTailCutsResolvedRecordsUnlessAll(t *testing.T) {
 	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
 		t.Fatal(err)
 	}
-	question := "Build the single reader anyway? " + strings.Repeat("measured detail ", 20) + "| options: A no new reader; B build it"
+	question := "Build the single reader anyway? " + strings.Repeat("measured detail ", 15) + "| options: A no new reader; B build it"
 	for _, args := range [][]string{
 		{"post", "--lane", "lane-a", "--kind", "ask", "--to", "root", "--text", question},
 		{"post", "--lane", "lane-a", "--kind", "ask", "--to", "root", "--text", "still open " + question},
