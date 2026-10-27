@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-10-26
+
+### Fixed
+
+- A teammate that took over a lane got the lane's whole history replayed by
+  the `PostToolUse` hook: a teammate shares its root session's window, so its
+  lane cursor started when the root session started. The cursor now starts at
+  the later of the window's start and the teammate's spawn, read from the
+  harness's agent metadata, so a record posted between spawn and the first
+  tool call still arrives.
+- The hook no longer delivers records a later record has closed, under the
+  store's own closure rule (`--resolves`, `answer --re`, a matching topic),
+  and still moves the cursor past them. A page whose records were all closed
+  keeps its resume trailer, which says "up to N more" while closed records
+  are skipped. `cci tail` itself still prints closed records.
+
 ## [0.27.1] - 2026-10-26
 
 ### Fixed
