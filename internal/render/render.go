@@ -67,7 +67,7 @@ func rest(r store.Record, brief, elide bool) string {
 	}
 	to := recipients(r.To)
 	if brief && len(to) > shownRecipients {
-		to = append(to[:shownRecipients:shownRecipients], fmt.Sprintf("+%d more", len(to)-shownRecipients))
+		to = []string{fmt.Sprintf("%d lanes", len(to))}
 	}
 	if len(to) > 0 {
 		fmt.Fprintf(&b, " -> %s", strings.Join(to, ","))

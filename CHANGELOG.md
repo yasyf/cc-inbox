@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   report about one PR, the earlier ones are skipped. A record with no topic is
   always delivered, and `cci tail`, `cci watch` and the channel still print
   every record.
+- Default views print a record addressed to more than eight lanes as
+  `-> <n> lanes` instead of its first eight recipients and `+<n> more`. The
+  first eight names of a broadcast to every lane told the reader nothing, and
+  they were half of each such line in every lane's hook. `cci show` and
+  `cci grep` still print every recipient.
 
 ## [0.30.3] - 2026-10-27
 
