@@ -59,6 +59,7 @@ type Agent struct {
 	Name     string
 	Workflow bool
 	Parent   string
+	Spawned  time.Time
 }
 
 const workflowAgentType = "workflow-subagent"
@@ -81,6 +82,10 @@ func (p Payload) Agent() (Agent, error) {
 	if err != nil {
 		return Agent{}, fmt.Errorf("read agent metadata: %w", err)
 	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return Agent{}, fmt.Errorf("stat agent metadata: %w", err)
+	}
 	var meta struct {
 		AgentType   string `json:"agentType"`
 		Name        string `json:"name"`
@@ -91,9 +96,9 @@ func (p Payload) Agent() (Agent, error) {
 		return Agent{}, fmt.Errorf("decode %s: %w", path, err)
 	}
 	if meta.AgentType == workflowAgentType {
-		return Agent{Name: meta.Description, Workflow: true, Parent: meta.Parent}, nil
+		return Agent{Name: meta.Description, Workflow: true, Parent: meta.Parent, Spawned: info.ModTime()}, nil
 	}
-	return Agent{Name: meta.Name, Parent: meta.Parent}, nil
+	return Agent{Name: meta.Name, Parent: meta.Parent, Spawned: info.ModTime()}, nil
 }
 
 func Read(r io.Reader) (Payload, error) {
@@ -174,7 +179,7 @@ func announceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 	if found && existing.PID == win.PID && existing.PIDStarted == win.Started && !existing.Superseded && (existing.AgentName != "" || agent.Name == "") {
 		return st.SetParent(ctx, p.Key(), agent.Parent)
 	}
-	o := peers.Options{Session: p.SessionID, Agent: p.AgentID, AgentName: agent.Name, Window: win, Cwd: p.Cwd}
+	o := peers.Options{Session: p.SessionID, Agent: p.AgentID, AgentName: agent.Name, Window: win, Cwd: p.Cwd, Spawned: agent.Spawned}
 	if agent.Workflow {
 		o.Role = peers.RoleWorkflow
 	}
@@ -193,7 +198,7 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 	var tail bytes.Buffer
 	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
 	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true}, &tail)
-	if err != nil || res.Printed == 0 {
+	if err != nil || res.Printed == 0 && res.More == 0 {
 		return err
 	}
 	var out bytes.Buffer

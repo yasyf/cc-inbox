@@ -102,7 +102,11 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		if opts.Cursor != "" {
 			resume = cmp.Or(opts.Resume, "cci tail")
 		}
-		b.Trailer(fmt.Sprintf("... %d more; resume with %s", res.More, resume))
+		upTo := ""
+		if opts.Open {
+			upTo = "up to "
+		}
+		b.Trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume))
 	}
 	if opts.Cursor != "" && res.Last != f.After {
 		if err := st.SetCursor(ctx, opts.Cursor, f.Drive, res.Last); err != nil {
@@ -204,17 +208,22 @@ func closedOf(ctx context.Context, st *store.Store, records []store.Record, open
 	if !open {
 		return nil, nil
 	}
-	seqs := make([]int64, len(records))
-	for i, r := range records {
-		seqs[i] = r.Seq
-	}
-	replies, err := st.Replies(ctx, seqs)
-	if err != nil {
-		return nil, err
-	}
+	openers := map[string][]int64{}
 	closed := map[int64]bool{}
-	for seq, rs := range replies {
-		closed[seq] = slices.ContainsFunc(rs, func(r store.Record) bool { return slices.Contains(r.Closes(), seq) })
+	for _, r := range records {
+		if r.Kind.Opens() && r.Tracked() {
+			openers[r.Drive] = append(openers[r.Drive], r.Seq)
+			closed[r.Seq] = true
+		}
+	}
+	for drive, seqs := range openers {
+		stillOpen, err := st.OpenAmong(ctx, drive, seqs)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range stillOpen {
+			delete(closed, r.Seq)
+		}
 	}
 	return closed, nil
 }

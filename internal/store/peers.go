@@ -61,13 +61,18 @@ const peerColumns = "session, agent, agent_name, origin, drive, root, lane, role
 // binding as Bind and BindLane set it. An empty role, description, tag list
 // or agent name keeps the stored one, so an automatic announce never erases
 // an explicit one. Another session announced from the same process, the one
-// a /clear replaced, is marked superseded.
+// a /clear replaced, is marked superseded. A peer that names when it was
+// spawned is announced at that time, so its lane cursor starts there.
 func (s *Store) Announce(ctx context.Context, p Peer) (Peer, error) {
 	if p.Session == "" {
 		return Peer{}, errors.New("announce: session is required")
 	}
 	now := s.Now().UTC()
-	p.AnnouncedAt, p.SeenAt = now, now
+	p.SeenAt = now
+	if p.AnnouncedAt.IsZero() {
+		p.AnnouncedAt = now
+	}
+	p.AnnouncedAt = p.AnnouncedAt.UTC()
 	tags, _ := json.Marshal(nonNil(p.Tags))
 	env, _ := json.Marshal(p.Env)
 	tx, err := s.db.BeginTx(ctx, nil)
