@@ -125,6 +125,32 @@ func TestTailLimitPrintsTheNewestRecords(t *testing.T) {
 	}
 }
 
+func TestAFreshSubagentAndAnUnboundSessionPostToTheDriveTheyInherit(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	t.Setenv("CCI_AGENT_ID", "")
+	t.Setenv("CLAUDE_LONG_RUNNING_DRIVE", "")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCI_AGENT_ID", "a-fresh-lane")
+	if out, err := run(t, "post", "--lane", "fresh-lane", "--kind", "note", "--text", "first post"); err != nil || out != "#1\n" {
+		t.Fatalf("subagent post = %q, %v", out, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-2")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "post", "--lane", "orca-lane", "--kind", "note", "--text", "x"); err == nil || !strings.Contains(err.Error(), "no drive") {
+		t.Fatalf("unbound post without the drive env: %v", err)
+	}
+	t.Setenv("CLAUDE_LONG_RUNNING_DRIVE", "release-v3")
+	if out, err := run(t, "post", "--lane", "orca-lane", "--kind", "note", "--text", "second post"); err != nil || out != "#2\n" {
+		t.Fatalf("env post = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, "first post") || !strings.Contains(out, "second post") {
+		t.Fatalf("tail = %q, %v", out, err)
+	}
+}
+
 func TestCodexSessionBindsADrive(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
