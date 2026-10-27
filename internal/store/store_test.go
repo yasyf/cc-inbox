@@ -377,7 +377,7 @@ func TestBindingSurvivesReopen(t *testing.T) {
 	}
 }
 
-func TestBindLaneNeverMovesABoundDrive(t *testing.T) {
+func TestBindLaneNeverMovesABoundDriveOrLane(t *testing.T) {
 	st, clock := open(t)
 	ctx := context.Background()
 	k := store.PeerKey{Session: "s", Agent: "a-owner"}
@@ -390,8 +390,10 @@ func TestBindLaneNeverMovesABoundDrive(t *testing.T) {
 	}{
 		{func() error { return st.BindLane(ctx, k, "a", "owner", clock.Now()) }, store.Binding{Drive: "a", Lane: "owner"}},
 		{func() error { return st.BindLane(ctx, k, "b", "owner", clock.Now()) }, store.Binding{Drive: "a", Lane: "owner"}},
+		{func() error { return st.BindLane(ctx, k, "a", "root", clock.Now()) }, store.Binding{Drive: "a", Lane: "owner"}},
 		{func() error { return st.Bind(ctx, k, "b", false) }, store.Binding{Drive: "b"}},
 		{func() error { return st.BindLane(ctx, k, "b", "owner", clock.Now()) }, store.Binding{Drive: "b", Lane: "owner"}},
+		{func() error { return st.BindLane(ctx, k, "b", "desk", clock.Now()) }, store.Binding{Drive: "b", Lane: "owner"}},
 	} {
 		if err := step.bind(); err != nil {
 			t.Fatal(err)
