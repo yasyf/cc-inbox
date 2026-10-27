@@ -31,6 +31,7 @@ type TailOptions struct {
 	Width  int
 	JSON   bool
 	Resume string
+	Open   bool
 }
 
 type TailResult struct {
@@ -72,9 +73,17 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if err != nil {
 		return TailResult{}, err
 	}
+	closed, err := closedOf(ctx, st, records, opts.Open)
+	if err != nil {
+		return TailResult{}, err
+	}
 	b := render.NewBudget(w, opts.Budget)
 	res := TailResult{Last: f.After}
 	for i, r := range records {
+		if closed[r.Seq] {
+			res.Last = r.Seq
+			continue
+		}
 		if !b.Line(rendered[i]) {
 			break
 		}
@@ -93,9 +102,13 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		if opts.Cursor != "" {
 			resume = cmp.Or(opts.Resume, "cci tail")
 		}
-		b.Trailer(fmt.Sprintf("... %d more; resume with %s", res.More, resume))
+		upTo := ""
+		if opts.Open {
+			upTo = "up to "
+		}
+		b.Trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume))
 	}
-	if opts.Cursor != "" && res.Printed > 0 {
+	if opts.Cursor != "" && res.Last != f.After {
 		if err := st.SetCursor(ctx, opts.Cursor, f.Drive, res.Last); err != nil {
 			return TailResult{}, err
 		}
@@ -189,4 +202,28 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.
 		}
 	}
 	return nil
+}
+
+func closedOf(ctx context.Context, st *store.Store, records []store.Record, open bool) (map[int64]bool, error) {
+	if !open {
+		return nil, nil
+	}
+	openers := map[string][]int64{}
+	closed := map[int64]bool{}
+	for _, r := range records {
+		if r.Kind.Opens() && r.Tracked() {
+			openers[r.Drive] = append(openers[r.Drive], r.Seq)
+			closed[r.Seq] = true
+		}
+	}
+	for drive, seqs := range openers {
+		stillOpen, err := st.OpenAmong(ctx, drive, seqs)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range stillOpen {
+			delete(closed, r.Seq)
+		}
+	}
+	return closed, nil
 }

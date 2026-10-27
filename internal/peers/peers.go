@@ -48,6 +48,7 @@ type Options struct {
 	Description string
 	Tags        []string
 	Speak       bool
+	Spawned     time.Time
 }
 
 // Announce records the session in the registry and returns its row. With
@@ -107,6 +108,7 @@ func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 		PID:         o.Window.PID,
 		PIDStarted:  o.Window.Started,
 		Env:         env,
+		AnnouncedAt: o.Spawned,
 	})
 }
 
