@@ -284,7 +284,7 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 			_, _ = fmt.Fprintf(w, "... %d older open asks\n", i+1)
 			break
 		}
-		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Clip(render.Brief(r, now), openWidth), int(now.Sub(r.At).Minutes()))
+		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Brief(r, now, openWidth), int(now.Sub(r.At).Minutes()))
 	}
 	return nil
 }

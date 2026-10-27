@@ -37,13 +37,14 @@ func TestBriefDropsOnlyWhatTheTextAlreadyNames(t *testing.T) {
 		{"pr with its repo named in the text", record("", "opened #o/r#42", store.PR{Repo: "o/r", Number: 42}), " opened #o/r#42"},
 		{"pr named without the repo the ref carries", record("", "opened #42", store.PR{Repo: "o/r", Number: 42}), " opened #42 pr:o/r#42"},
 		{"pr not named", record("", "READY #420", store.PR{Number: 42}), " READY #420 pr#42"},
+		{"topic and pr before a question mark", record("rollout", "take #42 for the rollout?", store.PR{Number: 42}), " take #42 for the rollout?"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			stamp := render.Stamp(at, at)
-			if got := render.Untagged(tt.r, at); got != stamp+tt.brief {
+			if got := render.Untagged(tt.r, at, 0); got != stamp+tt.brief {
 				t.Fatalf("Untagged() = %q, want %q", got, stamp+tt.brief)
 			}
-			if got, header := render.Brief(tt.r, at), "#7 "+stamp+" REPORT desk"; got != header+tt.brief {
+			if got, header := render.Brief(tt.r, at, 0), "#7 "+stamp+" REPORT desk"; got != header+tt.brief {
 				t.Fatalf("Brief() = %q, want %q", got, header+tt.brief)
 			}
 			whole := render.Line(tt.r, at)
@@ -56,5 +57,18 @@ func TestBriefDropsOnlyWhatTheTextAlreadyNames(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBriefKeepsTheFieldsAClipWouldHideInTheText(t *testing.T) {
+	at := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
+	r := store.Record{Seq: 7, At: at, Lane: "desk", Kind: kinds.Report, Topic: "rollout", Text: strings.Repeat("filler ", 10) + "rollout"}
+	for _, got := range []string{render.Brief(r, at, 40), render.Untagged(r, at, 40)} {
+		if !strings.Contains(got, "[rollout]") {
+			t.Fatalf("clipped line %q hides the topic", got)
+		}
+	}
+	if got := render.Brief(r, at, 0); strings.Contains(got, "[rollout]") {
+		t.Fatalf("unclipped line %q repeats the topic its text names", got)
 	}
 }

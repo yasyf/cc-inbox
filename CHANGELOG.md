@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cci tail`, `cci watch`, the channel, the hooks, `cci digest` and `cci state`
   leave out a record's `[topic]` when its text already carries that topic as a
   word, and a `pr#N` or `pr:owner/repo#N` ref when its text already names that
-  pull request. `cci show` and `cci grep` still print every field.
+  pull request. A line the view clips keeps every field, since the clip may
+  cut the word that named it. `cci show` and `cci grep` still print every field.
 - After a session's first full list of open asks, the `PostToolUse` hook names
   a changed list by seq, lane and age instead of printing each ask's text
   again; each ask's text was already delivered as its own record. A session

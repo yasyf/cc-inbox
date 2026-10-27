@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -32,12 +33,19 @@ func Line(r store.Record, now time.Time) string {
 	return header(r, now) + rest(r, false)
 }
 
-func Brief(r store.Record, now time.Time) string {
-	return header(r, now) + rest(r, true)
+func Brief(r store.Record, now time.Time, width int) string {
+	return fit(header(r, now), r, width)
 }
 
-func Untagged(r store.Record, now time.Time) string {
-	return Stamp(r.At, now) + rest(r, true)
+func Untagged(r store.Record, now time.Time, width int) string {
+	return fit(Stamp(r.At, now), r, width)
+}
+
+func fit(head string, r store.Record, width int) string {
+	if s := head + rest(r, true); width <= 0 || utf8.RuneCountInString(s) <= width {
+		return s
+	}
+	return Clip(head+rest(r, false), width)
 }
 
 func header(r store.Record, now time.Time) string {
@@ -49,7 +57,7 @@ func rest(r store.Record, brief bool) string {
 	if brief {
 		words = strings.FieldsFunc(r.Text, func(c rune) bool { return unicode.IsSpace(c) || strings.ContainsRune(",;()[]", c) })
 		for i, w := range words {
-			words[i] = strings.TrimRight(w, ".:")
+			words[i] = strings.TrimRight(w, ".:!?")
 		}
 	}
 	var b strings.Builder
