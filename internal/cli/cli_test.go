@@ -49,6 +49,28 @@ func TestPostDedupeKeepsDistinctCloses(t *testing.T) {
 	}
 }
 
+func TestPostDedupeKeepsDistinctCommits(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	const (
+		first  = "ae92ec4c95769ec03f94a81d8a82bc5d4e7ce8ac"
+		second = "ae92ec4c9576c7b232748b7e0aafb970c6c1a9ac"
+	)
+	for _, tt := range []struct{ commit, want string }{
+		{first, "#1\n"},
+		{second, "#2\n"},
+		{second, "#2 (duplicate)\n"},
+	} {
+		out, err := run(t, "post", "--drive", "durable-agents-rebuild", "--lane", "p8a-step9", "--kind", "report", "--topic", "42784", "--pr", "42784", "--commit", tt.commit, "--text", "p8a-step9 head green")
+		if err != nil || out != tt.want {
+			t.Fatalf("post --commit %s = %q, %v; want %q", tt.commit, out, err, tt.want)
+		}
+	}
+	if out, err := run(t, "show", "2", "--json"); err != nil || !strings.Contains(out, `"commit":"`+second+`"`) {
+		t.Fatalf("show 2 --json = %q, %v; want fields.commit %s", out, err, second)
+	}
+}
+
 func TestPostTailDigest(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")

@@ -420,6 +420,16 @@ func Hash(r Record) string {
 	if r.ID != "" {
 		parts = append(parts, r.ID)
 	}
+	refs := r.Refs
+	refs.Path = ""
+	for _, structured := range []any{refs, r.Fields} {
+		if key, _ := json.Marshal(structured); string(key) != "{}" {
+			parts = append(parts, json.RawMessage(key))
+		}
+	}
+	if len(r.Body) > 0 {
+		parts = append(parts, r.Body)
+	}
 	key, _ := json.Marshal(parts)
 	sum := sha256.Sum256(key)
 	return hex.EncodeToString(sum[:])
