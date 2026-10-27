@@ -192,7 +192,7 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload) error {
 func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, w io.Writer) error {
 	var tail bytes.Buffer
 	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call"}, &tail)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true}, &tail)
 	if err != nil || res.Printed == 0 {
 		return err
 	}

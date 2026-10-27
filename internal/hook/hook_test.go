@@ -421,6 +421,35 @@ func TestPostToolUseAnnouncesAgentsAndDeliversTheirLanes(t *testing.T) {
 	}
 }
 
+func TestASuccessorTeammateReadsNothingFromBeforeItsSpawnAndNothingClosed(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	rootStarted := clock.Now()
+	clock.Advance(time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"lane-x"}, Text: "for the predecessor"})
+	clock.Advance(time.Minute)
+	successor := hook.Payload{SessionID: "s1", AgentID: "alane-x-2", TranscriptPath: filepath.Join(t.TempDir(), "s1.jsonl"), Cwd: t.TempDir(), Event: "PostToolUse"}
+	rootWindow := func() (store.Window, error) { return store.Window{PID: 42, Started: rootStarted.UnixMilli()}, nil }
+	if err := hook.PostToolUse(ctx, st, successor, rootWindow, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Minute)
+	if err := st.BindLane(ctx, successor.Key(), "d", "lane-x", rootStarted); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Defect, To: []string{"lane-x"}, Text: "for the successor"})
+	answered := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"lane-x"}, Text: "answered already"})
+	testutil.Post(t, st, store.Record{Lane: "lane-y", Kind: kinds.Answer, To: []string{"root"}, Text: "done", Resolves: answered.Seq})
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, successor, rootWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "DEFECT root -> lane-x for the successor") || strings.Contains(got, "for the predecessor") || strings.Contains(got, "answered already") {
+		t.Fatalf("successor's delivery = %q", got)
+	}
+}
+
 func TestPostToolUseNamesWorkflowAgentsAndDeliversTheirPeerRecords(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()

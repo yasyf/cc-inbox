@@ -350,10 +350,10 @@ ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin, drive = exc
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(
-	(SELECT MIN(seq) - 1 FROM records WHERE at >= ?),
+	(SELECT MIN(seq) - 1 FROM records WHERE at >= MAX(?, COALESCE((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0))),
 	(SELECT MAX(seq) FROM records),
 	0)
-ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli()); err != nil {
+ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli(), k.Session, k.Agent, s.Self()); err != nil {
 		return fmt.Errorf("start lane cursor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
