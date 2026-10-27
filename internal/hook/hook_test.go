@@ -582,22 +582,34 @@ func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
 		}
 		return hookContext(t, &out, event)
 	}
-	const listed, unchanged, changed = "open asks addressed to root, newest first", "1 open asks addressed to root, unchanged since the last list; cci digest lists them", "2 open asks addressed to root, changed since the last list; newest: #"
+	const listed, unchanged, changed = "open asks addressed to root, newest first", "cci records addressed to root; act on each:", " open asks addressed to root, changed since the last list; newest: #"
+	asks := map[string]int64{}
 	for _, tt := range []struct {
-		event string
-		post  store.Record
-		want  string
+		event   string
+		ask     string
+		resolve string
+		note    string
+		want    string
 	}{
-		{"PostToolUse", store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "which branch?"}, listed},
-		{"PostToolUse", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "a note changes no ask"}, unchanged},
-		{"SessionStart", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "after a compaction"}, listed},
-		{"PostToolUse", store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "still the one ask"}, unchanged},
-		{"PostToolUse", store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "which env?"}, changed},
+		{"PostToolUse", "which branch?", "", "the first list", listed},
+		{"PostToolUse", "", "", "a note changes no ask", unchanged},
+		{"SessionStart", "", "", "after a compaction", listed},
+		{"PostToolUse", "", "", "still the one ask", unchanged},
+		{"PostToolUse", "which env?", "", "a second ask", "2" + changed},
+		{"PostToolUse", "", "which branch?", "one answered", "1" + changed},
+		{"PostToolUse", "", "which env?", "every ask answered", unchanged},
+		{"PostToolUse", "which region?", "", "an ask after an empty list", "1" + changed},
 	} {
-		testutil.Post(t, st, tt.post)
+		if tt.ask != "" {
+			asks[tt.ask] = testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: tt.ask}).Seq
+		}
+		if tt.resolve != "" {
+			testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Resolves: asks[tt.resolve], Text: "resolved"})
+		}
+		testutil.Post(t, st, store.Record{Kind: kinds.Note, To: []string{"root"}, Text: tt.note})
 		got := deliver(tt.event)
-		if !strings.HasPrefix(got, tt.want) || !strings.Contains(got, tt.post.Text) {
-			t.Fatalf("after %q: additionalContext = %q, want it to lead with %q", tt.post.Text, got, tt.want)
+		if !strings.HasPrefix(got, tt.want) || !strings.Contains(got, tt.note) {
+			t.Fatalf("after %q: additionalContext = %q, want it to lead with %q", tt.note, got, tt.want)
 		}
 	}
 }
