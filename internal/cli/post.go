@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -86,6 +87,11 @@ func newPostCmd() *cobra.Command {
 			if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
 				return err
 			}
+			if lane == "" {
+				if lane, err = threadLane(cmd.Context(), st); err != nil {
+					return err
+				}
+			}
 			r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
 			if census != "" {
 				r.Fields.Census = &store.Census{}
@@ -132,7 +138,7 @@ func newPostCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
-	f.StringVar(&lane, "lane", "", "the writing lane (required)")
+	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to, else its channel subscription's reader, else root for a drive's root session)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
@@ -159,10 +165,39 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&bodyFile, "body-file", "", "JSON body of at most 64 KiB, from a file or - for stdin")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
-	for _, name := range []string{"lane", "kind"} {
-		_ = cmd.MarkFlagRequired(name)
-	}
+	_ = cmd.MarkFlagRequired("kind")
 	return cmd
+}
+
+var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and subscribes to no channel; after one post with --lane, later posts default to it")
+
+func threadLane(ctx context.Context, st *store.Store) (string, error) {
+	self := selfPeer()
+	if self.Session == "" {
+		return "", errNoLane
+	}
+	b, bound, err := st.Binding(ctx, self)
+	if err != nil {
+		return "", err
+	}
+	if bound && b.Lane != "" {
+		return b.Lane, nil
+	}
+	if self.Agent == "" {
+		if window, err := thisWindow(); err == nil {
+			sub, ok, err := st.Subscription(ctx, window)
+			if err != nil {
+				return "", err
+			}
+			if ok {
+				return sub.Reader, nil
+			}
+		}
+	}
+	if bound && b.Root {
+		return "root", nil
+	}
+	return "", errNoLane
 }
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")

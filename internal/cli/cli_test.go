@@ -1145,3 +1145,37 @@ func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
 		t.Errorf("show 9 = %v, want it to name the missing record", err)
 	}
 }
+
+func TestPostDefaultsItsLaneToTheThreadsBinding(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "root-session")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "lane-session"}, "release-v3", "landing-desk", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	for _, tt := range []struct{ session, want string }{
+		{"root-session", "root"},
+		{"lane-session", "landing-desk"},
+	} {
+		t.Setenv("CLAUDE_CODE_SESSION_ID", tt.session)
+		out, err := run(t, "post", "--json", "--drive", "release-v3", "--kind", "note", "--text", "posted with no --lane")
+		var r struct {
+			Lane string `json:"lane"`
+		}
+		if err != nil || json.Unmarshal([]byte(out), &r) != nil || r.Lane != tt.want {
+			t.Fatalf("%s: post = %q, %v; want lane %s", tt.session, out, err, tt.want)
+		}
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "unbound-session")
+	if _, err := run(t, "post", "--drive", "release-v3", "--kind", "note", "--text", "x"); err == nil || !strings.Contains(err.Error(), "post needs --lane") {
+		t.Fatalf("unbound post: %v", err)
+	}
+}
