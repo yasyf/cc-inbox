@@ -92,7 +92,7 @@ ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin,
 	tags = CASE WHEN excluded.tags = '[]' THEN sessions.tags ELSE excluded.tags END,
 	cwd = excluded.cwd, repo = excluded.repo, worktree = excluded.worktree, branch = excluded.branch, remote = excluded.remote,
 	pid = excluded.pid, pid_started = excluded.pid_started, env = excluded.env, announced_at = excluded.announced_at, seen_at = excluded.seen_at, superseded = 0`,
-		p.Session, p.Agent, p.AgentName, s.Self(), p.Role, p.Description, string(tags), p.Cwd, p.Repo, p.Worktree, p.Branch, p.Remote, p.PID, p.PIDStarted, string(env), now.UnixMilli(), now.UnixMilli()); err != nil {
+		p.Session, p.Agent, p.AgentName, s.Self(), p.Role, p.Description, string(tags), p.Cwd, p.Repo, p.Worktree, p.Branch, p.Remote, p.PID, p.PIDStarted, string(env), p.AnnouncedAt.UnixMilli(), now.UnixMilli()); err != nil {
 		return Peer{}, fmt.Errorf("announce %s: %w", p.Key(), err)
 	}
 	if p.PID != 0 && p.Agent == "" {
