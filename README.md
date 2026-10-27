@@ -345,6 +345,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci unsubscribe` | Stop this window's channel delivery. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
 | `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. `-F` matches the pattern literally. |
+| `cci show SEQ...` | Print records whole, in the order named: each line without a width cut, then the full text or `--path` body file the record names. |
 | `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain, and so does any record a peer node has not acked. |

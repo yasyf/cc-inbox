@@ -1102,3 +1102,25 @@ func TestClaimsPostAsTheOwningLane(t *testing.T) {
 		t.Fatalf("who --pr owner/repo#7 = %q, %v; want the lane's thread", out, err)
 	}
 }
+
+func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	long := strings.Repeat("a long finding about the stack cap ", 20) + "THE END"
+	for _, text := range []string{long, "short note"} {
+		if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	out, err := run(t, "show", "#2", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, end := strings.Index(out, "#2 "), strings.Index(out, "THE END")
+	if short < 0 || end < 0 || short > strings.Index(out, "#1 ") {
+		t.Errorf("show #2 1 = %q, want #2 first, then #1 with its text through THE END", out)
+	}
+	if _, err := run(t, "show", "9"); err == nil || !strings.Contains(err.Error(), "no record #9") {
+		t.Errorf("show 9 = %v, want it to name the missing record", err)
+	}
+}

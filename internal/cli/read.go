@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -130,6 +132,28 @@ func newGrepCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", true, "match case-insensitively; --ignore-case=false matches case exactly")
 	cmd.Flags().BoolVarP(&fixed, "fixed-strings", "F", false, "match PATTERN literally; the default reads it as a regular expression, so | alternates")
 	rf.registerLimit(cmd, "print at most this many matches, newest first")
+	return cmd
+}
+
+func newShowCmd() *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "show SEQ...",
+		Short: "Print records whole by seq: the full line, then the full text or body file the record names",
+		Args:  cobra.MinimumNArgs(1),
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			seqs := make([]int64, len(args))
+			for i, arg := range args {
+				seq, err := strconv.ParseInt(strings.TrimPrefix(arg, "#"), 10, 64)
+				if err != nil {
+					return fmt.Errorf("show: %q is not a record seq", arg)
+				}
+				seqs[i] = seq
+			}
+			return inbox.Show(cmd.Context(), st, seqs, asJSON, cmd.OutOrStdout())
+		}),
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "one JSON record per line, the body file not inlined")
 	return cmd
 }
 

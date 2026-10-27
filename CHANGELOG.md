@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cci show SEQ...` prints records whole, in the order named: each record's
+  line with no width cut, then the full text a record over 400 characters
+  spilled to its blob, or the body file it was posted with. A lane that had
+  only a record id used to page `cci tail --since` with a wide `--width`,
+  grep for the line, and `cat` the blob by hand.
+
 ## [0.26.0] - 2026-10-26
 
 ### Fixed

@@ -3,10 +3,14 @@ package inbox
 import (
 	"cmp"
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -143,6 +147,43 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	}
 	if matched > printed {
 		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
+	}
+	return nil
+}
+
+func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.Writer) error {
+	records := make([]store.Record, len(seqs))
+	for i, seq := range seqs {
+		r, err := st.Get(ctx, seq)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("show: no record #%d", seq)
+		}
+		if err != nil {
+			return err
+		}
+		records[i] = r
+	}
+	rendered, err := lines(ctx, st, records, asJSON, 0)
+	if err != nil {
+		return err
+	}
+	for i, line := range rendered {
+		if _, err := fmt.Fprintln(w, line); err != nil {
+			return err
+		}
+		path := records[i].Refs.Path
+		if asJSON || path == "" {
+			continue
+		}
+		body, err := os.ReadFile(path) //nolint:gosec // G304: the path is the one the record names.
+		if errors.Is(err, os.ErrNotExist) {
+			body = []byte(path + " is not on this machine")
+		} else if err != nil {
+			return fmt.Errorf("show #%d: %w", records[i].Seq, err)
+		}
+		if _, err := fmt.Fprintf(w, "%s\n", strings.TrimRight(string(body), "\n")); err != nil {
+			return err
+		}
 	}
 	return nil
 }

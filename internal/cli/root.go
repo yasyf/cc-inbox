@@ -41,6 +41,7 @@ func NewRootCmd() *cobra.Command {
 		newWatchCmd(),
 		newDigestCmd(),
 		newGrepCmd(),
+		newShowCmd(),
 		newStateCmd(),
 		newImportCmd(),
 		newCompactCmd(),
