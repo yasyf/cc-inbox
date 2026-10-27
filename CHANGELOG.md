@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.1] - 2026-10-26
+
+### Fixed
+
+- `cci claim --for <lane>@<drive>` refused a teammate that had not posted yet
+  with "no live session on this machine is bound as lane": a teammate is
+  announced at spawn under its agent name, but its thread takes a lane only on
+  its first `cci post`. When no session is bound as the lane, `--for` now
+  takes the one live teammate named that lane with no lane yet, whose session
+  is unbound or in that drive, binds it to the lane the way `cci post` does,
+  and claims for it. A root thread or a teammate of a session in another
+  drive is never adopted.
+
 ## [0.27.0] - 2026-10-26
 
 ### Added
