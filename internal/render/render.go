@@ -13,6 +13,7 @@ import (
 
 const (
 	DefaultBudget  = 6144
+	FoldWidth      = 160
 	trailerReserve = 96
 )
 
@@ -26,8 +27,15 @@ func Stamp(t, now time.Time) string {
 }
 
 func Line(r store.Record, now time.Time) string {
+	return fmt.Sprintf("#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane) + rest(r)
+}
+
+func Untagged(r store.Record, now time.Time) string {
+	return Stamp(r.At, now) + rest(r)
+}
+
+func rest(r store.Record) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "#%d %s %s %s", r.Seq, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
 	if r.Origin != "" {
 		fmt.Fprintf(&b, " origin:%s", r.Origin)
 	}

@@ -147,11 +147,16 @@ records after compaction. Both reads use a 400-character width, with a
 2,500-byte digest budget and 1,500-byte tail budget.
 
 A lane needs no reader setup: its first `cci post --lane <lane>` binds the
-session, and later posts keep that drive: `--drive` on a post or cursor
-applies to that one call, and only `cci drive use` moves the binding. From
+session, and later posts keep that drive and default `--lane` to that lane:
+`--drive` on a post or cursor applies to that one call, and only
+`cci drive use` moves the binding. A root thread with no lane posts as its
+channel subscription's reader, else as `root`. From
 then on every record addressed to the lane, whatever its
 kind, arrives as hook context after the next tool call, including records
-posted since the window started. A `stopped`, `hold`, or `owner` record
+posted since the window started. The open asks the lane owes lead that
+context only when the set changed since the last list; otherwise one line
+counts them and names `cci digest`. The first delivery after a session
+start or compaction lists them in full. A `stopped`, `hold`, or `owner` record
 addressed to you lands mid-task; act on it before your next edit.
 
 Read a stack's problems and fixes, or search records about a target or PR:
@@ -167,7 +172,9 @@ with AND. JSON tail, grep, and watch reads add `status` to opener kinds: `open`,
 `closed`, or `imported`. Imported openers with a stack or target ref use `open`
 or `closed`; those without either ref use `imported` and remain untracked.
 Text tail and watch reads append reply marks after
-clipping; grep prints whole record lines with reply marks. These include
+clipping; grep prints whole record lines with reply marks. Text tail cuts a
+record a later one resolved to 160 characters and says so in a trailer;
+`--all` prints those whole, and `cci show <seq>` prints one whole. These include
 `[ANSWERED #12]`,
 `[WITHDRAWN #14]`, `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or
 `[RE #n]`. A resolver adds `[RESOLVED #n]` to the target, naming the resolver,
@@ -405,8 +412,12 @@ Monitor. Subscribe once:
 cci subscribe --drive release-demo --reader root --kind incident,decide,ask
 ```
 
-Each tag's body is one record line, and its `seq`, `kind`, and `lane`
-attributes repeat the header. Delivery is at-least-once, so skip a seq you
+Each tag's `seq`, `kind`, and `lane` attributes carry the record's header,
+and its body is the rest of the record line, from its time on;
+`cci show <seq>` prints the whole record. In a window launched with the
+channel, a record addressed to the root's lane arrives once: the
+`PostToolUse` hook skips what the channel delivered, and the channel skips
+what the hook delivered first. Delivery is at-least-once, so skip a seq you
 have already handled. The subscription survives compaction and `/clear`, and
 the `SessionStart` hook carries it into a resumed session. Re-running
 `cci subscribe` replaces it, and `cci unsubscribe` ends it. Only the main

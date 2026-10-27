@@ -18,6 +18,7 @@ type WatchOptions struct {
 	For      time.Duration
 	Width    int
 	JSON     bool
+	Untagged bool
 }
 
 func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(store.Record, string) error) error {
@@ -42,7 +43,7 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 		if err != nil {
 			return err
 		}
-		rendered, err := lines(ctx, st, records, opts.JSON, opts.Width)
+		rendered, _, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Untagged: opts.Untagged})
 		if ctx.Err() != nil {
 			return nil
 		}

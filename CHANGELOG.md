@@ -6,6 +6,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-10-27
+
+### Changed
+
+- A root thread whose window runs the cci channel gets each record addressed
+  to it once. The channel moves the `PostToolUse` hook's lane cursor past
+  what it delivered, and skips a record the hook delivered first. A window
+  launched without `--channels plugin:cc-inbox@...` keeps both paths as before.
+- The hook lists the open asks a lane owes only when that set changed since
+  its last list, and otherwise prints one line counting them. The first
+  delivery after a session start or compaction lists them in full.
+- A channel tag's body drops the `#seq time KIND lane` header the tag's
+  attributes already carry, and keeps the time and the rest of the line.
+- Text `cci tail` cuts a record a later one resolved to 160 characters and
+  counts the cut lines in a trailer; `--all` prints them whole.
+
+### Fixed
+
+- `cci post` without `--lane` refused with `required flag(s) "lane" not set`.
+  It now posts as the thread's bound lane, else its channel subscription's
+  reader, else `root` for a drive's root session.
+
 ## [0.27.2] - 2026-10-26
 
 ### Fixed

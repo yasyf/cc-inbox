@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"os"
@@ -120,6 +121,9 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 		return err
 	}
 	if b.Lane != "" {
+		if err := st.MoveCursor(ctx, openAsksCursor(p.Key()), b.Drive, -1); err != nil {
+			return err
+		}
 		return deliver(ctx, st, p.Key(), b, "SessionStart", w)
 	}
 	var out bytes.Buffer
@@ -129,7 +133,7 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 	}
 	v.Write(&out, st.Now(), digestBudget, recordWidth)
 	out.WriteString("unseen since this session's cursor (cci tail for more):\n")
-	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: p.Key().String(), For: "root"}, Cursor: p.Key().String(), Budget: tailBudget, Width: recordWidth}, &out); err != nil {
+	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: p.Key().String(), For: "root"}, Cursor: p.Key().String(), Budget: tailBudget, Width: recordWidth, Fold: render.FoldWidth}, &out); err != nil {
 		return err
 	}
 	return additionalContext(w, "SessionStart", out.String())
@@ -197,7 +201,7 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload) error {
 func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, w io.Writer) error {
 	var tail bytes.Buffer
 	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true}, &tail)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.LaneMail(k, b), Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true}, &tail)
 	if err != nil || res.Printed == 0 && res.More == 0 {
 		return err
 	}
@@ -207,7 +211,9 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 		if err != nil {
 			return err
 		}
-		writeOpen(&out, open, b.Lane, st.Now())
+		if err := writeOpen(ctx, st, &out, k, b, open); err != nil {
+			return err
+		}
 	}
 	_, _ = tail.WriteTo(&out)
 	return additionalContext(w, event, out.String())
@@ -220,12 +226,8 @@ func owed(ctx context.Context, st *store.Store, drive, reader string) ([]store.R
 	}
 	return slices.DeleteFunc(open, func(r store.Record) bool {
 		first, _, _ := strings.Cut(r.To[0], "@")
-		return !sameLane(first, reader) || sameLane(r.Lane, reader) || r.Kind == kinds.Decide && !strings.HasSuffix(strings.TrimSpace(r.Text), "?")
+		return !store.SameLane(first, reader) || store.SameLane(r.Lane, reader) || r.Kind == kinds.Decide && !strings.HasSuffix(strings.TrimSpace(r.Text), "?")
 	}), nil
-}
-
-func sameLane(a, b string) bool {
-	return a == b || store.RootName(a) && store.RootName(b)
 }
 
 func watermark(ctx context.Context, st *store.Store, cursor, drive string) error {
@@ -236,11 +238,38 @@ func watermark(ctx context.Context, st *store.Store, cursor, drive string) error
 	return st.SetCursor(ctx, cursor, drive, head)
 }
 
-func writeOpen(w io.Writer, open []store.Record, reader string, now time.Time) {
-	if len(open) == 0 {
-		return
+func openAsksCursor(k store.PeerKey) string {
+	return "open-asks-" + k.String()
+}
+
+func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKey, b store.Binding, open []store.Record) error {
+	name := openAsksCursor(k)
+	shown, _, err := st.Cursor(ctx, name, b.Drive)
+	if err != nil {
+		return err
 	}
-	_, _ = fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", reader)
+	sum := fnv.New64a()
+	for _, r := range open {
+		_, _ = fmt.Fprintf(sum, "%d,", r.Seq)
+	}
+	listed := int64(sum.Sum64() >> 1)
+	if len(open) == 0 {
+		listed = 0
+	}
+	if listed == shown {
+		if len(open) > 0 {
+			_, _ = fmt.Fprintf(w, "%d open asks addressed to %s, unchanged since the last list; cci digest lists them\n", len(open), b.Lane)
+		}
+		return nil
+	}
+	if err := st.MoveCursor(ctx, name, b.Drive, listed); err != nil {
+		return err
+	}
+	if len(open) == 0 {
+		return nil
+	}
+	now := st.Now()
+	_, _ = fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", b.Lane)
 	for i, r := range slices.Backward(open) {
 		if i < len(open)-openShown {
 			_, _ = fmt.Fprintf(w, "... %d older open asks\n", i+1)
@@ -248,6 +277,7 @@ func writeOpen(w io.Writer, open []store.Record, reader string, now time.Time) {
 		}
 		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Clip(render.Line(r, now), openWidth), int(now.Sub(r.At).Minutes()))
 	}
+	return nil
 }
 
 // Stop blocks a lane's thread's stop once per record, about the newest open

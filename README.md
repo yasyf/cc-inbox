@@ -158,8 +158,11 @@ What arrives:
 - records addressed to `root` or to its other name, `main`;
 - other lanes' broadcasts of each `--kind`.
 
-Each record arrives as one tag whose body is its record line and whose `seq`,
-`kind`, and `lane` attributes repeat the header. The subscription's cursor
+Each record arrives as one tag whose `seq`, `kind`, and `lane` attributes
+carry the record's header and whose body is the rest of its record line, from
+its time on. In a window launched with the channel, the `PostToolUse` hook
+skips records the channel delivered, and the channel skips records the hook
+delivered first, so each record addressed to the root arrives once. The subscription's cursor
 starts at the head when you subscribe, and the channel advances it past each
 delivered record. It defaults to `channel-<session>`; give each subscription
 its own cursor. When a Monitor watched the same records, stop it after
@@ -428,7 +431,9 @@ The marks are `[ANSWERED #12]`, `[WITHDRAWN #14]`,
 `[LIFTED #n]`, `[DONE #n]`, `[GO #n]`, `[FIX-LIVE #n]`, or `[RE #n]` for other
 reply kinds. A resolver adds `[RESOLVED #n]` to its target's line and
 `resolves #n` to its own line. The first number identifies the resolver; the
-second identifies the target. JSON records have no text marks.
+second identifies the target. JSON records have no text marks. Text `cci tail`
+cuts a resolved record to 160 characters and counts the cut lines in a
+trailer; `--all` prints them whole.
 
 Read `cci state` before asking a lane for its head, contract, or status. Publish
 `head` on every push, `contract` for interfaces other lanes consume, and `state`
@@ -696,7 +701,7 @@ Each entry invokes the plugin's `bin/cci`;
 | --- | --- | --- |
 | `SessionStart` | `cci hook session-start` | Move this session's channel subscription to the current Claude Code window, inject the bound drive's digest and unseen session tail into model context, including after conversation compaction, then start or reuse the daemon. A lane session gets its unseen addressed records instead of the digest. |
 | `SessionStart` | `cci hook announce` | Announce the session in the peer registry: role inferred from its binding unless already set, worktree, branch and `origin` slug from git, process identity, Orca and long-running variables. A separate hook so a missing `git` never costs a session its digest. |
-| `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | Refresh the session's `seen_at` in the peer registry. In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. When anything is unseen, the injection leads with the five newest open records the lane owes, each with its age in minutes, so a fresh ask never waits behind the cursor's backlog. The lane owes an ask, a blocker, or a decide whose text ends in a question mark when it is the record's first addressee and not its author, and nothing has answered or resolved the record. |
+| `PostToolUse`, `PostToolUseFailure` | `cci hook post-tool-use` | Refresh the session's `seen_at` in the peer registry. In a lane session, inject every unseen record addressed to the lane, of any kind, after each tool call. When anything is unseen, the injection leads with the five newest open records the lane owes, each with its age in minutes, so a fresh ask never waits behind the cursor's backlog; when that set is the one last listed, a single line counts it instead. In a root thread whose window runs the channel, records the channel delivered are skipped. The lane owes an ask, a blocker, or a decide whose text ends in a question mark when it is the record's first addressee and not its author, and nothing has answered or resolved the record. |
 | `Stop` | `cci hook stop` | In a lane session, when a record the lane owes has gone unanswered for ten minutes, block the stop once with a reason naming the newest such record, its lane and age, and `cci post --resolves <seq>`. Each record blocks one stop; the next stop passes. The thread's first stop only records the head, so records posted before it never block. |
 | `UserPromptSubmit` | `cci hook prompt` | Refresh the session's `seen_at` in the peer registry. In a session bound with `--root`, record ordinary user prompts as `owner` records with source `hook:root`. Lanes receive them as broadcasts; `--reader root` and `--reader main` never get them back. Long prompts get a blob ref; slash commands and prompts starting with `<` are skipped. |
 

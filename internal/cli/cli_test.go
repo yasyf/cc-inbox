@@ -1179,3 +1179,33 @@ func TestPostDefaultsItsLaneToTheThreadsBinding(t *testing.T) {
 		t.Fatalf("unbound post: %v", err)
 	}
 }
+
+func TestTailCutsResolvedRecordsUnlessAll(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	question := "Build the single reader anyway? " + strings.Repeat("measured detail ", 20) + "| options: A no new reader; B build it"
+	for _, args := range [][]string{
+		{"post", "--lane", "lane-a", "--kind", "ask", "--to", "root", "--text", question},
+		{"post", "--lane", "lane-a", "--kind", "ask", "--to", "root", "--text", "still open " + question},
+		{"post", "--lane", "root", "--kind", "answer", "--re", "1", "--resolves", "1", "--text", "A"},
+	} {
+		if _, err := run(t, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, "tail", "--since", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) != 4 || utf8.RuneCountInString(strings.TrimSuffix(lines[0], " [RESOLVED #3]")) != 160 || !strings.HasSuffix(lines[0], "… [RESOLVED #3]") ||
+		!strings.HasSuffix(lines[1], "B build it") || lines[3] != "... 1 resolved records cut to 160 characters; cci show <seq> prints one whole, --all prints them whole" {
+		t.Fatalf("tail = %q", out)
+	}
+	if out, err = run(t, "tail", "--since", "0", "--all"); err != nil || strings.Count(out, "B build it") != 2 || strings.Contains(out, "cut to") {
+		t.Fatalf("tail --all = %q, %v", out, err)
+	}
+}
