@@ -151,8 +151,8 @@ records after compaction. Both reads use a 400-character width, with a
 A lane needs no reader setup: its first `cci post --lane <lane>` binds the
 session, and later posts keep that drive and default `--lane` to that lane:
 `--drive` on a post or cursor applies to that one call, and only
-`cci drive use` moves the binding. A root thread with no lane posts as its
-channel subscription's reader, else as `root`. From
+`cci drive use` moves the binding. A post never defaults to `root`: the root
+passes `--lane root`, and a thread bound to no lane is refused. From
 then on every record addressed to the lane, whatever its
 kind, arrives as hook context after the next tool call, including records
 posted since the window started. The open asks the lane owes lead that

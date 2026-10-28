@@ -187,7 +187,7 @@ func newPostCmd() *cobra.Command {
 	return cmd
 }
 
-var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and subscribes to no channel; after one post with --lane, later posts default to it")
+var errNoLane = errors.New("post needs --lane: this thread is bound to no lane, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
 
 func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	self := selfPeer()
@@ -198,24 +198,10 @@ func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if bound && b.Lane != "" {
-		return b.Lane, nil
+	if !bound || b.Lane == "" {
+		return "", errNoLane
 	}
-	if self.Agent == "" {
-		if window, err := thisWindow(); err == nil {
-			sub, ok, err := st.Subscription(ctx, window)
-			if err != nil {
-				return "", err
-			}
-			if ok {
-				return sub.Reader, nil
-			}
-		}
-	}
-	if bound && b.Root {
-		return "root", nil
-	}
-	return "", errNoLane
+	return b.Lane, nil
 }
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")

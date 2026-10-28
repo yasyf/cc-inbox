@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The Homebrew cask strips quarantine with a `postflight_steps` stanza instead of the Ruby `postflight` block Homebrew 7 deprecated, so `brew upgrade` no longer warns, and only on macOS.
+- `cci post` without `--lane` no longer files the record as `root` or as the
+  window subscription's reader. A subagent whose `CCI_AGENT_ID` was lost reads
+  as the root thread, so its posts carried root's authority; a thread bound to
+  no lane is now refused with an error naming `--lane`, and the root passes
+  `--lane root`.
 
 ## [0.34.0] - 2026-10-27
 
