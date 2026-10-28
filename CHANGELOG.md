@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `cci tail --reader <lane>` prints the records addressed to the reader first
+  when its backlog does not fit in one read. A record names the reader in
+  `--to`, or replies with `--re` to one of the reader's own records. Broadcasts
+  follow in seq order, and a trailer says how many records came first. A second
+  cursor remembers what was printed early, so a later read never prints it
+  again and the resume trailer never skips it. A backlog that fits still
+  prints in seq order.
+- `--reader` now also delivers a record that replies to one of the reader's own
+  records, whoever it is addressed to.
+
 ## [0.32.2] - 2026-10-27
 
 ### Changed

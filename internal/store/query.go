@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -20,6 +21,7 @@ type Filter struct {
 	Lanes          []string
 	To             string
 	For            string
+	Addressed      string
 	Topics         []string
 	Stack          string
 	Target         string
@@ -64,11 +66,16 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		names := addressees(f.For)
 		in := "(" + placeholders(len(names)) + ")"
 		broadcast := append([]string{"(recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all'))", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
-		scoped = append(scoped, "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN "+in+") OR ("+strings.Join(broadcast, " AND ")+"))")
-		params = append(append(append(append(params, names...), names...), hookSources(names)...), selected...)
+		scoped = append(scoped, "("+addressedTo(in)+" OR ("+strings.Join(broadcast, " AND ")+"))")
+		params = append(append(append(append(append(params, names...), names...), names...), hookSources(names)...), selected...)
 	} else {
 		scoped = append(scoped, selectors...)
 		params = append(params, selected...)
+	}
+	if f.Addressed != "" {
+		names := addressees(f.Addressed)
+		scoped = append(scoped, addressedTo("("+placeholders(len(names))+")"))
+		params = append(append(params, names...), names...)
 	}
 	if f.To != "" {
 		names := addressees(f.To)
@@ -132,6 +139,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	return strings.Join(clauses, " AND "), params
 }
 
+func addressedTo(in string) string {
+	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR EXISTS (SELECT 1 FROM records own WHERE own.seq = records.re AND own.lane IN " + in + "))"
+}
+
 func (f Filter) peerAddresses(self string) []any {
 	if f.Peer == "" {
 		return nil
@@ -141,10 +152,7 @@ func (f Filter) peerAddresses(self string) []any {
 
 func (f Filter) readerAddresses() []any {
 	var out []any
-	reader := f.To
-	if reader == "" {
-		reader = f.For
-	}
+	reader := cmp.Or(f.To, f.For, f.Addressed)
 	if reader != "" && f.Drive != "" {
 		for _, n := range addressees(reader) {
 			out = append(out, n.(string)+"@"+f.Drive)

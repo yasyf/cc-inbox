@@ -357,3 +357,77 @@ func TestDigestDefaultBudgetFitsEverySection(t *testing.T) {
 		t.Fatalf("default digest truncated at %d bytes", out.Len())
 	}
 }
+
+func TestReaderTailDeliversAddressedRecordsBeforeABacklogOfBroadcasts(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	own := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Head, To: []string{"root"}, Text: "head of the desk's own PR"})
+	broadcast := func(i int) {
+		testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("broadcast %03d %s", i, strings.Repeat("x", 80))})
+		c.Advance(time.Second)
+	}
+	for i := range 30 {
+		broadcast(i)
+	}
+	order := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"desk"}, Text: "enqueue the chain now"})
+	reply := testutil.Post(t, st, store.Record{Lane: "fidelity", Kind: kinds.Review, To: []string{"root"}, Re: own.Seq, Text: "a review of the desk's head"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"other"}, Text: "an order for another lane"})
+	for i := range 30 {
+		broadcast(30 + i)
+	}
+	opts := inbox.TailOptions{Filter: store.Filter{Drive: "d", For: "desk", Kinds: []kinds.Kind{kinds.Note}}, Cursor: "desk", Budget: 1200}
+	var first bytes.Buffer
+	res, err := inbox.Tail(ctx, st, opts, &first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(first.String(), "\n")
+	if !strings.HasPrefix(lines[0], fmt.Sprintf("#%d ", order.Seq)) || !strings.HasPrefix(lines[1], fmt.Sprintf("#%d ", reply.Seq)) {
+		t.Fatalf("the records addressed to desk do not lead a capped page:\n%s", first.String())
+	}
+	if !strings.Contains(first.String(), "... 2 records addressed to desk printed first") {
+		t.Fatalf("missing the addressed-first trailer:\n%s", first.String())
+	}
+	seen := map[string]int{}
+	count := func(page string) {
+		for _, line := range strings.Split(page, "\n") {
+			if m := regexp.MustCompile(`^#\d+ .*?(broadcast \d{3}|enqueue the chain now|a review of the desk's head|an order for another lane)`).FindStringSubmatch(line); m != nil {
+				seen[m[1]]++
+			}
+		}
+	}
+	count(first.String())
+	for res.More > 0 {
+		var page bytes.Buffer
+		if res, err = inbox.Tail(ctx, st, opts, &page); err != nil {
+			t.Fatal(err)
+		}
+		if res.Printed == 0 {
+			t.Fatalf("a tail with %d more printed nothing:\n%s", res.More, page.String())
+		}
+		count(page.String())
+	}
+	for _, want := range []string{"enqueue the chain now", "a review of the desk's head"} {
+		if seen[want] != 1 {
+			t.Fatalf("%q delivered %d times, want once: %v", want, seen[want], seen)
+		}
+	}
+	for i := range 60 {
+		if key := fmt.Sprintf("broadcast %03d", i); seen[key] != 1 {
+			t.Fatalf("%s delivered %d times, want once", key, seen[key])
+		}
+	}
+	if seen["an order for another lane"] != 0 {
+		t.Fatalf("delivered another lane's order: %v", seen)
+	}
+
+	var small bytes.Buffer
+	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "a broadcast before the order"})
+	late := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"desk"}, Text: "a second order"})
+	if _, err := inbox.Tail(ctx, st, opts, &small); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Split(small.String(), "\n"); !strings.Contains(got[0], "a broadcast before the order") || !strings.HasPrefix(got[1], fmt.Sprintf("#%d ", late.Seq)) {
+		t.Fatalf("a backlog that fits is not in seq order:\n%s", small.String())
+	}
+}
