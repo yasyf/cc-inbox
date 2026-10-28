@@ -217,16 +217,16 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	}
 }
 
-func TestPostToolUseSkipsBroadcastKindsAddressedToSeveralLanes(t *testing.T) {
+func TestPostToolUseDeliversBroadcastKindsOnlyToTheirFirstAddressee(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
 	started := clock.Now()
 	clock.Advance(time.Minute)
 	for _, r := range []store.Record{
-		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-x", "lane-y"}, Text: "review for several"},
-		{Lane: "lane-y", Kind: kinds.Head, To: []string{"lane-x", "lane-z"}, Text: "head for several"},
-		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-x"}, Text: "review for lane-x alone"},
-		{Lane: "root", Kind: kinds.Go, To: []string{"lane-x", "lane-y"}, Text: "go for both"},
+		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-y", "lane-x"}, Text: "review copied to lane-x"},
+		{Lane: "lane-y", Kind: kinds.Head, To: []string{"lane-z", "lane-x"}, Text: "head copied to lane-x"},
+		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-x", "lane-y"}, Text: "review for lane-x first"},
+		{Lane: "root", Kind: kinds.Go, To: []string{"lane-y", "lane-x"}, Text: "go copied to lane-x"},
 	} {
 		testutil.Post(t, st, r)
 	}
@@ -238,8 +238,8 @@ func TestPostToolUseSkipsBroadcastKindsAddressedToSeveralLanes(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := hookContext(t, &out, "PostToolUse")
-	if !strings.Contains(got, "review for lane-x alone") || !strings.Contains(got, "go for both") || strings.Contains(got, "for several") {
-		t.Fatalf("additionalContext = %q; want the solo review and the go, never a review or head sent to several lanes", got)
+	if !strings.Contains(got, "review for lane-x first") || !strings.Contains(got, "go copied to lane-x") || strings.Contains(got, "review copied") || strings.Contains(got, "head copied") {
+		t.Fatalf("additionalContext = %q; want the review addressed to lane-x first and the copied go, never a review or head lane-x is only copied on", got)
 	}
 }
 

@@ -156,8 +156,8 @@ passes `--lane root`, and a thread bound to no lane is refused. From
 then every record addressed to the lane arrives as hook context after the
 next tool call, including records posted since the window started. A
 `head`, `review`, `state`, `report`, `claim` or `matrix` record arrives only
-when the lane is its one addressee; read the rest with `cci tail --reader
-<lane>`, which also moves the hook past what it printed. The open asks the lane owes lead that
+when the lane is its first addressee; read the ones it is copied on with
+`cci tail --reader <lane>`, which also moves the hook past what it printed. The open asks the lane owes lead that
 context only when the set changed since the last list; otherwise one line
 counts them and names `cci digest`. The first delivery after a session
 start or compaction lists them in full. A `stopped`, `hold`, or `owner` record

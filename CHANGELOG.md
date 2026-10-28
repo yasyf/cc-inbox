@@ -8,10 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A lane's `PostToolUse` hook skips `head`, `review`, `state`, `report`,
-  `claim` and `matrix` records addressed to several lanes; a record of those
-  kinds addressed to the lane alone still arrives. A lane fed hundreds of
-  such records fell hours behind, three or four records per tool call.
+- A lane's `PostToolUse` hook delivers `head`, `review`, `state`, `report`,
+  `claim` and `matrix` records only when the lane is their first addressee;
+  a lane merely copied on one reads it with `cci tail --reader`. A lane copied
+  on hundreds of reviews fell hours behind, three or four records per tool
+  call.
 - `cci tail --reader <lane>` from the thread bound to that lane moves its hook
   delivery past what the tail read, so the hook never repeats it.
 - `cci post` rewrites a time label ahead of the post time to the post time

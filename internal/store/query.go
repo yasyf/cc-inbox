@@ -19,7 +19,7 @@ type Filter struct {
 	Peer           string
 	Kinds          []kinds.Kind
 	Mute           []kinds.Kind
-	Solo           []kinds.Kind
+	FirstOnly      []kinds.Kind
 	RepeatWindow   time.Duration
 	Lanes          []string
 	To             string
@@ -125,11 +125,13 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 			params = append(params, string(k))
 		}
 	}
-	if len(f.Solo) > 0 {
-		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.Solo))+") AND json_array_length(recipients) > 1)")
-		for _, k := range f.Solo {
+	if len(f.FirstOnly) > 0 && f.To != "" {
+		names := addressees(f.To)
+		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.FirstOnly))+") AND json_extract(recipients, '$[0]') NOT IN ("+placeholders(len(names))+"))")
+		for _, k := range f.FirstOnly {
 			params = append(params, string(k))
 		}
+		params = append(params, names...)
 	}
 	if f.RepeatWindow > 0 {
 		clauses = append(clauses, "NOT (kind = ? AND topic != '' AND EXISTS (SELECT 1 FROM records prior WHERE prior.drive = records.drive AND prior.kind = records.kind AND prior.lane = records.lane AND prior.topic = records.topic AND prior.seq < records.seq AND prior.at > records.at - ?))")
@@ -366,7 +368,7 @@ func LaneCursor(k PeerKey) string {
 func LaneMail(k PeerKey, b Binding) Filter {
 	f := Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
 	if b.Lane != "" {
-		f.Solo = kinds.Broadcasts()
+		f.FirstOnly = kinds.Broadcasts()
 	}
 	return f
 }
