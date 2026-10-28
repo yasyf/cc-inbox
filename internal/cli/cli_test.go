@@ -1244,6 +1244,7 @@ func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
 func TestPostDefaultsOnlyToABoundLaneNeverToRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
+	t.Setenv("CCI_AGENT_ID", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "root-session")
 	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
 		t.Fatal(err)
@@ -1256,8 +1257,13 @@ func TestPostDefaultsOnlyToABoundLaneNeverToRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = st.Close()
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "lane-root-session")
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", "binds lane root"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tt := range []struct{ session, want string }{
 		{"root-session", ""},
+		{"lane-root-session", ""},
 		{"lane-session", "landing-desk"},
 		{"unbound-session", ""},
 	} {
