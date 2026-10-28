@@ -318,14 +318,11 @@ func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T
 	}
 	stall(30)
 	ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "merge go 1?"})
-	followCtx, stop := context.WithCancel(ctx)
-	defer stop()
-	if err := follow(followCtx, st, sub, true, func(_ string, params any) error {
+	if err := follow(ctx, st, sub, true, func(_ string, params any) error {
 		if got := params.(map[string]any)["meta"].(map[string]string)["seq"]; got != fmt.Sprint(ask.Seq) {
 			t.Fatalf("channel delivered #%s, want only #%d", got, ask.Seq)
 		}
-		stop()
-		return nil
+		return errStale
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -32,7 +32,7 @@ func delivered(t *testing.T, f store.Filter, corpus []timed) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var texts []string
+	texts := make([]string, 0, len(got))
 	for _, r := range got {
 		texts = append(texts, r.Text)
 	}
@@ -56,10 +56,16 @@ func TestDeliveryMutesKindsAndHoldsUrgentRepeats(t *testing.T) {
 		filter store.Filter
 		want   []string
 	}{
-		{"delivery", store.Filter{Drive: "d", For: "root", Mute: []kinds.Kind{kinds.State}, RepeatWindow: store.UrgentRepeat},
-			[]string{"go 1 stalled 10 min", "merge go 1?", "go 1 unqueued", "go 2 stalled 10 min", "untopiced stall", "untopiced stall again", "go 1 stalled 51 min"}},
-		{"tail", store.Filter{Drive: "d", For: "root"},
-			[]string{"go 1 stalled 10 min", "QUEUED go 1", "merge go 1?", "go 1 stalled 20 min", "go 1 unqueued", "go 2 stalled 10 min", "untopiced stall", "untopiced stall again", "go 1 stalled 51 min"}},
+		{
+			name:   "delivery",
+			filter: store.Filter{Drive: "d", For: "root", Mute: []kinds.Kind{kinds.State}, RepeatWindow: store.UrgentRepeat},
+			want:   []string{"go 1 stalled 10 min", "merge go 1?", "go 1 unqueued", "go 2 stalled 10 min", "untopiced stall", "untopiced stall again", "go 1 stalled 51 min"},
+		},
+		{
+			name:   "tail",
+			filter: store.Filter{Drive: "d", For: "root"},
+			want:   []string{"go 1 stalled 10 min", "QUEUED go 1", "merge go 1?", "go 1 stalled 20 min", "go 1 unqueued", "go 2 stalled 10 min", "untopiced stall", "untopiced stall again", "go 1 stalled 51 min"},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := delivered(t, tc.filter, corpus); !slices.Equal(got, tc.want) {
