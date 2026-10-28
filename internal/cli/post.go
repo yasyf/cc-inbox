@@ -111,6 +111,11 @@ func newPostCmd() *cobra.Command {
 				return err
 			}
 			r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
+			if k == kinds.Head && len(r.Refs.PRs) == 0 {
+				if r.Refs.PRs, err = headPR(cmd.ErrOrStderr(), r); err != nil {
+					return err
+				}
+			}
 			if census != "" {
 				r.Fields.Census = &store.Census{}
 				if err := json.Unmarshal([]byte(census), r.Fields.Census); err != nil {
@@ -277,6 +282,19 @@ func stamped(w io.Writer, text, lane string, at time.Time) (string, error) {
 func labels(prefix, colon, lane string) bool {
 	prefix = strings.TrimSpace(prefix)
 	return prefix == "" || colon != "" || prefix == lane
+}
+
+var errHeadNeedsPR = errors.New("a head record needs --pr: the finder and landing desks key heads by pull request, so name the one this head is for, e.g. --pr 43922")
+
+func headPR(w io.Writer, r store.Record) ([]store.PR, error) {
+	named := store.UnboundPRs(r)
+	if len(named) != 1 {
+		return nil, errHeadNeedsPR
+	}
+	if _, err := fmt.Fprintf(w, "cci: head names #%d; recorded as --pr %d\n", named[0], named[0]); err != nil {
+		return nil, err
+	}
+	return []store.PR{{Number: named[0]}}, nil
 }
 
 func firstLine(text string) string {

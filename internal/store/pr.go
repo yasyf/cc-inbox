@@ -74,7 +74,7 @@ func (p *PR) UnmarshalJSON(b []byte) error {
 	return err
 }
 
-func unboundPRs(r Record) []int {
+func UnboundPRs(r Record) []int {
 	var missing []int
 	for _, m := range prMention.FindAllStringSubmatch(r.Topic+" "+r.Text, -1) {
 		n, _ := strconv.Atoi(m[1])
