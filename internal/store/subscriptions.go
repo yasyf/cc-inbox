@@ -27,12 +27,17 @@ type Subscription struct {
 	Drive   string       `json:"drive"`
 	Reader  string       `json:"reader"`
 	Kinds   []kinds.Kind `json:"kinds"`
+	Mute    []kinds.Kind `json:"mute,omitempty"`
 	Cursor  string       `json:"cursor"`
 	At      time.Time    `json:"at"`
 }
 
+// UrgentRepeat is how long an urgent record's lane and topic stay delivered:
+// a repeat inside it reaches no channel or hook, only cci tail.
+const UrgentRepeat = 30 * time.Minute
+
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Peer: s.Session, For: s.Reader, Kinds: s.Kinds}
+	return Filter{Drive: s.Drive, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Mute, RepeatWindow: UrgentRepeat}
 }
 
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {
@@ -72,6 +77,20 @@ func (s *Store) Subscription(_ context.Context, w Window) (Subscription, bool, e
 		return Subscription{}, false, err
 	}
 	return sub, true, nil
+}
+
+// SessionSubscription finds the subscription session holds in any window.
+func (s *Store) SessionSubscription(_ context.Context, session string) (Subscription, bool, error) {
+	all, err := s.subscriptions()
+	if err != nil {
+		return Subscription{}, false, err
+	}
+	for _, sub := range all {
+		if sub.Session == session {
+			return sub, true, nil
+		}
+	}
+	return Subscription{}, false, nil
 }
 
 func (s *Store) Repoint(_ context.Context, session string, w Window) error {

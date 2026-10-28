@@ -201,7 +201,17 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload) error {
 func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, w io.Writer) error {
 	var tail bytes.Buffer
 	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.LaneMail(k, b), Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true}, &tail)
+	f := store.LaneMail(k, b)
+	if k.Agent == "" {
+		sub, ok, err := st.SessionSubscription(ctx, k.Session)
+		if err != nil {
+			return err
+		}
+		if ok && store.SameLane(sub.Reader, b.Lane) {
+			f.Mute = sub.Mute
+		}
+	}
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true}, &tail)
 	if err != nil || res.Printed == 0 && res.More == 0 {
 		return err
 	}

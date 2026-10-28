@@ -167,6 +167,19 @@ func Parse(s string) (Kind, error) {
 	return "", fmt.Errorf("unknown kind %q (known: %s, or a dotted service kind such as oncall.fix.status)", s, strings.Join(Names(), ", "))
 }
 
+// ParseAll parses each name in ss.
+func ParseAll(ss []string) ([]Kind, error) {
+	out := make([]Kind, 0, len(ss))
+	for _, s := range ss {
+		k, err := Parse(s)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, k)
+	}
+	return out, nil
+}
+
 // Service reports whether k is a dotted, namespaced kind a service writes,
 // such as oncall.fix.status, outside the fixed vocabulary.
 func (k Kind) Service() bool {

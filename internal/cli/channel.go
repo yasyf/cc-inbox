@@ -22,6 +22,7 @@ func newSubscribeCmd() *cobra.Command {
 		drive  string
 		reader string
 		kindsF []string
+		muteF  []string
 		cursor string
 	)
 	cmd := &cobra.Command{
@@ -38,12 +39,11 @@ func newSubscribeCmd() *cobra.Command {
 				return err
 			}
 			sub := store.Subscription{Session: session, Window: window, Drive: d, Reader: reader, Cursor: cursor}
-			for _, k := range kindsF {
-				kind, err := kinds.Parse(k)
-				if err != nil {
-					return err
-				}
-				sub.Kinds = append(sub.Kinds, kind)
+			if sub.Kinds, err = kinds.ParseAll(kindsF); err != nil {
+				return err
+			}
+			if sub.Mute, err = kinds.ParseAll(muteF); err != nil {
+				return err
 			}
 			if sub.Cursor == "" {
 				sub.Cursor = "channel-" + session
@@ -55,15 +55,15 @@ func newSubscribeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			start := fmt.Sprintf("cursor %s at #%d", sub.Cursor, from)
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d (session %s) subscribed to %s as %s, kinds %s, %s; records arrive as <channel source=%q> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox\n",
-				window.PID, session, d, reader, kindList(sub.Kinds), start, channel.Source)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "window %d (session %s) subscribed: %s, cursor %s at #%d; records arrive as <channel source=%q> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox\n",
+				window.PID, session, describe(sub), sub.Cursor, from, channel.Source)
 			return err
 		}),
 	}
 	cmd.Flags().StringVar(&drive, "drive", "", "drive to deliver (default: the drive bound to this session)")
 	cmd.Flags().StringVar(&reader, "reader", "", "deliver records addressed to this lane, as cci tail --reader does")
 	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
+	cmd.Flags().StringSliceVar(&muteF, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")
 	_ = cmd.MarkFlagRequired("reader")
 	return cmd
@@ -183,6 +183,10 @@ func channelArgs(args []string) []string {
 		}
 	}
 	return out
+}
+
+func describe(sub store.Subscription) string {
+	return fmt.Sprintf("drive %s as %s, kinds %s, muted %s, urgent repeats held %s", sub.Drive, sub.Reader, kindList(sub.Kinds), kindList(sub.Mute), store.UrgentRepeat)
 }
 
 func kindList(ks []kinds.Kind) string {

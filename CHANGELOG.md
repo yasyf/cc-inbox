@@ -6,6 +6,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cci subscribe --mute-kinds <kinds>` keeps those kinds off the channel and
+  out of the subscribed root's `PostToolUse` delivery, even when addressed to
+  the reader. `cci tail`, `watch` and `grep` take the same flag; without it
+  they still read every muted record.
+- An `urgent` record whose lane posted the same `--topic` as `urgent` within
+  the previous 30 minutes is delivered by neither the channel nor the hook.
+  `cci tail` still reads it.
+- `cci me` prints the window's channel subscription under its registry line.
+
 ## [0.33.0] - 2026-10-27
 
 ### Changed
