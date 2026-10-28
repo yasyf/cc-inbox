@@ -6,6 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-28
+
 ### Fixed
 
 - A lane's `PostToolUse` hook delivers `head`, `review`, `state`, `report`,
@@ -1110,7 +1112,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code marketplace plugin with `SessionStart`, `UserPromptSubmit`, and
   `PostToolUse` hooks, plus the `using-cci` skill.
 
-[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/yasyf/cc-inbox/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/yasyf/cc-inbox/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/yasyf/cc-inbox/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/yasyf/cc-inbox/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/yasyf/cc-inbox/compare/v0.32.2...v0.33.0
