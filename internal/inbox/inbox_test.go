@@ -385,7 +385,7 @@ func TestReaderTailDeliversAddressedRecordsBeforeABacklogOfBroadcasts(t *testing
 	if !strings.HasPrefix(lines[0], fmt.Sprintf("#%d ", order.Seq)) || !strings.HasPrefix(lines[1], fmt.Sprintf("#%d ", reply.Seq)) {
 		t.Fatalf("the records addressed to desk do not lead a capped page:\n%s", first.String())
 	}
-	if !strings.Contains(first.String(), "... 2 records addressed to desk printed first") {
+	if !strings.Contains(first.String(), "... 2 to desk first") {
 		t.Fatalf("missing the addressed-first trailer:\n%s", first.String())
 	}
 	seen := map[string]int{}

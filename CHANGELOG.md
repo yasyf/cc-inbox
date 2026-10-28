@@ -8,10 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `cci tail --reader <lane>` prints the records addressed to the reader first
-  when its backlog does not fit in one read. A record names the reader in
-  `--to`, or replies with `--re` to one of the reader's own records. Broadcasts
-  follow in seq order, and a trailer says how many records came first. A second
+- `cci tail --reader <lane>` with a cursor prints the records addressed to the
+  reader first when its backlog does not fit in one read. Such a record names
+  the reader in `--to`, or replies with `--re` to one of the reader's own
+  records. Peer mail keeps its place in seq order. Broadcasts
+  follow in seq order, and a trailer says how many came first. A second
   cursor remembers what was printed early, so a later read never prints it
   again and the resume trailer never skips it. A backlog that fits still
   prints in seq order.

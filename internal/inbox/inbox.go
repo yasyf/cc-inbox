@@ -130,7 +130,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	res, shortened := t.res, t.shortened
 	if t.first > 0 && !opts.JSON {
-		b.Trailer(fmt.Sprintf("... %d records addressed to %s printed first, ahead of the backlog they sit in", t.first, f.For))
+		b.Trailer(fmt.Sprintf("... %d to %s first", t.first, f.For))
 	}
 	if shortened > 0 {
 		b.Trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
@@ -167,7 +167,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			return TailResult{}, err
 		}
 	}
-	if opts.Cursor != "" && t.sent > ahead.sent {
+	if t.sent > ahead.sent {
 		if err := st.SetCursor(ctx, addressedCursor(opts.Cursor), f.Drive, t.sent); err != nil {
 			return TailResult{}, err
 		}
@@ -207,20 +207,19 @@ type ahead struct {
 }
 
 func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts TailOptions) (ahead, error) {
-	if f.For == "" || f.Descending {
+	if f.For == "" || f.Descending || opts.Cursor == "" {
 		return ahead{}, nil
 	}
 	a := ahead{filter: f, delivered: map[int64]bool{}}
 	a.filter.For, a.filter.Addressed = "", f.For
 	a.filter.Kinds, a.filter.Lanes, a.filter.Topics = nil, nil, nil
+	a.filter.Peer, a.filter.PeerAfter = "", 0
 	a.filter.Limit = 0
-	if opts.Cursor != "" {
-		sent, _, err := st.Cursor(ctx, addressedCursor(opts.Cursor), f.Drive)
-		if err != nil {
-			return ahead{}, err
-		}
-		a.sent = sent
+	sent, _, err := st.Cursor(ctx, addressedCursor(opts.Cursor), f.Drive)
+	if err != nil {
+		return ahead{}, err
 	}
+	a.sent = sent
 	if a.sent > f.After {
 		done := a.filter
 		done.Before = a.sent + 1
