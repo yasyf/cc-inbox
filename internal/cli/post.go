@@ -100,8 +100,8 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if k == kinds.Head && len(r.Refs.PRs) == 0 {
-				if r.Refs.PRs, err = headPR(cmd.ErrOrStderr(), store.Record{Topic: r.Topic, Text: text}); err != nil {
+			if (k == kinds.Head || k == kinds.Opened) && len(r.Refs.PRs) == 0 {
+				if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
 					return err
 				}
 			}
@@ -289,14 +289,12 @@ func labels(prefix, colon, lane string) bool {
 	return prefix == "" || colon != "" || prefix == lane
 }
 
-var errHeadNeedsPR = errors.New("a head record needs --pr: the finder and landing desks key heads by pull request, so name the one this head is for, e.g. --pr 43922")
-
-func headPR(w io.Writer, r store.Record) ([]store.PR, error) {
+func namedPR(w io.Writer, r store.Record) ([]store.PR, error) {
 	named := store.UnboundPRs(r)
 	if len(named) != 1 || named[0] == 0 {
-		return nil, errHeadNeedsPR
+		return nil, fmt.Errorf("a %s record needs --pr: the finder and landing desks key it by pull request, so name the one it is for, e.g. --pr 43922", r.Kind)
 	}
-	if _, err := fmt.Fprintf(w, "cci: head names #%d; recorded as --pr %d\n", named[0], named[0]); err != nil {
+	if _, err := fmt.Fprintf(w, "cci: %s names #%d; recorded as --pr %d\n", r.Kind, named[0], named[0]); err != nil {
 		return nil, err
 	}
 	return []store.PR{{Number: named[0]}}, nil

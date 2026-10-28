@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci post --kind opened` without `--pr` takes the pull request from a single
+  `#N` in the text and says so on stderr, as `head` does; with none, several,
+  or `#0` it refuses and asks for `--pr`.
+
 ## [0.37.0] - 2026-10-28
 
 ### Fixed
