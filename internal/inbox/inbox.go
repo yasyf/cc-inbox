@@ -71,7 +71,17 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if f.Descending {
 		slices.Reverse(records)
 	}
-	rendered, folded, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold})
+	ahead, err := addressedAhead(ctx, st, f, opts)
+	if err != nil {
+		return TailResult{}, err
+	}
+	all := slices.Clone(records)
+	for _, r := range ahead.pending {
+		if len(records) == 0 || r.Seq > records[len(records)-1].Seq {
+			all = append(all, r)
+		}
+	}
+	rendered, folded, err := lines(ctx, st, all, view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold})
 	if err != nil {
 		return TailResult{}, err
 	}
@@ -79,22 +89,48 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if err != nil {
 		return TailResult{}, err
 	}
-	b := render.NewBudget(w, opts.Budget)
-	res := TailResult{Last: f.After}
-	shortened := 0
-	for i, r := range records {
-		if skipped[r.Seq] {
-			res.Last = r.Seq
-			continue
+	if skipped == nil {
+		skipped = map[int64]bool{}
+	}
+	maps.Copy(skipped, ahead.delivered)
+	index := make(map[int64]int, len(all))
+	for i, r := range all {
+		index[r.Seq] = i
+	}
+	run := func(first []store.Record) (*bytes.Buffer, *render.Budget, tailRun) {
+		var out bytes.Buffer
+		b := render.NewBudget(&out, opts.Budget)
+		t := tailRun{res: TailResult{Last: f.After}, printed: map[int64]bool{}}
+		for _, r := range first {
+			if !b.Line(rendered[index[r.Seq]]) {
+				break
+			}
+			t.mark(r, folded[index[r.Seq]])
+			t.sent = r.Seq
+			t.first++
 		}
-		if !b.Line(rendered[i]) {
-			break
+		t.done = true
+		for _, r := range records {
+			if skipped[r.Seq] || t.printed[r.Seq] {
+				t.res.Last = r.Seq
+				continue
+			}
+			if !b.Line(rendered[index[r.Seq]]) {
+				t.done = false
+				break
+			}
+			t.mark(r, folded[index[r.Seq]])
+			t.res.Last = r.Seq
 		}
-		if folded[i] {
-			shortened++
-		}
-		res.Printed++
-		res.Last = r.Seq
+		return &out, b, t
+	}
+	out, b, t := run(nil)
+	if len(ahead.pending) > 0 && (!t.done || len(records) == f.Limit) {
+		out, b, t = run(ahead.pending)
+	}
+	res, shortened := t.res, t.shortened
+	if t.first > 0 && !opts.JSON {
+		b.Trailer(fmt.Sprintf("... %d to %s first", t.first, f.For))
 	}
 	if shortened > 0 {
 		b.Trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
@@ -105,6 +141,15 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	rest.After = res.Last
 	if res.More, err = st.Count(ctx, rest); err != nil {
 		return TailResult{}, err
+	}
+	if sent := max(ahead.sent, t.sent); sent > res.Last {
+		early := ahead.filter
+		early.After, early.Before = res.Last, sent+1
+		n, err := st.Count(ctx, early)
+		if err != nil {
+			return TailResult{}, err
+		}
+		res.More -= n
 	}
 	if res.More > 0 && !opts.JSON {
 		resume := fmt.Sprintf("--since %d", res.Last)
@@ -122,7 +167,79 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			return TailResult{}, err
 		}
 	}
+	if t.sent > ahead.sent {
+		if err := st.SetCursor(ctx, addressedCursor(opts.Cursor), f.Drive, t.sent); err != nil {
+			return TailResult{}, err
+		}
+	}
+	if _, err := out.WriteTo(w); err != nil {
+		return TailResult{}, fmt.Errorf("write tail: %w", err)
+	}
 	return res, nil
+}
+
+type tailRun struct {
+	res       TailResult
+	printed   map[int64]bool
+	sent      int64
+	first     int
+	shortened int
+	done      bool
+}
+
+func (t *tailRun) mark(r store.Record, folded bool) {
+	t.printed[r.Seq] = true
+	t.res.Printed++
+	if folded {
+		t.shortened++
+	}
+}
+
+func addressedCursor(cursor string) string {
+	return cursor + "#addressed"
+}
+
+type ahead struct {
+	filter    store.Filter
+	sent      int64
+	pending   []store.Record
+	delivered map[int64]bool
+}
+
+func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts TailOptions) (ahead, error) {
+	if f.For == "" || f.Descending || opts.Cursor == "" {
+		return ahead{}, nil
+	}
+	a := ahead{filter: f, delivered: map[int64]bool{}}
+	a.filter.For, a.filter.Addressed = "", f.For
+	a.filter.Kinds, a.filter.Lanes, a.filter.Topics = nil, nil, nil
+	a.filter.Peer, a.filter.PeerAfter = "", 0
+	a.filter.Limit = 0
+	sent, _, err := st.Cursor(ctx, addressedCursor(opts.Cursor), f.Drive)
+	if err != nil {
+		return ahead{}, err
+	}
+	a.sent = sent
+	if a.sent > f.After {
+		done := a.filter
+		done.Before = a.sent + 1
+		records, err := st.Query(ctx, done)
+		if err != nil {
+			return ahead{}, err
+		}
+		for _, r := range records {
+			a.delivered[r.Seq] = true
+		}
+	}
+	waiting := a.filter
+	waiting.After = max(f.After, a.sent)
+	waiting.Limit = pageRows
+	pending, err := st.Query(ctx, waiting)
+	if err != nil {
+		return ahead{}, err
+	}
+	a.pending = pending
+	return a, nil
 }
 
 func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w io.Writer) error {
