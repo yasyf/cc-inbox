@@ -116,7 +116,7 @@ func TestPostTailDigest(t *testing.T) {
 	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "#2 ") {
 		t.Fatalf("grep = %q, %v", out, err)
 	}
-	if out, err = run(t, "post", "--lane", "evidence-lane", "--kind", "evidence", "--text", "5xx began at 5:40 PM"); err != nil || out != "#3\n" {
+	if out, err = run(t, "post", "--lane", "evidence-lane", "--kind", "evidence", "--text", "5xx began at 12:00 AM"); err != nil || out != "#3\n" {
 		t.Fatalf("post evidence = %q, %v", out, err)
 	}
 }
