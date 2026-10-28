@@ -39,11 +39,15 @@ func newTailCmd() *cobra.Command {
 			if all {
 				fold = 0
 			}
-			res, err := inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json, Fold: fold}, cmd.OutOrStdout())
-			if err != nil || name == "" || rf.limit > 0 {
+			start, resumed, err := st.Cursor(cmd.Context(), name, f.Drive)
+			if err != nil {
 				return err
 			}
-			return advanceLaneCursor(cmd.Context(), st, f, res.Last)
+			res, err := inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json, Fold: fold}, cmd.OutOrStdout())
+			if err != nil || name == "" || !resumed || rf.limit > 0 {
+				return err
+			}
+			return advanceLaneCursor(cmd.Context(), st, f, start, res.Last)
 		}),
 	}
 	cmd.Flags().BoolVar(&all, "all", false, fmt.Sprintf("print resolved records whole; by default a record a later one resolved is cut to %d characters", render.FoldWidth))
@@ -54,7 +58,7 @@ func newTailCmd() *cobra.Command {
 	return cmd
 }
 
-func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, last int64) error {
+func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, start, last int64) error {
 	self := selfPeer()
 	b, bound, err := st.Binding(ctx, self)
 	if err != nil || !bound || b.Lane == "" || !store.SameLane(b.Lane, f.For) || b.Drive != f.Drive {
@@ -64,7 +68,7 @@ func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, las
 		return nil
 	}
 	seq, _, err := st.Cursor(ctx, store.LaneCursor(self), f.Drive)
-	if err != nil || seq >= last {
+	if err != nil || start > seq || seq >= last {
 		return err
 	}
 	return st.SetCursor(ctx, store.LaneCursor(self), f.Drive, last)

@@ -364,7 +364,11 @@ func LaneCursor(k PeerKey) string {
 }
 
 func LaneMail(k PeerKey, b Binding) Filter {
-	return Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, Solo: kinds.Broadcasts(), RepeatWindow: UrgentRepeat}
+	f := Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
+	if b.Lane != "" {
+		f.Solo = kinds.Broadcasts()
+	}
+	return f
 }
 
 // BindLane names the lane k writes as in drive and starts its lane cursor. A

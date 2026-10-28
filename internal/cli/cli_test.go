@@ -1296,6 +1296,9 @@ func TestALanesOwnReaderTailAdvancesItsHookDelivery(t *testing.T) {
 	if err := st.BindLane(context.Background(), store.PeerKey{Session: "lane-session"}, "d", "lane-x", time.Now().Add(-time.Minute)); err != nil {
 		t.Fatal(err)
 	}
+	if err := st.SetCursor(context.Background(), "lane-x", "d", 0); err != nil {
+		t.Fatal(err)
+	}
 	_ = st.Close()
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "root-session")
 	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "lane-x", "--text", "take #12"); err != nil {
