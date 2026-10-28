@@ -156,7 +156,7 @@ func newPostCmd() *cobra.Command {
 	}
 	f := cmd.Flags()
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
-	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to, else its channel subscription's reader, else root for a drive's root session)")
+	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time, as is a leading H:MM AM/PM label more than a minute ahead of it, and any other such time is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
@@ -187,7 +187,7 @@ func newPostCmd() *cobra.Command {
 	return cmd
 }
 
-var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and subscribes to no channel; after one post with --lane, later posts default to it")
+var errNoLane = errors.New("post needs --lane: this thread is bound to no lane, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
 
 func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	self := selfPeer()
@@ -198,24 +198,10 @@ func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if bound && b.Lane != "" {
-		return b.Lane, nil
+	if !bound || b.Lane == "" || b.Lane == "root" {
+		return "", errNoLane
 	}
-	if self.Agent == "" {
-		if window, err := thisWindow(); err == nil {
-			sub, ok, err := st.Subscription(ctx, window)
-			if err != nil {
-				return "", err
-			}
-			if ok {
-				return sub.Reader, nil
-			}
-		}
-	}
-	if bound && b.Root {
-		return "root", nil
-	}
-	return "", errNoLane
+	return b.Lane, nil
 }
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")

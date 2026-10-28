@@ -1241,9 +1241,10 @@ func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
 	}
 }
 
-func TestPostDefaultsItsLaneToTheThreadsBinding(t *testing.T) {
+func TestPostDefaultsOnlyToABoundLaneNeverToRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
+	t.Setenv("CCI_AGENT_ID", "")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "root-session")
 	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
 		t.Fatal(err)
@@ -1256,22 +1257,30 @@ func TestPostDefaultsItsLaneToTheThreadsBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = st.Close()
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "lane-root-session")
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", "binds lane root"); err != nil {
+		t.Fatal(err)
+	}
 	for _, tt := range []struct{ session, want string }{
-		{"root-session", "root"},
+		{"root-session", ""},
+		{"lane-root-session", ""},
 		{"lane-session", "landing-desk"},
+		{"unbound-session", ""},
 	} {
 		t.Setenv("CLAUDE_CODE_SESSION_ID", tt.session)
 		out, err := run(t, "post", "--json", "--drive", "release-v3", "--kind", "note", "--text", "posted with no --lane")
+		if tt.want == "" {
+			if err == nil || !strings.Contains(err.Error(), "post needs --lane") {
+				t.Fatalf("%s: post = %q, %v; want a refusal naming --lane", tt.session, out, err)
+			}
+			continue
+		}
 		var r struct {
 			Lane string `json:"lane"`
 		}
 		if err != nil || json.Unmarshal([]byte(out), &r) != nil || r.Lane != tt.want {
 			t.Fatalf("%s: post = %q, %v; want lane %s", tt.session, out, err, tt.want)
 		}
-	}
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "unbound-session")
-	if _, err := run(t, "post", "--drive", "release-v3", "--kind", "note", "--text", "x"); err == nil || !strings.Contains(err.Error(), "post needs --lane") {
-		t.Fatalf("unbound post: %v", err)
 	}
 }
 
