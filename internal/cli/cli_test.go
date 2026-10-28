@@ -492,6 +492,40 @@ func TestPostRewritesOnlyALeadingTimeLabelAheadOfTheClock(t *testing.T) {
 	}
 }
 
+func TestPostHeadTakesItsPullRequestOrRefuses(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	for _, tt := range []struct {
+		name   string
+		args   []string
+		pr     int
+		stderr string
+	}{
+		{"--pr given", []string{"--pr", "43922", "--text", "lane/branch 0123abc"}, 43922, ""},
+		{"one #N in the text", []string{"--text", "#43946 lane/branch 0123abc"}, 43946, "cci: head names #43946; recorded as --pr 43946"},
+		{"no pull request", []string{"--text", "lane/branch 0123abc"}, 0, ""},
+		{"two pull requests", []string{"--text", "#1 and #2 at 0123abc"}, 0, ""},
+		{"#0", []string{"--text", "#0 lane/branch 0123abc"}, 0, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := run(t, append([]string{"post", "--json", "--drive", "d", "--lane", "lane-a", "--kind", "head"}, tt.args...)...)
+			if tt.pr == 0 {
+				if err == nil || !strings.Contains(err.Error(), "a head record needs --pr") {
+					t.Fatalf("post = %q, %v; want a refusal naming --pr", out, err)
+				}
+				return
+			}
+			lines := strings.Split(strings.TrimSpace(out), "\n")
+			var got store.Record
+			if err != nil || json.Unmarshal([]byte(lines[len(lines)-1]), &got) != nil || len(got.Refs.PRs) != 1 || got.Refs.PRs[0].Number != tt.pr {
+				t.Fatalf("post = %q, %v; want pr %d", out, err, tt.pr)
+			}
+			if stderr := strings.Join(lines[:len(lines)-1], "\n"); stderr != tt.stderr {
+				t.Errorf("stderr = %q, want %q", stderr, tt.stderr)
+			}
+		})
+	}
+}
+
 func TestPostSpillsTheStampedText(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	typed := time.Now().Add(7 * time.Minute).Format("3:04 PM")

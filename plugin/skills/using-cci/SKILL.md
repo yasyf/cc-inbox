@@ -94,7 +94,8 @@ The text can also be the one quoted argument after the flags, in place of
 Repeat `--pr`, `--build`, `--stack`, `--target`, and `--lane-ref` to attach refs.
 `--pr` takes a number, `owner/repo#N`, or a GitHub pull request URL; qualify a
 PR in another repo, such as `--pr Forge-FDE/iris-chime#243`.
-`--lane-ref` names lanes the record is about; `--lane` names its writer.
+`--lane-ref` names lanes the record is about; `--lane` names its writer. A `head` record
+needs `--pr`; without it, cci takes the one `#N` its text names or refuses.
 `--path`, `--ccn`, `--url`, and `--board` also set refs. Put long bodies in a file
 and post it with `--path <file>`; without `--text`, the file's first line becomes
 the text, so open the file with a one-line summary. `--path -` reads the body

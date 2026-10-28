@@ -453,7 +453,7 @@ func Validate(r Record) error {
 		return fmt.Errorf("kind %s requires --pr", r.Kind)
 	}
 	if spec.NeedsMentionedPRs {
-		if missing := unboundPRs(r); len(missing) > 0 {
+		if missing := UnboundPRs(r); len(missing) > 0 {
 			named, flags := make([]string, len(missing)), make([]string, len(missing))
 			for i, n := range missing {
 				named[i], flags[i] = fmt.Sprintf("#%d", n), fmt.Sprintf("--pr %d", n)

@@ -58,7 +58,10 @@ func newPostCmd() *cobra.Command {
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
-			var err error
+			var (
+				err      error
+				fromPath bool
+			)
 			if lane == "" {
 				if lane, err = threadLane(cmd.Context(), st); err != nil {
 					return err
@@ -91,9 +94,20 @@ func newPostCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
 				}
-				text = store.Clip(firstLine(string(body)))
+				text, fromPath = firstLine(string(body)), true
 			}
-			if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
+			k, err := kinds.Parse(kind)
+			if err != nil {
+				return err
+			}
+			if k == kinds.Head && len(r.Refs.PRs) == 0 {
+				if r.Refs.PRs, err = headPR(cmd.ErrOrStderr(), store.Record{Topic: r.Topic, Text: text}); err != nil {
+					return err
+				}
+			}
+			if fromPath {
+				text = store.Clip(text)
+			} else if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
 				excerpt, path, err := st.Fit(text)
 				if err != nil {
 					return err
@@ -102,10 +116,6 @@ func newPostCmd() *cobra.Command {
 				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: text over %d characters: the record carries its first %d, and the full text is at %s\n", store.MaxText, store.MaxText, path); err != nil {
 					return err
 				}
-			}
-			k, err := kinds.Parse(kind)
-			if err != nil {
-				return err
 			}
 			if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
 				return err
@@ -277,6 +287,19 @@ func stamped(w io.Writer, text, lane string, at time.Time) (string, error) {
 func labels(prefix, colon, lane string) bool {
 	prefix = strings.TrimSpace(prefix)
 	return prefix == "" || colon != "" || prefix == lane
+}
+
+var errHeadNeedsPR = errors.New("a head record needs --pr: the finder and landing desks key heads by pull request, so name the one this head is for, e.g. --pr 43922")
+
+func headPR(w io.Writer, r store.Record) ([]store.PR, error) {
+	named := store.UnboundPRs(r)
+	if len(named) != 1 || named[0] == 0 {
+		return nil, errHeadNeedsPR
+	}
+	if _, err := fmt.Fprintf(w, "cci: head names #%d; recorded as --pr %d\n", named[0], named[0]); err != nil {
+		return nil, err
+	}
+	return []store.PR{{Number: named[0]}}, nil
 }
 
 func firstLine(text string) string {

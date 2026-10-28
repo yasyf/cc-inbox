@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci post --kind head` without `--pr` takes the pull request from a single
+  `#N` in the text and says so on stderr; with none or several it refuses and
+  asks for `--pr`. A head with no pull request is invisible to the desks that
+  key heads by pull request.
+
 ## [0.36.0] - 2026-10-28
 
 ### Fixed
