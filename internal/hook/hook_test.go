@@ -217,6 +217,32 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	}
 }
 
+func TestPostToolUseDeliversBroadcastKindsOnlyToTheirFirstAddressee(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	started := clock.Now()
+	clock.Advance(time.Minute)
+	for _, r := range []store.Record{
+		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-y", "lane-x"}, Text: "review copied to lane-x"},
+		{Lane: "lane-y", Kind: kinds.Head, To: []string{"lane-z", "lane-x"}, Text: "head copied to lane-x"},
+		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-x", "lane-y"}, Text: "review for lane-x first"},
+		{Lane: "root", Kind: kinds.Go, To: []string{"lane-y", "lane-x"}, Text: "go copied to lane-x"},
+	} {
+		testutil.Post(t, st, r)
+	}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "lane-x", started); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "review for lane-x first") || !strings.Contains(got, "go copied to lane-x") || strings.Contains(got, "review copied") || strings.Contains(got, "head copied") {
+		t.Fatalf("additionalContext = %q; want the review addressed to lane-x first and the copied go, never a review or head lane-x is only copied on", got)
+	}
+}
+
 func TestLaneCursorSurvivesOtherReadsAndLateImports(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()

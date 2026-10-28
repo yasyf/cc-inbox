@@ -72,6 +72,7 @@ type Spec struct {
 	NeedsMentionedPRs bool
 	NeedsRef          bool
 	Internal          bool
+	Broadcast         bool
 }
 
 var specs = map[Kind]Spec{
@@ -95,20 +96,20 @@ var specs = map[Kind]Spec{
 	Applied:    {},
 	Handoff:    {},
 	Done:       {},
-	Head:       {},
+	Head:       {Broadcast: true},
 	Contract:   {},
 	Blocker:    {},
 	Withdraw:   {NeedsRef: true},
 	Digest:     {Internal: true},
-	Claim:      {TTL: EphemeralTTL},
+	Claim:      {TTL: EphemeralTTL, Broadcast: true},
 	Note:       {TTL: EphemeralTTL},
-	State:      {TTL: EphemeralTTL, Latest: true},
-	Matrix:     {TTL: EphemeralTTL},
-	Report:     {TTL: EphemeralTTL, Latest: true},
+	State:      {TTL: EphemeralTTL, Latest: true, Broadcast: true},
+	Matrix:     {TTL: EphemeralTTL, Broadcast: true},
+	Report:     {TTL: EphemeralTTL, Latest: true, Broadcast: true},
 	Peer:       {TTL: EphemeralTTL},
 	Blocked:    {},
 	Unblock:    {NeedsRef: true},
-	Review:     {},
+	Review:     {Broadcast: true},
 	Retro:      {},
 	Posted:     {},
 	Design:     {},
@@ -228,6 +229,17 @@ func Latests() []Kind {
 	var out []Kind
 	for k, spec := range specs {
 		if spec.Latest {
+			out = append(out, k)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+func Broadcasts() []Kind {
+	var out []Kind
+	for k, spec := range specs {
+		if spec.Broadcast {
 			out = append(out, k)
 		}
 	}

@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A lane's `PostToolUse` hook delivers `head`, `review`, `state`, `report`,
+  `claim` and `matrix` records only when the lane is their first addressee;
+  a lane merely copied on one reads it with `cci tail --reader`. A lane copied
+  on hundreds of reviews fell hours behind, three or four records per tool
+  call.
+- `cci tail --reader <lane>` from the thread bound to that lane moves its hook
+  delivery past what the tail read, so the hook never repeats it.
+- `cci post` rewrites a time label ahead of the post time to the post time
+  when the label follows up to four words and ends in a colon, or follows the
+  lane's own name, as in `board 1:09 AM:`; before, only a label that opened
+  the text was rewritten.
+- The daemon cuts HTTP streams still open after half its drain budget, so a
+  stop or an upgrade handoff finishes instead of holding its lock and leaving
+  port 7377 refusing connections for minutes.
+- A `SessionStart` hook running an older cci hands the daemon check to the
+  newest install, so an old plugin no longer replaces a newer daemon and sets
+  off repeated handoffs.
+
 ## [0.35.0] - 2026-10-28
 
 ### Fixed
