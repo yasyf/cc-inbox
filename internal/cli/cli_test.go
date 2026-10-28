@@ -504,6 +504,7 @@ func TestPostHeadTakesItsPullRequestOrRefuses(t *testing.T) {
 		{"one #N in the text", []string{"--text", "#43946 lane/branch 0123abc"}, 43946, "cci: head names #43946; recorded as --pr 43946"},
 		{"no pull request", []string{"--text", "lane/branch 0123abc"}, 0, ""},
 		{"two pull requests", []string{"--text", "#1 and #2 at 0123abc"}, 0, ""},
+		{"#0", []string{"--text", "#0 lane/branch 0123abc"}, 0, ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			out, err := run(t, append([]string{"post", "--json", "--drive", "d", "--lane", "lane-a", "--kind", "head"}, tt.args...)...)

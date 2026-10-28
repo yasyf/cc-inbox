@@ -58,7 +58,10 @@ func newPostCmd() *cobra.Command {
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
-			var err error
+			var (
+				err      error
+				fromPath bool
+			)
 			if lane == "" {
 				if lane, err = threadLane(cmd.Context(), st); err != nil {
 					return err
@@ -91,9 +94,20 @@ func newPostCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
 				}
-				text = store.Clip(firstLine(string(body)))
+				text, fromPath = firstLine(string(body)), true
 			}
-			if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
+			k, err := kinds.Parse(kind)
+			if err != nil {
+				return err
+			}
+			if k == kinds.Head && len(r.Refs.PRs) == 0 {
+				if r.Refs.PRs, err = headPR(cmd.ErrOrStderr(), store.Record{Topic: r.Topic, Text: text}); err != nil {
+					return err
+				}
+			}
+			if fromPath {
+				text = store.Clip(text)
+			} else if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
 				excerpt, path, err := st.Fit(text)
 				if err != nil {
 					return err
@@ -103,19 +117,10 @@ func newPostCmd() *cobra.Command {
 					return err
 				}
 			}
-			k, err := kinds.Parse(kind)
-			if err != nil {
-				return err
-			}
 			if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
 				return err
 			}
 			r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
-			if k == kinds.Head && len(r.Refs.PRs) == 0 {
-				if r.Refs.PRs, err = headPR(cmd.ErrOrStderr(), r); err != nil {
-					return err
-				}
-			}
 			if census != "" {
 				r.Fields.Census = &store.Census{}
 				if err := json.Unmarshal([]byte(census), r.Fields.Census); err != nil {
@@ -288,7 +293,7 @@ var errHeadNeedsPR = errors.New("a head record needs --pr: the finder and landin
 
 func headPR(w io.Writer, r store.Record) ([]store.PR, error) {
 	named := store.UnboundPRs(r)
-	if len(named) != 1 {
+	if len(named) != 1 || named[0] == 0 {
 		return nil, errHeadNeedsPR
 	}
 	if _, err := fmt.Fprintf(w, "cci: head names #%d; recorded as --pr %d\n", named[0], named[0]); err != nil {
