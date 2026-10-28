@@ -69,8 +69,10 @@ homebrew_casks:
     # Quarantined cask binaries stall every first exec on a Gatekeeper check.
     hooks:
       post:
-        install: |
-          system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/cci"]
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci"]
+          end
     repository:
       owner: yasyf
       name: homebrew-tap
