@@ -213,12 +213,18 @@ func (p *Product) Handle(ctx context.Context, req daemonkit.Request) (daemonkit.
 
 func (p *Product) Drain(b daemonkit.Budget) error {
 	p.stopSync()
-	ctx, cancel := b.Context(context.Background())
-	defer cancel()
-	if err := p.http.Shutdown(ctx); err != nil {
+	graceful, cancelGraceful := b.Share("http", 0.5).Context(context.Background())
+	defer cancelGraceful()
+	if err := p.http.Shutdown(graceful); errors.Is(err, context.DeadlineExceeded) {
+		if err := p.http.Close(); err != nil {
+			return fmt.Errorf("close lingering http streams: %w", err)
+		}
+	} else if err != nil {
 		return fmt.Errorf("drain http: %w", err)
 	}
 	<-p.done
+	ctx, cancel := b.Context(context.Background())
+	defer cancel()
 	select {
 	case <-p.synced:
 		return nil

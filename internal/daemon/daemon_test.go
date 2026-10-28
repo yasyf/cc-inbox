@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,7 +34,7 @@ func TestDaemonServesDigestAndHTTP(t *testing.T) {
 	}
 	_ = st.Close()
 
-	d, ln := serve(t, home)
+	d, ln, _ := serve(t, home)
 	client, err := daemonkit.Open(d)
 	if err != nil {
 		t.Fatal(err)
@@ -114,7 +115,7 @@ func TestDaemonImportsAppendedInboxLines(t *testing.T) {
 	}
 }
 
-func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener) {
+func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener, func() error) {
 	t.Helper()
 	kit, err := os.MkdirTemp("/tmp", "cci-dk")
 	if err != nil {
@@ -137,13 +138,41 @@ func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener) {
 		_, err := daemonkit.Serve(ctx, d, daemon.New(home, ln).Start)
 		served <- err
 	}()
-	t.Cleanup(func() {
+	stopped := sync.OnceValue(func() error {
 		stop()
-		if err := <-served; err != nil {
+		return <-served
+	})
+	t.Cleanup(func() {
+		if err := stopped(); err != nil {
 			t.Errorf("Serve() = %v", err)
 		}
 	})
-	return d, ln
+	return d, ln, stopped
+}
+
+func TestDaemonStopsWithAStreamStillOpen(t *testing.T) {
+	_, ln, stopped := serve(t, t.TempDir())
+	var resp *http.Response
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(50 * time.Millisecond) {
+		var err error
+		if resp, err = http.Get("http://" + ln.Addr().String() + "/v1/stream?drive=d"); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("open stream: %v", err)
+		}
+	}
+	defer func() { _ = resp.Body.Close() }()
+	done := make(chan error, 1)
+	go func() { done <- stopped() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Serve() with a stream open = %v", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("the daemon kept running past its drain budget with a stream open")
+	}
 }
 
 func TestDaemonReportsAListenerFailure(t *testing.T) {

@@ -19,6 +19,7 @@ type Filter struct {
 	Peer           string
 	Kinds          []kinds.Kind
 	Mute           []kinds.Kind
+	Solo           []kinds.Kind
 	RepeatWindow   time.Duration
 	Lanes          []string
 	To             string
@@ -121,6 +122,12 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	if len(f.Mute) > 0 {
 		clauses = append(clauses, "kind NOT IN ("+placeholders(len(f.Mute))+")")
 		for _, k := range f.Mute {
+			params = append(params, string(k))
+		}
+	}
+	if len(f.Solo) > 0 {
+		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.Solo))+") AND json_array_length(recipients) > 1)")
+		for _, k := range f.Solo {
 			params = append(params, string(k))
 		}
 	}
@@ -357,7 +364,7 @@ func LaneCursor(k PeerKey) string {
 }
 
 func LaneMail(k PeerKey, b Binding) Filter {
-	return Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
+	return Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, Solo: kinds.Broadcasts(), RepeatWindow: UrgentRepeat}
 }
 
 // BindLane names the lane k writes as in drive and starts its lane cursor. A

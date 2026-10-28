@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"regexp"
@@ -38,8 +39,11 @@ func newTailCmd() *cobra.Command {
 			if all {
 				fold = 0
 			}
-			_, err = inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json, Fold: fold}, cmd.OutOrStdout())
-			return err
+			res, err := inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json, Fold: fold}, cmd.OutOrStdout())
+			if err != nil || name == "" || rf.limit > 0 {
+				return err
+			}
+			return advanceLaneCursor(cmd.Context(), st, f, res.Last)
 		}),
 	}
 	cmd.Flags().BoolVar(&all, "all", false, fmt.Sprintf("print resolved records whole; by default a record a later one resolved is cut to %d characters", render.FoldWidth))
@@ -48,6 +52,22 @@ func newTailCmd() *cobra.Command {
 	rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
 	cmd.Flags().StringVar(&cursor, "cursor", selfPeer().String(), "cursor name, read and advanced when --since is absent")
 	return cmd
+}
+
+func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, last int64) error {
+	self := selfPeer()
+	b, bound, err := st.Binding(ctx, self)
+	if err != nil || !bound || b.Lane == "" || !store.SameLane(b.Lane, f.For) || b.Drive != f.Drive {
+		return err
+	}
+	if f.To != "" || f.Origin != "" || f.Stack != "" || f.Target != "" || f.PR.Number != 0 || len(f.Mute) > 0 {
+		return nil
+	}
+	seq, _, err := st.Cursor(ctx, store.LaneCursor(self), f.Drive)
+	if err != nil || seq >= last {
+		return err
+	}
+	return st.SetCursor(ctx, store.LaneCursor(self), f.Drive, last)
 }
 
 func newWatchCmd() *cobra.Command {

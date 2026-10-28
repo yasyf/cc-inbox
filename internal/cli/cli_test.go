@@ -469,6 +469,9 @@ func TestPostRewritesOnlyALeadingTimeLabelAheadOfTheClock(t *testing.T) {
 	}{
 		{"leading label ahead of the clock", ahead + ": live on dev", "{at}: live on dev", "cci: time label " + ahead + " rewritten to {at}"},
 		{"leading label before the clock", before + ": live on dev", before + ": live on dev", ""},
+		{"label after a short heading", "board " + ahead + ": pulled the row", "board {at}: pulled the row", "cci: time label " + ahead + " rewritten to {at}"},
+		{"label after the lane's name", "root " + ahead + " count: 0 ungraded", "root {at} count: 0 ungraded", "cci: time label " + ahead + " rewritten to {at}"},
+		{"time in an opening clause", "for his " + ahead + " ask", "for his " + ahead + " ask", "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
 		{"later time inside the text", "live on dev, read " + ahead, "live on dev, read " + ahead, "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1253,14 +1256,12 @@ func TestPostDefaultsOnlyToABoundLaneNeverToRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.BindLane(context.Background(), store.PeerKey{Session: "lane-session"}, "release-v3", "landing-desk", time.Now()); err != nil {
-		t.Fatal(err)
+	for session, lane := range map[string]string{"lane-session": "landing-desk", "lane-root-session": "root"} {
+		if err := st.BindLane(context.Background(), store.PeerKey{Session: session}, "release-v3", lane, time.Now()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	_ = st.Close()
-	t.Setenv("CLAUDE_CODE_SESSION_ID", "lane-root-session")
-	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", "binds lane root"); err != nil {
-		t.Fatal(err)
-	}
 	for _, tt := range []struct{ session, want string }{
 		{"root-session", ""},
 		{"lane-root-session", ""},
@@ -1281,6 +1282,37 @@ func TestPostDefaultsOnlyToABoundLaneNeverToRoot(t *testing.T) {
 		if err != nil || json.Unmarshal([]byte(out), &r) != nil || r.Lane != tt.want {
 			t.Fatalf("%s: post = %q, %v; want lane %s", tt.session, out, err, tt.want)
 		}
+	}
+}
+
+func TestALanesOwnReaderTailAdvancesItsHookDelivery(t *testing.T) {
+	t.Setenv("CCI_AGENT_ID", "")
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	st, err := store.Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "lane-session"}, "d", "lane-x", time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "root-session")
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "lane-x", "--text", "take #12"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "lane-session")
+	if out, err := run(t, "tail", "--drive", "d", "--reader", "lane-x", "--cursor", "lane-x"); err != nil || !strings.Contains(out, "take #12") {
+		t.Fatalf("tail --reader lane-x = %q, %v", out, err)
+	}
+	var out bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetIn(strings.NewReader(`{"session_id":"lane-session","hook_event_name":"PostToolUse"}`))
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs([]string{"hook", "post-tool-use"})
+	if err := root.Execute(); err != nil || out.Len() != 0 {
+		t.Fatalf("hook after the lane's own tail = %q, %v; want nothing redelivered", out.String(), err)
 	}
 }
 

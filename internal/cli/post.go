@@ -26,7 +26,7 @@ import (
 
 var (
 	typedStamp   = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
-	leadingLabel = regexp.MustCompile(`^\s*(` + clockLabel + `)`)
+	leadingLabel = regexp.MustCompile(`^\s*((?:\S+\s+){0,4}?)(` + clockLabel + `)(:?)`)
 	anyLabel     = regexp.MustCompile(clockLabel)
 )
 
@@ -59,6 +59,11 @@ func newPostCmd() *cobra.Command {
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
 			var err error
+			if lane == "" {
+				if lane, err = threadLane(cmd.Context(), st); err != nil {
+					return err
+				}
+			}
 			if r.Refs.Path != "" {
 				if r.Refs.Path, err = keepPath(cmd, st, r.Refs.Path); err != nil {
 					return err
@@ -78,7 +83,7 @@ func newPostCmd() *cobra.Command {
 						return errors.New("post -: stdin is empty")
 					}
 				}
-				if text, err = stamped(cmd.ErrOrStderr(), text, at); err != nil {
+				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at); err != nil {
 					return err
 				}
 			default:
@@ -104,11 +109,6 @@ func newPostCmd() *cobra.Command {
 			}
 			if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
 				return err
-			}
-			if lane == "" {
-				if lane, err = threadLane(cmd.Context(), st); err != nil {
-					return err
-				}
 			}
 			r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
 			if census != "" {
@@ -158,7 +158,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time, as is a leading H:MM AM/PM label more than a minute ahead of it, and any other such time is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time, as is a leading H:MM AM/PM label more than a minute ahead of it, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, and any other such time is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
@@ -248,7 +248,7 @@ func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
 	return err
 }
 
-func stamped(w io.Writer, text string, at time.Time) (string, error) {
+func stamped(w io.Writer, text, lane string, at time.Time) (string, error) {
 	stamp := render.Stamp(at, at)
 	now := at.Truncate(time.Minute)
 	later := func(typed string) bool {
@@ -257,11 +257,11 @@ func stamped(w io.Writer, text string, at time.Time) (string, error) {
 	}
 	if m := typedStamp.FindStringSubmatchIndex(text); m != nil && importer.ParseClock(text[m[2]:m[3]]) != nil {
 		text = text[:m[2]] + stamp + text[m[3]:]
-	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil && later(text[m[2]:m[3]]) {
-		if _, err := fmt.Fprintf(w, "cci: time label %s rewritten to %s\n", text[m[2]:m[3]], stamp); err != nil {
+	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil && later(text[m[4]:m[5]]) && labels(text[m[2]:m[3]], text[m[6]:m[7]], lane) {
+		if _, err := fmt.Fprintf(w, "cci: time label %s rewritten to %s\n", text[m[4]:m[5]], stamp); err != nil {
 			return "", err
 		}
-		text = text[:m[2]] + stamp + text[m[3]:]
+		text = text[:m[4]] + stamp + text[m[5]:]
 	}
 	for _, typed := range anyLabel.FindAllString(text, -1) {
 		if !later(typed) {
@@ -272,6 +272,11 @@ func stamped(w io.Writer, text string, at time.Time) (string, error) {
 		}
 	}
 	return strings.ReplaceAll(text, "{at}", stamp), nil
+}
+
+func labels(prefix, colon, lane string) bool {
+	prefix = strings.TrimSpace(prefix)
+	return prefix == "" || colon != "" || prefix == lane
 }
 
 func firstLine(text string) string {

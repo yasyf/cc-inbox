@@ -109,6 +109,24 @@ func ensureDaemon(ctx context.Context, timeout time.Duration) (daemonkit.Ensured
 	return ensured, nil
 }
 
+func ensureNewestDaemon(ctx context.Context) error {
+	roots, err := version.DefaultRoots()
+	if err != nil {
+		return err
+	}
+	newest, err := roots.Newest()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if version.IsRelease(version.String()) && version.Newer(newest.Version, version.String()) {
+		return exec.CommandContext(ctx, newest.Path, "serve").Run() //nolint:gosec // G204: a cci install under the plugin cache or Caskroom.
+	}
+	_, err = ensureDaemon(ctx, 10*time.Second)
+	return err
+}
+
 func newDaemonCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "daemon", Short: "The daemonkit-managed cci daemon", Hidden: true}
 	cmd.AddCommand(&cobra.Command{
@@ -150,8 +168,7 @@ func newHookCmd() *cobra.Command {
 				if err := hook.SessionStart(cmd.Context(), st, p, window, cmd.OutOrStdout()); err != nil {
 					return err
 				}
-				_, err = ensureDaemon(cmd.Context(), 10*time.Second)
-				return errors.Join(windowErr, err)
+				return errors.Join(windowErr, ensureNewestDaemon(cmd.Context()))
 			}),
 		},
 		&cobra.Command{

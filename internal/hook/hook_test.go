@@ -217,6 +217,32 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	}
 }
 
+func TestPostToolUseSkipsBroadcastKindsAddressedToSeveralLanes(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	started := clock.Now()
+	clock.Advance(time.Minute)
+	for _, r := range []store.Record{
+		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-x", "lane-y"}, Text: "review for several"},
+		{Lane: "lane-y", Kind: kinds.Head, To: []string{"lane-x", "lane-z"}, Text: "head for several"},
+		{Lane: "desk", Kind: kinds.Review, To: []string{"lane-x"}, Text: "review for lane-x alone"},
+		{Lane: "root", Kind: kinds.Go, To: []string{"lane-x", "lane-y"}, Text: "go for both"},
+	} {
+		testutil.Post(t, st, r)
+	}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "lane-x", started); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "review for lane-x alone") || !strings.Contains(got, "go for both") || strings.Contains(got, "for several") {
+		t.Fatalf("additionalContext = %q; want the solo review and the go, never a review or head sent to several lanes", got)
+	}
+}
+
 func TestLaneCursorSurvivesOtherReadsAndLateImports(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
