@@ -429,6 +429,13 @@ The cursor starts at the head when you subscribe and defaults to
 `channel-<session>`. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
+`--mute-kinds state,review,note` keeps those kinds off the channel and out of
+the root's hook delivery, even when addressed to the root; `cci tail` still
+reads them. An `urgent` record repeating its lane's `urgent` topic within 30
+minutes reaches no channel and no hook, for any reader; post a stall once and
+repeat it no sooner than every 30 minutes. `cci me` prints the window's
+subscription, to confirm a subscribe took.
+
 ## Choose a kind
 
 Pair kinds through `--re` or a shared `--topic` in the drive using the table's

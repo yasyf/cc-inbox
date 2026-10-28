@@ -104,6 +104,7 @@ type readFlags struct {
 	drive  string
 	origin string
 	kinds  []string
+	mute   []string
 	lanes  []string
 	to     string
 	reader string
@@ -122,6 +123,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 	cmd.Flags().StringVar(&f.drive, "drive", "", "drive to read (default: the drive bound to this session)")
 	if filters {
 		cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "only these kinds (repeatable)")
+		cmd.Flags().StringSliceVar(&f.mute, "mute-kinds", nil, "never these kinds, even addressed to --reader (repeatable)")
 		cmd.Flags().StringSliceVar(&f.lanes, "lane", nil, "only these lanes (repeatable)")
 		cmd.Flags().StringVar(&f.to, "to", "", "only records addressed to this lane")
 		cmd.Flags().StringVar(&f.reader, "reader", "", "deliver to this lane: records addressed to it, plus other lanes' broadcasts that match --kind, --lane and --topic")
@@ -153,12 +155,11 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 	if f.to == "" {
 		out.Peer = selfPeer().String()
 	}
-	for _, k := range f.kinds {
-		kind, err := kinds.Parse(k)
-		if err != nil {
-			return store.Filter{}, err
-		}
-		out.Kinds = append(out.Kinds, kind)
+	if out.Kinds, err = kinds.ParseAll(f.kinds); err != nil {
+		return store.Filter{}, err
+	}
+	if out.Mute, err = kinds.ParseAll(f.mute); err != nil {
+		return store.Filter{}, err
 	}
 	if out.After, out.Since, err = parseSince(f.since, st.Now()); err != nil {
 		return store.Filter{}, err

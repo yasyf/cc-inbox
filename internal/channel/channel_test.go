@@ -290,3 +290,40 @@ func TestAChannelAndTheHookDeliverEachRecordOnce(t *testing.T) {
 		t.Fatalf("channel delivered #%s again", <-seqs)
 	}
 }
+
+func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+	ctx := context.Background()
+	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
+	if err := st.BindLane(ctx, store.PeerKey{Session: root.SessionID}, "d", "root", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := st.Subscribe(ctx, store.Subscription{Session: root.SessionID, Window: window, Drive: "d", Reader: "root", Mute: []kinds.Kind{kinds.State}, Cursor: "root-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stall := func(minutes int) store.Record {
+		return testutil.Post(t, st, store.Record{Lane: "stall-watch", Kind: kinds.Urgent, Topic: "go:1", To: []string{"root"}, Text: fmt.Sprintf("go 1 stalled %d min", minutes)})
+	}
+	first := stall(10)
+	queued := testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"root"}, Text: "QUEUED go 1"})
+	repeat := stall(20)
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, first.Text) || strings.Contains(got, queued.Text) || strings.Contains(got, repeat.Text) {
+		t.Fatalf("hook delivered %q", got)
+	}
+	stall(30)
+	ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "merge go 1?"})
+	if err := follow(ctx, st, sub, true, func(_ string, params any) error {
+		if got := params.(map[string]any)["meta"].(map[string]string)["seq"]; got != fmt.Sprint(ask.Seq) {
+			t.Fatalf("channel delivered #%s, want only #%d", got, ask.Seq)
+		}
+		return errStale
+	}); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -18,6 +18,8 @@ type Filter struct {
 	Origin         string
 	Peer           string
 	Kinds          []kinds.Kind
+	Mute           []kinds.Kind
+	RepeatWindow   time.Duration
 	Lanes          []string
 	To             string
 	For            string
@@ -115,6 +117,16 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		text, param := f.PR.textMatch("value")
 		clauses = append(clauses, "EXISTS (SELECT 1 FROM json_each(refs, '$.prs') WHERE (type = 'integer' AND value = ?) OR (type = 'text' AND "+text+"))")
 		params = append(params, f.PR.Number, param)
+	}
+	if len(f.Mute) > 0 {
+		clauses = append(clauses, "kind NOT IN ("+placeholders(len(f.Mute))+")")
+		for _, k := range f.Mute {
+			params = append(params, string(k))
+		}
+	}
+	if f.RepeatWindow > 0 {
+		clauses = append(clauses, "NOT (kind = ? AND topic != '' AND EXISTS (SELECT 1 FROM records prior WHERE prior.drive = records.drive AND prior.kind = records.kind AND prior.lane = records.lane AND prior.topic = records.topic AND prior.seq < records.seq AND prior.at > records.at - ?))")
+		params = append(params, string(kinds.Urgent), f.RepeatWindow.Milliseconds())
 	}
 	if f.After > 0 {
 		clauses = append(clauses, "seq > ?")
@@ -345,7 +357,7 @@ func LaneCursor(k PeerKey) string {
 }
 
 func LaneMail(k PeerKey, b Binding) Filter {
-	return Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane}
+	return Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
 }
 
 // BindLane names the lane k writes as in drive and starts its lane cursor. A

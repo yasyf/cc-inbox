@@ -55,14 +55,22 @@ func newAnnounceCmd() *cobra.Command {
 func newMeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "me",
-		Short: "Print this session's registry line, the one to paste into a handoff",
+		Short: "Print this session's registry line, the one to paste into a handoff, and its channel subscription",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			self, _, err := peerIdentity()
 			if err != nil {
 				return err
 			}
-			return printPeer(cmd, st, self)
+			if err := printPeer(cmd, st, self); err != nil {
+				return err
+			}
+			sub, ok, err := st.SessionSubscription(cmd.Context(), self.Session)
+			if err != nil || !ok {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "channel subscription of window %d: %s\n", sub.Window.PID, describe(sub))
+			return err
 		}),
 	}
 }
