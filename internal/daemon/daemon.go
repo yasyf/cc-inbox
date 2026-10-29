@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yasyf/daemonkit"
+	daemonversion "github.com/yasyf/daemonkit/version"
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
@@ -33,7 +34,7 @@ const (
 )
 
 func Definition() (daemonkit.Daemon, error) {
-	program, err := daemonkit.Stable(version.String())
+	program, err := daemonkit.Stable(daemonversion.Running(version.String()))
 	if err != nil {
 		return daemonkit.Daemon{}, fmt.Errorf("resolve cci program: %w", err)
 	}
