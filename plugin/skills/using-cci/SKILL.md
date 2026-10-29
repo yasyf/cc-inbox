@@ -36,8 +36,10 @@ Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose
 needs the time, write `{at}`, which `cci post` replaces with the record's time
 in the form readers print, such as `10:52 AM`. A clock typed in a leading
-`R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way, and so is a leading `H:MM AM/PM` label
-more than a minute ahead of the post's own clock. A clock anywhere else
+`R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way. A
+leading `H:MM AM/PM` label more than a minute off the post's own clock refuses
+the post; `cci post --stamp` writes that label from the clock, replacing a
+typed one or opening the text with it. A clock anywhere else
 is stored as typed, and `cci post` warns on stderr when it is later than the
 post. A post that takes its
 text from a `--path` file stores the file's first line exactly as written, so
