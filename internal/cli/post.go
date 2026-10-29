@@ -39,7 +39,7 @@ func newPostCmd() *cobra.Command {
 		counts                  map[string]string
 		census, bodyFile        string
 		ttl                     time.Duration
-		asJSON                  bool
+		asJSON, label           bool
 		re, resolves            []int64
 	)
 	cmd := &cobra.Command{
