@@ -8,8 +8,8 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.5
 	github.com/spf13/cobra v1.10.2
 	github.com/yasyf/cc-interact v0.35.2
-	github.com/yasyf/daemonkit v0.32.3
-	github.com/yasyf/synckit v0.42.0
+	github.com/yasyf/daemonkit v0.36.0
+	github.com/yasyf/synckit v0.51.0
 	golang.org/x/mod v0.41.0
 	modernc.org/sqlite v1.60.1
 )
@@ -39,6 +39,7 @@ require (
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect
+	howett.net/plist v1.0.1 // indirect
 	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
