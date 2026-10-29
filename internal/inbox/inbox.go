@@ -34,6 +34,7 @@ type TailOptions struct {
 	Resume string
 	Open   bool
 	Fold   int
+	Notes  io.Writer
 }
 
 type TailResult struct {
@@ -129,11 +130,19 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		out, b, t = run(ahead.pending)
 	}
 	res, shortened := t.res, t.shortened
+	var notes []string
+	trailer := func(s string) {
+		if opts.JSON {
+			notes = append(notes, s)
+			return
+		}
+		b.Trailer(s)
+	}
 	if t.first > 0 && !opts.JSON {
-		b.Trailer(fmt.Sprintf("... %d to %s first", t.first, f.For))
+		trailer(fmt.Sprintf("... %d to %s first", t.first, f.For))
 	}
 	if shortened > 0 {
-		b.Trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
+		trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
 	}
 	rest := f
 	rest.Limit = 0
@@ -151,7 +160,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		}
 		res.More -= n
 	}
-	if res.More > 0 && !opts.JSON {
+	if res.More > 0 {
 		resume := fmt.Sprintf("--since %d", res.Last)
 		if opts.Cursor != "" {
 			resume = cmp.Or(opts.Resume, "cci tail")
@@ -160,7 +169,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		if opts.Open {
 			upTo = "up to "
 		}
-		b.Trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume))
+		trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume))
 	}
 	if opts.Cursor != "" && res.Last != f.After {
 		if err := st.SetCursor(ctx, opts.Cursor, f.Drive, res.Last); err != nil {
@@ -174,6 +183,11 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	if _, err := out.WriteTo(w); err != nil {
 		return TailResult{}, fmt.Errorf("write tail: %w", err)
+	}
+	for _, note := range notes {
+		if _, err := fmt.Fprintln(opts.Notes, note); err != nil {
+			return TailResult{}, fmt.Errorf("write tail: %w", err)
+		}
 	}
 	return res, nil
 }

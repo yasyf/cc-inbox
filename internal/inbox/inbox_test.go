@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strings"
 	"sync"
@@ -93,6 +94,29 @@ func TestTailBudgetGovernsWholeRecords(t *testing.T) {
 	}
 }
 
+func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	for i := range 40 {
+		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("step %02d %s", i, strings.Repeat("x", 80))})
+		c.Advance(time.Second)
+	}
+	var out, notes bytes.Buffer
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.More == 0 {
+		t.Fatalf("a 1000-byte JSON tail of 40 records cut none: %+v", res)
+	}
+	if want := fmt.Sprintf("... %d more; resume with --since %d\n", res.More, res.Last); notes.String() != want {
+		t.Errorf("JSON tail notes = %q, want %q", notes.String(), want)
+	}
+	if strings.Contains(out.String(), "...") {
+		t.Errorf("JSON tail put its trailer among the records:\n%s", out.String())
+	}
+}
+
 func TestReadsClipRecordsToWidth(t *testing.T) {
 	const width = 400
 	st, _ := testutil.Store(t)
@@ -120,7 +144,7 @@ func TestReadsClipRecordsToWidth(t *testing.T) {
 			return err
 		},
 		"tail --json": func(b *bytes.Buffer) error {
-			_, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000, Width: width, JSON: true}, b)
+			_, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 16000, Width: width, JSON: true, Notes: io.Discard}, b)
 			return err
 		},
 		"grep": func(b *bytes.Buffer) error {

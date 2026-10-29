@@ -43,7 +43,7 @@ func newTailCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			res, err := inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json, Fold: fold}, cmd.OutOrStdout())
+			res, err := inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: f, Cursor: name, Limit: rf.limit, Budget: rf.budget, Width: rf.width, JSON: rf.json, Fold: fold, Notes: cmd.ErrOrStderr()}, cmd.OutOrStdout())
 			if err != nil || name == "" || !resumed || rf.limit > 0 {
 				return err
 			}
