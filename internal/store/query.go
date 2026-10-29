@@ -403,6 +403,15 @@ ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli()
 	return nil
 }
 
+// Registered reports whether lane is bound to a thread in drive or has posted there.
+func (s *Store) Registered(ctx context.Context, drive, lane string) (bool, error) {
+	var ok bool
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sessions WHERE drive = ? AND lane = ?) OR EXISTS (SELECT 1 FROM records WHERE drive = ? AND lane = ?)", drive, lane, drive, lane).Scan(&ok); err != nil {
+		return false, fmt.Errorf("read lane %s on %s: %w", lane, drive, err)
+	}
+	return ok, nil
+}
+
 func (s *Store) Binding(ctx context.Context, k PeerKey) (Binding, bool, error) {
 	var b Binding
 	err := s.db.QueryRowContext(ctx, "SELECT drive, root, lane FROM sessions WHERE session = ? AND agent = ? AND drive != '' AND origin = ?", k.Session, k.Agent, s.Self()).Scan(&b.Drive, &b.Root, &b.Lane)

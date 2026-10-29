@@ -39,7 +39,7 @@ func newPostCmd() *cobra.Command {
 		counts                  map[string]string
 		census, bodyFile        string
 		ttl                     time.Duration
-		asJSON, label           bool
+		asJSON, label, force    bool
 		re, resolves            []int64
 	)
 	cmd := &cobra.Command{
@@ -142,7 +142,7 @@ func newPostCmd() *cobra.Command {
 					r.Fields.Counts[key] = n
 				}
 			}
-			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, cmd.ErrOrStderr()); err != nil {
+			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, force, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
 			records, err := perTarget(r, re, resolves)
@@ -170,7 +170,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time later than the post is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is refused, naming the nearest live lane, unless --force; owner and all always pass")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64SliceVar(&re, "re", nil, "seq this record answers or closes; repeated, each seq gets its own record")
 	f.Int64SliceVar(&resolves, "resolves", nil, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every seq")
@@ -194,6 +194,7 @@ func newPostCmd() *cobra.Command {
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	f.BoolVar(&label, "stamp", false, "cci writes the leading H:MM AM/PM label from the post's own clock: it replaces a typed leading label, or opens the text when it has none")
+	f.BoolVar(&force, "force", false, "address a bare --to lane that no live session holds and no thread has registered or posted as on the drive, such as a lane not yet started; without it the post is refused and names the nearest live lane")
 	_ = cmd.MarkFlagRequired("kind")
 	return cmd
 }

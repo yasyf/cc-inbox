@@ -297,7 +297,7 @@ func TestGrepSinceTakesAClockTime(t *testing.T) {
 
 func TestPostTakesItsTextAsOneArgument(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
-	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--to", "cci-fix-4"}
+	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--force", "--to", "cci-fix-4"}
 	if out, err := run(t, append(post, "land the fix")...); err != nil || out != "#1\n" {
 		t.Fatalf("post with a text argument = %q, %v", out, err)
 	}
@@ -889,8 +889,16 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
-	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#1\n" {
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner,desk", "--text", "RELEASE #45190"); err == nil || err.Error() != "--to release-owner: no live session or registered lane on drive drive-a is named release-owner; the nearest live lane is release-owner-4; --force addresses a lane that has not started yet" {
+		t.Fatalf("post to a lane nobody holds: %v", err)
+	}
+	for _, to := range []string{"owner", "all"} {
+		if _, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", to, "--text", "approve?"); err != nil {
+			t.Fatalf("post --to %s: %v", to, err)
+		}
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--force", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
+	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#3\n" {
 		t.Fatalf("post to a lane reading another drive = %q, %v", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "walker", "--text", "x"); err == nil || !strings.Contains(err.Error(), "read drive-b, drive-c; address one as walker@<drive>") {
