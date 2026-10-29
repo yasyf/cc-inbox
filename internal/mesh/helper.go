@@ -99,7 +99,7 @@ func StartHelper(ctx context.Context, scope daemonkit.Ctx) (*daemonkit.Child, er
 	spawnCtx, cancel := context.WithTimeout(ctx, helperReadyWithin)
 	defer cancel()
 	child, err := scope.Spawn(spawnCtx, daemonkit.Cmd{
-		Path: executable, Args: HelperArgs, Session: true, Exec: daemonkit.ServingSameUser(),
+		Path: executable, Args: HelperArgs, Session: true,
 	}, daemonkit.ChannelNone, nil)
 	if err != nil {
 		return nil, fmt.Errorf("start mesh helper: %w", err)

@@ -33,16 +33,16 @@ const (
 )
 
 func Definition() (daemonkit.Daemon, error) {
-	program, err := daemonkit.Stable()
+	program, err := daemonkit.Stable(version.String())
 	if err != nil {
 		return daemonkit.Daemon{}, fmt.Errorf("resolve cci program: %w", err)
 	}
 	return daemonkit.Daemon{
-		Label:    Label,
-		Program:  program,
-		Args:     []string{"daemon", "run"},
-		Schemas:  []daemonkit.Schema{Schema},
-		Trust:    daemonkit.Trust{Serving: daemonkit.ServingSameUser()},
+		Label:   Label,
+		Program: program,
+		Args:    []string{"daemon", "run"},
+		Schemas: []daemonkit.Schema{Schema},
+
 		Restart:  daemonkit.RestartOnFailure,
 		Shutdown: daemonkit.Grace(10 * time.Second),
 	}, nil

@@ -7,7 +7,7 @@ toolchain go1.26.10
 require (
 	github.com/shirou/gopsutil/v4 v4.26.5
 	github.com/spf13/cobra v1.10.2
-	github.com/yasyf/cc-interact v0.35.2
+	github.com/yasyf/cc-interact v0.39.0
 	github.com/yasyf/daemonkit v0.36.0
 	github.com/yasyf/synckit v0.51.0
 	golang.org/x/mod v0.41.0
@@ -35,7 +35,7 @@ require (
 	github.com/vishvananda/netlink v1.2.1-beta.2 // indirect
 	github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect

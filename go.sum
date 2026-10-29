@@ -59,8 +59,8 @@ github.com/vishvananda/netlink v1.2.1-beta.2 h1:Llsql0lnQEbHj0I1OuKyp8otXp0r3q0m
 github.com/vishvananda/netlink v1.2.1-beta.2/go.mod h1:twkDnbuQxJYemMlGd4JFIcuhgX83tXhKS2B/PRMpOho=
 github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae h1:4hwBBUfQCFe3Cym0ZtKyq7L16eZUtYKs+BaHDN6mAns=
 github.com/vishvananda/netns v0.0.0-20200728191858-db3c7e526aae/go.mod h1:DD4vA1DwXk04H54A1oHXtwZmA0grkVMdPxx/VGLCah0=
-github.com/yasyf/cc-interact v0.35.2 h1:V3ArT/Pt0nAMWmdUN/jH1dwmD+sVCEsfd6+h7V7jXZU=
-github.com/yasyf/cc-interact v0.35.2/go.mod h1:1w5e7BD8LFysFvsEnpeVMTnm7xboVNcsrdl01uvjgiI=
+github.com/yasyf/cc-interact v0.39.0 h1:ebJhMzXSx56zVvD0n8BRKxAb+dRmDOtytG2tpqooqps=
+github.com/yasyf/cc-interact v0.39.0/go.mod h1:+zkZi12pmVPfpTnLTzLanAfaj6Ox2QbGIMKS5+/SjAM=
 github.com/yasyf/daemonkit v0.36.0 h1:2SOhdDB/bxNbJDPsYEWRhQ9fqtxFSNgUatngrM0BPkY=
 github.com/yasyf/daemonkit v0.36.0/go.mod h1:hEUZvGh+jCBOJmltSQa3QZR0kqV6G/ApJoViU1aAMps=
 github.com/yasyf/synckit v0.51.0 h1:wRDYA+atoue/rrft+Xn9fyl8NvrT4b2GPxiZYp12flg=
@@ -70,8 +70,8 @@ github.com/yusufpapurcu/wmi v1.2.4/go.mod h1:SBZ9tNy3G9/m5Oi98Zks0QjeHVDvuK0qfxQ
 go.yaml.in/yaml/v3 v3.0.4/go.mod h1:DhzuOOF2ATzADvBadXxruRBLzYTpT36CKvDb3+aBEFg=
 golang.org/x/mod v0.41.0 h1:qJmnOUb4YB+FsEuM3HcWucdZASCPGhsX6uljO6pog0c=
 golang.org/x/mod v0.41.0/go.mod h1:Ek9pY8RKWXwsWvd3rQiHYtMqkjSUV+s1Rj7j4H5Ur6o=
-golang.org/x/net v0.59.0 h1:5zfYln+w5XCxwrnMMJPufRgNoXEaGxl0wo5GqPXyues=
-golang.org/x/net v0.59.0/go.mod h1:2DA/G1UfVbCpQPeWTmMPGY7Cs2PkBkwu743bVX5PIVg=
+golang.org/x/net v0.60.0 h1:79p50tfZlm0J9YfoDsSi639qSXNGVwEzOPLCxM2FsYU=
+golang.org/x/net v0.60.0/go.mod h1:2DA/G1UfVbCpQPeWTmMPGY7Cs2PkBkwu743bVX5PIVg=
 golang.org/x/sync v0.23.0 h1:KameEIfc1IkluZyXWLn39Wd4tURc6GbCiISGiZm2bQk=
 golang.org/x/sync v0.23.0/go.mod h1:sUUOizhqBxiL6pEWpqNLUiaJn1ShEbZ6BBqskPbjZm0=
 golang.org/x/sys v0.0.0-20190916202348-b4ddaad3f8a3/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
