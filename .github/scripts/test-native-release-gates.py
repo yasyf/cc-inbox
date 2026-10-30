@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import unittest
 
-EXPECTED_CANCEL = "${{ !inputs.commit && github.event_name == 'pull_request' }}"
+EXPECTED_CANCEL = "${{ inputs.commit == '' && github.event_name == 'pull_request' }}"
 EXPECTED_DYNAMIC_PROFILES = 0
 
 

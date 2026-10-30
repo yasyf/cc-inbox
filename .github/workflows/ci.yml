@@ -19,7 +19,7 @@ on:
 
 concurrency:
   group: ci-${{ inputs.commit || github.ref }}
-  cancel-in-progress: ${{ !inputs.commit && github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ inputs.commit == '' && github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
