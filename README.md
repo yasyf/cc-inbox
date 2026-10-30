@@ -768,7 +768,8 @@ sessions write to the same SQLite store without a daemon.
 
 Wider record lines leave the byte budgets unchanged, so fewer records may fit.
 Capped text tail and grep reads report omitted records; capped text digest
-and state reads report truncation. Their JSON forms omit that trailer. Narrow
+and state reads report truncation. `cci tail --json` prints its trailer on
+stderr, so stdout stays one record per line; the other JSON forms omit it. Narrow
 state output with `--lane` or `--topic`.
 
 Tail and watch reads hide expired records; `grep` and `state` include them.
