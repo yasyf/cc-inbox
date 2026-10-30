@@ -28,6 +28,7 @@ type Subscription struct {
 	Reader  string       `json:"reader"`
 	Kinds   []kinds.Kind `json:"kinds"`
 	Mute    []kinds.Kind `json:"mute,omitempty"`
+	ToKinds []kinds.Kind `json:"to_kinds,omitempty"`
 	Cursor  string       `json:"cursor"`
 	At      time.Time    `json:"at"`
 }
@@ -36,8 +37,15 @@ type Subscription struct {
 // a repeat inside it reaches no channel or hook, only cci tail.
 const UrgentRepeat = 30 * time.Minute
 
+func DefaultToKinds(reader string) []kinds.Kind {
+	if RootName(reader) {
+		return kinds.RootAddressed()
+	}
+	return nil
+}
+
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Mute, RepeatWindow: UrgentRepeat}
+	return Filter{Drive: s.Drive, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Mute, ToKinds: s.ToKinds, RepeatWindow: UrgentRepeat}
 }
 
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {

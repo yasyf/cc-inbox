@@ -102,22 +102,23 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 }
 
 type readFlags struct {
-	drive  string
-	origin string
-	kinds  []string
-	mute   []string
-	lanes  []string
-	to     string
-	reader string
-	topics []string
-	stack  string
-	target string
-	pr     store.PR
-	since  string
-	limit  int
-	budget int
-	width  int
-	json   bool
+	drive   string
+	origin  string
+	kinds   []string
+	mute    []string
+	toKinds []string
+	lanes   []string
+	to      string
+	reader  string
+	topics  []string
+	stack   string
+	target  string
+	pr      store.PR
+	since   string
+	limit   int
+	budget  int
+	width   int
+	json    bool
 }
 
 func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, budget int) {
@@ -125,6 +126,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 	if filters {
 		cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "only these kinds (repeatable)")
 		cmd.Flags().StringSliceVar(&f.mute, "mute-kinds", nil, "never these kinds, even addressed to --reader (repeatable)")
+		cmd.Flags().StringSliceVar(&f.toKinds, "to-kind", nil, "only these kinds among records addressed to --reader or --to; broadcasts still follow --kind (repeatable)")
 		cmd.Flags().StringSliceVar(&f.lanes, "lane", nil, "only these lanes (repeatable)")
 		cmd.Flags().StringVar(&f.to, "to", "", "only records addressed to this lane")
 		cmd.Flags().StringVar(&f.reader, "reader", "", "deliver to this lane: records addressed to it, plus other lanes' broadcasts that match --kind, --lane and --topic")
@@ -160,6 +162,9 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 		return store.Filter{}, err
 	}
 	if out.Mute, err = kinds.ParseAll(f.mute); err != nil {
+		return store.Filter{}, err
+	}
+	if out.ToKinds, err = kinds.ParseAll(f.toKinds); err != nil {
 		return store.Filter{}, err
 	}
 	if out.After, out.Since, err = parseSince(f.since, st.Now()); err != nil {

@@ -439,6 +439,14 @@ The cursor starts at the head when you subscribe and defaults to
 `channel-<session>`. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
+A record addressed to the reader arrives only when its kind is a
+`--to-kind`. For `--reader root` (or `main`) that defaults to
+`incident,decide,ask,blocker,urgent,answer,correction,defect`, the kinds a root
+acts on; the state, head, red, report, review, note and evidence records lanes
+copy to root stay in `cci tail` and `cci digest`, and the root's `PostToolUse`
+hook holds them back too. Other readers get every addressed kind unless they
+name `--to-kind`. `cci watch --reader root` applies the same default.
+
 `--mute-kinds state,review,note` keeps those kinds off the channel and out of
 the root's hook delivery, even when addressed to the root; `cci tail` still
 reads them. An `urgent` record repeating its lane's `urgent` topic within 30

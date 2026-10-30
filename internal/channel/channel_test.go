@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -325,5 +326,44 @@ func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T
 		return errStale
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+	ctx := context.Background()
+	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
+	if err := st.BindLane(ctx, store.PeerKey{Session: root.SessionID}, "d", "root", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := st.Subscribe(ctx, store.Subscription{Session: root.SessionID, Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Decide}, ToKinds: store.DefaultToKinds("root"), Cursor: "root-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"root"}, Text: "QUEUED go 1"})
+	report := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Report, To: []string{"main"}, Text: "PR opened"})
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); strings.Contains(got, state.Text) || strings.Contains(got, report.Text) {
+		t.Fatalf("hook delivered %q", got)
+	}
+	ask := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Ask, To: []string{"main"}, Text: "merge go 1?"})
+	decide := testutil.Post(t, st, store.Record{Lane: "design-lane", Kind: kinds.Decide, Text: "pick a schema?"})
+	want := []string{fmt.Sprint(ask.Seq), fmt.Sprint(decide.Seq)}
+	var got []string
+	if err := follow(ctx, st, sub, true, func(_ string, params any) error {
+		got = append(got, params.(map[string]any)["meta"].(map[string]string)["seq"])
+		if len(got) == len(want) {
+			return errStale
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("channel delivered %v, want %v", got, want)
 	}
 }

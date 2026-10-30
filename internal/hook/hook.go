@@ -208,7 +208,7 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 			return err
 		}
 		if ok && store.SameLane(sub.Reader, b.Lane) {
-			f.Mute = sub.Mute
+			f.Mute, f.ToKinds = sub.Mute, sub.ToKinds
 		}
 	}
 	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true}, &tail)

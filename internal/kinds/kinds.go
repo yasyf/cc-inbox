@@ -249,6 +249,10 @@ func Broadcasts() []Kind {
 	return out
 }
 
+func RootAddressed() []Kind {
+	return []Kind{Incident, Decide, Ask, Blocker, Urgent, Answer, Correction, Defect}
+}
+
 func Closers() []Kind {
 	var out []Kind
 	for _, cs := range openers {

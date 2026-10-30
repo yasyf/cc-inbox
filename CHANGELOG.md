@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `cci subscribe --to-kind <kinds>` limits the records addressed to `--reader`
+  that the channel and the reader's `PostToolUse` hook deliver. For `root` it
+  defaults to `incident,decide,ask,blocker,urgent,answer,correction,defect`,
+  so state, head, red, report, review, note and evidence records copied to
+  the root stay in `cci tail` and `cci digest`. `cci watch` takes the same
+  flag and default; `cci tail` and `cci grep` take the flag with no default.
+
 ## [0.41.0] - 2026-10-29
 
 ### Changed
