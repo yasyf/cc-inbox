@@ -555,13 +555,25 @@ type ReplyPage struct {
 
 type replyScanner struct {
 	row      scanner
-	re       int64
-	resolves int64
-	also     string
+	re       any
+	resolves any
+	also     any
 }
 
 func (r *replyScanner) Scan(dest ...any) error {
-	return r.row.Scan(append([]any{&r.re, &r.resolves, &r.also}, dest...)...)
+	err := r.row.Scan(append(dest, &r.re, &r.resolves, &r.also)...)
+	if err == nil {
+		return nil
+	}
+	values := make([]any, len(dest))
+	raw := make([]any, len(dest))
+	for i := range values {
+		raw[i] = &values[i]
+	}
+	if rawErr := r.row.Scan(append(raw, &r.re, &r.resolves, &r.also)...); rawErr != nil {
+		return rawErr
+	}
+	return err
 }
 
 func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, error) {
@@ -596,38 +608,31 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 	}
 	ids, _ := json.Marshal(seqs)
 	in := "SELECT value FROM json_each(?)"
-	rows, err := s.db.QueryContext(ctx, "SELECT re, resolves, COALESCE(also_resolves, ''), "+columns+" FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+", re, resolves, also_resolves FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	type failure struct {
+		metadata replyScanner
+		err      error
+	}
+	var failures []failure
 	for rows.Next() {
 		metadata := replyScanner{row: rows}
 		r, decodeErr := s.scan(&metadata)
-		targets := []int64{metadata.re, metadata.resolves}
-		var also []int64
-		if metadata.also != "" {
-			if err := json.Unmarshal([]byte(metadata.also), &also); err != nil {
-				return nil, decodeErr
-			}
+		if decodeErr != nil {
+			failures = append(failures, failure{metadata: metadata, err: decodeErr})
+			continue
 		}
-		targets = append(targets, also...)
+		targets := append([]int64{r.Re, r.Resolves}, r.AlsoResolves...)
 		affected := map[int]bool{}
 		for _, target := range targets {
 			for _, page := range owners[target] {
 				affected[page] = true
 			}
 		}
-		if len(affected) == 0 && decodeErr != nil {
-			return nil, decodeErr
-		}
 		for page := range affected {
-			if decodeErr != nil {
-				if pages[page].Err == nil {
-					pages[page].Err = decodeErr
-				}
-				continue
-			}
 			if r.Re != 0 {
 				pages[page].Replies[r.Re] = append(pages[page].Replies[r.Re], r)
 			}
@@ -638,14 +643,65 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 			}
 		}
 	}
-	if err := rows.Err(); err != nil {
+	queryErr := rows.Err()
+	if err := rows.Close(); err != nil && queryErr == nil {
+		queryErr = err
+	}
+	for _, failed := range failures {
+		direct, err := s.replyErrorTargets(ctx, "SELECT value FROM json_each(?) WHERE value = ? OR value = ?", string(ids), failed.metadata.re, failed.metadata.resolves)
+		if err != nil {
+			return nil, err
+		}
+		also, err := s.replyErrorTargets(ctx, "SELECT value FROM json_each(?) WHERE value IN (SELECT value FROM json_each(?))", string(ids), failed.metadata.also)
+		if err != nil {
+			if pages[0].Err == nil {
+				pages[0].Err = err
+				for _, target := range direct {
+					if slices.Contains(owners[target], 0) {
+						pages[0].Err = failed.err
+						break
+					}
+				}
+			}
+			continue
+		}
+		targets := append(direct, also...)
+		if len(targets) == 0 {
+			return nil, failed.err
+		}
+		for _, target := range targets {
+			for _, page := range owners[target] {
+				if pages[page].Err == nil {
+					pages[page].Err = failed.err
+				}
+			}
+		}
+	}
+	if queryErr != nil {
 		for page := range pages {
 			if pages[page].Err == nil {
-				pages[page].Err = err
+				pages[page].Err = queryErr
 			}
 		}
 	}
 	return pages, nil
+}
+
+func (s *Store) replyErrorTargets(ctx context.Context, query string, args ...any) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var targets []int64
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, err
+		}
+		targets = append(targets, seq)
+	}
+	return targets, rows.Err()
 }
 
 func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, error) {

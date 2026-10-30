@@ -78,10 +78,13 @@ jobs:
         run: |
           test "$(git -C .ci-grep-baseline rev-parse HEAD)" = e08497bf9ce5880788f6103a949e034c9ed13fc4
           cp internal/cli/grep_cost_test.go .ci-grep-baseline/internal/cli/grep_cost_test.go
+          cp internal/inbox/grep_internal_test.go .ci-grep-baseline/internal/inbox/grep_internal_test.go
+          mkdir -p "$RUNNER_TEMP/cci-grep-errors"
+          (cd .ci-grep-baseline && CCI_GREP_SNAPSHOTS="$RUNNER_TEMP/cci-grep-errors" CCI_GREP_SNAPSHOT_WRITE=1 go test -run '^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox)
           (cd .ci-grep-baseline && CCI_GREP_EXPECT_PAGED=1 go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli)
           go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli
           go test -run '^TestRepliesSelectionExceedsVariableLimit$' -v ./internal/store
-          go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreservesReadErrorOutput$|^TestGrepPreservesLaterAnnotationErrorPrefix$' -v ./internal/inbox
+          CCI_GREP_SNAPSHOTS="$RUNNER_TEMP/cci-grep-errors" go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
       - name: Build
         run: go build ./...
 
