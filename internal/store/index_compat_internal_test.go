@@ -67,11 +67,11 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			if first == "old" {
 				assertLaneIndexCount(t, st, 0)
-				assertMembershipsInstalled(t, st, false)
+				assertMembershipsInstalled(ctx, t, st, false)
 				assertOldFixtureRecord(t, st, initial)
 			} else {
 				assertLaneIndexCount(t, st, len(physicalIndexes))
-				assertMembershipsInstalled(t, st, true)
+				assertMembershipsInstalled(ctx, t, st, true)
 			}
 			report, err := MaintainIndexes(ctx, home)
 			if err != nil {
@@ -85,8 +85,8 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 				t.Fatalf("maintenance report = %+v, want %d indexes and %d membership objects", report, wantCreated, wantMemberships)
 			}
 			assertLaneIndexCount(t, st, len(physicalIndexes))
-			assertMembershipsInstalled(t, st, true)
-			assertMembershipsDerived(t, st)
+			assertMembershipsInstalled(ctx, t, st, true)
+			assertMembershipsDerived(ctx, t, st)
 			candidate, _, err := st.Post(ctx, Record{
 				Drive:  "compat",
 				Lane:   "new",
@@ -112,16 +112,16 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			t.Cleanup(func() { _ = reopened.Close() })
 			assertOldFixtureRecord(t, reopened, old)
 			assertLaneIndexCount(t, reopened, len(physicalIndexes))
-			assertMembershipsInstalled(t, reopened, true)
-			assertMembership(t, reopened, "record_recipients", "'peer:compat-old'", old.PostedSeq, 1)
-			assertMembership(t, reopened, "record_recipients", "'peer:old-matrix'", matrix.Ask, 1)
-			assertMembership(t, reopened, "record_recipients", "'old@compat'", matrix.Ask, 1)
-			assertMembership(t, reopened, "record_also_resolves", strconv.FormatInt(candidate.Seq, 10), matrix.Done, 1)
-			assertMembership(t, reopened, "record_recipients", "'peer:old-import'", matrix.Imported, 0)
-			assertMembership(t, reopened, "record_recipients", "'peer:old-reparsed'", matrix.Imported, 1)
-			assertMembership(t, reopened, "record_also_resolves", strconv.FormatInt(candidate.Seq, 10), matrix.Remote, 1)
-			assertMembership(t, reopened, "record_recipients", "'peer:old-folded'", 0, 0)
-			assertMembershipsDerived(t, reopened)
+			assertMembershipsInstalled(ctx, t, reopened, true)
+			assertMembership(ctx, t, reopened, "record_recipients", "'peer:compat-old'", old.PostedSeq, 1)
+			assertMembership(ctx, t, reopened, "record_recipients", "'peer:old-matrix'", matrix.Ask, 1)
+			assertMembership(ctx, t, reopened, "record_recipients", "'old@compat'", matrix.Ask, 1)
+			assertMembership(ctx, t, reopened, "record_also_resolves", strconv.FormatInt(candidate.Seq, 10), matrix.Done, 1)
+			assertMembership(ctx, t, reopened, "record_recipients", "'peer:old-import'", matrix.Imported, 0)
+			assertMembership(ctx, t, reopened, "record_recipients", "'peer:old-reparsed'", matrix.Imported, 1)
+			assertMembership(ctx, t, reopened, "record_also_resolves", strconv.FormatInt(candidate.Seq, 10), matrix.Remote, 1)
+			assertMembership(ctx, t, reopened, "record_recipients", "'peer:old-folded'", 0, 0)
+			assertMembershipsDerived(ctx, t, reopened)
 			if matrix.Folded != 2 {
 				t.Fatalf("old matrix folded %d records, want 2", matrix.Folded)
 			}

@@ -25,7 +25,7 @@ var membershipKeys = map[string]string{
 
 func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 	ctx := context.Background()
-	st := openMembershipStore(t, t.TempDir())
+	st := openMembershipStore(ctx, t, t.TempDir())
 	post := func(r Record) Record {
 		t.Helper()
 		got, _, err := st.Post(ctx, r, 0)
@@ -43,10 +43,10 @@ func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 	ask := post(Record{Drive: "d", Lane: "root", Kind: kinds.Ask, Text: "question", To: []string{"peer:reader", "api@other", "peer:reader"}})
 	other := post(Record{Drive: "d", Lane: "api", Kind: kinds.Ask, Text: "second question"})
 	done := post(Record{Drive: "d", Lane: "api", Kind: kinds.Done, Text: "both answered", Resolves: ask.Seq, AlsoResolves: []int64{other.Seq}, To: []string{"root"}})
-	assertMembership(t, st, "record_recipients", "'peer:reader'", ask.Seq, 1)
-	assertMembership(t, st, "record_recipients", "'api@other'", ask.Seq, 1)
-	assertMembership(t, st, "record_also_resolves", strconv.FormatInt(other.Seq, 10), done.Seq, 1)
-	assertMembershipsDerived(t, st)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:reader'", ask.Seq, 1)
+	assertMembership(ctx, t, st, "record_recipients", "'api@other'", ask.Seq, 1)
+	assertMembership(ctx, t, st, "record_also_resolves", strconv.FormatInt(other.Seq, 10), done.Seq, 1)
+	assertMembershipsDerived(ctx, t, st)
 
 	imported := Ingestion{
 		Record:   Record{Drive: "d", Lane: "importer", Kind: kinds.Note, At: st.Now(), Text: "imported line", Source: "import:/inbox.md", To: []string{"peer:imported"}},
@@ -60,14 +60,14 @@ func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 	if err := st.db.QueryRowContext(ctx, "SELECT seq FROM records WHERE line_hash = ?", imported.LineHash).Scan(&importedSeq); err != nil {
 		t.Fatal(err)
 	}
-	assertMembership(t, st, "record_recipients", "'peer:imported'", importedSeq, 1)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:imported'", importedSeq, 1)
 	imported.Record.To = []string{"peer:reparsed"}
 	if updated, _, err := st.Reparse(ctx, []Ingestion{imported}, false); err != nil || updated != 1 {
 		t.Fatalf("Reparse() = %d, %v", updated, err)
 	}
-	assertMembership(t, st, "record_recipients", "'peer:imported'", importedSeq, 0)
-	assertMembership(t, st, "record_recipients", "'peer:reparsed'", importedSeq, 1)
-	assertMembershipsDerived(t, st)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:imported'", importedSeq, 0)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:reparsed'", importedSeq, 1)
+	assertMembershipsDerived(ctx, t, st)
 
 	remote := "0123456789abcdef"
 	applied, err := st.Apply(ctx, []Row{
@@ -81,9 +81,9 @@ func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 	if err := st.db.QueryRowContext(ctx, "SELECT seq FROM records WHERE origin = ? AND origin_seq = 2", remote).Scan(&replySeq); err != nil {
 		t.Fatal(err)
 	}
-	assertMembership(t, st, "record_recipients", "'peer:remote'", replySeq, 1)
-	assertMembership(t, st, "record_also_resolves", strconv.FormatInt(other.Seq, 10), replySeq, 1)
-	assertMembershipsDerived(t, st)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:remote'", replySeq, 1)
+	assertMembership(ctx, t, st, "record_also_resolves", strconv.FormatInt(other.Seq, 10), replySeq, 1)
+	assertMembershipsDerived(ctx, t, st)
 
 	for _, set := range []string{
 		`recipients = '['`,
@@ -101,14 +101,14 @@ func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 		`recipients = '[]', also_resolves = '[]'`,
 	} {
 		exec("UPDATE records SET "+set+" WHERE seq = ?", done.Seq)
-		assertMembershipsDerived(t, st)
+		assertMembershipsDerived(ctx, t, st)
 	}
 	exec(`UPDATE records SET recipients = '[', also_resolves = '[' WHERE seq = ?`, done.Seq)
-	assertMembership(t, st, "record_json_errors", "'recipients'", done.Seq, 1)
-	assertMembership(t, st, "record_json_errors", "'also_resolves'", done.Seq, 1)
+	assertMembership(ctx, t, st, "record_json_errors", "'recipients'", done.Seq, 1)
+	assertMembership(ctx, t, st, "record_json_errors", "'also_resolves'", done.Seq, 1)
 	exec(`UPDATE records SET recipients = '["peer:fixed"]', also_resolves = NULL WHERE seq = ?`, done.Seq)
-	assertMembership(t, st, "record_json_errors", "", done.Seq, 0)
-	assertMembership(t, st, "record_recipients", "'peer:fixed'", done.Seq, 1)
+	assertMembership(ctx, t, st, "record_json_errors", "", done.Seq, 0)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:fixed'", done.Seq, 1)
 
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -120,8 +120,8 @@ func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
-	assertMembership(t, st, "record_recipients", "'peer:rolled'", 0, 0)
-	assertMembershipsDerived(t, st)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:rolled'", 0, 0)
+	assertMembershipsDerived(ctx, t, st)
 
 	for i := range 3 {
 		post(Record{Drive: "c", Lane: "compact", Kind: kinds.Note, Text: fmt.Sprintf("folded %d", i), To: []string{"peer:folded"}})
@@ -129,13 +129,13 @@ func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 	if res, err := st.Compact(ctx, "c", -time.Hour); err != nil || res.Folded != 3 {
 		t.Fatalf("Compact() = %+v, %v", res, err)
 	}
-	assertMembership(t, st, "record_recipients", "'peer:folded'", 0, 0)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:folded'", 0, 0)
 	post(Record{Drive: "c", Lane: "compact", Kind: kinds.Note, Text: "folded later", To: []string{"peer:folded"}})
 	if res, err := st.Compact(ctx, "c", -time.Hour); err != nil || res.Folded != 1 || res.Digests != 1 {
 		t.Fatalf("second Compact() = %+v, %v", res, err)
 	}
-	assertMembership(t, st, "record_recipients", "'peer:folded'", 0, 0)
-	assertMembershipsDerived(t, st)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:folded'", 0, 0)
+	assertMembershipsDerived(ctx, t, st)
 
 	inserted, err := st.db.ExecContext(ctx, `INSERT INTO records (drive, lane, kind, at, text, recipients, also_resolves, source, hash) VALUES ('elsewhere', 'raw', 'note', 1, 'raw corruption', '[', '[', 'post', 'raw')`)
 	if err != nil {
@@ -145,24 +145,24 @@ func TestRecordMembershipsFollowEveryWriter(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertMembership(t, st, "record_json_errors", "", raw, 2)
-	assertMembershipsDerived(t, st)
+	assertMembership(ctx, t, st, "record_json_errors", "", raw, 2)
+	assertMembershipsDerived(ctx, t, st)
 
 	exec("UPDATE records SET seq = 100000 WHERE seq = ?", ask.Seq)
-	assertMembership(t, st, "record_recipients", "'peer:reader'", ask.Seq, 0)
-	assertMembership(t, st, "record_recipients", "'peer:reader'", 100000, 1)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:reader'", ask.Seq, 0)
+	assertMembership(ctx, t, st, "record_recipients", "'peer:reader'", 100000, 1)
 	exec("DELETE FROM records WHERE seq IN (?, ?)", replySeq, raw)
-	assertMembership(t, st, "record_also_resolves", "", replySeq, 0)
-	assertMembership(t, st, "record_json_errors", "", raw, 0)
-	assertMembershipsDerived(t, st)
+	assertMembership(ctx, t, st, "record_also_resolves", "", replySeq, 0)
+	assertMembership(ctx, t, st, "record_json_errors", "", raw, 0)
+	assertMembershipsDerived(ctx, t, st)
 }
 
 func TestInitializationInstallsMembershipsOnlyWhileMigrating(t *testing.T) {
 	ctx := context.Background()
 	t.Run("fresh", func(t *testing.T) {
-		st := openMembershipStore(t, t.TempDir())
-		assertMembershipsInstalled(t, st, true)
-		assertMembershipsDerived(t, st)
+		st := openMembershipStore(ctx, t, t.TempDir())
+		assertMembershipsInstalled(ctx, t, st, true)
+		assertMembershipsDerived(ctx, t, st)
 	})
 	t.Run("schema one", func(t *testing.T) {
 		dir := t.TempDir()
@@ -183,11 +183,11 @@ func TestInitializationInstallsMembershipsOnlyWhileMigrating(t *testing.T) {
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
-		st := openMembershipStore(t, dir)
-		assertMembershipsInstalled(t, st, true)
-		assertMembership(t, st, "record_recipients", "'peer:old'", 1, 1)
-		assertMembership(t, st, "record_json_errors", "'recipients'", 2, 1)
-		assertMembershipsDerived(t, st)
+		st := openMembershipStore(ctx, t, dir)
+		assertMembershipsInstalled(ctx, t, st, true)
+		assertMembership(ctx, t, st, "record_recipients", "'peer:old'", 1, 1)
+		assertMembership(ctx, t, st, "record_json_errors", "'recipients'", 2, 1)
+		assertMembershipsDerived(ctx, t, st)
 		got, err := st.Query(ctx, Filter{Drive: "d", Peer: "missing"})
 		if err == nil || !strings.Contains(err.Error(), "malformed JSON") {
 			t.Fatalf("migrated corrupt recipients read = %+v, %v; want the native malformed JSON error", got, err)
@@ -199,19 +199,19 @@ func TestInitializationInstallsMembershipsOnlyWhileMigrating(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		dropMemberships(t, st)
+		dropMemberships(ctx, t, st)
 		if _, err := st.db.ExecContext(ctx, `INSERT INTO records (drive, lane, kind, at, text, recipients, also_resolves, source, hash) VALUES ('f', 'l', 'note', 1, 'unprovisioned', '["peer:reader"]', '[1]', 'post', 'h')`); err != nil {
 			t.Fatal(err)
 		}
-		before := schemaObjects(t, st)
+		before := schemaObjects(ctx, t, st)
 		if err := st.Close(); err != nil {
 			t.Fatal(err)
 		}
-		reopened := openMembershipStore(t, home)
-		if after := schemaObjects(t, reopened); !slices.Equal(after, before) {
+		reopened := openMembershipStore(ctx, t, home)
+		if after := schemaObjects(ctx, t, reopened); !slices.Equal(after, before) {
 			t.Fatalf("current-schema Open changed objects:\nbefore %v\nafter %v", before, after)
 		}
-		assertMembershipsInstalled(t, reopened, false)
+		assertMembershipsInstalled(ctx, t, reopened, false)
 		if _, err := reopened.Query(ctx, Filter{Drive: "d", Peer: "reader"}); err == nil || !strings.Contains(err.Error(), "no such table: record_") {
 			t.Fatalf("unprovisioned peer read error = %v, want the missing membership table", err)
 		}
@@ -225,10 +225,10 @@ func TestInitializationInstallsMembershipsOnlyWhileMigrating(t *testing.T) {
 		if len(report.Created) != 0 || len(report.Memberships) != len(recordMemberships) {
 			t.Fatalf("provisioning report = %+v, want every membership object and no lane index", report)
 		}
-		assertMembershipsInstalled(t, reopened, true)
-		assertMembership(t, reopened, "record_recipients", "'peer:reader'", 1, 1)
-		assertMembership(t, reopened, "record_also_resolves", "1", 1, 1)
-		assertMembershipsDerived(t, reopened)
+		assertMembershipsInstalled(ctx, t, reopened, true)
+		assertMembership(ctx, t, reopened, "record_recipients", "'peer:reader'", 1, 1)
+		assertMembership(ctx, t, reopened, "record_also_resolves", "1", 1, 1)
+		assertMembershipsDerived(ctx, t, reopened)
 		repeated, err := MaintainIndexes(ctx, home)
 		if err != nil || len(repeated.Created) != 0 || len(repeated.Memberships) != 0 {
 			t.Fatalf("repeated provisioning = %+v, %v", repeated, err)
@@ -252,18 +252,18 @@ func TestMaintainIndexesRefusesForeignMembershipObjects(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
-			st := openMembershipStore(t, t.TempDir())
+			st := openMembershipStore(ctx, t, t.TempDir())
 			dropLaneIndexes(t, st)
 			for _, query := range tt.damage {
 				if _, err := st.db.ExecContext(ctx, query); err != nil {
 					t.Fatal(err)
 				}
 			}
-			before := schemaObjects(t, st)
+			before := schemaObjects(ctx, t, st)
 			if _, err := MaintainIndexes(ctx, st.home); err == nil {
 				t.Fatal("maintenance accepted foreign membership objects")
 			}
-			if after := schemaObjects(t, st); !slices.Equal(after, before) {
+			if after := schemaObjects(ctx, t, st); !slices.Equal(after, before) {
 				t.Fatalf("refused maintenance changed objects:\nbefore %v\nafter %v", before, after)
 			}
 			if _, err := membershipsInstalled(ctx, st.db); err == nil {
@@ -274,7 +274,8 @@ func TestMaintainIndexesRefusesForeignMembershipObjects(t *testing.T) {
 }
 
 func TestBoundedReadPlansStayIndexed(t *testing.T) {
-	st := openMembershipStore(t, t.TempDir())
+	ctx := t.Context()
+	st := openMembershipStore(ctx, t, t.TempDir())
 	now := st.Now()
 	scans := regexp.MustCompile(`^SCAN (records|r|record_\w+)\b`)
 	driveCandidates := regexp.MustCompile(`SEARCH records USING COVERING INDEX \w+ \(drive=\?`)
@@ -295,12 +296,20 @@ func TestBoundedReadPlansStayIndexed(t *testing.T) {
 			q, params := st.selection(tt.f)
 			where, countParams := tt.f.bounded(st.Self(), st.Now())
 			for name, plan := range map[string][]string{
-				"query": queryPlan(t, st, q, params...),
-				"count": queryPlan(t, st, "SELECT COUNT(*) FROM records WHERE "+where, countParams...),
+				"query": queryPlan(ctx, t, st, q, params...),
+				"count": queryPlan(ctx, t, st, "SELECT COUNT(*) FROM records WHERE "+where, countParams...),
 			} {
 				joined := strings.Join(plan, "\n")
+				if name == "count" && tt.f.PeerAfter > 0 {
+					nativeWhere, nativeParams := tt.f.where(st.Self(), st.Now())
+					nativePlan := queryPlan(ctx, t, st, "SELECT COUNT(*) FROM records WHERE "+nativeWhere, nativeParams...)
+					if plan[0] != nativePlan[0] {
+						t.Fatalf("peer-after count access path = %v, want original %v", plan, nativePlan)
+					}
+				} else if !strings.Contains(joined, "SEARCH records USING INTEGER PRIMARY KEY (rowid=?)") {
+					t.Fatalf("%s plan lacks keyed record lookup:\n%s", name, joined)
+				}
 				for _, want := range []string{
-					"SEARCH records USING INTEGER PRIMARY KEY (rowid=?)",
 					"SEARCH record_recipients USING COVERING INDEX record_recipients_address (address=?",
 					"SEARCH record_json_errors USING COVERING INDEX record_json_errors_field (field=?",
 				} {
@@ -323,13 +332,13 @@ func TestBoundedReadPlansStayIndexed(t *testing.T) {
 	origin := Filter{Drive: "d", Peer: "reader", Origin: "feedfacefeedface", Limit: 2, Descending: true}
 	q, params := st.selection(origin)
 	where, unboundedParams := origin.where(st.Self(), st.Now())
-	got, want := queryPlan(t, st, q, params...), queryPlan(t, st, "SELECT "+columns+" FROM records WHERE "+where+" ORDER BY seq DESC LIMIT 2", unboundedParams...)
+	got, want := queryPlan(ctx, t, st, q, params...), queryPlan(ctx, t, st, "SELECT "+columns+" FROM records WHERE "+where+" ORDER BY seq DESC LIMIT 2", unboundedParams...)
 	sorted := "USE TEMP B-TREE FOR ORDER BY"
 	if got[0] != want[0] || slices.Contains(got, sorted) != slices.Contains(want, sorted) {
 		t.Fatalf("origin plan = %v, want the unbounded access path %v", got, want)
 	}
 	t.Logf("origin plan: %v; unbounded: %v", got, want)
-	plan := queryPlan(t, st, resolversSQL, slices.Repeat([]any{"d"}, 7)...)
+	plan := queryPlan(ctx, t, st, resolversSQL, slices.Repeat([]any{"d"}, 7)...)
 	joined := strings.Join(plan, "\n")
 	for _, want := range []string{
 		"SEARCH records USING COVERING INDEX records_resolves (drive=?)",
@@ -351,7 +360,7 @@ func TestBoundedReadPlansStayIndexed(t *testing.T) {
 	for _, statement := range strings.Split(strings.TrimSpace(forgetMemberships), "\n") {
 		cleanup := strings.Replace(strings.TrimSuffix(statement, ";"), "OLD.seq", "?", 1)
 		table := strings.Fields(cleanup)[2]
-		got := strings.Join(queryPlan(t, st, cleanup, 1), "\n")
+		got := strings.Join(queryPlan(ctx, t, st, cleanup, 1), "\n")
 		if !strings.HasPrefix(got, "SEARCH "+table+" USING ") || !strings.Contains(got, "INDEX "+table+"_source (source_seq=?)") {
 			t.Fatalf("trigger cleanup %q plan = %s, want a %s_source search", cleanup, got, table)
 		}
@@ -393,15 +402,15 @@ func TestBoundedReadsMatchUnboundedPredicates(t *testing.T) {
 	}
 	for _, variant := range membershipVariants {
 		t.Run(variant.name, func(t *testing.T) {
-			st := openMembershipStore(t, t.TempDir())
+			st := openMembershipStore(ctx, t, t.TempDir())
 			st.Now = func() time.Time { return now }
-			seedMembershipFixture(t, st, now)
+			seedMembershipFixture(ctx, t, st, now)
 			for _, set := range variant.sets {
 				if _, err := st.db.ExecContext(ctx, "UPDATE records SET "+set.set+" WHERE seq = ?", set.seq); err != nil {
 					t.Fatalf("%s: %v", set.set, err)
 				}
 			}
-			assertMembershipsDerived(t, st)
+			assertMembershipsDerived(ctx, t, st)
 			for _, tt := range filters {
 				got, gotErr := st.Query(ctx, tt.f)
 				want, wantErr := unboundedQuery(ctx, st, tt.f)
@@ -465,7 +474,7 @@ var membershipVariants = []struct {
 	{"real drive resolves", []membershipSet{{4, `resolves = 4.5`}}},
 }
 
-func seedMembershipFixture(t *testing.T, st *Store, now time.Time) {
+func seedMembershipFixture(ctx context.Context, t *testing.T, st *Store, now time.Time) {
 	t.Helper()
 	at := now.Add(-time.Hour).UnixMilli()
 	node := PeerAddressOn(st.Self(), "reader")
@@ -491,7 +500,7 @@ func seedMembershipFixture(t *testing.T, st *Store, now time.Time) {
 		{"x", "irrelevant", "note", `["someone"]`, nil, 0, `{}`},
 		{"d", "api", "note", `[]`, nil, 0, `{}`},
 	} {
-		res, err := st.db.ExecContext(context.Background(), `INSERT INTO records (drive, lane, kind, at, text, recipients, also_resolves, resolves, refs, source, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'post', ?)`,
+		res, err := st.db.ExecContext(ctx, `INSERT INTO records (drive, lane, kind, at, text, recipients, also_resolves, resolves, refs, source, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'post', ?)`,
 			row.drive, row.lane, row.kind, at, fmt.Sprintf("fixture %d", i+1), row.recipients, row.also, row.resolves, row.refs, fmt.Sprintf("fixture-%d", i+1))
 		if err != nil {
 			t.Fatal(err)
@@ -500,7 +509,7 @@ func seedMembershipFixture(t *testing.T, st *Store, now time.Time) {
 			t.Fatalf("fixture seq = %d, %v; want %d", seq, err, i+1)
 		}
 	}
-	if _, err := st.db.ExecContext(context.Background(), "UPDATE records SET origin = 'feedfacefeedface' WHERE seq >= 12"); err != nil {
+	if _, err := st.db.ExecContext(ctx, "UPDATE records SET origin = 'feedfacefeedface' WHERE seq >= 12"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -580,8 +589,8 @@ func TestMaintainIndexesProvisionsMembershipsWithinWriterBudget(t *testing.T) {
 	budget := 5 * time.Second
 	ctx := context.Background()
 	home := t.TempDir()
-	st := openMembershipStore(t, home)
-	dropMemberships(t, st)
+	st := openMembershipStore(ctx, t, home)
+	dropMemberships(ctx, t, st)
 	if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
@@ -597,14 +606,14 @@ SELECT 'drive-' || (n % 64), 'lane-' || (n % 16), 'note', n, 'history ' || n,
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertMembershipsInstalled(t, st, true)
+	assertMembershipsInstalled(ctx, t, st, true)
 	if len(report.Memberships) != len(recordMemberships) || report.Elapsed >= budget {
 		t.Fatalf("provisioning %d records = %+v, want every membership object within %s of the 10s writer busy timeout", population, report, budget)
 	}
 	if _, _, err := st.Post(ctx, Record{Drive: "drive-1", Lane: "after", Kind: kinds.Note, Text: "after provisioning", To: []string{"peer:session-1"}}, 0); err != nil {
 		t.Fatal(err)
 	}
-	assertMembershipsDerived(t, st)
+	assertMembershipsDerived(ctx, t, st)
 	var memberships int
 	if err := st.db.QueryRowContext(ctx, "SELECT (SELECT COUNT(*) FROM record_recipients) + (SELECT COUNT(*) FROM record_also_resolves)").Scan(&memberships); err != nil {
 		t.Fatal(err)
@@ -612,9 +621,9 @@ SELECT 'drive-' || (n % 64), 'lane-' || (n % 16), 'note', n, 'history ' || n,
 	t.Logf("records=%d memberships=%d provisioning_elapsed=%s writer_budget=%s before=%+v after=%+v", population, memberships, report.Elapsed, budget, report.Before, report.After)
 }
 
-func openMembershipStore(t *testing.T, home string) *Store {
+func openMembershipStore(ctx context.Context, t *testing.T, home string) *Store {
 	t.Helper()
-	st, err := Open(context.Background(), home)
+	st, err := Open(ctx, home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -622,24 +631,24 @@ func openMembershipStore(t *testing.T, home string) *Store {
 	return st
 }
 
-func dropMemberships(t *testing.T, st *Store) {
+func dropMemberships(ctx context.Context, t *testing.T, st *Store) {
 	t.Helper()
 	for _, object := range slices.Backward(recordMemberships[:]) {
-		if _, err := st.db.ExecContext(context.Background(), "DROP "+strings.ToUpper(object.kind)+" IF EXISTS "+object.name); err != nil {
+		if _, err := st.db.ExecContext(ctx, "DROP "+strings.ToUpper(object.kind)+" IF EXISTS "+object.name); err != nil {
 			t.Fatal(err)
 		}
 	}
 }
 
-func assertMembershipsInstalled(t *testing.T, st *Store, want bool) {
+func assertMembershipsInstalled(ctx context.Context, t *testing.T, st *Store, want bool) {
 	t.Helper()
-	got, err := membershipsInstalled(context.Background(), st.db)
+	got, err := membershipsInstalled(ctx, st.db)
 	if err != nil || got != want {
 		t.Fatalf("record memberships installed = %v, %v; want %v", got, err, want)
 	}
 }
 
-func assertMembership(t *testing.T, st *Store, table, key string, seq int64, want int) {
+func assertMembership(ctx context.Context, t *testing.T, st *Store, table, key string, seq int64, want int) {
 	t.Helper()
 	query, args := "SELECT COUNT(*) FROM "+table+" WHERE 1", []any{}
 	if key != "" {
@@ -651,7 +660,7 @@ func assertMembership(t *testing.T, st *Store, table, key string, seq int64, wan
 		args = append(args, seq)
 	}
 	var got int
-	if err := st.db.QueryRowContext(context.Background(), query, args...).Scan(&got); err != nil {
+	if err := st.db.QueryRowContext(ctx, query, args...).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got != want {
@@ -659,9 +668,8 @@ func assertMembership(t *testing.T, st *Store, table, key string, seq int64, wan
 	}
 }
 
-func assertMembershipsDerived(t *testing.T, st *Store) {
+func assertMembershipsDerived(ctx context.Context, t *testing.T, st *Store) {
 	t.Helper()
-	ctx := context.Background()
 	conn, err := st.db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -681,17 +689,17 @@ func assertMembershipsDerived(t *testing.T, st *Store) {
 				t.Fatalf("%s: %v", query, err)
 			}
 		}
-		got := membershipRows(t, conn, "main."+object.name, object.name)
-		want := membershipRows(t, conn, "temp."+expected, object.name)
+		got := membershipRows(ctx, t, conn, "main."+object.name, object.name)
+		want := membershipRows(ctx, t, conn, "temp."+expected, object.name)
 		if !slices.Equal(got, want) {
 			t.Fatalf("%s = %v, want backfill derivation %v", object.name, got, want)
 		}
 	}
 }
 
-func membershipRows(t *testing.T, conn *sql.Conn, table, name string) []string {
+func membershipRows(ctx context.Context, t *testing.T, conn *sql.Conn, table, name string) []string {
 	t.Helper()
-	rows, err := conn.QueryContext(context.Background(), "SELECT quote("+membershipKeys[name]+") || ' #' || source_seq FROM "+table+" ORDER BY 1")
+	rows, err := conn.QueryContext(ctx, "SELECT quote("+membershipKeys[name]+") || ' #' || source_seq FROM "+table+" ORDER BY 1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -710,9 +718,9 @@ func membershipRows(t *testing.T, conn *sql.Conn, table, name string) []string {
 	return out
 }
 
-func schemaObjects(t *testing.T, st *Store) []string {
+func schemaObjects(ctx context.Context, t *testing.T, st *Store) []string {
 	t.Helper()
-	rows, err := st.db.QueryContext(context.Background(), "SELECT type || ' ' || name || ' ' || COALESCE(sql, '') FROM sqlite_schema ORDER BY name")
+	rows, err := st.db.QueryContext(ctx, "SELECT type || ' ' || name || ' ' || COALESCE(sql, '') FROM sqlite_schema ORDER BY name")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -731,9 +739,9 @@ func schemaObjects(t *testing.T, st *Store) []string {
 	return out
 }
 
-func queryPlan(t *testing.T, st *Store, query string, args ...any) []string {
+func queryPlan(ctx context.Context, t *testing.T, st *Store, query string, args ...any) []string {
 	t.Helper()
-	rows, err := st.db.QueryContext(context.Background(), "EXPLAIN QUERY PLAN "+query, args...)
+	rows, err := st.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query, args...)
 	if err != nil {
 		t.Fatal(err)
 	}

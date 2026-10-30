@@ -168,8 +168,8 @@ func (f Filter) bounded(self string, now time.Time) (string, []any) {
 		return where, params
 	}
 	candidate := "seq"
-	if f.Origin != "" {
-		// Unary plus keeps the records_origin access path the unbounded query takes, so its rows are visited the same way.
+	if f.Origin != "" || f.PeerAfter > 0 {
+		// Unary plus retains records_origin and peer-after OR scans, including their native error order.
 		candidate = "+seq"
 	}
 	return where + " AND " + candidate + " IN (" + strings.Join(arms, " UNION ALL ") + ")", append(params, candidates...)

@@ -34,12 +34,24 @@ DELETE FROM record_json_errors WHERE source_seq = OLD.seq;
 var recordMemberships = [...]struct {
 	kind, name, sql, fill string
 }{
-	{"table", "record_recipients", "CREATE TABLE record_recipients (address TEXT NOT NULL, source_seq INTEGER NOT NULL)",
-		`INSERT INTO record_recipients (address, source_seq) SELECT DISTINCT j.value, r.seq FROM records r, json_each(CASE WHEN json_error_position(r.recipients) = 0 THEN r.recipients ELSE '[]' END) j WHERE typeof(j.value) = 'text'`},
-	{"table", "record_also_resolves", "CREATE TABLE record_also_resolves (target NUMERIC NOT NULL, source_seq INTEGER NOT NULL)",
-		`INSERT INTO record_also_resolves (target, source_seq) SELECT j.atom, r.seq FROM records r, json_each(CASE WHEN json_error_position(r.also_resolves) = 0 THEN r.also_resolves ELSE '[]' END) j WHERE j.atom IS NOT NULL`},
-	{"table", "record_json_errors", "CREATE TABLE record_json_errors (field TEXT NOT NULL, source_seq INTEGER NOT NULL)",
-		`INSERT INTO record_json_errors (field, source_seq) SELECT 'recipients', seq FROM records WHERE json_error_position(recipients) != 0 UNION ALL SELECT 'also_resolves', seq FROM records WHERE json_error_position(also_resolves) != 0`},
+	{
+		"table",
+		"record_recipients",
+		"CREATE TABLE record_recipients (address TEXT NOT NULL, source_seq INTEGER NOT NULL)",
+		`INSERT INTO record_recipients (address, source_seq) SELECT DISTINCT j.value, r.seq FROM records r, json_each(CASE WHEN json_error_position(r.recipients) = 0 THEN r.recipients ELSE '[]' END) j WHERE typeof(j.value) = 'text'`,
+	},
+	{
+		"table",
+		"record_also_resolves",
+		"CREATE TABLE record_also_resolves (target NUMERIC NOT NULL, source_seq INTEGER NOT NULL)",
+		`INSERT INTO record_also_resolves (target, source_seq) SELECT j.atom, r.seq FROM records r, json_each(CASE WHEN json_error_position(r.also_resolves) = 0 THEN r.also_resolves ELSE '[]' END) j WHERE j.atom IS NOT NULL`,
+	},
+	{
+		"table",
+		"record_json_errors",
+		"CREATE TABLE record_json_errors (field TEXT NOT NULL, source_seq INTEGER NOT NULL)",
+		`INSERT INTO record_json_errors (field, source_seq) SELECT 'recipients', seq FROM records WHERE json_error_position(recipients) != 0 UNION ALL SELECT 'also_resolves', seq FROM records WHERE json_error_position(also_resolves) != 0`,
+	},
 	{"index", "record_recipients_address", "CREATE INDEX record_recipients_address ON record_recipients(address, source_seq)", ""},
 	{"index", "record_recipients_source", "CREATE INDEX record_recipients_source ON record_recipients(source_seq)", ""},
 	{"index", "record_also_resolves_target", "CREATE INDEX record_also_resolves_target ON record_also_resolves(target, source_seq)", ""},

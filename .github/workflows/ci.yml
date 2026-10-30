@@ -101,7 +101,7 @@ jobs:
           CCI_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-tail-snapshots" go test -run "$tail_tests" -v ./internal/cli
       - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
         run: |
-          go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store
+          go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store
           CCI_MEMBERSHIP_PROVISION_ROWS=200000 go test -run '^TestMaintainIndexesProvisionsMembershipsWithinWriterBudget$' -v ./internal/store
 
   lint:

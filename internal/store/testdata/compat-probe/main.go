@@ -38,6 +38,9 @@ func main() {
 }
 
 func run() error {
+	if len(os.Args) == 3 && os.Args[1] == "wait-write" {
+		return waitingWriter(os.Args[2])
+	}
 	if len(os.Args) == 4 && os.Args[1] == "matrix" {
 		return matrix(os.Args[2], os.Args[3])
 	}
@@ -86,6 +89,39 @@ func run() error {
 		return fmt.Errorf("close old store: %w", err)
 	}
 	return json.NewEncoder(os.Stdout).Encode(result)
+}
+
+func waitingWriter(home string) error {
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		return fmt.Errorf("open waiting old writer: %w", err)
+	}
+	defer func() { _ = st.Close() }()
+	if _, err := fmt.Fprintln(os.Stdout, "ready"); err != nil {
+		return err
+	}
+	var signal string
+	if _, err := fmt.Fscanln(os.Stdin, &signal); err != nil {
+		return fmt.Errorf("await old writer signal: %w", err)
+	}
+	if signal != "write" {
+		return fmt.Errorf("old writer signal %q, want write", signal)
+	}
+	if _, err := fmt.Fprintln(os.Stdout, "writing"); err != nil {
+		return err
+	}
+	record, _, err := st.Post(ctx, store.Record{
+		Drive: "concurrent", Lane: "old", Kind: "note", Text: "old writer during provisioning",
+		To: []string{"peer:concurrent-old"}, Source: "post",
+	}, 0)
+	if err != nil {
+		return fmt.Errorf("post while memberships provision: %w", err)
+	}
+	return json.NewEncoder(os.Stdout).Encode(struct {
+		Seq         int64  `json:"seq"`
+		Fingerprint string `json:"fingerprint"`
+	}{record.Seq, st.SchemaFingerprint()})
 }
 
 func matrix(home, rawTarget string) error {
