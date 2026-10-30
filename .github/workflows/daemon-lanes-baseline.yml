@@ -1,0 +1,19 @@
+name: Daemon lane history baseline
+
+on:
+  push:
+    branches: [perf/cci-daemon-cpu]
+
+permissions:
+  contents: read
+
+jobs:
+  actual-handler-counts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test -run '^TestDaemonLaneHistoryBaseline$' -v ./internal/cli
