@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"ops":[{"kind":"set_branch","branch":"perf/cci-session-ux"}]}
+{"v":1,"lamport":4,"ops":[{"kind":"set_criterion_status","id":"3c0753b7ece99f0b0fbe95bc568cb12f","status":"met","note":"Actual test-only baseline5824f56 CI41041889631 reproduces backend and stdin side effects on Linux and macOS; raw ux-baseline-linux.log and ux-baseline-macos.log retained in fundamental-efficiency/cci-post-cost-ci. Final combined candidate CI41043911818 and merged-main41044363918 all5PASS."}]}
