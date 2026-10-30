@@ -19,6 +19,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Validate known-store population margin
+        env:
+          CCI_MEMBERSHIP_PROVISION_ROWS: "250000"
+        run: go test -run '^TestMaintainIndexesProvisionsMembershipsWithinWriterBudget$' -v ./internal/store
       - name: Build source-bound provisioning candidate
         env:
           GOOS: darwin
