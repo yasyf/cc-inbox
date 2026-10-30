@@ -348,8 +348,14 @@ func stamped(w io.Writer, text, lane string, at time.Time, label bool) (string, 
 
 func labels(prefix, colon, lane string) bool {
 	prefix = strings.TrimSpace(prefix)
-	return prefix == "" || colon != "" || prefix == lane
+	if prefix == "" || prefix == lane {
+		return true
+	}
+	words := strings.Fields(prefix)
+	return colon != "" && !strings.ContainsAny(prefix, ".;") && !clockPrepositions[strings.ToLower(words[len(words)-1])]
 }
+
+var clockPrepositions = map[string]bool{"since": true, "at": true, "until": true, "till": true, "before": true, "after": true, "by": true, "from": true, "to": true, "around": true, "about": true}
 
 func namedPR(w io.Writer, r store.Record) ([]store.PR, error) {
 	named := store.UnboundPRs(r)

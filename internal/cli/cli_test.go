@@ -479,6 +479,8 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 		{name: "stamped text without a label", text: "live on dev", stamp: true, want: "{at} live on dev"},
 		{name: "time in an opening clause", text: "for his " + ahead + " ask", want: "for his " + ahead + " ask", stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
 		{name: "later time inside the text", text: "live on dev, read " + ahead, want: "live on dev, read " + ahead, stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
+		{name: "time a sentence names since", text: "lane-x: reconciling. Landed since " + before + ": 45899", want: "lane-x: reconciling. Landed since " + before + ": 45899"},
+		{name: "stamped text whose sentence names a time since", text: "lane-x: reconciling. Landed since " + before + ": 45899", stamp: true, want: "{at} lane-x: reconciling. Landed since " + before + ": 45899"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			args := []string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", tt.text}
