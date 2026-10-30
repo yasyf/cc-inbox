@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -65,7 +66,8 @@ func Dir() (string, error) {
 }
 
 // Sessions reads every registry file in dir, keyed by session id. A missing
-// dir is an empty registry.
+// dir is an empty registry, and a file that does not decode, such as one its
+// writer is still writing, is skipped with a warning.
 func Sessions(dir string) (map[string]Session, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -88,7 +90,8 @@ func Sessions(dir string) (map[string]Session, error) {
 		}
 		var s Session
 		if err := json.Unmarshal(raw, &s); err != nil {
-			return nil, fmt.Errorf("decode %s: %w", e.Name(), err)
+			slog.Warn("skipping a session registry file that does not decode", "file", e.Name(), "err", err)
+			continue
 		}
 		out[s.SessionID] = s
 	}
