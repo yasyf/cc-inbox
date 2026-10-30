@@ -6,14 +6,16 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
+	"regexp"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
 )
@@ -71,12 +73,24 @@ func NewRootCmd() *cobra.Command {
 	return root
 }
 
+var number = regexp.MustCompile(`^#?[0-9]+(@[0-9a-f]+)?$`)
+
 func openStore(ctx context.Context) (*store.Store, error) {
 	home, err := store.Home()
 	if err != nil {
 		return nil, err
 	}
-	return store.Open(ctx, home)
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		return nil, err
+	}
+	configs, err := relay.Configs(home)
+	if err != nil {
+		_ = st.Close()
+		return nil, err
+	}
+	st.SetOwner(!slices.ContainsFunc(configs, func(c relay.Config) bool { return c.Tier != string(node.TierOwner) }))
+	return st, nil
 }
 
 func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, error) {
@@ -167,18 +181,20 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 	if out.ToKinds, err = kinds.ParseAll(f.toKinds); err != nil {
 		return store.Filter{}, err
 	}
-	if out.After, out.Since, err = parseSince(f.since, st.Now()); err != nil {
+	if out.After, out.Since, err = parseSince(ctx, st, f.since); err != nil {
 		return store.Filter{}, err
 	}
 	return out, nil
 }
 
-func parseSince(s string, now time.Time) (int64, time.Time, error) {
+func parseSince(ctx context.Context, st *store.Store, s string) (int64, time.Time, error) {
 	if s == "" {
 		return 0, time.Time{}, nil
 	}
-	if seq, err := strconv.ParseInt(strings.TrimPrefix(s, "#"), 10, 64); err == nil {
-		return seq, time.Time{}, nil
+	now := st.Now()
+	if number.MatchString(s) {
+		seq, err := st.Resolve(ctx, s)
+		return seq, time.Time{}, err
 	}
 	if d, err := time.ParseDuration(s); err == nil {
 		return 0, now.Add(-d), nil
