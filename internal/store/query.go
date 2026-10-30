@@ -329,7 +329,10 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, s.numbered(ctx, out)
 }
 
 func (s *Store) selection(f Filter) (string, []any) {
@@ -679,7 +682,10 @@ func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, e
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, s.numbered(ctx, out)
 }
 
 type ReplyPage struct {
@@ -829,6 +835,13 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 				if firstReply[page] == 0 {
 					pages[page].Err = fmt.Errorf("read replies: %w", queryErr)
 				}
+			}
+		}
+	}
+	for _, page := range pages {
+		for _, replies := range page.Replies {
+			if err := s.numbered(ctx, replies); err != nil {
+				return nil, err
 			}
 		}
 	}

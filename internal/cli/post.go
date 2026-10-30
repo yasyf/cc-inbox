@@ -46,7 +46,7 @@ func newPostCmd() *cobra.Command {
 		ttl                     time.Duration
 		asJSON, label, force    bool
 		pairwise                bool
-		re, resolves            []int64
+		re, resolves            []string
 	)
 	cmd := &cobra.Command{
 		Use:   "post [TEXT]",
@@ -169,13 +169,24 @@ func newPostCmd() *cobra.Command {
 				}
 				r.Fields.Attrs["successor"] = successor
 			}
-			records, err := perTarget(r, re, resolves, pairwise)
+			reSeqs, err := resolveAll(cmd.Context(), st, re)
+			if err != nil {
+				return err
+			}
+			resolvesSeqs, err := resolveAll(cmd.Context(), st, resolves)
+			if err != nil {
+				return err
+			}
+			records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
 			if err != nil {
 				return err
 			}
 			for _, rec := range records {
 				got, dup, err := st.PostAt(cmd.Context(), rec, ttl, at)
 				if err != nil {
+					return err
+				}
+				if got.Num, err = st.Number(cmd.Context(), got); err != nil {
 					return err
 				}
 				if err := printPosted(cmd.OutOrStdout(), got, dup, asJSON); err != nil {
@@ -197,8 +208,8 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; owner and all always pass")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
-	f.Int64SliceVar(&re, "re", nil, "seq this record answers or closes; repeated, each seq gets its own record")
-	f.Int64SliceVar(&resolves, "resolves", nil, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every seq")
+	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) of the record this one answers or closes; repeated, each gets its own record")
+	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
 	f.BoolVar(&pairwise, "pairwise", false, "pair equal non-empty --re and --resolves lists in order, posting one record per pair")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
@@ -288,7 +299,7 @@ func forwarded(ctx context.Context, st *store.Store, drive string, to []string) 
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")
 
-func validateTargets(re, resolves []int64, pairwise bool) error {
+func validateTargets[T any](re, resolves []T, pairwise bool) error {
 	if pairwise {
 		if len(re) == 0 || len(re) != len(resolves) {
 			return fmt.Errorf("--pairwise needs equal non-empty --re and --resolves lists; got %d and %d", len(re), len(resolves))
@@ -341,6 +352,18 @@ func perTarget(r store.Record, re, resolves []int64, pairwise bool) ([]store.Rec
 	return out, nil
 }
 
+func resolveAll(ctx context.Context, st *store.Store, refs []string) ([]int64, error) {
+	seqs := make([]int64, len(refs))
+	for i, ref := range refs {
+		seq, err := st.Resolve(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		seqs[i] = seq
+	}
+	return seqs, nil
+}
+
 func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
 	if asJSON {
 		_, err := fmt.Fprintln(w, render.JSON(got))
@@ -350,7 +373,7 @@ func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
 	if dup {
 		suffix = " (duplicate)"
 	}
-	_, err := fmt.Fprintf(w, "#%d%s\n", got.Seq, suffix)
+	_, err := fmt.Fprintf(w, "%s%s\n", got.Name(), suffix)
 	return err
 }
 

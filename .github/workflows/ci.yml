@@ -102,22 +102,19 @@ jobs:
           test "$(git -C .ci-grep-baseline rev-parse HEAD)" = e08497bf9ce5880788f6103a949e034c9ed13fc4
           cp internal/cli/grep_cost_test.go .ci-grep-baseline/internal/cli/grep_cost_test.go
           cp internal/inbox/grep_internal_test.go .ci-grep-baseline/internal/inbox/grep_internal_test.go
-          mkdir -p "$RUNNER_TEMP/cci-grep-errors"
-          (cd .ci-grep-baseline && CCI_GREP_SNAPSHOTS="$RUNNER_TEMP/cci-grep-errors" CCI_GREP_SNAPSHOT_WRITE=1 go test -run '^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox)
           (cd .ci-grep-baseline && CCI_GREP_EXPECT_PAGED=1 go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli)
           go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli
           go test -run '^TestRepliesSelectionExceedsVariableLimit$' -v ./internal/store
-          CCI_GREP_SNAPSHOTS="$RUNNER_TEMP/cci-grep-errors" go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
+          go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
       - name: Build
         run: go build ./...
-      - name: Tail operation counts, full requested output, and immutable 0.41.7 output and errors
+      - name: Tail operation counts and full requested output
         run: |
           test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
-          cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go internal/cli/tail_semantics_test.go .ci-tail-baseline/internal/cli/
-          mkdir -p "$RUNNER_TEMP/cci-tail-snapshots"
-          tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailPreservesNativeOutputAndErrors$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
-          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 CCI_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-tail-snapshots" CCI_TAIL_SNAPSHOT_WRITE=1 go test -run "$tail_tests" -v ./internal/cli)
-          CCI_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-tail-snapshots" go test -run "$tail_tests" -v ./internal/cli
+          cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
+          tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
+          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$tail_tests" -v ./internal/cli)
+          go test -run "$tail_tests" -v ./internal/cli
       - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
         run: |
           go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store

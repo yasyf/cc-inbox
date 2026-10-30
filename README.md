@@ -150,7 +150,7 @@ cci subscribe --drive release-demo --reader root --kind incident,decide,ask --mu
 ```
 
 ```text
-window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,decide,ask,blocker,urgent,answer,correction,defect, kinds incident,decide,ask, muted state,review,note, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,blocker,urgent,answer,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
 ```
 
 What arrives:
@@ -159,7 +159,7 @@ What arrives:
   `--to-kind`;
 - other lanes' broadcasts of each `--kind`.
 
-`--to-kind` defaults to `incident,decide,ask,blocker,urgent,answer,correction,defect`
+`--to-kind` defaults to `incident,mechanism,fix-live,decide,ask,blocker,urgent,answer,correction,defect,owner`
 for `root`, the kinds a root acts on, and to every kind for any other reader.
 
 What never arrives:
