@@ -461,21 +461,37 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 	}
 }
 
-func TestPostRewritesOnlyALeadingTimeLabelAheadOfTheClock(t *testing.T) {
+func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	ahead, before := time.Now().Add(7*time.Minute).Format("3:04 PM"), time.Now().Add(-30*time.Minute).Format("3:04 PM")
 	for _, tt := range []struct {
-		name, text, want, stderr string
+		name, text   string
+		stamp        bool
+		want, stderr string
+		refused      string
 	}{
-		{"leading label ahead of the clock", ahead + ": live on dev", "{at}: live on dev", "cci: time label " + ahead + " rewritten to {at}"},
-		{"leading label before the clock", before + ": live on dev", before + ": live on dev", ""},
-		{"label after a short heading", "board " + ahead + ": pulled the row", "board {at}: pulled the row", "cci: time label " + ahead + " rewritten to {at}"},
-		{"label after the lane's name", "root " + ahead + " count: 0 ungraded", "root {at} count: 0 ungraded", "cci: time label " + ahead + " rewritten to {at}"},
-		{"time in an opening clause", "for his " + ahead + " ask", "for his " + ahead + " ask", "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
-		{"later time inside the text", "live on dev, read " + ahead, "live on dev, read " + ahead, "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
+		{name: "leading label ahead of the clock", text: ahead + ": live on dev", refused: ahead},
+		{name: "leading label before the clock", text: before + ": live on dev", refused: before},
+		{name: "label after a short heading", text: "board " + ahead + ": pulled the row", refused: ahead},
+		{name: "label after the lane's name", text: "root " + ahead + " count: 0 ungraded", refused: ahead},
+		{name: "stamped label ahead of the clock", text: ahead + ": live on dev", stamp: true, want: "{at}: live on dev"},
+		{name: "stamped label after the lane's name", text: "root " + before + " count: 0 ungraded", stamp: true, want: "root {at} count: 0 ungraded"},
+		{name: "stamped text without a label", text: "live on dev", stamp: true, want: "{at} live on dev"},
+		{name: "time in an opening clause", text: "for his " + ahead + " ask", want: "for his " + ahead + " ask", stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
+		{name: "later time inside the text", text: "live on dev, read " + ahead, want: "live on dev, read " + ahead, stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := run(t, "post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", tt.text)
+			args := []string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", tt.text}
+			if tt.stamp {
+				args = append(args, "--stamp")
+			}
+			out, err := run(t, args...)
+			if tt.refused != "" {
+				if err == nil || !strings.Contains(err.Error(), "time label "+tt.refused+" is not the post time") || strings.Contains(err.Error(), "\n") {
+					t.Fatalf("post %q = %q, %v; want a one-line refusal naming %s", tt.text, out, err, tt.refused)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}

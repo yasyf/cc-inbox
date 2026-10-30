@@ -39,7 +39,7 @@ func newPostCmd() *cobra.Command {
 		counts                  map[string]string
 		census, bodyFile        string
 		ttl                     time.Duration
-		asJSON                  bool
+		asJSON, label           bool
 		re, resolves            []int64
 	)
 	cmd := &cobra.Command{
@@ -86,7 +86,7 @@ func newPostCmd() *cobra.Command {
 						return errors.New("post -: stdin is empty")
 					}
 				}
-				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at); err != nil {
+				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at, label); err != nil {
 					return err
 				}
 			default:
@@ -168,7 +168,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time, as is a leading H:MM AM/PM label more than a minute ahead of it, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, and any other such time is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time later than the post is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
@@ -193,6 +193,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&bodyFile, "body-file", "", "JSON body of at most 64 KiB, from a file or - for stdin")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
+	f.BoolVar(&label, "stamp", false, "cci writes the leading H:MM AM/PM label from the post's own clock: it replaces a typed leading label, or opens the text when it has none")
 	_ = cmd.MarkFlagRequired("kind")
 	return cmd
 }
@@ -258,23 +259,29 @@ func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
 	return err
 }
 
-func stamped(w io.Writer, text, lane string, at time.Time) (string, error) {
+func stamped(w io.Writer, text, lane string, at time.Time, label bool) (string, error) {
 	stamp := render.Stamp(at, at)
 	now := at.Truncate(time.Minute)
-	later := func(typed string) bool {
+	off := func(typed string) time.Duration {
 		c := importer.ParseClock(typed)
-		return c != nil && c.Latest(now.Add(12*time.Hour)).Sub(now) > time.Minute
+		if c == nil {
+			return 0
+		}
+		return c.Latest(now.Add(12 * time.Hour)).Sub(now)
 	}
 	if m := typedStamp.FindStringSubmatchIndex(text); m != nil && importer.ParseClock(text[m[2]:m[3]]) != nil {
 		text = text[:m[2]] + stamp + text[m[3]:]
-	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil && later(text[m[4]:m[5]]) && labels(text[m[2]:m[3]], text[m[6]:m[7]], lane) {
-		if _, err := fmt.Fprintf(w, "cci: time label %s rewritten to %s\n", text[m[4]:m[5]], stamp); err != nil {
-			return "", err
+	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil && labels(text[m[2]:m[3]], text[m[6]:m[7]], lane) {
+		typed := text[m[4]:m[5]]
+		if d := off(typed); !label && (d > time.Minute || d < -time.Minute) {
+			return "", fmt.Errorf("time label %s is not the post time %s: pass --stamp and cci writes the label, or drop it", typed, stamp)
 		}
 		text = text[:m[4]] + stamp + text[m[5]:]
+	} else if label {
+		text = stamp + " " + text
 	}
 	for _, typed := range anyLabel.FindAllString(text, -1) {
-		if !later(typed) {
+		if off(typed) <= time.Minute {
 			continue
 		}
 		if _, err := fmt.Fprintf(w, "cci: time %s in the text is later than the post time %s; stored as typed\n", typed, stamp); err != nil {
