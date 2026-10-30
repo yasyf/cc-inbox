@@ -18,12 +18,13 @@ func TestPostPairwisePreservesOrderedPairs(t *testing.T) {
 		args []string
 		want [][2]int64
 	}{
-		{"ordered", []string{"--pairwise", "--re", "7,2", "--resolves", "9,3"}, [][2]int64{{7, 9}, {2, 3}}},
-		{"single", []string{"--pairwise", "--re", "7", "--resolves", "9"}, [][2]int64{{7, 9}}},
-		{"default replies", []string{"--re", "7,2", "--resolves", "9"}, [][2]int64{{7, 9}, {2, 9}}},
+		{"ordered", []string{"--pairwise", "--re", "2,1", "--resolves", "4,3"}, [][2]int64{{2, 4}, {1, 3}}},
+		{"single", []string{"--pairwise", "--re", "2", "--resolves", "4"}, [][2]int64{{2, 4}}},
+		{"default replies", []string{"--re", "2,1", "--resolves", "4"}, [][2]int64{{2, 4}, {1, 4}}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("CCI_HOME", t.TempDir())
+			seedPairwiseTargets(t)
 			out, err := run(t, append([]string{"post", "--json", "--drive", "test-drive", "--lane", "root", "--kind", "note", "--text", "summary"}, tt.args...)...)
 			if err != nil {
 				t.Fatal(err)
@@ -47,15 +48,25 @@ func TestPostPairwisePreservesOrderedPairs(t *testing.T) {
 
 func TestPostPairwiseIdempotencyIncludesBothTargets(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
-	args := []string{"post", "--drive", "test-drive", "--lane", "root", "--kind", "note", "--pairwise", "--re", "7,7", "--resolves", "9,8", "--id", "paired", "--text", "summary"}
-	if out, err := run(t, args...); err != nil || out != "#1\n#2\n" {
+	seedPairwiseTargets(t)
+	args := []string{"post", "--drive", "test-drive", "--lane", "root", "--kind", "note", "--pairwise", "--re", "1,1", "--resolves", "3,4", "--id", "paired", "--topic", "paired", "--text", "summary"}
+	if out, err := run(t, args...); err != nil || out != "#5\n#6\n" {
 		t.Fatalf("post = %q, %v; want two distinct pairs", out, err)
 	}
-	if out, err := run(t, args...); err != nil || out != "#1 (duplicate)\n#2 (duplicate)\n" {
+	if out, err := run(t, args...); err != nil || out != "#5 (duplicate)\n#6 (duplicate)\n" {
 		t.Fatalf("repost = %q, %v; want the same two records", out, err)
 	}
-	if out, err := run(t, "tail", "--drive", "test-drive", "--since", "0", "--json"); err != nil || strings.Count(strings.TrimSpace(out), "\n") != 1 {
+	if out, err := run(t, "tail", "--drive", "test-drive", "--since", "0", "--topic", "paired", "--json"); err != nil || strings.Count(strings.TrimSpace(out), "\n") != 1 {
 		t.Errorf("tail = %q, %v; want exactly two stored records", out, err)
+	}
+}
+
+func seedPairwiseTargets(t *testing.T) {
+	t.Helper()
+	for _, text := range []string{"first", "second", "third", "fourth"} {
+		if _, err := run(t, "post", "--drive", "test-drive", "--lane", "root", "--kind", "note", "--text", text); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
