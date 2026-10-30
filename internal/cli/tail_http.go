@@ -75,11 +75,12 @@ func TailHandler(st *store.Store, home string) (http.Handler, error) {
 			}
 			return nil
 		}
+		ctx := r.Context()
 		cmd.RunE = func(cmd *cobra.Command, _ []string) error {
 			if protocol = validate(cmd); protocol != nil {
 				return protocol
 			}
-			return flags.run(cmd.Context(), cmd, st, peer)
+			return flags.run(ctx, cmd, st, peer)
 		}
 		help := cmd.HelpFunc()
 		cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -88,7 +89,7 @@ func TailHandler(st *store.Store, home string) (http.Handler, error) {
 			}
 			help(cmd, args)
 		})
-		err := root.ExecuteContext(r.Context())
+		err := root.ExecuteContext(ctx)
 		if protocol != nil {
 			rejectNativeTail(w, protocol)
 			return
