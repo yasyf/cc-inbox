@@ -52,7 +52,7 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		return report, fmt.Errorf("take index maintenance lock: %w", err)
 	}
 	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
-	db, err := sql.Open("sqlite", storeDSN(home)+"&mode=rw")
+	db, err := sql.Open("sqlite", storeDSN(home, 0)+"&mode=rw")
 	if err != nil {
 		return report, fmt.Errorf("open index maintenance store: %w", err)
 	}

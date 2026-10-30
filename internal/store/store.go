@@ -310,7 +310,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := storeDSN(home)
+	dsn := storeDSN(home, 10000)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -323,8 +323,8 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	return s, nil
 }
 
-func storeDSN(home string) string {
-	return "file:" + filepath.Join(home, DBFile) + "?_pragma=busy_timeout(10000)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
+func storeDSN(home string, timeoutMS int) string {
+	return fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate", filepath.Join(home, DBFile), timeoutMS)
 }
 
 func (s *Store) initialize(ctx context.Context) error {

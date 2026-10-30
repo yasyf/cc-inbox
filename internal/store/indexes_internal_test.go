@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	"modernc.org/sqlite"
 )
@@ -156,44 +157,91 @@ func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
 	assertLaneIndexCount(t, st, 0)
 }
 
-func TestMaintainIndexesRollsBackCancelledBuild(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	var building atomic.Bool
-	var interrupted atomic.Bool
-	collation := fmt.Sprintf("cci_cancel_lane_%d", laneCollationID.Add(1))
-	if err := sqlite.RegisterCollationUtf8(collation, func(a, b string) int {
-		if building.Load() && interrupted.CompareAndSwap(false, true) {
-			cancel()
-		}
-		return strings.Compare(a, b)
-	}); err != nil {
+func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, t.TempDir())
+	if err != nil {
 		t.Fatal(err)
 	}
-	st := countedLaneStore(t, collation)
-	var dbPath string
-	if err := st.db.QueryRowContext(context.Background(), "SELECT file FROM pragma_database_list WHERE name = 'main'").Scan(&dbPath); err != nil {
-		t.Fatal(err)
-	}
-	st.home = filepath.Dir(dbPath)
-	if err := os.WriteFile(filepath.Join(st.home, "init.lock"), nil, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, query := range []string{"PRAGMA journal_mode = WAL", "PRAGMA user_version = 14"} {
-		if _, err := st.db.ExecContext(context.Background(), query); err != nil {
-			t.Fatal(err)
-		}
-	}
+	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
-	seedLaneHistory(t, st, 4096)
-	building.Store(true)
-	if _, err := MaintainIndexes(ctx, st.home); err == nil {
-		t.Fatal("cancelled index build succeeded")
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !interrupted.Load() {
-		t.Fatal("test did not cancel an active index build")
+	t.Cleanup(func() { _ = tx.Rollback() })
+	done := make(chan error, 1)
+	go func() {
+		_, err := MaintainIndexes(ctx, st.home)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("maintenance accepted busy database writer")
+		}
+	case <-time.After(2 * time.Second):
+		_ = tx.Rollback()
+		<-done
+		t.Fatal("maintenance waited behind ordinary database writer")
 	}
 	assertLaneIndexCount(t, st, 0)
+}
+
+func TestMaintainIndexesRollsBackCancelledBuild(t *testing.T) {
+	for _, target := range []string{"record", "session"} {
+		t.Run(target, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			var building atomic.Bool
+			var interrupted atomic.Bool
+			collation := fmt.Sprintf("cci_cancel_lane_%d", laneCollationID.Add(1))
+			if err := sqlite.RegisterCollationUtf8(collation, func(a, b string) int {
+				if building.Load() && strings.HasPrefix(a, target+"-") && interrupted.CompareAndSwap(false, true) {
+					cancel()
+				}
+				return strings.Compare(a, b)
+			}); err != nil {
+				t.Fatal(err)
+			}
+			st := countedLaneStore(t, collation)
+			var dbPath string
+			if err := st.db.QueryRowContext(context.Background(), "SELECT file FROM pragma_database_list WHERE name = 'main'").Scan(&dbPath); err != nil {
+				t.Fatal(err)
+			}
+			st.home = filepath.Dir(dbPath)
+			if err := os.WriteFile(filepath.Join(st.home, "init.lock"), nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, query := range []string{"PRAGMA journal_mode = WAL", "PRAGMA user_version = 14"} {
+				if _, err := st.db.ExecContext(context.Background(), query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			dropLaneIndexes(t, st)
+			seedLaneHistory(t, st, 4096)
+			for _, query := range []string{
+				"UPDATE records SET lane = 'record-lane'",
+				`WITH RECURSIVE history(n) AS (
+	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < 4096
+)
+INSERT INTO sessions (session, agent, origin, drive, root, lane)
+SELECT 'session-' || n, '', '', 'drive', 0, 'session-lane' FROM history`,
+			} {
+				if _, err := st.db.ExecContext(context.Background(), query); err != nil {
+					t.Fatal(err)
+				}
+			}
+			building.Store(true)
+			if _, err := MaintainIndexes(ctx, st.home); err == nil {
+				t.Fatal("cancelled index build succeeded")
+			}
+			if !interrupted.Load() {
+				t.Fatal("test did not cancel an active index build")
+			}
+			assertLaneIndexCount(t, st, 0)
+		})
+	}
 }
 
 func dropLaneIndexes(t *testing.T, st *Store) {
