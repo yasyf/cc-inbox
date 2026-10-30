@@ -310,7 +310,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := "file:" + filepath.Join(home, DBFile) + "?_pragma=busy_timeout(10000)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
+	dsn := storeDSN(home)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -321,6 +321,10 @@ func Open(ctx context.Context, home string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+func storeDSN(home string) string {
+	return "file:" + filepath.Join(home, DBFile) + "?_pragma=busy_timeout(10000)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
 }
 
 func (s *Store) initialize(ctx context.Context) error {
@@ -412,9 +416,20 @@ func (s *Store) migrate(ctx context.Context) error {
 	if schema > len(migrations) {
 		return fmt.Errorf("store schema %d is newer than this cci %s (schema %d); upgrade it with: %s", schema, version.String(), len(migrations), version.UpgradeCommand())
 	}
+	var empty bool
+	if schema == 0 {
+		if err := tx.QueryRowContext(ctx, "SELECT NOT EXISTS (SELECT 1 FROM sqlite_schema)").Scan(&empty); err != nil {
+			return fmt.Errorf("inspect empty store: %w", err)
+		}
+	}
 	for i, step := range migrations[schema:] {
 		if _, err := tx.ExecContext(ctx, strings.ReplaceAll(step, "{self}", "'"+s.Self()+"'")); err != nil {
 			return fmt.Errorf("migrate store to schema %d: %w", schema+i+1, err)
+		}
+	}
+	if empty {
+		if err := createPhysicalIndexes(ctx, tx, []int{0, 1}); err != nil {
+			return err
 		}
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
