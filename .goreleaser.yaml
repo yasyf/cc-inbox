@@ -66,13 +66,15 @@ homebrew_casks:
   - name: cci
     binaries:
       - cci
-    # Strip quarantine before the binary is linked: an exec that wins the race against a
-    # postflight strip raises a Gatekeeper prompt that holds every later exec until answered.
+    # Strip quarantine and run cci once before the binary is linked: an exec that wins the
+    # race against a postflight strip raises a Gatekeeper prompt that holds every later exec,
+    # and a new binary's first exec waits on its assessment, which the upgrade pays instead.
     hooks:
       pre:
         install_steps: |
           on_macos do
             run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci"]
+            run "{{ .StagedPath }}/cci", args: ["--version"]
           end
     repository:
       owner: yasyf
