@@ -1,1 +1,1 @@
-{"v":1,"lamport":6,"ops":[{"kind":"renew"}]}
+{"v":1,"lamport":7,"ops":[{"kind":"add_criterion","id":"07a7abb313607614bc7dde4e3ce5b19f","text":"P-only carrier is normally merged, published and installed under fresh runtime authority, with indexed installed-state and affected-operation proof; W registry opens remain explicitly unresolved until authoritative writer integration is verified","script":""}]}
