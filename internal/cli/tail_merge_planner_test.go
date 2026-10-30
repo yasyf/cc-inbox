@@ -125,6 +125,35 @@ func tailPlannerRows(db *sql.DB, query string, args []any) tailPlannerResult {
 	return result
 }
 
+func TestCountPeerAfterPlannerErrorPrototype(t *testing.T) {
+	db := tailCostStore(t)
+	for _, row := range []struct{ drive, recipients string }{{"d", "[]"}, {"d", "["}} {
+		if _, err := db.Exec("INSERT INTO records (drive,lane,kind,at,text,recipients,source,hash) VALUES (?,'lane','note',1,'selected',?,'post',?)", row.drive, row.recipients, row.recipients); err != nil {
+			t.Fatal(err)
+		}
+	}
+	predicate := `((drive = ?) OR (EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (?,?)) AND seq > ?)) AND (expires_at IS NULL OR expires_at > ?)`
+	args := []any{"d", "peer:reader", "peer:0123456789abcdef/reader", 1, time.Now().UnixMilli()}
+	base := "SELECT COUNT(*) FROM records WHERE " + predicate
+	want := tailPlannerRows(db, base, args)
+	oldPlan := tailPlannerPlan(t, db, base, args)
+	if want.err == "" || !strings.Contains(strings.Join(oldPlan, " | "), "MULTI-INDEX OR") {
+		t.Fatalf("reference did not reproduce the peer-after native error: %+v plan=%v", want, oldPlan)
+	}
+	candidates := `(SELECT seq FROM records WHERE drive = ? UNION ALL SELECT source_seq FROM record_recipients WHERE address IN (?,?) AND source_seq > ? UNION ALL SELECT source_seq FROM record_json_errors WHERE field = 'recipients')`
+	allArgs := append(slices.Clone(args), "d", "peer:reader", "peer:0123456789abcdef/reader", 1)
+	for _, column := range []string{"seq", "+seq"} {
+		q := base + " AND " + column + " IN " + candidates
+		got := tailPlannerRows(db, q, allArgs)
+		plan := tailPlannerPlan(t, db, q, allArgs)
+		parity := slices.Equal(got.seqs, want.seqs) && got.phase == want.phase && got.err == want.err
+		t.Logf("peer_after_count candidate=%s parity=%t result=%+v reference=%+v plan=%v original_plan=%v", column, parity, got, want, plan, oldPlan)
+		if column == "+seq" && !parity {
+			t.Fatal("unary-plus candidate did not preserve the original count error")
+		}
+	}
+}
+
 func tailPlannerPlan(t *testing.T, db *sql.DB, query string, args []any) []string {
 	t.Helper()
 	rows, err := db.Query("EXPLAIN QUERY PLAN "+query, args...)

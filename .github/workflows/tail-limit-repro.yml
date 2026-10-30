@@ -26,4 +26,4 @@ jobs:
           cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
           (cd .ci-tail-baseline && go test -run '^TestTailNewestLimitDoesNotWalkSameDriveHistory$' -v ./internal/cli)
       - name: Compare lazy SQL plans, top-one cost and native corruption frontiers
-        run: go test -run '^TestTailOrderedCandidatesPlannerPrototype$' -v ./internal/cli
+        run: go test -run '^TestTailOrderedCandidatesPlannerPrototype$|^TestCountPeerAfterPlannerErrorPrototype$' -v ./internal/cli
