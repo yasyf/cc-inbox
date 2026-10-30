@@ -90,6 +90,13 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 	if now.IsZero() {
 		now = st.Now()
 	}
+	out, folded = textLines(records, replies, v, now)
+	return out, folded, nil
+}
+
+func textLines(records []store.Record, replies map[int64][]store.Record, v view, now time.Time) ([]string, []bool) {
+	out := make([]string, len(records))
+	folded := make([]bool, len(records))
 	line := func(r store.Record, width int) string {
 		switch {
 		case v.Whole:
@@ -106,7 +113,7 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 		}
 		out[i] = text + marks(r.Seq, replies[r.Seq])
 	}
-	return out, folded, nil
+	return out, folded
 }
 
 func resolved(seq int64, replies []store.Record) bool {

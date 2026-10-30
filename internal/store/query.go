@@ -548,33 +548,104 @@ func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, e
 	return out, rows.Err()
 }
 
+type ReplyPage struct {
+	Replies map[int64][]Record
+	Err     error
+}
+
+type replyScanner struct {
+	row      scanner
+	re       int64
+	resolves int64
+	also     string
+}
+
+func (r *replyScanner) Scan(dest ...any) error {
+	return r.row.Scan(append([]any{&r.re, &r.resolves, &r.also}, dest...)...)
+}
+
 func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, error) {
-	out := map[int64][]Record{}
+	pages, err := s.ReplyPages(ctx, [][]int64{seqs})
+	if err != nil {
+		return nil, err
+	}
+	if pages[0].Err != nil {
+		return nil, pages[0].Err
+	}
+	return pages[0].Replies, nil
+}
+
+// ReplyPages reads selected replies once and attributes decoding errors to each affected page.
+func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage, error) {
+	pages := make([]ReplyPage, len(selected))
+	owners := map[int64][]int{}
+	var seqs []int64
+	for page, ids := range selected {
+		pages[page].Replies = map[int64][]Record{}
+		for _, seq := range ids {
+			if len(owners[seq]) == 0 {
+				seqs = append(seqs, seq)
+			}
+			if previous := owners[seq]; len(previous) == 0 || previous[len(previous)-1] != page {
+				owners[seq] = append(owners[seq], page)
+			}
+		}
+	}
 	if len(seqs) == 0 {
-		return out, nil
+		return pages, nil
 	}
 	ids, _ := json.Marshal(seqs)
 	in := "SELECT value FROM json_each(?)"
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
+	rows, err := s.db.QueryContext(ctx, "SELECT re, resolves, COALESCE(also_resolves, ''), "+columns+" FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
-		r, err := s.scan(rows)
-		if err != nil {
-			return nil, err
+		metadata := replyScanner{row: rows}
+		r, decodeErr := s.scan(&metadata)
+		targets := []int64{metadata.re, metadata.resolves}
+		var also []int64
+		if metadata.also != "" {
+			if err := json.Unmarshal([]byte(metadata.also), &also); err != nil {
+				return nil, decodeErr
+			}
 		}
-		if r.Re != 0 {
-			out[r.Re] = append(out[r.Re], r)
+		targets = append(targets, also...)
+		affected := map[int]bool{}
+		for _, target := range targets {
+			for _, page := range owners[target] {
+				affected[page] = true
+			}
 		}
-		for _, seq := range r.Closes() {
-			if seq != r.Re {
-				out[seq] = append(out[seq], r)
+		if len(affected) == 0 && decodeErr != nil {
+			return nil, decodeErr
+		}
+		for page := range affected {
+			if decodeErr != nil {
+				if pages[page].Err == nil {
+					pages[page].Err = decodeErr
+				}
+				continue
+			}
+			if r.Re != 0 {
+				pages[page].Replies[r.Re] = append(pages[page].Replies[r.Re], r)
+			}
+			for _, target := range r.Closes() {
+				if target != r.Re {
+					pages[page].Replies[target] = append(pages[page].Replies[target], r)
+				}
 			}
 		}
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		for page := range pages {
+			if pages[page].Err == nil {
+				pages[page].Err = err
+			}
+		}
+	}
+	return pages, nil
 }
 
 func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, error) {

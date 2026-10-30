@@ -259,8 +259,8 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w io.Writer) error {
 	b := render.NewBudget(w, budget)
 	candidateBudget := render.NewBudget(io.Discard, budget)
-	matched, printed := 0, 0
-	var hits []store.Record
+	matched, printed, kept := 0, 0, 0
+	var selected [][]store.Record
 	var readErr error
 	f.Descending = true
 	f.Limit = pageRows
@@ -271,13 +271,14 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 			readErr = err
 			break
 		}
+		var hits []store.Record
 		for _, r := range records {
 			line := render.Line(r, now)
 			if !pattern.MatchString(line) {
 				continue
 			}
 			matched++
-			if candidateBudget.Full() || limit != 0 && len(hits) >= limit {
+			if candidateBudget.Full() || limit != 0 && kept >= limit {
 				continue
 			}
 			if asJSON {
@@ -285,22 +286,30 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 			}
 			if candidateBudget.Line(line) {
 				hits = append(hits, r)
+				kept++
 			}
+		}
+		if len(hits) > 0 {
+			selected = append(selected, hits)
 		}
 		if len(records) < pageRows {
 			break
 		}
 		f.Before = records[len(records)-1].Seq
 	}
-	rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON, Whole: true, Now: now})
-	if err != nil {
-		return err
-	}
-	for _, line := range rendered {
-		if !b.Line(line) {
+	for _, page := range grepPages(ctx, st, selected, asJSON, now) {
+		if b.Full() {
 			break
 		}
-		printed++
+		if page.err != nil {
+			return page.err
+		}
+		for _, line := range page.lines {
+			if !b.Line(line) {
+				break
+			}
+			printed++
+		}
 	}
 	if readErr != nil {
 		return readErr
@@ -319,6 +328,67 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
 	}
 	return nil
+}
+
+type grepPage struct {
+	lines []string
+	err   error
+}
+
+func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, asJSON bool, now time.Time) []grepPage {
+	pages := make([]grepPage, len(selected))
+	if len(selected) == 0 {
+		return pages
+	}
+	if asJSON {
+		drives := map[string][]store.Record{}
+		first := map[string]int{}
+		for page, records := range selected {
+			for _, r := range records {
+				if _, seen := first[r.Drive]; !seen && r.Kind.Opens() && r.Tracked() {
+					first[r.Drive] = page
+				}
+				drives[r.Drive] = append(drives[r.Drive], r)
+			}
+		}
+		statuses := map[int64]string{}
+		for _, drive := range slices.Sorted(maps.Keys(drives)) {
+			if err := Annotate(ctx, st, drives[drive]); err != nil {
+				if pages[first[drive]].err == nil {
+					pages[first[drive]].err = err
+				}
+				continue
+			}
+			for _, r := range drives[drive] {
+				statuses[r.Seq] = r.Status
+			}
+		}
+		for page, records := range selected {
+			for _, r := range records {
+				r.Status = statuses[r.Seq]
+				pages[page].lines = append(pages[page].lines, render.JSON(r))
+			}
+		}
+		return pages
+	}
+	seqs := make([][]int64, len(selected))
+	for page, records := range selected {
+		for _, r := range records {
+			seqs[page] = append(seqs[page], r.Seq)
+		}
+	}
+	replies, err := st.ReplyPages(ctx, seqs)
+	if err != nil {
+		pages[0].err = err
+		return pages
+	}
+	for page, records := range selected {
+		pages[page].err = replies[page].Err
+		if replies[page].Err == nil {
+			pages[page].lines, _ = textLines(records, replies[page].Replies, view{Whole: true}, now)
+		}
+	}
+	return pages
 }
 
 func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.Writer) error {

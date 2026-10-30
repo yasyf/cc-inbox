@@ -168,3 +168,35 @@ func TestGrepPreservesReadErrorOutput(t *testing.T) {
 		}
 	}
 }
+
+func TestGrepPreservesLaterAnnotationErrorPrefix(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", filepath.Join(st.HomeDir(), store.DBFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if _, err := db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
+VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < 1005
+)
+INSERT INTO records (drive, lane, kind, at, text, source, hash)
+SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' || n FROM history`); err != nil {
+		t.Fatal(err)
+	}
+	reply := testutil.Post(t, st, store.Record{Drive: "elsewhere", Kind: kinds.Answer, Text: "answer", Re: 500})
+	if _, err := db.ExecContext(ctx, "UPDATE records SET refs = '{' WHERE seq = ?", reply.Seq); err != nil {
+		t.Fatal(err)
+	}
+	var got, want bytes.Buffer
+	pattern := regexp.MustCompile("REVIEW")
+	gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, 1<<20, false, &got)
+	wantErr := pagedGrep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, 1<<20, false, &want)
+	if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() || !strings.Contains(gotErr.Error(), fmt.Sprintf("decode refs of #%d:", reply.Seq)) {
+		t.Fatalf("selected annotation errors got %v, want %v", gotErr, wantErr)
+	}
+	if got.String() != want.String() || strings.Count(got.String(), "\n") != 500 {
+		t.Fatalf("annotation error prefixes got %d lines, paged %d lines", strings.Count(got.String(), "\n"), strings.Count(want.String(), "\n"))
+	}
+	t.Logf("same_selected_annotation_error=true candidate_prefix_lines=%d paged_prefix_lines=%d", strings.Count(got.String(), "\n"), strings.Count(want.String(), "\n"))
+}

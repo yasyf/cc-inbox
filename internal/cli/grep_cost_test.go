@@ -104,6 +104,12 @@ SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 
 					t.Fatalf("wide budget printed %d records, want %d", strings.Count(out, "\n"), population)
 				}
 				t.Logf("rows=%d budget=%d actual_cli_history_column_reads=%d candidate_rows=%d annotation_history_rows=%d", population, budget, reads.Load(), population, reads.Load()-int64(population))
+				reads.Store(0)
+				out, err = run(t, "grep", "REVIEW", "--drive", "durable-agents-rebuild", "--json", "--limit", "-1")
+				if err != nil || out != "" || reads.Load() != int64(population) {
+					t.Fatalf("zero-output grep = %q, %v, reads=%d; want empty output and %d candidate reads", out, err, reads.Load(), population)
+				}
+				t.Logf("rows=%d zero_output_cli_history_column_reads=%d annotation_history_rows=0", population, reads.Load())
 			})
 		}
 	}
