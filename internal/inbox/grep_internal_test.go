@@ -21,7 +21,7 @@ import (
 func TestGrepMatchesPagedOutput(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
-	var history []store.Ingestion
+	history := make([]store.Ingestion, 0, 1005)
 	for i := range 1005 {
 		history = append(history, store.Ingestion{
 			Record:   store.Record{Drive: "d", Lane: "reviewer", Kind: kinds.Note, At: st.Now(), Text: fmt.Sprintf("REVIEW history %d", i), Source: "import:/history"},
@@ -128,7 +128,7 @@ func TestGrepPreservesReadErrorOutput(t *testing.T) {
 			t.Run(fmt.Sprintf("json=%t/annotation_error=%t", asJSON, annotationError), func(t *testing.T) {
 				st, _ := testutil.Store(t)
 				ctx := context.Background()
-				var history []store.Ingestion
+				history := make([]store.Ingestion, 0, 1005)
 				for i := range 1005 {
 					history = append(history, store.Ingestion{
 						Record:   store.Record{Drive: "d", Lane: "reviewer", Kind: kinds.Note, At: st.Now(), Text: fmt.Sprintf("REVIEW history %d", i), Source: "import:/history"},

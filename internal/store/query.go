@@ -567,7 +567,7 @@ func (r *replyScanner) Scan(dest ...any) error {
 		return nil
 	}
 	values := make([]any, len(dest))
-	raw := make([]any, len(dest))
+	raw := make([]any, len(dest), len(dest)+4)
 	for i := range values {
 		raw[i] = &values[i]
 	}
