@@ -3,8 +3,11 @@ package inbox
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"fmt"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -112,4 +115,56 @@ func pagedGrep(ctx context.Context, st *store.Store, f store.Filter, pattern *re
 		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
 	}
 	return nil
+}
+
+func TestGrepPreservesReadErrorOutput(t *testing.T) {
+	for _, asJSON := range []bool{false, true} {
+		for _, annotationError := range []bool{false, true} {
+			if asJSON && annotationError {
+				continue
+			}
+			t.Run(fmt.Sprintf("json=%t/annotation_error=%t", asJSON, annotationError), func(t *testing.T) {
+				st, _ := testutil.Store(t)
+				ctx := context.Background()
+				var history []store.Ingestion
+				for i := range 1005 {
+					history = append(history, store.Ingestion{
+						Record:   store.Record{Drive: "d", Lane: "reviewer", Kind: kinds.Note, At: st.Now(), Text: fmt.Sprintf("REVIEW history %d", i), Source: "import:/history"},
+						LineHash: fmt.Sprintf("history-%d", i),
+					})
+				}
+				if _, err := st.IngestAll(ctx, history); err != nil {
+					t.Fatal(err)
+				}
+				db, err := sql.Open("sqlite", filepath.Join(st.HomeDir(), store.DBFile))
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = db.Close() })
+				if _, err := db.ExecContext(ctx, "UPDATE records SET refs = '{' WHERE seq = 1"); err != nil {
+					t.Fatal(err)
+				}
+				wantError := "decode refs of #1:"
+				if annotationError {
+					reply := testutil.Post(t, st, store.Record{Drive: "elsewhere", Kind: kinds.Answer, Text: "answer", Re: 1005})
+					if _, err := db.ExecContext(ctx, "UPDATE records SET refs = '{' WHERE seq = ?", reply.Seq); err != nil {
+						t.Fatal(err)
+					}
+					wantError = fmt.Sprintf("decode refs of #%d:", reply.Seq)
+				}
+				for _, budget := range []int{1, 6144, 1 << 20} {
+					var got, want bytes.Buffer
+					pattern := regexp.MustCompile("REVIEW")
+					gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, budget, asJSON, &got)
+					wantErr := pagedGrep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, budget, asJSON, &want)
+					if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() || !strings.Contains(gotErr.Error(), wantError) {
+						t.Fatalf("budget=%d errors got %v, want %v with %q", budget, gotErr, wantErr, wantError)
+					}
+					if got.String() != want.String() {
+						t.Fatalf("budget=%d error output got %q, want %q", budget, got.String(), want.String())
+					}
+				}
+			})
+		}
+	}
 }

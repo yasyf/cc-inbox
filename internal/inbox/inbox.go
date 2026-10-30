@@ -261,13 +261,15 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	candidateBudget := render.NewBudget(io.Discard, budget)
 	matched, printed := 0, 0
 	var hits []store.Record
+	var readErr error
 	f.Descending = true
 	f.Limit = pageRows
 	now := st.Now()
 	for {
 		records, err := st.Query(ctx, f)
 		if err != nil {
-			return err
+			readErr = err
+			break
 		}
 		for _, r := range records {
 			line := render.Line(r, now)
@@ -299,6 +301,9 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 			break
 		}
 		printed++
+	}
+	if readErr != nil {
+		return readErr
 	}
 	if asJSON {
 		return nil

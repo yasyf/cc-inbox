@@ -81,7 +81,7 @@ jobs:
           (cd .ci-grep-baseline && CCI_GREP_EXPECT_PAGED=1 go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli)
           go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli
           go test -run '^TestRepliesSelectionExceedsVariableLimit$' -v ./internal/store
-          go test -run '^TestGrepMatchesPagedOutput$' -v ./internal/inbox
+          go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreservesReadErrorOutput$' -v ./internal/inbox
       - name: Build
         run: go build ./...
 
