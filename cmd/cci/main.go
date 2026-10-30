@@ -19,7 +19,7 @@ func main() {
 
 	root := cli.NewRootCmd()
 	if path, ok := cli.External(root, os.Args[1:]); ok {
-		err := syscall.Exec(path, append([]string{path}, os.Args[2:]...), os.Environ())
+		err := syscall.Exec(path, append([]string{path}, os.Args[2:]...), os.Environ()) //nolint:gosec // G204: a cci-<verb> program on PATH, run the way git runs its external commands.
 		fmt.Fprintln(os.Stderr, "cci:", err)
 		os.Exit(1)
 	}
