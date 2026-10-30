@@ -274,7 +274,6 @@ func TestMaintainIndexesRefusesForeignMembershipObjects(t *testing.T) {
 }
 
 func TestBoundedReadPlansStayIndexed(t *testing.T) {
-	ctx := context.Background()
 	st := openMembershipStore(t, t.TempDir())
 	now := st.Now()
 	scans := regexp.MustCompile(`^SCAN (records|r|record_\w+)\b`)
