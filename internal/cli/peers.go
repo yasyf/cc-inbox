@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -448,7 +449,7 @@ func newUnclaimCmd() *cobra.Command {
 	return cmd
 }
 
-func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []string, notices io.Writer) ([]string, error) {
+func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []string, force bool, notices io.Writer) ([]string, error) {
 	out := make([]string, len(to))
 	var reading map[string][]string
 	for i, t := range to {
@@ -456,11 +457,14 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 		switch target, ok := strings.CutPrefix(t, "peer:"); {
 		case ok:
 			out[i], err = resolvePeer(ctx, st, t, target)
-		case strings.Contains(t, "@") || store.RootName(t):
+		case strings.Contains(t, "@") || store.RootName(t) || t == "owner" || t == "all":
 			out[i] = t
 		default:
 			if reading == nil {
 				reading, err = laneDrives(ctx, st)
+			}
+			if err == nil && !force && len(reading[t]) == 0 {
+				err = registeredLane(ctx, st, drive, t, reading)
 			}
 			if err == nil {
 				out[i], err = routeLane(t, drive, reading[t], notices)
@@ -537,4 +541,39 @@ func routeLane(lane, drive string, reading []string, notices io.Writer) (string,
 	addr := lane + "@" + reading[0]
 	_, err := fmt.Fprintf(notices, "cci: --to %s: %s reads drive %s, not %s; addressed %s\n", lane, lane, reading[0], drive, addr)
 	return addr, err
+}
+
+func registeredLane(ctx context.Context, st *store.Store, drive, lane string, reading map[string][]string) error {
+	ok, err := st.Registered(ctx, drive, lane)
+	if err != nil || ok {
+		return err
+	}
+	msg := fmt.Sprintf("--to %s: no live session or registered lane on drive %s is named %s", lane, drive, lane)
+	if len(reading) > 0 {
+		names := slices.Sorted(maps.Keys(reading))
+		msg += "; the nearest live lane is " + slices.MinFunc(names, func(a, b string) int {
+			return cmp.Compare(distance(lane, a), distance(lane, b))
+		})
+	}
+	return errors.New(msg + "; --force addresses a lane that has not started yet")
+}
+
+func distance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := range len(a) {
+		cur := make([]int, len(b)+1)
+		cur[0] = i + 1
+		for j := range len(b) {
+			cost := 1
+			if a[i] == b[j] {
+				cost = 0
+			}
+			cur[j+1] = min(prev[j+1]+1, cur[j]+1, prev[j]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }

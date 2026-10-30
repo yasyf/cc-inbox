@@ -31,6 +31,9 @@ file's path, and `cci post` prints that path. Read the file for the rest. Use `s
 status, `ask` for a question, `hold` for a stop, `go` for permission, and `opened`
 or `landed` for a PR event. Use `review` with `--outcome` for a rules-review verdict.
 Address lanes with `--to`; when an action needs the owner, use `--to owner`.
+`cci post` refuses a bare `--to` lane that no live session reads, no thread is
+bound as on the drive, and no record there was posted as, and names the
+nearest live lane; `--force` addresses a lane that has not started yet.
 
 Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose
