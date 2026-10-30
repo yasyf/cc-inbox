@@ -1,1 +1,1 @@
-{"v":1,"lamport":5,"ops":[{"kind":"set_criterion_status","id":"3db4ef69cd06b4c5deb51058e876958d","status":"met","note":"Candidate eb0aef50 full CI41043718773 passes ordered pairs, seeded targets, default fanout/refusal, pre-store/stdin cardinality and repeated-re/different-resolves idempotency cases."}]}
+{"v":1,"lamport":6,"ops":[{"kind":"set_criterion_status","id":"1279767e25f3cdec199f2f5e57e5e17d","status":"met","note":"Review1865f632 PASS; correctedbaseline c96f6f5 CI41043683280 expected feature failures; candidate eb0aef50 CI41043718773 all5jobs pass."}]}
