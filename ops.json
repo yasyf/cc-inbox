@@ -1,1 +1,1 @@
-{"v":1,"lamport":4,"ops":[{"kind":"link_commit","sha":"71ded34de891604153678c3bdb16743e08552faf"}]}
+{"v":1,"lamport":5,"ops":[{"kind":"add_comment","body":"Draft PR https://github.com/yasyf/cc-inbox/pull/171 exact 71ded34de891604153678c3bdb16743e08552faf. Two-file fix and subprocess regressions shipped; git diff --check passed, worktree clean. Official CI 41068486876 queued; independent reviewer launch hit thread limit and parent/root were notified. Next: obtain exact-head fresh review and official CI before merge/release. No local tests/build/gofmt or runtime changes."}]}
