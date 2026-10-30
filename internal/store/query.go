@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -552,13 +553,9 @@ func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, 
 	if len(seqs) == 0 {
 		return out, nil
 	}
-	params := make([]any, 0, 3*len(seqs))
-	for _, seq := range seqs {
-		params = append(params, seq)
-	}
-	params = append(params, append(params, params...)...)
-	in := placeholders(len(seqs))
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", params...)
+	ids, _ := json.Marshal(seqs)
+	in := "SELECT value FROM json_each(?)"
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}

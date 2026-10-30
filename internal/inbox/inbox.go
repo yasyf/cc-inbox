@@ -258,7 +258,9 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 
 func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w io.Writer) error {
 	b := render.NewBudget(w, budget)
+	candidateBudget := render.NewBudget(io.Discard, budget)
 	matched, printed := 0, 0
+	var hits []store.Record
 	f.Descending = true
 	f.Limit = pageRows
 	now := st.Now()
@@ -267,26 +269,36 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		if err != nil {
 			return err
 		}
-		var hits []store.Record
 		for _, r := range records {
-			if pattern.MatchString(render.Line(r, now)) {
-				hits = append(hits, r)
+			line := render.Line(r, now)
+			if !pattern.MatchString(line) {
+				continue
 			}
-		}
-		rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON, Whole: true})
-		if err != nil {
-			return err
-		}
-		for _, line := range rendered {
 			matched++
-			if (limit == 0 || printed < limit) && b.Line(line) {
-				printed++
+			if candidateBudget.Full() || limit != 0 && len(hits) >= limit {
+				continue
+			}
+			if asJSON {
+				line = render.JSON(r)
+			}
+			if candidateBudget.Line(line) {
+				hits = append(hits, r)
 			}
 		}
 		if len(records) < pageRows {
 			break
 		}
 		f.Before = records[len(records)-1].Seq
+	}
+	rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON, Whole: true, Now: now})
+	if err != nil {
+		return err
+	}
+	for _, line := range rendered {
+		if !b.Line(line) {
+			break
+		}
+		printed++
 	}
 	if asJSON {
 		return nil

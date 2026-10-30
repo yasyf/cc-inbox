@@ -70,6 +70,10 @@ jobs:
           (cd .ci-recipients-baseline && go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli)
           go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli
           go test -run '^TestRecipientLaneQueryUsesTargetedIndex$' -v ./internal/store
+      - name: Grep actual caller operation counts and paged output equivalence
+        run: |
+          go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli
+          go test -run '^TestGrepMatchesPagedOutput$' -v ./internal/inbox
       - name: Build
         run: go build ./...
 
