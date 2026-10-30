@@ -10,9 +10,12 @@ import (
 	"time"
 
 	"github.com/yasyf/daemonkit"
+	"github.com/yasyf/daemonkit/durable"
 	"github.com/yasyf/synckit/codec"
 	"github.com/yasyf/synckit/helperruntime"
+	"github.com/yasyf/synckit/hostregistry"
 	"github.com/yasyf/synckit/manifest"
+	"github.com/yasyf/synckit/registration"
 	"github.com/yasyf/synckit/rpc"
 	"github.com/yasyf/synckit/syncservice"
 
@@ -40,22 +43,72 @@ func ManifestPath(home string) string {
 }
 
 func WriteManifest(home, schema string, debounce time.Duration) (string, error) {
-	m := Manifest(schema, debounce)
-	if err := m.Validate(); err != nil {
+	path := ManifestPath(home)
+	if err := writeManifest(path, Manifest(schema, debounce)); err != nil {
 		return "", err
 	}
-	path := ManifestPath(home)
+	return path, nil
+}
+
+func writeManifest(path string, m manifest.Manifest) error {
+	if err := m.Validate(); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+		return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
 	raw, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
-		return "", err
+		return err
 	}
-	if err := os.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
-		return "", fmt.Errorf("write %s: %w", path, err)
+	if err := durable.WriteFile(path, append(raw, '\n'), 0o600); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
-	return path, nil
+	return nil
+}
+
+// RefreshRegistration updates the schema of an already enabled and registered
+// mesh, preserving each manifest's remaining settings.
+func RefreshRegistration(ctx context.Context, home, schema string) error {
+	path := ManifestPath(home)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("stat mesh manifest %s: %w", path, err)
+	}
+	registeredPath, err := hostregistry.RegisteredPath(Service)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(registeredPath); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("stat registered mesh manifest %s: %w", registeredPath, err)
+	}
+	source, err := manifest.Load(path)
+	if err != nil {
+		return err
+	}
+	registered, err := manifest.Load(registeredPath)
+	if err != nil {
+		return err
+	}
+	if source.Name != Service || registered.Name != Service {
+		return fmt.Errorf("mesh manifests must both name %q, got source %q and registered %q", Service, source.Name, registered.Name)
+	}
+	if source.Service.SchemaFingerprint != schema {
+		source.Service.SchemaFingerprint = schema
+		if err := writeManifest(path, *source); err != nil {
+			return err
+		}
+	}
+	if registered.Service.SchemaFingerprint != schema {
+		registered.Service.SchemaFingerprint = schema
+		if err := registration.RegisterManifest(ctx, *registered); err != nil {
+			return fmt.Errorf("refresh registered mesh manifest: %w", err)
+		}
+	}
+	return nil
 }
 
 func Enabled(home string) (bool, error) {

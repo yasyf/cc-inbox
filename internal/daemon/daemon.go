@@ -58,14 +58,15 @@ type Product struct {
 }
 
 type Runtime struct {
-	home   string
-	ln     net.Listener
-	mu     sync.Mutex
-	failed error
+	home                string
+	ln                  net.Listener
+	mu                  sync.Mutex
+	failed              error
+	refreshRegistration func(context.Context, string, string) error
 }
 
 func New(home string, ln net.Listener) *Runtime {
-	return &Runtime{home: home, ln: ln}
+	return &Runtime{home: home, ln: ln, refreshRegistration: mesh.RefreshRegistration}
 }
 
 func (r *Runtime) Err() error {
@@ -93,6 +94,9 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	st, err := store.Open(c.Context, r.home)
 	if err != nil {
 		return nil, err
+	}
+	if err := r.refreshRegistration(c.Context, r.home, st.SchemaFingerprint()); err != nil {
+		slog.Warn("cci daemon cannot refresh mesh registration", "err", err)
 	}
 	p := &Product{
 		st:     st,
