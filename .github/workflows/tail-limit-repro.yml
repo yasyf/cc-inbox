@@ -1,0 +1,29 @@
+name: Tail newest limit source reproduction
+
+on:
+  push:
+    branches: [perf/cci-tail-limit-repro]
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: c148e0dc6970d4d5f446d77ba62d8a4060e0156c
+          path: .ci-tail-baseline
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Reproduce immutable baseline operation counts
+        run: |
+          test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
+          cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
+          (cd .ci-tail-baseline && go test -run '^TestTailNewestLimitDoesNotWalkSameDriveHistory$' -v ./internal/cli)
+      - name: Reproduce frozen production draft operation counts
+        run: go test -run '^TestTailNewestLimitDoesNotWalkSameDriveHistory$' -v ./internal/cli

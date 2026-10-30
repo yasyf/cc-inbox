@@ -161,6 +161,40 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	return strings.Join(clauses, " AND "), params
 }
 
+func (f Filter) bounded(self string, now time.Time) (string, []any) {
+	where, params := f.where(self, now)
+	peers, readers := f.peerAddresses(self), f.readerAddresses()
+	if len(peers) == 0 && len(readers) == 0 {
+		return where, params
+	}
+	bounds := func(column string, after int64) string {
+		var clauses string
+		if after > 0 {
+			clauses += " AND " + column + " > ?"
+			params = append(params, after)
+		}
+		if f.Before > 0 {
+			clauses += " AND " + column + " < ?"
+			params = append(params, f.Before)
+		}
+		return clauses
+	}
+	params = append(params, f.Drive)
+	arms := []string{"SELECT seq FROM records WHERE drive = ?" + bounds("seq", f.After)}
+	for _, addresses := range []struct {
+		values []any
+		after  int64
+	}{{peers, max(f.After, f.PeerAfter)}, {readers, f.After}} {
+		if len(addresses.values) == 0 {
+			continue
+		}
+		params = append(params, addresses.values...)
+		arms = append(arms, "SELECT source_seq FROM record_recipients WHERE address IN ("+placeholders(len(addresses.values))+")"+bounds("source_seq", addresses.after))
+	}
+	arms = append(arms, "SELECT source_seq FROM record_json_errors WHERE field = 'recipients'"+bounds("source_seq", f.After))
+	return where + " AND seq IN (" + strings.Join(arms, " UNION ALL ") + ")", params
+}
+
 func addressedTo(in string) string {
 	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR EXISTS (SELECT 1 FROM records own WHERE own.seq = records.re AND own.lane IN " + in + "))"
 }
@@ -254,15 +288,7 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
 	if f.Drive == "" && f.Peer == "" {
 		return nil, ErrNoDrive
 	}
-	where, params := f.where(s.Self(), s.Now())
-	order := "ASC"
-	if f.Descending {
-		order = "DESC"
-	}
-	q := "SELECT " + columns + " FROM records WHERE " + where + " ORDER BY seq " + order
-	if f.Limit > 0 {
-		q += fmt.Sprintf(" LIMIT %d", f.Limit)
-	}
+	q, params := s.selection(f)
 	rows, err := s.db.QueryContext(ctx, q, params...)
 	if err != nil {
 		return nil, fmt.Errorf("query records: %w", err)
@@ -279,8 +305,21 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
 	return out, rows.Err()
 }
 
+func (s *Store) selection(f Filter) (string, []any) {
+	where, params := f.bounded(s.Self(), s.Now())
+	order := "ASC"
+	if f.Descending {
+		order = "DESC"
+	}
+	q := "SELECT " + columns + " FROM records WHERE " + where + " ORDER BY seq " + order
+	if f.Limit > 0 {
+		q += fmt.Sprintf(" LIMIT %d", f.Limit)
+	}
+	return q, params
+}
+
 func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
-	where, params := f.where(s.Self(), s.Now())
+	where, params := f.bounded(s.Self(), s.Now())
 	var n int
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE "+where, params...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count records: %w", err)
@@ -718,9 +757,13 @@ func (s *Store) replyErrorTargets(ctx context.Context, query string, args ...any
 	return targets, rows.Err()
 }
 
+const resolversSQL = `SELECT resolves, seq FROM records WHERE resolves != 0 AND drive = ?
+UNION ALL SELECT resolves, seq FROM records WHERE resolves != 0 AND drive != ? AND resolves IN (SELECT seq FROM records WHERE drive = ?)
+UNION ALL SELECT j.value, r.seq FROM records r, json_each(r.also_resolves) j WHERE (r.drive = ? OR j.value IN (SELECT seq FROM records WHERE drive = ?))
+AND r.seq IN (SELECT seq FROM records WHERE drive = ? UNION ALL SELECT source_seq FROM record_also_resolves WHERE target IN (SELECT seq FROM records WHERE drive = ?) UNION ALL SELECT source_seq FROM record_json_errors WHERE field = 'also_resolves')`
+
 func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT resolves, seq FROM records WHERE resolves != 0 AND (drive = ? OR resolves IN (SELECT seq FROM records WHERE drive = ?))
-UNION ALL SELECT j.value, r.seq FROM records r, json_each(r.also_resolves) j WHERE r.drive = ? OR j.value IN (SELECT seq FROM records WHERE drive = ?)`, drive, drive, drive, drive)
+	rows, err := s.db.QueryContext(ctx, resolversSQL, slices.Repeat([]any{drive}, 7)...)
 	if err != nil {
 		return nil, fmt.Errorf("read resolvers: %w", err)
 	}

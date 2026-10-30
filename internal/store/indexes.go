@@ -20,12 +20,46 @@ var physicalIndexes = [...]struct {
 	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
 }
 
-// IndexMaintenanceReport describes committed physical tuning and storage snapshots, not peak I/O.
+const (
+	deriveMemberships = `INSERT INTO record_recipients (address, source_seq) SELECT DISTINCT value, NEW.seq FROM json_each(CASE WHEN json_error_position(NEW.recipients) = 0 THEN NEW.recipients ELSE '[]' END) WHERE typeof(value) = 'text';
+INSERT INTO record_also_resolves (target, source_seq) SELECT atom, NEW.seq FROM json_each(CASE WHEN json_error_position(NEW.also_resolves) = 0 THEN NEW.also_resolves ELSE '[]' END) WHERE atom IS NOT NULL;
+INSERT INTO record_json_errors (field, source_seq) SELECT 'recipients', NEW.seq WHERE json_error_position(NEW.recipients) != 0 UNION ALL SELECT 'also_resolves', NEW.seq WHERE json_error_position(NEW.also_resolves) != 0;
+`
+	forgetMemberships = `DELETE FROM record_recipients WHERE source_seq = OLD.seq;
+DELETE FROM record_also_resolves WHERE source_seq = OLD.seq;
+DELETE FROM record_json_errors WHERE source_seq = OLD.seq;
+`
+)
+
+var recordMemberships = [...]struct {
+	kind, name, sql, fill string
+}{
+	{"table", "record_recipients", "CREATE TABLE record_recipients (address TEXT NOT NULL, source_seq INTEGER NOT NULL)",
+		`INSERT INTO record_recipients (address, source_seq) SELECT DISTINCT j.value, r.seq FROM records r, json_each(CASE WHEN json_error_position(r.recipients) = 0 THEN r.recipients ELSE '[]' END) j WHERE typeof(j.value) = 'text'`},
+	{"table", "record_also_resolves", "CREATE TABLE record_also_resolves (target NUMERIC NOT NULL, source_seq INTEGER NOT NULL)",
+		`INSERT INTO record_also_resolves (target, source_seq) SELECT j.atom, r.seq FROM records r, json_each(CASE WHEN json_error_position(r.also_resolves) = 0 THEN r.also_resolves ELSE '[]' END) j WHERE j.atom IS NOT NULL`},
+	{"table", "record_json_errors", "CREATE TABLE record_json_errors (field TEXT NOT NULL, source_seq INTEGER NOT NULL)",
+		`INSERT INTO record_json_errors (field, source_seq) SELECT 'recipients', seq FROM records WHERE json_error_position(recipients) != 0 UNION ALL SELECT 'also_resolves', seq FROM records WHERE json_error_position(also_resolves) != 0`},
+	{"index", "record_recipients_address", "CREATE INDEX record_recipients_address ON record_recipients(address, source_seq)", ""},
+	{"index", "record_recipients_source", "CREATE INDEX record_recipients_source ON record_recipients(source_seq)", ""},
+	{"index", "record_also_resolves_target", "CREATE INDEX record_also_resolves_target ON record_also_resolves(target, source_seq)", ""},
+	{"index", "record_also_resolves_source", "CREATE INDEX record_also_resolves_source ON record_also_resolves(source_seq)", ""},
+	{"index", "record_json_errors_field", "CREATE INDEX record_json_errors_field ON record_json_errors(field, source_seq)", ""},
+	{"index", "record_json_errors_source", "CREATE INDEX record_json_errors_source ON record_json_errors(source_seq)", ""},
+	{"index", "records_resolves_target", "CREATE INDEX records_resolves_target ON records(resolves, drive) WHERE resolves != 0", ""},
+	{"trigger", "record_memberships_insert", "CREATE TRIGGER record_memberships_insert AFTER INSERT ON records\nBEGIN\n" + deriveMemberships + "END", ""},
+	{"trigger", "record_memberships_update", "CREATE TRIGGER record_memberships_update AFTER UPDATE OF seq, recipients, also_resolves ON records\nWHEN OLD.seq IS NOT NEW.seq OR OLD.recipients IS NOT NEW.recipients OR OLD.also_resolves IS NOT NEW.also_resolves\nBEGIN\n" + forgetMemberships + deriveMemberships + "END", ""},
+	{"trigger", "record_memberships_delete", "CREATE TRIGGER record_memberships_delete AFTER DELETE ON records\nBEGIN\n" + forgetMemberships + "END", ""},
+}
+
+// IndexMaintenanceReport describes the physical tuning and record memberships
+// one maintenance committed, with storage snapshots, not peak I/O.
 type IndexMaintenanceReport struct {
-	Created []string          `json:"created"`
-	Elapsed time.Duration     `json:"elapsed_ns"`
-	Before  IndexStorageStats `json:"before"`
-	After   IndexStorageStats `json:"after"`
+	Created     []string          `json:"created"`
+	Memberships []string          `json:"memberships"`
+	Elapsed     time.Duration     `json:"elapsed_ns"`
+	Before      IndexStorageStats `json:"before"`
+	After       IndexStorageStats `json:"after"`
 }
 
 // IndexStorageStats samples SQLite allocation and file sizes without measuring peak usage.
@@ -37,10 +71,12 @@ type IndexStorageStats struct {
 	FreelistCount int64 `json:"freelist_count"`
 }
 
-// MaintainIndexes explicitly tunes an initialized store, failing immediately when its init lock is busy.
+// MaintainIndexes explicitly tunes an initialized store and installs its
+// record memberships in one transaction, failing immediately when its init
+// lock or database writer is busy.
 func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, error) {
 	started := time.Now()
-	report := IndexMaintenanceReport{Created: []string{}}
+	report := IndexMaintenanceReport{Created: []string{}, Memberships: []string{}}
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
@@ -74,12 +110,21 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
-	if len(missing) > 0 {
+	installed, err := membershipsInstalled(ctx, s.db)
+	if err != nil {
+		return report, err
+	}
+	if len(missing) > 0 || !installed {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return report, fmt.Errorf("begin index maintenance: %w", err)
 		}
 		defer func() { _ = tx.Rollback() }()
+		if !installed {
+			if err := installMemberships(ctx, tx); err != nil {
+				return report, err
+			}
+		}
 		if err := createPhysicalIndexes(ctx, tx, missing); err != nil {
 			return report, err
 		}
@@ -88,6 +133,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		for _, index := range missing {
 			report.Created = append(report.Created, physicalIndexes[index].name)
+		}
+		if !installed {
+			for _, object := range recordMemberships {
+				report.Memberships = append(report.Memberships, object.name)
+			}
 		}
 	}
 	report.After, err = s.indexStorageStats(ctx)
@@ -117,6 +167,42 @@ func createPhysicalIndexes(ctx context.Context, tx *sql.Tx, indexes []int) error
 		index := physicalIndexes[i]
 		if _, err := tx.ExecContext(ctx, index.sql); err != nil {
 			return fmt.Errorf("create physical index %s: %w", index.name, err)
+		}
+	}
+	return nil
+}
+
+func membershipsInstalled(ctx context.Context, q querier) (bool, error) {
+	present := 0
+	for _, object := range recordMemberships {
+		var kind, definition string
+		err := q.QueryRowContext(ctx, "SELECT type, COALESCE(sql, '') FROM sqlite_schema WHERE name = ?", object.name).Scan(&kind, &definition)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			continue
+		case err != nil:
+			return false, fmt.Errorf("inspect record membership %s: %w", object.name, err)
+		case kind != object.kind || definition != object.sql:
+			return false, fmt.Errorf("record membership %s is %s %q, not this cci's definition", object.name, kind, definition)
+		}
+		present++
+	}
+	if present != 0 && present != len(recordMemberships) {
+		return false, fmt.Errorf("record memberships are partially installed: %d of %d objects", present, len(recordMemberships))
+	}
+	return present == len(recordMemberships), nil
+}
+
+func installMemberships(ctx context.Context, tx *sql.Tx) error {
+	for _, object := range recordMemberships {
+		if _, err := tx.ExecContext(ctx, object.sql); err != nil {
+			return fmt.Errorf("create record membership %s: %w", object.name, err)
+		}
+		if object.fill == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, object.fill); err != nil {
+			return fmt.Errorf("fill record membership %s: %w", object.name, err)
 		}
 	}
 	return nil
