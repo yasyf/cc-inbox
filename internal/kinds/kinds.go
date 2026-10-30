@@ -250,7 +250,7 @@ func Broadcasts() []Kind {
 }
 
 func RootAddressed() []Kind {
-	return []Kind{Incident, Decide, Ask, Blocker, Urgent, Answer, Correction, Defect}
+	return []Kind{Incident, Mechanism, FixLive, Decide, Ask, Blocker, Urgent, Answer, Correction, Defect, Owner}
 }
 
 func Closers() []Kind {
