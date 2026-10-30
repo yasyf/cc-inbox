@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,12 +20,6 @@ import (
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
-
-type nativeTailEnvelope struct {
-	Code int    `json:"returncode"`
-	Out  []byte `json:"stdout_b64"`
-	Err  []byte `json:"stderr_b64"`
-}
 
 func nativeTailBody(t *testing.T, fixture nativeTailFixture, call nativeTailCall) []byte {
 	t.Helper()
@@ -67,11 +62,42 @@ func nativeTailResultFromHTTP(t *testing.T, response *httptest.ResponseRecorder)
 	if response.Code != http.StatusOK {
 		t.Fatalf("native response status=%d body=%q", response.Code, response.Body.String())
 	}
-	var envelope nativeTailEnvelope
-	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+	var result nativeTailResult
+	if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	return nativeTailResult{Code: envelope.Code, Out: envelope.Out, Err: envelope.Err}
+	return result
+}
+
+func countNativeTailCore(fixture nativeTailFixture) *atomic.Int64 {
+	calls := &atomic.Int64{}
+	now := fixture.st.Now
+	fixture.st.Now = func() time.Time {
+		calls.Add(1)
+		return now()
+	}
+	return calls
+}
+
+func TestNativeTailRejectsNullArgumentBeforeCore(t *testing.T) {
+	call := nativeTailCall{args: []string{"tail", "--drive", "d", "--since", "", "--json"}}
+	fixture := newNativeTailFixture(t, call, nil)
+	handler := nativeTailHandler(t, fixture)
+	forbidNativeTailWrites(t, fixture)
+	calls := countNativeTailCore(fixture)
+	body := nativeTailBody(t, fixture, call)
+	got := nativeTailResultFromHTTP(t, nativeTailResponse(t, handler, body))
+	if got.Code != 0 || calls.Load() == 0 {
+		t.Fatalf("legal empty since did not enter Tail: code=%d calls=%d error=%q", got.Code, calls.Load(), got.Err)
+	}
+	for _, value := range []string{"null", "false", "1", "{}", "[]"} {
+		calls.Store(0)
+		bad := bytes.Replace(body, []byte(`"--since",""`), []byte(`"--since",`+value), 1)
+		response := nativeTailResponse(t, handler, bad)
+		if response.Code != http.StatusBadRequest || calls.Load() != 0 {
+			t.Fatalf("%s argv reached core: status=%d calls=%d body=%q", value, response.Code, calls.Load(), response.Body.String())
+		}
+	}
 }
 
 func TestNativeTailHTTPParity(t *testing.T) {
@@ -176,6 +202,7 @@ func TestNativeTailProtocolAndHome(t *testing.T) {
 	handler := nativeTailHandler(t, fixture)
 	forbidNativeTailWrites(t, fixture)
 	body := nativeTailBody(t, fixture, call)
+	calls := countNativeTailCore(fixture)
 	for _, bad := range [][]byte{
 		[]byte("null"),
 		[]byte("{}"),
@@ -188,6 +215,9 @@ func TestNativeTailProtocolAndHome(t *testing.T) {
 	} {
 		if response := nativeTailResponse(t, handler, bad); response.Code != http.StatusBadRequest {
 			t.Fatalf("invalid request status=%d body=%q", response.Code, response.Body.String())
+		}
+		if calls.Load() != 0 {
+			t.Fatalf("invalid request entered core: calls=%d", calls.Load())
 		}
 	}
 	var mismatch map[string]any
@@ -211,6 +241,9 @@ func TestNativeTailProtocolAndHome(t *testing.T) {
 	handler.ServeHTTP(response, get)
 	if response.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("GET native tail = %d", response.Code)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("protocol request entered core: calls=%d", calls.Load())
 	}
 }
 
@@ -304,13 +337,20 @@ func TestNativeTailInputBoundIncludesTrailingAndChunked(t *testing.T) {
 	handler := nativeTailHandler(t, fixture)
 	forbidNativeTailWrites(t, fixture)
 	body := nativeTailBody(t, fixture, call)
+	calls := countNativeTailCore(fixture)
 	exact := append(append([]byte(nil), body...), bytes.Repeat([]byte(" "), limit-len(body))...)
 	if got := nativeTailResultFromHTTP(t, nativeTailResponse(t, handler, exact)); got.Code != 0 {
 		t.Fatalf("exact frame failed: %q", got.Err)
 	}
+	if calls.Swap(0) == 0 {
+		t.Fatal("accepted exact frame did not enter Tail")
+	}
 	over := append(exact, ' ')
 	if response := nativeTailResponse(t, handler, over); response.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("declared oversize = %d", response.Code)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("declared oversized request entered core: calls=%d", calls.Load())
 	}
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
@@ -329,6 +369,9 @@ func TestNativeTailInputBoundIncludesTrailingAndChunked(t *testing.T) {
 	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("chunked oversized trailing whitespace = %d", response.StatusCode)
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("chunked oversized request entered core: calls=%d", calls.Load())
 	}
 }
 

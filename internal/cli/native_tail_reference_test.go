@@ -21,9 +21,9 @@ type nativeTailCall struct {
 }
 
 type nativeTailResult struct {
-	Code int
-	Out  []byte
-	Err  []byte
+	Code int    `json:"returncode"`
+	Out  []byte `json:"stdout_b64"`
+	Err  []byte `json:"stderr_b64"`
 }
 
 type nativeTailFixture struct {
@@ -53,7 +53,7 @@ func nativeTailCalls() []nativeTailCall {
 		{"repeat lanes", []string{"--lane", "api", "--lane=root"}},
 		{"pr", []string{"--pr", "29020"}},
 		{"topic", []string{"--topic", "#29020"}},
-		{"mute", []string{"--mute", "note"}},
+		{"mute", []string{"--mute-kinds", "note"}},
 		{"to kind", []string{"--to-kind", "hold"}},
 		{"stack", []string{"--stack", "p/e"}},
 		{"target", []string{"--target", "prod"}},
@@ -159,6 +159,9 @@ func TestNativeTailCLIReference(t *testing.T) {
 			t.Run(variant.name+"/"+call.name, func(t *testing.T) {
 				fixture := newNativeTailFixture(t, call, variant.sets)
 				got := normalizeNativeTail(runNativeTailReference(t, call.args), fixture.node)
+				if variant.name == "clean" && call.name == "mute" && (got.Code != 0 || len(got.Out) == 0 || bytes.Contains(got.Out, []byte(`"kind":"note"`))) {
+					t.Fatalf("--mute-kinds did not exclude notes: code=%d output=%q error=%q", got.Code, got.Out, got.Err)
+				}
 				path := nativeTailSnapshotPath(variant.name + "/" + call.name)
 				if os.Getenv("CCI_NATIVE_TAIL_SNAPSHOT_WRITE") == "1" {
 					raw, err := json.Marshal(got)

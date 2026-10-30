@@ -20,7 +20,7 @@ import (
 func newTailCmd() *cobra.Command {
 	cmd, flags := tailCommand(selfPeer().String())
 	cmd.RunE = withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-		return flags.run(cmd, st, selfPeer())
+		return flags.run(cmd.Context(), cmd, st, selfPeer())
 	})
 	return cmd
 }
@@ -46,8 +46,8 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	return cmd, f
 }
 
-func (f *tailFlags) run(cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
-	filter, err := f.rf.filterPeer(cmd.Context(), st, peer)
+func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
+	filter, err := f.rf.filterPeer(ctx, st, peer)
 	if err != nil {
 		return err
 	}
@@ -59,15 +59,15 @@ func (f *tailFlags) run(cmd *cobra.Command, st *store.Store, peer store.PeerKey)
 	if f.all {
 		fold = 0
 	}
-	start, resumed, err := st.Cursor(cmd.Context(), name, filter.Drive)
+	start, resumed, err := st.Cursor(ctx, name, filter.Drive)
 	if err != nil {
 		return err
 	}
-	res, err := inbox.Tail(cmd.Context(), st, inbox.TailOptions{Filter: filter, Cursor: name, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Fold: fold, Notes: cmd.ErrOrStderr()}, cmd.OutOrStdout())
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Fold: fold, Notes: cmd.ErrOrStderr()}, cmd.OutOrStdout())
 	if err != nil || name == "" || !resumed || f.rf.limit > 0 {
 		return err
 	}
-	return advanceLaneCursor(cmd.Context(), st, filter, start, res.Last)
+	return advanceLaneCursor(ctx, st, filter, start, res.Last)
 }
 
 func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, start, last int64) error {

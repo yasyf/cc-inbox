@@ -20,10 +20,10 @@ import (
 const nativeTailInputBytes = 8 << 20
 
 type nativeTailRequest struct {
-	Argv    []string `json:"argv"`
-	Session *string  `json:"session"`
-	Agent   *string  `json:"agent"`
-	Home    *string  `json:"home"`
+	Argv    []*string `json:"argv"`
+	Session *string   `json:"session"`
+	Agent   *string   `json:"agent"`
+	Home    *string   `json:"home"`
 }
 
 type tailProtocolError struct {
@@ -57,7 +57,11 @@ func TailHandler(st *store.Store, home string) (http.Handler, error) {
 		cmd, flags := tailCommand(peer.String())
 		root := rootCommand()
 		root.AddCommand(cmd)
-		root.SetArgs(request.Argv[1:])
+		args := make([]string, len(request.Argv)-1)
+		for i, arg := range request.Argv[1:] {
+			args[i] = *arg
+		}
+		root.SetArgs(args)
 		output := &nativeTailOutput{w: w}
 		var stderr bytes.Buffer
 		root.SetOut(output)
@@ -75,7 +79,7 @@ func TailHandler(st *store.Store, home string) (http.Handler, error) {
 			if protocol = validate(cmd); protocol != nil {
 				return protocol
 			}
-			return flags.run(cmd, st, peer)
+			return flags.run(cmd.Context(), cmd, st, peer)
 		}
 		help := cmd.HelpFunc()
 		cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
@@ -131,13 +135,16 @@ func decodeNativeTail(w http.ResponseWriter, r *http.Request) (nativeTailRequest
 		}
 		return nativeTailRequest{}, invalid
 	}
-	if len(request.Argv) < 2 || request.Argv[0] != "cci" || request.Argv[1] != "tail" || request.Session == nil || request.Agent == nil || request.Home == nil {
+	if len(request.Argv) < 2 || request.Session == nil || request.Agent == nil || request.Home == nil {
 		return nativeTailRequest{}, invalid
 	}
 	for _, arg := range request.Argv {
-		if strings.IndexByte(arg, 0) >= 0 {
+		if arg == nil || strings.IndexByte(*arg, 0) >= 0 {
 			return nativeTailRequest{}, invalid
 		}
+	}
+	if *request.Argv[0] != "cci" || *request.Argv[1] != "tail" {
+		return nativeTailRequest{}, invalid
 	}
 	if !filepath.IsAbs(*request.Home) || strings.IndexByte(*request.Home, 0) >= 0 {
 		return nativeTailRequest{}, invalid

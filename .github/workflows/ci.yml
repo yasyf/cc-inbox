@@ -68,6 +68,10 @@ jobs:
         with:
           ref: 14d268579c8882c8feebea28094ae3a279d2e165
           path: .ci-native-tail-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
+          path: .ci-native-tail-null-baseline
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -128,6 +132,14 @@ jobs:
           CCI_MEMBERSHIP_PROVISION_ROWS=200000 go test -run '^TestMaintainIndexesProvisionsMembershipsWithinWriterBudget$' -v ./internal/store
       - name: Native HTTP Tail immutable CLI bytes, errors, identity, freshness, and zero writes
         run: |
+          test "$(git -C .ci-native-tail-null-baseline rev-parse HEAD)" = e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
+          cp internal/cli/native_tail_reference_test.go internal/cli/tail_http_test.go .ci-native-tail-null-baseline/internal/cli/
+          if (cd .ci-native-tail-null-baseline && go test -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli) > "$RUNNER_TEMP/cci-native-tail-null-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
+          grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 14d268579c8882c8feebea28094ae3a279d2e165
           cp internal/cli/native_tail_reference_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
