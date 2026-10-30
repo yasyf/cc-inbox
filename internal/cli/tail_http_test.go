@@ -370,7 +370,7 @@ func TestNativeTailStreamsFirstWholeRecordBeyondInputFrame(t *testing.T) {
 func TestNativeTailFreshMutableHold(t *testing.T) {
 	call := nativeTailCall{args: []string{"tail", "--drive", "fresh", "--since", "0", "--kind=hold", "--json"}}
 	fixture := newNativeTailFixture(t, call, nil)
-	seq, _, err := fixture.st.Post(t.Context(), store.Record{Drive: "fresh", Lane: "root", Kind: kinds.Hold, Text: "hold #29020", Refs: store.Refs{PRs: []store.PR{{Number: 29020}}}}, 0)
+	hold, _, err := fixture.st.Post(t.Context(), store.Record{Drive: "fresh", Lane: "root", Kind: kinds.Hold, Text: "hold #29020", Refs: store.Refs{PRs: []store.PR{{Number: 29020}}}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -393,13 +393,13 @@ func TestNativeTailFreshMutableHold(t *testing.T) {
 	if records := read(); len(records) != 1 || records[0].Status != "open" {
 		t.Fatalf("initial hold = %+v", records)
 	}
-	if _, _, err := fixture.st.Post(t.Context(), store.Record{Drive: "fresh", Lane: "root", Kind: kinds.Done, Text: "resolved", Resolves: seq}, 0); err != nil {
+	if _, _, err := fixture.st.Post(t.Context(), store.Record{Drive: "fresh", Lane: "root", Kind: kinds.Done, Text: "resolved", Resolves: hold.Seq}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if records := read(); len(records) != 1 || records[0].Status != "closed" {
 		t.Fatalf("resolved hold stale = %+v", records)
 	}
-	if _, err := fixture.db.ExecContext(t.Context(), "UPDATE records SET expires_at=1 WHERE seq=?", seq); err != nil {
+	if _, err := fixture.db.ExecContext(t.Context(), "UPDATE records SET expires_at=1 WHERE seq=?", hold.Seq); err != nil {
 		t.Fatal(err)
 	}
 	if records := read(); len(records) != 0 {
