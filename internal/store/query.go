@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -547,37 +548,174 @@ func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, e
 	return out, rows.Err()
 }
 
+type ReplyPage struct {
+	Replies map[int64][]Record
+	Err     error
+}
+
+type replyScanner struct {
+	row      scanner
+	re       any
+	resolves any
+	also     any
+	seq      int64
+}
+
+func (r *replyScanner) Scan(dest ...any) error {
+	err := r.row.Scan(append(dest, &r.re, &r.resolves, &r.also, &r.seq)...)
+	if err == nil {
+		return nil
+	}
+	values := make([]any, len(dest))
+	raw := make([]any, len(dest), len(dest)+4)
+	for i := range values {
+		raw[i] = &values[i]
+	}
+	if rawErr := r.row.Scan(append(raw, &r.re, &r.resolves, &r.also, &r.seq)...); rawErr != nil {
+		return rawErr
+	}
+	return err
+}
+
 func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, error) {
-	out := map[int64][]Record{}
+	pages, err := s.ReplyPages(ctx, [][]int64{seqs})
+	if err != nil {
+		return nil, err
+	}
+	if pages[0].Err != nil {
+		return nil, pages[0].Err
+	}
+	return pages[0].Replies, nil
+}
+
+// ReplyPages reads selected replies once and attributes decoding errors to each affected page.
+func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage, error) {
+	pages := make([]ReplyPage, len(selected))
+	firstReply := make([]int64, len(selected))
+	owners := map[int64][]int{}
+	var seqs []int64
+	for page, ids := range selected {
+		pages[page].Replies = map[int64][]Record{}
+		for _, seq := range ids {
+			if len(owners[seq]) == 0 {
+				seqs = append(seqs, seq)
+			}
+			if previous := owners[seq]; len(previous) == 0 || previous[len(previous)-1] != page {
+				owners[seq] = append(owners[seq], page)
+			}
+		}
+	}
 	if len(seqs) == 0 {
-		return out, nil
+		return pages, nil
 	}
-	params := make([]any, 0, 3*len(seqs))
-	for _, seq := range seqs {
-		params = append(params, seq)
-	}
-	params = append(params, append(params, params...)...)
-	in := placeholders(len(seqs))
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", params...)
+	ids, _ := json.Marshal(seqs)
+	in := "SELECT value FROM json_each(?)"
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+", re, resolves, also_resolves, seq FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
+	type failure struct {
+		metadata replyScanner
+		err      error
+	}
+	var failures []failure
 	for rows.Next() {
-		r, err := s.scan(rows)
-		if err != nil {
-			return nil, err
+		metadata := replyScanner{row: rows}
+		r, decodeErr := s.scan(&metadata)
+		if decodeErr != nil {
+			failures = append(failures, failure{metadata: metadata, err: decodeErr})
+			continue
 		}
-		if r.Re != 0 {
-			out[r.Re] = append(out[r.Re], r)
+		targets := append([]int64{r.Re, r.Resolves}, r.AlsoResolves...)
+		affected := map[int]bool{}
+		for _, target := range targets {
+			for _, page := range owners[target] {
+				affected[page] = true
+			}
 		}
-		for _, seq := range r.Closes() {
-			if seq != r.Re {
-				out[seq] = append(out[seq], r)
+		for page := range affected {
+			if firstReply[page] == 0 {
+				firstReply[page] = r.Seq
+			}
+			if r.Re != 0 {
+				pages[page].Replies[r.Re] = append(pages[page].Replies[r.Re], r)
+			}
+			for _, target := range r.Closes() {
+				if target != r.Re {
+					pages[page].Replies[target] = append(pages[page].Replies[target], r)
+				}
 			}
 		}
 	}
-	return out, rows.Err()
+	queryErr := rows.Err()
+	if err := rows.Close(); err != nil && queryErr == nil {
+		queryErr = err
+	}
+	for _, failed := range failures {
+		direct, err := s.replyErrorTargets(ctx, "SELECT value FROM json_each(?) WHERE value = ? OR value = ?", string(ids), failed.metadata.re, failed.metadata.resolves)
+		if err != nil {
+			return nil, err
+		}
+		also, err := s.replyErrorTargets(ctx, "SELECT value FROM json_each(?) WHERE value IN (SELECT value FROM json_each(?))", string(ids), failed.metadata.also)
+		if err != nil {
+			if pages[0].Err == nil {
+				pages[0].Err = err
+				if firstReply[0] == 0 || firstReply[0] > failed.metadata.seq {
+					pages[0].Err = fmt.Errorf("read replies: %w", err)
+				}
+				for _, target := range direct {
+					if slices.Contains(owners[target], 0) {
+						pages[0].Err = failed.err
+						break
+					}
+				}
+			}
+			continue
+		}
+		targets := append(direct, also...)
+		if len(targets) == 0 {
+			return nil, failed.err
+		}
+		for _, target := range targets {
+			for _, page := range owners[target] {
+				if firstReply[page] == 0 || firstReply[page] > failed.metadata.seq {
+					firstReply[page] = failed.metadata.seq
+				}
+				if pages[page].Err == nil {
+					pages[page].Err = failed.err
+				}
+			}
+		}
+	}
+	if queryErr != nil {
+		for page := range pages {
+			if pages[page].Err == nil {
+				pages[page].Err = queryErr
+				if firstReply[page] == 0 {
+					pages[page].Err = fmt.Errorf("read replies: %w", queryErr)
+				}
+			}
+		}
+	}
+	return pages, nil
+}
+
+func (s *Store) replyErrorTargets(ctx context.Context, query string, args ...any) ([]int64, error) {
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var targets []int64
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, err
+		}
+		targets = append(targets, seq)
+	}
+	return targets, rows.Err()
 }
 
 func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, error) {

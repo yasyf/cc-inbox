@@ -6,6 +6,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -59,6 +60,7 @@ type view struct {
 	Fold     int
 	Untagged bool
 	Whole    bool
+	Now      time.Time
 }
 
 func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
@@ -84,7 +86,17 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 	if err != nil {
 		return nil, nil, err
 	}
-	now := st.Now()
+	now := v.Now
+	if now.IsZero() {
+		now = st.Now()
+	}
+	out, folded = textLines(records, replies, v, now)
+	return out, folded, nil
+}
+
+func textLines(records []store.Record, replies map[int64][]store.Record, v view, now time.Time) ([]string, []bool) {
+	out := make([]string, len(records))
+	folded := make([]bool, len(records))
 	line := func(r store.Record, width int) string {
 		switch {
 		case v.Whole:
@@ -101,7 +113,7 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 		}
 		out[i] = text + marks(r.Seq, replies[r.Seq])
 	}
-	return out, folded, nil
+	return out, folded
 }
 
 func resolved(seq int64, replies []store.Record) bool {
