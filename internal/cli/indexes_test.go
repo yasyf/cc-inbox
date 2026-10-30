@@ -60,8 +60,8 @@ func TestMaintainIndexesCommandFailsBusyBeforeOpeningStore(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		release()
-		_ = <-done
-		t.Fatal("maintenance command waited on initialization lock")
+		err := <-done
+		t.Fatalf("maintenance command waited on initialization lock: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, store.DBFile)); !os.IsNotExist(err) {
 		t.Fatalf("busy maintenance created database: %v", err)
