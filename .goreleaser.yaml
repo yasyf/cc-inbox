@@ -66,12 +66,15 @@ homebrew_casks:
   - name: cci
     binaries:
       - cci
-    # Quarantined cask binaries stall every first exec on a Gatekeeper check.
+    # Quarantined cask binaries stall every first exec on a Gatekeeper check, and any new
+    # binary's first exec waits on its assessment; running it here makes the upgrade, not
+    # the next drive read, pay for both, and fails the upgrade if cci cannot start.
     hooks:
       post:
         install_steps: |
           on_macos do
             run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci"]
+            run "{{ .StagedPath }}/cci", args: ["--version"]
           end
     repository:
       owner: yasyf
