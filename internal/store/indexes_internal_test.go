@@ -24,6 +24,7 @@ func TestExistingStoreOpenDoesNotBuildPhysicalIndexes(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
+	dropMemberships(ctx, t, st)
 	seedLaneHistory(t, st, 64)
 	fingerprint := st.SchemaFingerprint()
 	tx, err := st.db.BeginTx(ctx, nil)
@@ -40,6 +41,7 @@ func TestExistingStoreOpenDoesNotBuildPhysicalIndexes(t *testing.T) {
 		t.Fatal("Open changed logical fingerprint")
 	}
 	assertLaneIndexCount(t, other, 0)
+	assertMembershipsInstalled(ctx, t, other, false)
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +138,7 @@ func TestMaintainIndexesRejectsNewerLogicalSchema(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
+	dropMemberships(ctx, t, st)
 	if _, err := st.db.ExecContext(ctx, "PRAGMA user_version = 15"); err != nil {
 		t.Fatal(err)
 	}
@@ -143,6 +146,7 @@ func TestMaintainIndexesRejectsNewerLogicalSchema(t *testing.T) {
 		t.Fatal("maintenance accepted newer logical schema")
 	}
 	assertLaneIndexCount(t, st, 0)
+	assertMembershipsInstalled(ctx, t, st, false)
 }
 
 func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
@@ -153,6 +157,7 @@ func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
+	dropMemberships(ctx, t, st)
 	lock, err := os.OpenFile(filepath.Join(st.home, "init.lock"), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -166,6 +171,7 @@ func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
 		t.Fatal("maintenance crossed active initialization barrier")
 	}
 	assertLaneIndexCount(t, st, 0)
+	assertMembershipsInstalled(ctx, t, st, false)
 }
 
 func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
@@ -176,6 +182,7 @@ func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
+	dropMemberships(ctx, t, st)
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -197,12 +204,14 @@ func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
 		t.Fatalf("maintenance waited behind ordinary database writer: %v", err)
 	}
 	assertLaneIndexCount(t, st, 0)
+	assertMembershipsInstalled(ctx, t, st, false)
 }
 
 func TestMaintainIndexesRollsBackCancelledBuild(t *testing.T) {
 	for _, target := range []string{"record", "session"} {
 		t.Run(target, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
+			cleanupCtx := t.Context()
+			ctx, cancel := context.WithCancel(cleanupCtx)
 			t.Cleanup(cancel)
 			var building atomic.Bool
 			var interrupted atomic.Bool
@@ -230,9 +239,10 @@ func TestMaintainIndexesRollsBackCancelledBuild(t *testing.T) {
 				}
 			}
 			dropLaneIndexes(t, st)
+			dropMemberships(cleanupCtx, t, st)
 			seedLaneHistory(t, st, 4096)
 			for _, query := range []string{
-				"UPDATE records SET lane = 'record-lane'",
+				"UPDATE records SET lane = 'record-lane', recipients = '[\"peer:rolled-back\"]'",
 				`WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < 4096
 )
@@ -251,6 +261,7 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'session-lane' FROM history`,
 				t.Fatal("test did not cancel an active index build")
 			}
 			assertLaneIndexCount(t, st, 0)
+			assertMembershipsInstalled(cleanupCtx, t, st, false)
 		})
 	}
 }
