@@ -23,12 +23,21 @@ func newSubscribeCmd() *cobra.Command {
 		reader string
 		kindsF []string
 		muteF  []string
+		toF    []string
 		cursor string
 	)
 	cmd := &cobra.Command{
 		Use:   "subscribe",
-		Short: "Deliver this session's records over the cci channel: records addressed to --reader plus broadcasts of each --kind",
-		Args:  cobra.NoArgs,
+		Short: "Deliver this session's records over the cci channel: records addressed to --reader of each --to-kind, plus broadcasts of each --kind",
+		Long: `Deliver this session's records over the cci channel.
+
+A record addressed to --reader arrives when its kind is a --to-kind; other
+lanes' broadcasts arrive when their kind is a --kind. For reader root (or main)
+--to-kind defaults to ` + kindList(kinds.RootAddressed()) + `, the kinds a
+drive's root acts on; for any other reader every addressed kind arrives.
+Records the channel holds back still show in cci tail, cci digest and the stop
+hook's overdue-ask nudge.`,
+		Args: cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			window, session, err := thisSession()
 			if err != nil {
@@ -44,6 +53,12 @@ func newSubscribeCmd() *cobra.Command {
 			}
 			if sub.Mute, err = kinds.ParseAll(muteF); err != nil {
 				return err
+			}
+			if sub.ToKinds, err = kinds.ParseAll(toF); err != nil {
+				return err
+			}
+			if len(sub.ToKinds) == 0 {
+				sub.ToKinds = store.DefaultToKinds(reader)
 			}
 			if sub.Cursor == "" {
 				sub.Cursor = "channel-" + session
@@ -64,6 +79,7 @@ func newSubscribeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&reader, "reader", "", "deliver records addressed to this lane, as cci tail --reader does")
 	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
 	cmd.Flags().StringSliceVar(&muteF, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
+	cmd.Flags().StringSliceVar(&toF, "to-kind", nil, "deliver records addressed to --reader only of these kinds; cci tail still reads the rest (repeatable; default for root: "+kindList(kinds.RootAddressed())+", otherwise every kind)")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")
 	_ = cmd.MarkFlagRequired("reader")
 	return cmd
@@ -186,7 +202,14 @@ func channelArgs(args []string) []string {
 }
 
 func describe(sub store.Subscription) string {
-	return fmt.Sprintf("drive %s as %s, kinds %s, muted %s, urgent repeats held %s", sub.Drive, sub.Reader, kindList(sub.Kinds), kindList(sub.Mute), store.UrgentRepeat)
+	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, urgent repeats held %s", sub.Drive, sub.Reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), store.UrgentRepeat)
+}
+
+func addressedList(ks []kinds.Kind) string {
+	if len(ks) == 0 {
+		return "all"
+	}
+	return kindList(ks)
 }
 
 func kindList(ks []kinds.Kind) string {

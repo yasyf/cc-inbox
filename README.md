@@ -150,16 +150,23 @@ cci subscribe --drive release-demo --reader root --kind incident,decide,ask --mu
 ```
 
 ```text
-window 29348 (session 900424b6-…) subscribed: drive release-demo as root, kinds incident,decide,ask, muted state,review,note, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,decide,ask,blocker,urgent,answer,correction,defect, kinds incident,decide,ask, muted state,review,note, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
 ```
 
 What arrives:
 
-- records addressed to `root` or to its other name, `main`;
+- records addressed to `root` or to its other name, `main`, of each
+  `--to-kind`;
 - other lanes' broadcasts of each `--kind`.
+
+`--to-kind` defaults to `incident,decide,ask,blocker,urgent,answer,correction,defect`
+for `root`, the kinds a root acts on, and to every kind for any other reader.
 
 What never arrives:
 
+- records addressed to the reader of a kind outside `--to-kind`; neither the
+  channel nor the `PostToolUse` hook delivers them, and `cci tail` and
+  `cci digest` still read them;
 - records of a `--mute-kinds` kind, even addressed to `root`; neither the
   channel nor the `PostToolUse` hook delivers them, and `cci tail` still reads
   them;
@@ -357,7 +364,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument, which a bare `-` reads from stdin; prints its sequence number. `{at}` in that text becomes the record's own time in the form readers print, such as `10:52 AM`. A clock typed in a leading `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced with that time. A leading `H:MM AM/PM` label more than a minute off that time refuses the post; `--stamp` has cci write the label itself, replacing a typed one or opening the text with it. Any other time in the text that is later than the post is stored as typed, with a warning on stderr. Text taken from a `--path` file is stored as written. |
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is the session, `CLAUDE_CODE_SESSION_ID` or else `CODEX_THREAD_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second until interrupted; `--for` exits after a duration. |
-| `cci subscribe` | Deliver records for `--reader`, plus other lanes' broadcasts of each `--kind`, minus each `--mute-kinds` kind and urgent repeats, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
+| `cci subscribe` | Deliver records for `--reader` of each `--to-kind` (for `root`, by default, the kinds a root acts on), plus other lanes' broadcasts of each `--kind`, minus each `--mute-kinds` kind and urgent repeats, to this Claude Code window's `cci` channel, advancing `--cursor`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
 | `cci unsubscribe` | Stop this window's channel delivery. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
 | `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. `-F` matches the pattern literally. |

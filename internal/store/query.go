@@ -20,6 +20,7 @@ type Filter struct {
 	Peer           string
 	Kinds          []kinds.Kind
 	Mute           []kinds.Kind
+	ToKinds        []kinds.Kind
 	FirstOnly      []kinds.Kind
 	RepeatWindow   time.Duration
 	Lanes          []string
@@ -50,9 +51,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	var selected []any
 	if len(f.Kinds) > 0 {
 		selectors = append(selectors, "kind IN ("+placeholders(len(f.Kinds))+")")
-		for _, k := range f.Kinds {
-			selected = append(selected, string(k))
-		}
+		selected = append(selected, kindArgs(f.Kinds)...)
 	}
 	if len(f.Lanes) > 0 {
 		selectors = append(selectors, "lane IN ("+placeholders(len(f.Lanes))+")")
@@ -70,8 +69,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		names := addressees(f.For)
 		in := "(" + placeholders(len(names)) + ")"
 		broadcast := append([]string{"(recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all'))", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
-		scoped = append(scoped, "("+addressedTo(in)+" OR ("+strings.Join(broadcast, " AND ")+"))")
-		params = append(append(append(append(append(params, names...), names...), names...), hookSources(names)...), selected...)
+		addressed, kindParams := f.addressedKinds(addressedTo(in))
+		scoped = append(scoped, "("+addressed+" OR ("+strings.Join(broadcast, " AND ")+"))")
+		params = append(append(append(append(append(append(params, names...), names...), kindParams...), names...), hookSources(names)...), selected...)
 	} else {
 		scoped = append(scoped, selectors...)
 		params = append(params, selected...)
@@ -83,8 +83,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	}
 	if f.To != "" {
 		names := addressees(f.To)
-		scoped = append(scoped, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(names))+"))")
-		params = append(params, names...)
+		addressed, kindParams := f.addressedKinds("EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(names)) + "))")
+		scoped = append(scoped, addressed)
+		params = append(append(params, names...), kindParams...)
 	}
 	branches := []string{"(" + strings.Join(scoped, " AND ") + ")"}
 	if peers := f.peerAddresses(self); len(peers) > 0 {
@@ -94,11 +95,14 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 			branch = "(" + branch + " AND seq > ?)"
 			params = append(params, f.PeerAfter)
 		}
+		branch, kindParams := f.addressedKinds(branch)
 		branches = append(branches, branch)
+		params = append(params, kindParams...)
 	}
 	if readers := f.readerAddresses(); len(readers) > 0 {
-		branches = append(branches, "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN ("+placeholders(len(readers))+"))")
-		params = append(params, readers...)
+		branch, kindParams := f.addressedKinds("EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(readers)) + "))")
+		branches = append(branches, branch)
+		params = append(append(params, readers...), kindParams...)
 	}
 	clauses := []string{"(" + strings.Join(branches, " OR ") + ")"}
 	if f.Origin != "" {
@@ -122,17 +126,12 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	}
 	if len(f.Mute) > 0 {
 		clauses = append(clauses, "kind NOT IN ("+placeholders(len(f.Mute))+")")
-		for _, k := range f.Mute {
-			params = append(params, string(k))
-		}
+		params = append(params, kindArgs(f.Mute)...)
 	}
 	if len(f.FirstOnly) > 0 && f.To != "" {
 		names := addressees(f.To)
 		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.FirstOnly))+") AND json_extract(recipients, '$[0]') NOT IN ("+placeholders(len(names))+"))")
-		for _, k := range f.FirstOnly {
-			params = append(params, string(k))
-		}
-		params = append(params, names...)
+		params = append(append(params, kindArgs(f.FirstOnly)...), names...)
 	}
 	if f.RepeatWindow > 0 {
 		clauses = append(clauses, "NOT (kind = ? AND topic != '' AND EXISTS (SELECT 1 FROM records prior WHERE prior.drive = records.drive AND prior.kind = records.kind AND prior.lane = records.lane AND prior.topic = records.topic AND prior.seq < records.seq AND prior.at > records.at - ?))")
@@ -205,6 +204,21 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 	}
 	arms = append(arms, "SELECT source_seq FROM record_json_errors WHERE field = 'recipients'"+bounds("source_seq", f.After))
 	return arms, params
+}
+
+func (f Filter) addressedKinds(clause string) (string, []any) {
+	if len(f.ToKinds) == 0 {
+		return clause, nil
+	}
+	return "(" + clause + " AND kind IN (" + placeholders(len(f.ToKinds)) + "))", kindArgs(f.ToKinds)
+}
+
+func kindArgs(ks []kinds.Kind) []any {
+	out := make([]any, len(ks))
+	for i, k := range ks {
+		out[i] = string(k)
+	}
+	return out
 }
 
 func addressedTo(in string) string {
