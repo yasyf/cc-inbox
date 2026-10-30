@@ -27,9 +27,9 @@ func TestSessionsReadsRegistry(t *testing.T) {
 	if missing, err := harness.Sessions(filepath.Join(dir, "nope")); err != nil || len(missing) != 0 {
 		t.Fatalf("Sessions(missing) = %v, %v", missing, err)
 	}
-	write(t, dir, "bad.json", "{")
-	if _, err := harness.Sessions(dir); err == nil {
-		t.Fatal("Sessions() accepted a malformed file")
+	write(t, dir, "57786.json", `{"pid":57786,"sessionId":"half`)
+	if got, err := harness.Sessions(dir); err != nil || len(got) != 2 {
+		t.Fatalf("Sessions() with a half-written file = %v, %v; want the two whole files and no error", got, err)
 	}
 }
 
