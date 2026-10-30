@@ -16,7 +16,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "modernc.org/sqlite"
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/node"
@@ -316,11 +317,26 @@ func Open(ctx context.Context, home string) (*Store, error) {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
 	s := &Store{db: db, home: home, node: n, Now: time.Now}
-	if err := s.initialize(ctx); err != nil {
+	err = s.initialize(ctx)
+	for _, pause := range openRetries {
+		if !busy(err) {
+			break
+		}
+		time.Sleep(pause)
+		err = s.initialize(ctx)
+	}
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return s, nil
+}
+
+var openRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
+
+func busy(err error) bool {
+	var locked *sqlite.Error
+	return errors.As(err, &locked) && locked.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
 func storeDSN(home string, timeoutMS int) string {
