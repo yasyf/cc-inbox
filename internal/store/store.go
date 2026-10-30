@@ -302,6 +302,8 @@ func Home() (string, error) {
 	return filepath.Join(dir, ".cc-inbox"), nil
 }
 
+const busyTimeout = time.Minute
+
 func Open(ctx context.Context, home string) (*Store, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", home, err)
@@ -310,7 +312,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := storeDSN(home, 10000)
+	dsn := storeDSN(home, int(busyTimeout.Milliseconds()))
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -337,24 +339,31 @@ func (s *Store) initialize(ctx context.Context) error {
 		return fmt.Errorf("take init lock: %w", err)
 	}
 	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
-	var schema int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
-	}
-	var journal string
-	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil {
-		return fmt.Errorf("read journal mode: %w", err)
-	}
-	if schema == len(migrations) && journal == "wal" {
-		return nil
+	if current, err := s.current(ctx); err != nil || current {
+		return err
 	}
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("take migration lock: %w", err)
+	}
+	if current, err := s.current(ctx); err != nil || current {
+		return err
 	}
 	if _, err := s.db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
 		return fmt.Errorf("set journal mode: %w", err)
 	}
 	return s.migrate(ctx)
+}
+
+func (s *Store) current(ctx context.Context) (bool, error) {
+	var schema int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
+		return false, fmt.Errorf("read schema version: %w", err)
+	}
+	var journal string
+	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil {
+		return false, fmt.Errorf("read journal mode: %w", err)
+	}
+	return schema == len(migrations) && journal == "wal", nil
 }
 
 func (s *Store) Close() error {
