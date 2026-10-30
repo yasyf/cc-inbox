@@ -472,6 +472,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `hold` / `lift` | None | Lift closes hold and requires a link. Each `#<number>` in a hold's text or topic needs `--pr`. |
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
+| `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `review` | None | A rules-review verdict. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |

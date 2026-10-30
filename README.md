@@ -528,6 +528,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `fix-live` | None | Closes a matching `incident` or `defect`. |
 | `done` | None | Closes a matching `incident`, `defect`, or `blocker`. |
 | `opened`, `landed` | None | Require `--pr`. |
+| `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
