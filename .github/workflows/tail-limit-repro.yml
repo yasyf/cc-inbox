@@ -1,8 +1,8 @@
-name: Tail newest limit source reproduction
+name: Tail ordered candidate SQL planner prototype
 
 on:
   push:
-    branches: [perf/cci-tail-limit-repro]
+    branches: [perf/cci-tail-merge-prototype]
 
 permissions:
   contents: read
@@ -25,5 +25,5 @@ jobs:
           test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
           cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
           (cd .ci-tail-baseline && go test -run '^TestTailNewestLimitDoesNotWalkSameDriveHistory$' -v ./internal/cli)
-      - name: Reproduce frozen production draft operation counts
-        run: go test -run '^TestTailNewestLimitDoesNotWalkSameDriveHistory$' -v ./internal/cli
+      - name: Compare lazy SQL plans, top-one cost and native corruption frontiers
+        run: go test -run '^TestTailOrderedCandidatesPlannerPrototype$' -v ./internal/cli
