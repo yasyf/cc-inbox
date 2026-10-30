@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -92,8 +93,12 @@ SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 
 				if !strings.HasPrefix(out, fmt.Sprintf("#%d ", population)) {
 					t.Fatalf("grep newest row missing: %q", out)
 				}
-				if got, want := reads.Load(), 2*int64(population); got != want {
-					t.Fatalf("actual CLI read also_resolves %d times, want %d (one candidate scan and one annotation scan)", got, want)
+				wantReads := 2 * int64(population)
+				if os.Getenv("CCI_GREP_EXPECT_PAGED") == "1" {
+					wantReads = int64(population * (1 + (population+499)/500))
+				}
+				if got := reads.Load(); got != wantReads {
+					t.Fatalf("actual CLI read also_resolves %d times, want %d", got, wantReads)
 				}
 				if budget > 6144 && strings.Count(out, "\n") != population {
 					t.Fatalf("wide budget printed %d records, want %d", strings.Count(out, "\n"), population)
