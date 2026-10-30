@@ -63,6 +63,13 @@ func TestMaintainIndexesPreservesLogicalStore(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			dropLaneIndexes(t, st)
 			seedLaneHistory(t, st, history)
+			if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
+	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
+)
+INSERT INTO sessions (session, agent, origin, drive, root, lane)
+SELECT 'session-' || n, '', '', 'drive', 0, 'registered-session' FROM history`, history); err != nil {
+				t.Fatal(err)
+			}
 			fingerprint := st.SchemaFingerprint()
 			report, err := MaintainIndexes(ctx, st.home)
 			if err != nil {
@@ -72,21 +79,25 @@ func TestMaintainIndexesPreservesLogicalStore(t *testing.T) {
 				t.Fatalf("created indexes = %v, want both", report.Created)
 			}
 			assertLaneIndexCount(t, st, 2)
-			var schema, rows int
+			var schema, rows, sessionRows int
 			if err := st.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
 				t.Fatal(err)
 			}
 			if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records").Scan(&rows); err != nil {
 				t.Fatal(err)
 			}
-			if schema != 14 || rows != history || st.SchemaFingerprint() != fingerprint {
-				t.Fatalf("maintenance changed logical state: schema=%d rows=%d fingerprint=%s", schema, rows, st.SchemaFingerprint())
+			if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sessions").Scan(&sessionRows); err != nil {
+				t.Fatal(err)
+			}
+			if schema != 14 || rows != history || sessionRows != history || st.SchemaFingerprint() != fingerprint {
+				t.Fatalf("maintenance changed logical state: schema=%d records=%d sessions=%d fingerprint=%s", schema, rows, sessionRows, st.SchemaFingerprint())
 			}
 			for _, tc := range []struct {
 				drive, lane string
 				want        bool
 			}{
 				{"drive", "old-lane", true},
+				{"drive", "registered-session", true},
 				{"drive", "missing", false},
 				{"other", "old-lane", false},
 			} {
@@ -112,7 +123,7 @@ func TestMaintainIndexesPreservesLogicalStore(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			t.Logf("rows=%d actual_index_build_report=%s", history, encoded)
+			t.Logf("records_rows=%d sessions_rows=%d actual_index_build_report=%s", history, history, encoded)
 		})
 	}
 }
