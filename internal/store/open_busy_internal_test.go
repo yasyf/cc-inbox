@@ -31,7 +31,7 @@ func TestOpenRetriesAStoreAnotherWriterHoldsPastTheBusyTimeout(t *testing.T) {
 	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
 		t.Fatal(err)
 	}
-	release := time.AfterFunc(10500*time.Millisecond, func() {
+	release := time.AfterFunc(2500*time.Millisecond, func() {
 		_, _ = conn.ExecContext(ctx, "COMMIT")
 		_ = conn.Close()
 	})
