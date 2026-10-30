@@ -165,7 +165,7 @@ func Parse(s string) (Kind, error) {
 	if _, ok := specs[k]; ok || k.Service() {
 		return k, nil
 	}
-	return "", fmt.Errorf("unknown kind %q (known: %s, or a dotted service kind such as oncall.fix.status)", s, strings.Join(Names(), ", "))
+	return "", fmt.Errorf("unknown kind %q: see cci post --help for kinds, or use a dotted service kind such as oncall.fix.status", s)
 }
 
 // ParseAll parses each name in ss.

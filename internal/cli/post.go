@@ -35,6 +35,7 @@ const clockLabel = `\b\d{1,2}:\d{2} ?[AaPp][Mm]\b`
 func newPostCmd() *cobra.Command {
 	var (
 		drive, lane, kind, text string
+		parsedKind              kinds.Kind
 		r                       store.Record
 		counts                  map[string]string
 		census, bodyFile        string
@@ -54,7 +55,14 @@ func newPostCmd() *cobra.Command {
 			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path"):
 				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
 			}
-			return nil
+			if !cmd.Flags().Changed("kind") {
+				return nil
+			}
+			var err error
+			if parsedKind, err = kinds.Parse(kind); err != nil {
+				return err
+			}
+			return validateTargets(re, resolves)
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
@@ -96,10 +104,7 @@ func newPostCmd() *cobra.Command {
 				}
 				text, fromPath = firstLine(string(body)), true
 			}
-			k, err := kinds.Parse(kind)
-			if err != nil {
-				return err
-			}
+			k := parsedKind
 			if (k == kinds.Opened || k == kinds.Head && r.Refs.CCN == "") && len(r.Refs.PRs) == 0 {
 				if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
 					return err
@@ -218,9 +223,16 @@ func threadLane(ctx context.Context, st *store.Store) (string, error) {
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")
 
-func perTarget(r store.Record, re, resolves []int64) ([]store.Record, error) {
+func validateTargets(re, resolves []int64) error {
 	if len(re) > 1 && len(resolves) > 1 {
-		return nil, errManyTargets
+		return errManyTargets
+	}
+	return nil
+}
+
+func perTarget(r store.Record, re, resolves []int64) ([]store.Record, error) {
+	if err := validateTargets(re, resolves); err != nil {
+		return nil, err
 	}
 	for _, seq := range resolves {
 		switch {
