@@ -84,7 +84,7 @@ func TestAddressedKindsNarrowOnlyRecordsAddressedToTheReader(t *testing.T) {
 		{0, store.Record{Lane: "ship-lane", Kind: kinds.Head, Text: "head broadcast"}},
 		{0, store.Record{Lane: "ship-lane", Kind: kinds.State, Text: "state broadcast"}},
 		{0, store.Record{Lane: "peer-lane", Kind: kinds.Note, To: []string{"peer:s1"}, Text: "note to peer"}},
-		{0, store.Record{Lane: "peer-lane", Kind: kinds.Answer, To: []string{"peer:s1"}, Text: "answer to peer"}},
+		{0, store.Record{Lane: "peer-lane", Kind: kinds.Answer, Topic: "schema", To: []string{"peer:s1"}, Text: "answer to peer"}},
 	}
 	rootKinds := store.DefaultToKinds("main")
 	for _, tc := range []struct {
