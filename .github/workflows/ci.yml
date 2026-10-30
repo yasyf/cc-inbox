@@ -41,6 +41,10 @@ jobs:
         with:
           ref: e08497bf9ce5880788f6103a949e034c9ed13fc4
           path: .ci-grep-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: c148e0dc6970d4d5f446d77ba62d8a4060e0156c
+          path: .ci-tail-baseline
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -87,8 +91,18 @@ jobs:
           CCI_GREP_SNAPSHOTS="$RUNNER_TEMP/cci-grep-errors" go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
       - name: Build
         run: go build ./...
-      - name: Tail actual caller baseline operation counts and full requested output
-        run: go test -run '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$' -v ./internal/cli
+      - name: Tail operation counts, full requested output, and immutable 0.41.7 output and errors
+        run: |
+          test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
+          cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go internal/cli/tail_semantics_test.go .ci-tail-baseline/internal/cli/
+          mkdir -p "$RUNNER_TEMP/cci-tail-snapshots"
+          tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailPreservesNativeOutputAndErrors$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
+          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 CCI_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-tail-snapshots" CCI_TAIL_SNAPSHOT_WRITE=1 go test -run "$tail_tests" -v ./internal/cli)
+          CCI_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-tail-snapshots" go test -run "$tail_tests" -v ./internal/cli
+      - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
+        run: |
+          go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store
+          CCI_MEMBERSHIP_PROVISION_ROWS=200000 go test -run '^TestMaintainIndexesProvisionsMembershipsWithinWriterBudget$' -v ./internal/store
 
   lint:
     runs-on: ubuntu-latest
@@ -132,3 +146,53 @@ jobs:
           jq -e '.hooks | length == 6' plugin/hooks/hooks.json
           test -L plugin/bin/cci
           tail -n +2 plugin/descriptor/cci.binrun.tmpl | sed -E 's/__SIZE_[A-Z0-9_]+__/1/g' | jq -e '.platforms | length == 4'
+
+  provisioning-candidate:
+    name: Prepublication Darwin arm64 provisioning candidate
+    needs: [test, lint, vuln, plugin]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build source-bound provisioning candidate
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: "0"
+        run: |
+          cci_candidate_dir="$RUNNER_TEMP/cci-tail-candidate"
+          mkdir -p "$cci_candidate_dir"
+          cci_candidate_commit="$(git rev-parse HEAD)"
+          go build -mod=readonly -trimpath -buildvcs=true -ldflags "-s -w -X github.com/yasyf/cc-inbox/internal/version.Commit=$cci_candidate_commit" -o "$cci_candidate_dir/cci" ./cmd/cci
+          test -z "$(git status --porcelain)"
+          go version -m "$cci_candidate_dir/cci" > "$cci_candidate_dir/build-info.txt"
+          CCI_CANDIDATE_DIR="$cci_candidate_dir" python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          folder = pathlib.Path(os.environ["CCI_CANDIDATE_DIR"])
+          descriptor = {
+              "purpose": "root-reviewed prepublication physical membership provisioning only",
+              "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "source_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+              "binary_sha256": hashlib.sha256((folder / "cci").read_bytes()).hexdigest(),
+              "os": "darwin",
+              "arch": "arm64",
+              "version": "dev",
+              "release_signature": "none; verified CI candidate, not a published signed release",
+          }
+          (folder / "descriptor.json").write_text(json.dumps(descriptor, indent=2) + "\n")
+          PY
+          tar -czf "$cci_candidate_dir/cci-tail-provisioning-darwin-arm64.tar.gz" -C "$cci_candidate_dir" cci build-info.txt descriptor.json
+          (cd "$cci_candidate_dir" && sha256sum cci-tail-provisioning-darwin-arm64.tar.gz > checksums.txt)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cci-tail-provisioning-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/cci-tail-candidate/cci-tail-provisioning-darwin-arm64.tar.gz
+            ${{ runner.temp }}/cci-tail-candidate/checksums.txt
+          if-no-files-found: error
+          compression-level: 0

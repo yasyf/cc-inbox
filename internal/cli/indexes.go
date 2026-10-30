@@ -11,7 +11,7 @@ import (
 func newMaintainIndexesCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:    "maintain-indexes",
-		Short:  "Build local lane-registration indexes and report storage cost",
+		Short:  "Build local lane-registration indexes and record memberships and report storage cost",
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

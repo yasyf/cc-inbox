@@ -30,7 +30,7 @@ func TestMaintainIndexesCommandReportsCost(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatal(err)
 	}
-	if len(report.Created) != 0 || report.Before.PageSize <= 0 || report.After.PageCount <= 0 {
+	if len(report.Created) != 0 || len(report.Memberships) != 0 || report.Before.PageSize <= 0 || report.After.PageCount <= 0 {
 		t.Fatalf("new cold store maintenance report = %+v", report)
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -20,6 +21,7 @@ import (
 var tailCounterID atomic.Uint64
 
 func TestTailRecipientHistoryBaseline(t *testing.T) {
+	global := os.Getenv("CCI_TAIL_EXPECT_GLOBAL_SCANS") == "1"
 	for _, population := range []int{32, 10000} {
 		for _, peer := range []bool{false, true} {
 			t.Run(fmt.Sprintf("irrelevant=%d/peer=%t", population, peer), func(t *testing.T) {
@@ -47,17 +49,24 @@ func TestTailRecipientHistoryBaseline(t *testing.T) {
 					want = append(want, 2)
 				}
 				tailCostOutput(t, out, want, "")
-				got := reads.Load()
-				if peer && got < int64(2*population) || !peer && got != 1 {
-					t.Fatalf("recipient reads = %d for irrelevant=%d peer=%t", got, population, peer)
+				got, wantReads := reads.Load(), int64(1)
+				switch {
+				case peer && global:
+					wantReads = int64(2*population + 3)
+				case peer:
+					wantReads = 3
 				}
-				t.Logf("actual_tail irrelevant=%d peer=%t output_rows=%d recipient_column_reads=%d", population, peer, len(want), got)
+				if got != wantReads {
+					t.Fatalf("recipient reads = %d for irrelevant=%d peer=%t global=%t, want %d", got, population, peer, global, wantReads)
+				}
+				t.Logf("actual_tail irrelevant=%d peer=%t global=%t output_rows=%d recipient_column_reads=%d", population, peer, global, len(want), got)
 			})
 		}
 	}
 }
 
 func TestTailResolverHistoryBaseline(t *testing.T) {
+	global := os.Getenv("CCI_TAIL_EXPECT_GLOBAL_SCANS") == "1"
 	for _, population := range []int{32, 10000} {
 		t.Run(fmt.Sprintf("irrelevant=%d", population), func(t *testing.T) {
 			db := tailCostStore(t)
@@ -75,34 +84,44 @@ func TestTailResolverHistoryBaseline(t *testing.T) {
 				t.Fatal(err)
 			}
 			tailCostOutput(t, out, []int64{1}, "closed")
-			got := reads.Load()
-			if got < int64(population) {
-				t.Fatalf("resolver reads = %d for irrelevant=%d", got, population)
+			got, wantReads := reads.Load(), int64(4)
+			if global {
+				wantReads = int64(population + 4)
 			}
-			t.Logf("actual_tail irrelevant=%d output_rows=1 cross_drive_status=closed also_resolves_column_reads=%d", population, got)
+			if got != wantReads {
+				t.Fatalf("resolver reads = %d for irrelevant=%d global=%t, want %d", got, population, global, wantReads)
+			}
+			t.Logf("actual_tail irrelevant=%d global=%t output_rows=1 cross_drive_status=closed also_resolves_column_reads=%d", population, global, got)
 		})
 	}
 }
 
 func TestTailPreservesRequested80000JSONRecords(t *testing.T) {
-	db := tailCostStore(t)
-	if _, err := db.Exec(`WITH RECURSIVE history(n) AS (
+	for _, peer := range []bool{false, true} {
+		t.Run(fmt.Sprintf("peer=%t", peer), func(t *testing.T) {
+			db := tailCostStore(t)
+			if peer {
+				t.Setenv("CLAUDE_CODE_SESSION_ID", "tail-cost-session")
+			}
+			if _, err := db.Exec(`WITH RECURSIVE history(n) AS (
 VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < 80000
 )
 INSERT INTO records (drive,lane,kind,at,text,source,hash)
 SELECT 'durable-agents-rebuild','lane','note',?,'requested','post','requested-' || n FROM history`, time.Now().UnixMilli()); err != nil {
-		t.Fatal(err)
+				t.Fatal(err)
+			}
+			out, err := run(t, "tail", "--drive", "durable-agents-rebuild", "--since", "36h", "-n", "80000", "--json", "--budget", "300000000")
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := make([]int64, 80000)
+			for i := range want {
+				want[i] = int64(i + 1)
+			}
+			tailCostOutput(t, out, want, "")
+			t.Logf("actual_tail peer=%t requested_rows=80000 output_rows=80000 output_bytes=%d", peer, len(out))
+		})
 	}
-	out, err := run(t, "tail", "--drive", "durable-agents-rebuild", "--since", "36h", "-n", "80000", "--json", "--budget", "300000000")
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := make([]int64, 80000)
-	for i := range want {
-		want[i] = int64(i + 1)
-	}
-	tailCostOutput(t, out, want, "")
-	t.Logf("actual_tail requested_rows=80000 output_rows=80000 output_bytes=%d", len(out))
 }
 
 func tailCostStore(t *testing.T) *sql.DB {
@@ -132,8 +151,8 @@ func tailCostHistory(t *testing.T, db *sql.DB, population int, at int64) {
 	if _, err := db.Exec(`WITH RECURSIVE history(n) AS (
 VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
-INSERT INTO records (drive,lane,kind,at,text,recipients,also_resolves,source,hash)
-SELECT 'irrelevant','lane','note',?,'irrelevant','["someone-else"]','[]','post','irrelevant-' || n FROM history`, population, at); err != nil {
+INSERT INTO records (drive,lane,kind,at,text,recipients,also_resolves,resolves,source,hash)
+SELECT 'irrelevant','lane','note',?,'irrelevant',json_array('someone-else','peer:other-' || n,'lane@irrelevant'),json_array(1000000 + n),2000000 + n,'post','irrelevant-' || n FROM history`, population, at); err != nil {
 		t.Fatal(err)
 	}
 }

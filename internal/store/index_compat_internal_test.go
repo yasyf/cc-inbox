@@ -26,6 +26,14 @@ type oldStoreProbeResult struct {
 	PostedText  string `json:"posted_text"`
 }
 
+type oldMatrixProbeResult struct {
+	Ask      int64 `json:"ask"`
+	Done     int64 `json:"done"`
+	Imported int64 `json:"imported"`
+	Remote   int64 `json:"remote"`
+	Folded   int   `json:"folded"`
+}
+
 func TestPhysicalIndexesKeepLogicalSchema14Fingerprint(t *testing.T) {
 	digest := sha256.Sum256([]byte(strings.Join(migrations, "\x00")))
 	if got := hex.EncodeToString(digest[:]); got != schema14MigrationDigest {
@@ -59,22 +67,26 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			t.Cleanup(func() { _ = st.Close() })
 			if first == "old" {
 				assertLaneIndexCount(t, st, 0)
+				assertMembershipsInstalled(t, st, false)
 				assertOldFixtureRecord(t, st, initial)
 			} else {
 				assertLaneIndexCount(t, st, len(physicalIndexes))
+				assertMembershipsInstalled(t, st, true)
 			}
 			report, err := MaintainIndexes(ctx, home)
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantCreated := 0
+			wantCreated, wantMemberships := 0, 0
 			if first == "old" {
-				wantCreated = len(physicalIndexes)
+				wantCreated, wantMemberships = len(physicalIndexes), len(recordMemberships)
 			}
-			if len(report.Created) != wantCreated {
-				t.Fatalf("created indexes = %v, want %d", report.Created, wantCreated)
+			if len(report.Created) != wantCreated || len(report.Memberships) != wantMemberships {
+				t.Fatalf("maintenance report = %+v, want %d indexes and %d membership objects", report, wantCreated, wantMemberships)
 			}
 			assertLaneIndexCount(t, st, len(physicalIndexes))
+			assertMembershipsInstalled(t, st, true)
+			assertMembershipsDerived(t, st)
 			candidate, _, err := st.Post(ctx, Record{
 				Drive:  "compat",
 				Lane:   "new",
@@ -92,6 +104,7 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			if old.ReadSeq != candidate.Seq || old.ReadText != candidate.Text {
 				t.Fatalf("old store read candidate = %+v, want #%d %q", old, candidate.Seq, candidate.Text)
 			}
+			matrix := runOldMatrixProbe(t, binary, home, candidate.Seq)
 			reopened, err := Open(ctx, home)
 			if err != nil {
 				t.Fatal(err)
@@ -99,6 +112,27 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			t.Cleanup(func() { _ = reopened.Close() })
 			assertOldFixtureRecord(t, reopened, old)
 			assertLaneIndexCount(t, reopened, len(physicalIndexes))
+			assertMembershipsInstalled(t, reopened, true)
+			assertMembership(t, reopened, "record_recipients", "'peer:compat-old'", old.PostedSeq, 1)
+			assertMembership(t, reopened, "record_recipients", "'peer:old-matrix'", matrix.Ask, 1)
+			assertMembership(t, reopened, "record_recipients", "'old@compat'", matrix.Ask, 1)
+			assertMembership(t, reopened, "record_also_resolves", strconv.FormatInt(candidate.Seq, 10), matrix.Done, 1)
+			assertMembership(t, reopened, "record_recipients", "'peer:old-import'", matrix.Imported, 0)
+			assertMembership(t, reopened, "record_recipients", "'peer:old-reparsed'", matrix.Imported, 1)
+			assertMembership(t, reopened, "record_also_resolves", strconv.FormatInt(candidate.Seq, 10), matrix.Remote, 1)
+			assertMembership(t, reopened, "record_recipients", "'peer:old-folded'", 0, 0)
+			assertMembershipsDerived(t, reopened)
+			if matrix.Folded != 2 {
+				t.Fatalf("old matrix folded %d records, want 2", matrix.Folded)
+			}
+			delivered, err := reopened.Query(ctx, Filter{Drive: "elsewhere", Peer: "old-matrix"})
+			if err != nil || len(delivered) != 1 || delivered[0].Seq != matrix.Ask {
+				t.Fatalf("candidate peer read of old write = %+v, %v; want #%d", delivered, err, matrix.Ask)
+			}
+			resolved, err := reopened.Resolvers(ctx, "compat")
+			if err != nil || resolved[candidate.Seq] != max(matrix.Done, matrix.Remote) {
+				t.Fatalf("candidate resolvers after old writes = %v, %v; want #%d resolved by #%d", resolved, err, candidate.Seq, max(matrix.Done, matrix.Remote))
+			}
 			var schema int
 			if err := reopened.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
 				t.Fatal(err)
@@ -127,6 +161,22 @@ func runOldStoreProbe(t *testing.T, binary, home string, readSeq int64) oldStore
 	}
 	if result.Schema != 14 || result.Fingerprint != schema14Wire3Fingerprint || result.PostedSeq <= 0 || result.PostedText == "" {
 		t.Fatalf("old-store probe result = %+v", result)
+	}
+	return result
+}
+
+func runOldMatrixProbe(t *testing.T, binary, home string, target int64) oldMatrixProbeResult {
+	t.Helper()
+	out, err := exec.CommandContext(t.Context(), binary, "matrix", home, strconv.FormatInt(target, 10)).CombinedOutput()
+	if err != nil {
+		t.Fatalf("old-store matrix probe: %v: %s", err, out)
+	}
+	var result oldMatrixProbeResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("decode old-store matrix probe: %v: %s", err, out)
+	}
+	if result.Ask <= 0 || result.Done <= 0 || result.Imported <= 0 || result.Remote <= 0 {
+		t.Fatalf("old-store matrix probe result = %+v", result)
 	}
 	return result
 }
