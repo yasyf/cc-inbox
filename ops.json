@@ -1,1 +1,1 @@
-{"v":1,"lamport":4,"ops":[{"kind":"set_criterion_status","id":"760599ff7dd668236c5c021342992aba","status":"met","note":"Independent source review PASS; candidate41043718773 full CI passes explicit occurrence, bare same-number, mixed and boundary tests."}]}
+{"v":1,"lamport":5,"ops":[{"kind":"set_criterion_status","id":"3db4ef69cd06b4c5deb51058e876958d","status":"met","note":"Candidate eb0aef50 full CI41043718773 passes ordered pairs, seeded targets, default fanout/refusal, pre-store/stdin cardinality and repeated-re/different-resolves idempotency cases."}]}
