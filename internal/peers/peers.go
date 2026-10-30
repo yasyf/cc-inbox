@@ -189,10 +189,25 @@ func (f Filter) byClaim() bool {
 // Resolve joins the registry with the harness windows and applies f. Without
 // All, only live peers are returned.
 func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
+	return resolve(ctx, st, f, nil)
+}
+
+// ResolveLanes joins local threads bound to lanes with their harness windows.
+func ResolveLanes(ctx context.Context, st *store.Store, lanes []string) ([]View, error) {
+	return resolve(ctx, st, Filter{Origin: LocalOrigin}, lanes)
+}
+
+func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]View, error) {
 	if f.Origin == st.Self() {
 		f.Origin = LocalOrigin
 	}
-	rows, err := st.Peers(ctx)
+	var rows []store.Peer
+	var err error
+	if lanes == nil {
+		rows, err = st.Peers(ctx)
+	} else {
+		rows, err = st.LanePeers(ctx, lanes)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -224,7 +239,11 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 		return nil, err
 	}
 	now := st.Now()
-	views := make([]View, 0, len(rows)+len(windows))
+	capacity := len(rows)
+	if lanes == nil {
+		capacity += len(windows)
+	}
+	views := make([]View, 0, capacity)
 	for _, p := range rows {
 		v := View{Peer: p, Live: live(p, now), Claims: claimed[p.Key()]}
 		if p.Origin != "" {
@@ -245,16 +264,18 @@ func Resolve(ctx context.Context, st *store.Store, f Filter) ([]View, error) {
 		}
 		views = append(views, v)
 	}
-	for _, w := range windows {
-		views = append(views, View{
-			Peer:     store.Peer{Session: w.SessionID, Role: RoleSession, Cwd: w.Cwd, PID: w.PID, SeenAt: time.UnixMilli(w.StatusUpdatedAt).UTC()},
-			Name:     w.Name,
-			Address:  w.Address(),
-			Status:   w.Status,
-			StatusAt: time.UnixMilli(w.StatusUpdatedAt).UTC(),
-			Live:     w.Alive(),
-			Claims:   claimed[store.PeerKey{Session: w.SessionID}],
-		})
+	if lanes == nil {
+		for _, w := range windows {
+			views = append(views, View{
+				Peer:     store.Peer{Session: w.SessionID, Role: RoleSession, Cwd: w.Cwd, PID: w.PID, SeenAt: time.UnixMilli(w.StatusUpdatedAt).UTC()},
+				Name:     w.Name,
+				Address:  w.Address(),
+				Status:   w.Status,
+				StatusAt: time.UnixMilli(w.StatusUpdatedAt).UTC(),
+				Live:     w.Alive(),
+				Claims:   claimed[store.PeerKey{Session: w.SessionID}],
+			})
+		}
 	}
 	views = slices.DeleteFunc(views, func(v View) bool { return !f.matches(v) })
 	if f.Viewer == node.TierPaired {

@@ -75,10 +75,10 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'registered-session' FROM history`, 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(report.Created) != 2 {
-				t.Fatalf("created indexes = %v, want both", report.Created)
+			if len(report.Created) != len(physicalIndexes) {
+				t.Fatalf("created indexes = %v, want %d", report.Created, len(physicalIndexes))
 			}
-			assertLaneIndexCount(t, st, 2)
+			assertLaneIndexCount(t, st, len(physicalIndexes))
 			var schema, rows, sessionRows int
 			if err := st.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
 				t.Fatal(err)
@@ -257,8 +257,8 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'session-lane' FROM history`,
 
 func dropLaneIndexes(t *testing.T, st *Store) {
 	t.Helper()
-	for _, name := range []string{"records_drive_lane", "sessions_drive_lane"} {
-		if _, err := st.db.ExecContext(context.Background(), "DROP INDEX IF EXISTS "+name); err != nil {
+	for _, index := range physicalIndexes {
+		if _, err := st.db.ExecContext(context.Background(), "DROP INDEX IF EXISTS "+index.name); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -268,7 +268,7 @@ func assertLaneIndexCount(t *testing.T, st *Store, want int) {
 	t.Helper()
 	var got int
 	if err := st.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_schema
-WHERE type = 'index' AND name IN ('records_drive_lane', 'sessions_drive_lane')`).Scan(&got); err != nil {
+WHERE type = 'index' AND name IN ('records_drive_lane', 'sessions_drive_lane', 'sessions_origin_lane')`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got != want {

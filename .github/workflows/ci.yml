@@ -33,6 +33,10 @@ jobs:
         with:
           ref: 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
           path: .ci-old
+      - uses: actions/checkout@v7
+        with:
+          ref: 722f03bcbaadf335f6ee9cb7d2c4b57e274f942e
+          path: .ci-recipients-baseline
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -59,6 +63,13 @@ jobs:
         run: |
           test -x "$CCI_OLD_STORE_PROBE"
           go test -run 'TestRegisteredLaneComparisonsStayBounded|TestExistingStoreOpenDoesNotBuildPhysicalIndexes|TestMaintainIndexes|TestPhysicalIndexes' -v ./internal/store
+      - name: Recipient identity and targeted session query costs
+        run: |
+          test "$(git -C .ci-recipients-baseline rev-parse HEAD)" = 722f03bcbaadf335f6ee9cb7d2c4b57e274f942e
+          cp internal/cli/recipient_identity_test.go .ci-recipients-baseline/internal/cli/recipient_identity_test.go
+          (cd .ci-recipients-baseline && go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli)
+          go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli
+          go test -run '^TestRecipientLaneQueryUsesTargetedIndex$' -v ./internal/store
       - name: Build
         run: go build ./...
 

@@ -428,7 +428,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if empty {
-		if err := createPhysicalIndexes(ctx, tx, []int{0, 1}); err != nil {
+		if err := createPhysicalIndexes(ctx, tx, []int{0, 1, 2}); err != nil {
 			return err
 		}
 	}

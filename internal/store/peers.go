@@ -137,6 +137,17 @@ func (s *Store) Peer(ctx context.Context, k PeerKey) (Peer, error) {
 // Peers lists every known session thread, most recently seen first.
 func (s *Store) Peers(ctx context.Context) ([]Peer, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+peerColumns+" FROM sessions ORDER BY seen_at DESC, session, agent")
+	return s.readPeers(rows, err)
+}
+
+// LanePeers reads local threads bound to the named lanes across all drives.
+func (s *Store) LanePeers(ctx context.Context, lanes []string) ([]Peer, error) {
+	encoded, _ := json.Marshal(lanes)
+	rows, err := s.db.QueryContext(ctx, "SELECT "+peerColumns+" FROM sessions WHERE origin IN ('', ?) AND lane IN (SELECT value FROM json_each(?)) AND drive != '' ORDER BY seen_at DESC, session, agent", s.Self(), string(encoded))
+	return s.readPeers(rows, err)
+}
+
+func (s *Store) readPeers(rows *sql.Rows, err error) ([]Peer, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list peers: %w", err)
 	}
