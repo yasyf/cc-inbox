@@ -12,10 +12,10 @@ import (
 	"github.com/yasyf/daemonkit"
 	"github.com/yasyf/daemonkit/durable"
 	"github.com/yasyf/synckit/codec"
-	"github.com/yasyf/synckit/daemon"
 	"github.com/yasyf/synckit/helperruntime"
 	"github.com/yasyf/synckit/hostregistry"
 	"github.com/yasyf/synckit/manifest"
+	"github.com/yasyf/synckit/registration"
 	"github.com/yasyf/synckit/rpc"
 	"github.com/yasyf/synckit/syncservice"
 
@@ -104,7 +104,7 @@ func RefreshRegistration(ctx context.Context, home, schema string) error {
 	}
 	if registered.Service.SchemaFingerprint != schema {
 		registered.Service.SchemaFingerprint = schema
-		if err := daemon.RegisterManifest(ctx, *registered); err != nil {
+		if err := registration.RegisterManifest(ctx, *registered); err != nil {
 			return fmt.Errorf("refresh registered mesh manifest: %w", err)
 		}
 	}
