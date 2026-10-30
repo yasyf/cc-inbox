@@ -1,0 +1,100 @@
+name: Inspect official Claude registry writer
+
+on:
+  push:
+    branches: [research/cci-registry-writer-2.1.314]
+    paths: [.github/workflows/registry-writer-inspect.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLAUDE_PACKAGE: '@anthropic-ai/claude-code-linux-x64'
+      CLAUDE_VERSION: 2.1.314
+      CLAUDE_INTEGRITY: sha512-Yg0a5mpdkGClK0rgFMxbCWZW3wZtqgOhYjbISALqyL5tfADHhX9Ms6ExA0/effgSJ9MaWfHMPntryeOG6Mk6HQ==
+      CLAUDE_TARBALL: https://registry.npmjs.org/@anthropic-ai/claude-code-linux-x64/-/claude-code-linux-x64-2.1.314.tgz
+    steps:
+      - name: Verify immutable distribution and collect bounded writer evidence
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import tarfile
+          import urllib.request
+
+          out = Path(os.environ["RUNNER_TEMP"]) / "registry-writer-evidence"
+          out.mkdir()
+          package = os.environ["CLAUDE_PACKAGE"]
+          version = os.environ["CLAUDE_VERSION"]
+          integrity = os.environ["CLAUDE_INTEGRITY"]
+          url = os.environ["CLAUDE_TARBALL"]
+          metadata_url = "https://registry.npmjs.org/" + package.replace("/", "%2f") + "/" + version
+          with urllib.request.urlopen(metadata_url, timeout=30) as response:
+              raw_metadata = response.read(1024 * 1024 + 1)
+          if len(raw_metadata) > 1024 * 1024:
+              raise RuntimeError("package metadata exceeds 1 MiB")
+          metadata = json.loads(raw_metadata)
+          if (metadata["name"], metadata["version"], metadata["dist"]["integrity"], metadata["dist"]["tarball"]) != (package, version, integrity, url):
+              raise RuntimeError("official package metadata differs from immutable pins")
+          (out / "package-metadata.json").write_bytes(raw_metadata)
+          archive = Path(os.environ["RUNNER_TEMP"]) / "official-claude-2.1.314.tgz"
+          digest = hashlib.sha512()
+          size = 0
+          with urllib.request.urlopen(url, timeout=60) as response, archive.open("wb") as destination:
+              while chunk := response.read(1024 * 1024):
+                  size += len(chunk)
+                  if size > 256 * 1024 * 1024:
+                      raise RuntimeError("official archive exceeds 256 MiB")
+                  digest.update(chunk)
+                  destination.write(chunk)
+          actual_integrity = "sha512-" + base64.b64encode(digest.digest()).decode()
+          if actual_integrity != integrity:
+              raise RuntimeError("official archive integrity mismatch")
+          with tarfile.open(archive, "r:gz") as distribution:
+              members = distribution.getmembers()
+              if len(members) > 32 or sum(member.size for member in members) > 400 * 1024 * 1024:
+                  raise RuntimeError("distribution exceeds bounded manifest limits")
+              manifest = [{"name": member.name, "bytes": member.size, "regular": member.isfile()} for member in members]
+              native_members = [member for member in members if member.isfile() and member.size > 10 * 1024 * 1024]
+              if len(native_members) != 1:
+                  raise RuntimeError("expected exactly one native payload")
+              native_member = native_members[0]
+              native = distribution.extractfile(native_member).read()
+          if not native.startswith(b"\x7fELF"):
+              raise RuntimeError("official linux payload is not ELF")
+          (out / "tar-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
+          markers = [b"procStart", b"messagingSocketPath", b"sessionId", b"sessions/", b'"sessions"', b"atomicWrite", b"writeFileAtomic"]
+          snippets = []
+          summaries = []
+          io_symbols = ["writeFile", "rename", "unlink", "rmSync", "mkdir", "watch", "generation", "barrier", "fsync"]
+          for marker in markers:
+              matches = list(re.finditer(re.escape(marker), native))
+              summaries.append({"marker": marker.decode(), "matches": len(matches), "captured": min(len(matches), 16)})
+              for match in matches[:16]:
+                  start, end = max(0, match.start() - 3072), min(len(native), match.end() + 3072)
+                  context = native[start:end].decode("utf-8", errors="replace")
+                  snippets.append({"marker": marker.decode(), "match_offset": match.start(), "start": start, "end": end, "adjacent_io_tokens": [token for token in io_symbols if token in context], "text": context})
+          provenance = {"package": package, "version": version, "metadata_url": metadata_url, "tarball_url": url, "metadata_sha256": hashlib.sha256(raw_metadata).hexdigest(), "archive_bytes": size, "archive_integrity": actual_integrity, "native_member": native_member.name, "native_bytes": len(native), "native_sha256": hashlib.sha256(native).hexdigest(), "workflow_source": os.environ["GITHUB_SHA"], "workflow_run": os.environ["GITHUB_RUN_ID"], "executed_native": False}
+          findings = {"status": "STATIC_BINARY_EVIDENCE_REQUIRES_SOURCE_REVIEW", "markers": summaries, "writer_identity": "UNKNOWN", "write_atomicity": "UNKNOWN", "session_id_to_registry_path_authority": "UNKNOWN", "freshness_barrier_or_generation_api": "UNKNOWN", "limitations": ["Byte contexts and nearby IO tokens are leads, not an execution trace or proof of writer ownership or atomicity.", "Linux official package provenance does not prove identical Darwin behavior.", "Absent readable source or symbols leaves the authority and synchronization contract UNKNOWN.", "No user data, live registry, credentials, Mac binary, or installed process was read or changed."]}
+          for name, value in [("provenance.json", provenance), ("findings.json", findings), ("writer-snippets.json", snippets)]:
+              (out / name).write_text(json.dumps(value, indent=2) + "\n")
+          evidence_hashes = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(out.iterdir())}
+          (out / "evidence-sha256.json").write_text(json.dumps(evidence_hashes, indent=2) + "\n")
+          print(json.dumps({"provenance": provenance, "findings": findings, "artifact_files": list(evidence_hashes)}))
+          PYTHON
+      - name: Upload bounded public-distribution evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-2.1.314-registry-writer-${{ github.sha }}
+          path: ${{ runner.temp }}/registry-writer-evidence
+          if-no-files-found: error
+          retention-days: 14
