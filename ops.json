@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"ops":[{"kind":"set_branch","branch":"fix/generated-command-precedence"}]}
+{"v":1,"lamport":4,"ops":[{"kind":"link_commit","sha":"71ded34de891604153678c3bdb16743e08552faf"}]}
