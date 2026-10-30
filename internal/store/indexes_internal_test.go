@@ -182,7 +182,7 @@ func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		_ = tx.Rollback()
-		<-done
+		_ = <-done
 		t.Fatal("maintenance waited behind ordinary database writer")
 	}
 	assertLaneIndexCount(t, st, 0)

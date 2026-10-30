@@ -43,7 +43,7 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
-	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
+	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0) //nolint:gosec // G304: home is the caller-selected CCI store; init.lock is its fixed existing lock.
 	if err != nil {
 		return report, fmt.Errorf("open index maintenance lock: %w", err)
 	}
