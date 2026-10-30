@@ -18,12 +18,10 @@ func main() {
 	defer stop()
 
 	root := cli.NewRootCmd()
-	if path, ok := cli.External(root, os.Args[1:]); ok {
-		err := syscall.Exec(path, append([]string{path}, os.Args[2:]...), os.Environ()) //nolint:gosec // G204: a cci-<verb> program on PATH, run the way git runs its external commands.
-		fmt.Fprintln(os.Stderr, "cci:", err)
-		os.Exit(1)
-	}
 	if err := root.ExecuteContext(ctx); err != nil {
+		if path, ok := cli.External(root, os.Args[1:]); ok {
+			err = syscall.Exec(path, append([]string{path}, os.Args[2:]...), os.Environ()) //nolint:gosec // G204: a cci-<verb> program on PATH, run the way git runs its external commands.
+		}
 		fmt.Fprintln(os.Stderr, "cci:", err)
 		os.Exit(1)
 	}
