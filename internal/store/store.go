@@ -270,6 +270,9 @@ type Record struct {
 	Source       string          `json:"source"`
 	Body         json.RawMessage `json:"body,omitempty"`
 	Status       string          `json:"status,omitempty"`
+	Num          string          `json:"num,omitempty"`
+	ReNum        string          `json:"-"`
+	CloseNums    []string        `json:"-"`
 
 	alsoOrigins []Pointer
 }
@@ -286,10 +289,11 @@ func (r Record) Tracked() bool {
 }
 
 type Store struct {
-	db   *sql.DB
-	home string
-	node node.Node
-	Now  func() time.Time
+	db    *sql.DB
+	home  string
+	node  node.Node
+	owner bool
+	Now   func() time.Time
 }
 
 func Home() (string, error) {
@@ -316,7 +320,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	s := &Store{db: db, home: home, node: n, Now: time.Now}
+	s := &Store{db: db, home: home, node: n, owner: true, Now: time.Now}
 	err = s.initialize(ctx)
 	for _, pause := range openRetries {
 		if !busy(err) {
@@ -870,7 +874,15 @@ func (s *Store) get(ctx context.Context, q querier, seq int64) (Record, error) {
 }
 
 func (s *Store) Get(ctx context.Context, seq int64) (Record, error) {
-	return s.get(ctx, s.db, seq)
+	r, err := s.get(ctx, s.db, seq)
+	if err != nil {
+		return Record{}, err
+	}
+	records := []Record{r}
+	if err := s.numbered(ctx, records); err != nil {
+		return Record{}, err
+	}
+	return records[0], nil
 }
 
 func (s *Store) MaxSeq(ctx context.Context) (int64, error) {
