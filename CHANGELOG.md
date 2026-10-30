@@ -6,6 +6,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-10-29
+
+### Changed
+
+- `cci post --to <lane>` refuses a bare lane name that no live session reads,
+  no thread is bound as on the drive, and no record on the drive was posted
+  as, and names the nearest live lane. `--force` addresses a lane that has not
+  started yet; `owner` and `all` always pass.
+
+## [0.39.2] - 2026-10-29
+
+### Changed
+
+- `cci post` refuses a text whose leading `H:MM AM/PM` label is more than a
+  minute off the post's own clock, ahead or behind, with a one-line message.
+  `cci post --stamp` writes the label from the clock instead: it replaces a
+  typed leading label, or opens the text with one.
+
+### Fixed
+
+- `cci tail --json` prints its truncation trailer on stderr when its budget or
+  page cut records, so stdout stays one JSON record per line and a cut read
+  still says so.
+
 ## [0.38.0] - 2026-10-28
 
 ### Fixed
