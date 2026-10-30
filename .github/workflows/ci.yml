@@ -19,6 +19,16 @@ permissions:
   contents: read
 
 jobs:
+  release-observer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+      - name: Post-release observation outcomes and dispatch identity
+        run: python3 .github/scripts/test-release-observer.py
+
   test:
     runs-on: ${{ matrix.os }}
     strategy:
