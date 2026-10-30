@@ -310,7 +310,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := "file:" + filepath.Join(home, DBFile) + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
+	dsn := "file:" + filepath.Join(home, DBFile) + "?_pragma=busy_timeout(10000)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
@@ -329,10 +329,27 @@ func (s *Store) initialize(ctx context.Context) error {
 		return fmt.Errorf("open init lock: %w", err)
 	}
 	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH); err != nil {
 		return fmt.Errorf("take init lock: %w", err)
 	}
 	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
+	var schema int
+	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	var journal string
+	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil {
+		return fmt.Errorf("read journal mode: %w", err)
+	}
+	if schema == len(migrations) && journal == "wal" {
+		return nil
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("take migration lock: %w", err)
+	}
+	if _, err := s.db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
+		return fmt.Errorf("set journal mode: %w", err)
+	}
 	return s.migrate(ctx)
 }
 

@@ -37,6 +37,10 @@ jobs:
         run: go vet ./...
       - name: Test (race)
         run: go test -race ./...
+      - name: Post operation counts and scaling
+        run: |
+          go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
+          go test -run '^$' -bench '^BenchmarkBindLaneExistingCursor$' -benchtime=100x -benchmem ./internal/store
       - name: Build
         run: go build ./...
 
