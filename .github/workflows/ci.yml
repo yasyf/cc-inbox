@@ -21,8 +21,6 @@ permissions:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    env:
-      CCI_OLD_STORE_PROBE: ${{ runner.temp }}/cci-old-store-probe
     strategy:
       fail-fast: false
       matrix:
@@ -43,12 +41,14 @@ jobs:
         run: go vet ./...
       - name: Build immutable 0.41.1 store compatibility probe
         run: |
+          cci_old_store_probe="$RUNNER_TEMP/cci-old-store-probe"
           test "$(git -C .ci-old rev-parse HEAD)" = 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
           mkdir -p .ci-old/cmd/compat-probe
           cp internal/store/testdata/compat-probe/main.go .ci-old/cmd/compat-probe/main.go
           cd .ci-old
-          go build -p 2 -o "$CCI_OLD_STORE_PROBE" ./cmd/compat-probe
-          test -x "$CCI_OLD_STORE_PROBE"
+          go build -p 2 -o "$cci_old_store_probe" ./cmd/compat-probe
+          test -x "$cci_old_store_probe"
+          printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
       - name: Test (race)
         run: go test -race ./...
       - name: Post operation counts and scaling
