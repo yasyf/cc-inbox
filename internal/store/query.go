@@ -528,7 +528,7 @@ func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []str
 
 func (s *Store) successor(ctx context.Context, drive, lane string) (string, bool, error) {
 	var successor string
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(json_extract(fields, '$.successor'), '') FROM records
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(json_extract(fields, '$.attrs.successor'), '') FROM records
 WHERE drive = ? AND kind = ? AND seq IN (SELECT source_seq FROM record_recipients WHERE address = ?) ORDER BY seq DESC LIMIT 1`, drive, string(kinds.StandDown), lane).Scan(&successor)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
@@ -542,7 +542,7 @@ WHERE drive = ? AND kind = ? AND seq IN (SELECT source_seq FROM record_recipient
 // NamedSuccessor reports whether a stand-down record in drive hands a lane over to lane.
 func (s *Store) NamedSuccessor(ctx context.Context, drive, lane string) (bool, error) {
 	var ok bool
-	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM records WHERE drive = ? AND kind = ? AND json_extract(fields, '$.successor') = ?)`, drive, string(kinds.StandDown), lane).Scan(&ok); err != nil {
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM records WHERE drive = ? AND kind = ? AND json_extract(fields, '$.attrs.successor') = ?)`, drive, string(kinds.StandDown), lane).Scan(&ok); err != nil {
 		return false, fmt.Errorf("read successors on %s: %w", drive, err)
 	}
 	return ok, nil

@@ -239,14 +239,13 @@ type Census struct {
 }
 
 type Fields struct {
-	Attrs     map[string]string `json:"attrs,omitempty"`
-	Envs      []string          `json:"envs,omitempty"`
-	Mode      string            `json:"mode,omitempty"`
-	Outcome   string            `json:"outcome,omitempty"`
-	Commit    string            `json:"commit,omitempty"`
-	Census    *Census           `json:"census,omitempty"`
-	Counts    map[string]int    `json:"counts,omitempty"`
-	Successor string            `json:"successor,omitempty"`
+	Attrs   map[string]string `json:"attrs,omitempty"`
+	Envs    []string          `json:"envs,omitempty"`
+	Mode    string            `json:"mode,omitempty"`
+	Outcome string            `json:"outcome,omitempty"`
+	Commit  string            `json:"commit,omitempty"`
+	Census  *Census           `json:"census,omitempty"`
+	Counts  map[string]int    `json:"counts,omitempty"`
 }
 
 type Record struct {

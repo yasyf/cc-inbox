@@ -170,6 +170,7 @@ func hookContext(t *testing.T, out *bytes.Buffer, event string) string {
 func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
+	testutil.Post(t, st, store.Record{Lane: "lane-x", Kind: kinds.State, Text: "an earlier session of lane-x"})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Stopped, To: []string{"lane-x"}, Text: "from before this session"})
 	clock.Advance(time.Minute)
 	started := clock.Now()
@@ -452,6 +453,7 @@ func TestASuccessorTeammateReadsFromItsSpawnAndNothingClosed(t *testing.T) {
 	ctx := context.Background()
 	rootStarted := clock.Now()
 	clock.Advance(time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "lane-x", Kind: kinds.State, Text: "the predecessor at work"})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"lane-x"}, Text: "for the predecessor"})
 	clock.Advance(time.Minute)
 	successor := hook.Payload{SessionID: "s1", AgentID: "alane-x-2", TranscriptPath: filepath.Join(t.TempDir(), "s1.jsonl"), Cwd: t.TempDir(), Event: "PostToolUse"}

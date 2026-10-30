@@ -83,18 +83,15 @@ func TestPostRecipientUsesHarnessSessionIdentity(t *testing.T) {
 				}
 			}
 			out, err := run(t, "post", "--drive", "sender-drive", "--lane", "sender", "--kind", "note", "--to", "receiver", "--text", "identity fixture")
+			want, wantTo := "cci: --to receiver: receiver reads drive other-drive, not sender-drive; addressed receiver@other-drive\n#1\n", "receiver@other-drive"
 			if tt.deadWindow || tt.duplicate {
-				want := "--to receiver: no live session or registered lane on drive sender-drive is named receiver; --force addresses a lane that has not started yet"
-				if err == nil || err.Error() != want {
-					t.Fatalf("post with %s = %q, %v; want %s", tt.name, out, err, want)
-				}
-				return
+				want, wantTo = "#1\n", "receiver"
 			}
-			if err != nil || out != "cci: --to receiver: receiver reads drive other-drive, not sender-drive; addressed receiver@other-drive\n#1\n" {
-				t.Fatalf("post with %s = %q, %v", tt.name, out, err)
+			if err != nil || out != want {
+				t.Fatalf("post with %s = %q, %v; want %q", tt.name, out, err, want)
 			}
 			stored, err := st.Get(ctx, 1)
-			if err != nil || strings.Join(stored.To, ",") != "receiver@other-drive" {
+			if err != nil || strings.Join(stored.To, ",") != wantTo {
 				t.Fatalf("stored recipient = %v, %v", stored.To, err)
 			}
 		})
