@@ -1,1 +1,1 @@
-{"v":1,"lamport":6,"ops":[{"kind":"set_criterion_status","id":"1279767e25f3cdec199f2f5e57e5e17d","status":"met","note":"Review1865f632 PASS; correctedbaseline c96f6f5 CI41043683280 expected feature failures; candidate eb0aef50 CI41043718773 all5jobs pass."}]}
+{"v":1,"lamport":7,"ops":[{"kind":"set_status","status":"done"},{"kind":"add_comment","body":"Implementation and CI evidence delivered to sole PR164 carrier; merge/release/install remain carrier-owner gates."},{"kind":"link_commit","sha":"eb0aef50b45be5716af48b064e9e353023078887"}]}
