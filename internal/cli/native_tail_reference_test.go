@@ -112,8 +112,12 @@ func newNativeTailFixture(t *testing.T, call nativeTailCall, sets []tailSet) nat
 VALUES('f','worker','note',4102444800000,'worker mail',?,'post','native-mail')`, string(address)); err != nil {
 		t.Fatal(err)
 	}
+	refs, err := json.Marshal(store.Refs{PRs: []store.PR{{Number: 29020}}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.ExecContext(t.Context(), `INSERT INTO records(drive,lane,kind,at,text,topic,refs,source,hash)
-VALUES('d','held','hold',4102444800000,'hold #29020','#29020','{"prs":[{"number":29020}]}','post','native-hold')`); err != nil {
+VALUES('d','held','hold',4102444800000,'hold #29020','#29020',?,'post','native-hold')`, string(refs)); err != nil {
 		t.Fatal(err)
 	}
 	for _, set := range sets {
