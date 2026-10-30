@@ -1,1 +1,1 @@
-{"v":1,"lamport":6,"ops":[{"kind":"remove_criterion","id":"928e2967c27ad6232a73ef6945e348ba"}]}
+{"v":1,"lamport":7,"ops":[{"kind":"set_criterion_status","id":"a4871271a4e330a75e853cdd1f720a19","status":"met","note":"Correctedf5179bc6 fullLinux/MacCI passes currentsharedreader+ordinaryWALwriter coexistence, actualexclusiveuncommittednewer-schema barrier/rejection, and8concurrentcoldopens. Initialunsafe lock-free route rejected byindependentreview; no schema/wire/fingerprint change. Full finalunion CI remains release gate."}]}
