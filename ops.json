@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"ops":[{"kind":"set_branch","branch":"perf/cci-targeted-recipients"}]}
+{"v":1,"lamport":4,"ops":[{"kind":"add_comment","body":"Implemented isolated separable indexed session query/catalog candidate and paired immutable722 CI identity fixture. Full CLI integration intentionally waits for root identity-authority decision: baseline joins SessionID regardless PID0/stale pointer, and only external Claude native registry writer is currently located. No local tests/builds/benchmarks/live bus/process actions. No PR or commit yet."}]}
