@@ -28,14 +28,7 @@ const (
 var errNoPeerSession = errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
 
 func NewRootCmd() *cobra.Command {
-	root := &cobra.Command{
-		Use:           "cci",
-		Short:         "Typed, bounded coordination records for long-running agent drives",
-		Version:       version.String(),
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-	root.SetVersionTemplate("{{.Version}}\n")
+	root := rootCommand()
 	root.AddCommand(
 		newPostCmd(),
 		newTailCmd(),
@@ -68,6 +61,18 @@ func NewRootCmd() *cobra.Command {
 		newUnpairCmd(),
 		newPeersCmd(),
 	)
+	return root
+}
+
+func rootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "cci",
+		Short:         "Typed, bounded coordination records for long-running agent drives",
+		Version:       version.String(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	root.SetVersionTemplate("{{.Version}}\n")
 	return root
 }
 
@@ -150,13 +155,17 @@ func (f *readFlags) registerLimit(cmd *cobra.Command, usage string) {
 }
 
 func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, error) {
+	return f.filterPeer(ctx, st, selfPeer())
+}
+
+func (f *readFlags) filterPeer(ctx context.Context, st *store.Store, peer store.PeerKey) (store.Filter, error) {
 	drive, err := resolveDrive(ctx, st, f.drive)
 	if err != nil {
 		return store.Filter{}, err
 	}
 	out := store.Filter{Drive: drive, Origin: f.origin, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
 	if f.to == "" {
-		out.Peer = selfPeer().String()
+		out.Peer = peer.String()
 	}
 	if out.Kinds, err = kinds.ParseAll(f.kinds); err != nil {
 		return store.Filter{}, err
