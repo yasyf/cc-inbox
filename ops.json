@@ -1,1 +1,1 @@
-{"v":1,"lamport":5,"ops":[{"kind":"add_criterion","id":"a4871271a4e330a75e853cdd1f720a19","text":"CI proves current WAL readers coexist with shared initialization checks and ordinary writers while real upgrades retain exclusive barriers","script":""}]}
+{"v":1,"lamport":6,"ops":[{"kind":"remove_criterion","id":"928e2967c27ad6232a73ef6945e348ba"}]}
