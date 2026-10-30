@@ -461,10 +461,17 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 			out[i] = t
 		default:
 			if reading == nil {
-				reading, err = laneDrives(ctx, st)
+				var lanes []string
+				for _, candidate := range to {
+					if strings.HasPrefix(candidate, "peer:") || strings.Contains(candidate, "@") || store.RootName(candidate) || candidate == "owner" || candidate == "all" {
+						continue
+					}
+					lanes = append(lanes, candidate)
+				}
+				reading, err = laneDrives(ctx, st, lanes)
 			}
 			if err == nil && !force && len(reading[t]) == 0 {
-				err = registeredLane(ctx, st, drive, t, reading)
+				err = registeredLane(ctx, st, drive, t)
 			}
 			if err == nil {
 				out[i], err = routeLane(t, drive, reading[t], notices)
@@ -516,8 +523,8 @@ func onePeer(ctx context.Context, st *store.Store, f peers.Filter) (peers.View, 
 	return peers.One(ctx, st, f)
 }
 
-func laneDrives(ctx context.Context, st *store.Store) (map[string][]string, error) {
-	views, err := peers.Resolve(ctx, st, peers.Filter{Origin: peers.LocalOrigin})
+func laneDrives(ctx context.Context, st *store.Store, lanes []string) (map[string][]string, error) {
+	views, err := peers.ResolveLanes(ctx, st, lanes)
 	if err != nil {
 		return nil, err
 	}
@@ -543,9 +550,13 @@ func routeLane(lane, drive string, reading []string, notices io.Writer) (string,
 	return addr, err
 }
 
-func registeredLane(ctx context.Context, st *store.Store, drive, lane string, reading map[string][]string) error {
+func registeredLane(ctx context.Context, st *store.Store, drive, lane string) error {
 	ok, err := st.Registered(ctx, drive, lane)
 	if err != nil || ok {
+		return err
+	}
+	reading, err := laneDrives(ctx, st, nil)
+	if err != nil {
 		return err
 	}
 	msg := fmt.Sprintf("--to %s: no live session or registered lane on drive %s is named %s", lane, drive, lane)

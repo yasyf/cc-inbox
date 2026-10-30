@@ -61,7 +61,7 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 				assertLaneIndexCount(t, st, 0)
 				assertOldFixtureRecord(t, st, initial)
 			} else {
-				assertLaneIndexCount(t, st, 2)
+				assertLaneIndexCount(t, st, len(physicalIndexes))
 			}
 			report, err := MaintainIndexes(ctx, home)
 			if err != nil {
@@ -69,12 +69,12 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			}
 			wantCreated := 0
 			if first == "old" {
-				wantCreated = 2
+				wantCreated = len(physicalIndexes)
 			}
 			if len(report.Created) != wantCreated {
 				t.Fatalf("created indexes = %v, want %d", report.Created, wantCreated)
 			}
-			assertLaneIndexCount(t, st, 2)
+			assertLaneIndexCount(t, st, len(physicalIndexes))
 			candidate, _, err := st.Post(ctx, Record{
 				Drive:  "compat",
 				Lane:   "new",
@@ -98,7 +98,7 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = reopened.Close() })
 			assertOldFixtureRecord(t, reopened, old)
-			assertLaneIndexCount(t, reopened, 2)
+			assertLaneIndexCount(t, reopened, len(physicalIndexes))
 			var schema int
 			if err := reopened.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
 				t.Fatal(err)
@@ -106,7 +106,7 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			if schema != 14 || reopened.SchemaFingerprint() != old.Fingerprint {
 				t.Fatalf("reopened candidate schema/fingerprint = %d/%s, old = %d/%s", schema, reopened.SchemaFingerprint(), old.Schema, old.Fingerprint)
 			}
-			t.Logf("first=%s old_source=0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2 old_schema=%d old_fingerprint=%s physical_indexes=2 old_read_candidate_seq=%d new_read_old_seq=%d", first, old.Schema, old.Fingerprint, old.ReadSeq, old.PostedSeq)
+			t.Logf("first=%s old_source=0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2 old_schema=%d old_fingerprint=%s physical_indexes=%d old_read_candidate_seq=%d new_read_old_seq=%d", first, old.Schema, old.Fingerprint, len(physicalIndexes), old.ReadSeq, old.PostedSeq)
 		})
 	}
 }

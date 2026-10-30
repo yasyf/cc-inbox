@@ -17,6 +17,7 @@ var physicalIndexes = [...]struct {
 }{
 	{"records_drive_lane", "CREATE INDEX records_drive_lane ON records(drive, lane)"},
 	{"sessions_drive_lane", "CREATE INDEX sessions_drive_lane ON sessions(drive, lane)"},
+	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
 }
 
 // IndexMaintenanceReport describes committed physical tuning and storage snapshots, not peak I/O.
