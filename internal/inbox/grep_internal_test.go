@@ -207,13 +207,21 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 
 func TestGrepReplyMetadataErrorAttribution(t *testing.T) {
 	for _, tt := range []struct {
-		name string
-		set  string
+		name      string
+		set       string
+		before    int64
+		wantLines int
 	}{
-		{"typed array", `re = 500, also_resolves = '["oops"]'`},
-		{"typed array with earlier owner", `re = 500, also_resolves = '[1000, "oops"]'`},
-		{"invalid re", "re = 'oops', resolves = 500"},
-		{"malformed JSON", "re = 500, also_resolves = '['"},
+		{"typed array", `re = 500, also_resolves = '["oops"]'`, 0, 500},
+		{"typed array with earlier owner", `re = 500, also_resolves = '[1000, "oops"]'`, 0, 0},
+		{"typed object with earlier owner", `re = 500, also_resolves = '{"x":1000}'`, 0, 0},
+		{"real earlier owner", `re = 500, also_resolves = '[1000.0]'`, 0, 0},
+		{"string owner", `re = 500, also_resolves = '["1000", "oops"]'`, 0, 500},
+		{"invalid re", "re = 'oops', resolves = 500", 0, 500},
+		{"malformed JSON", "re = 500, also_resolves = '['", 0, 0},
+		{"malformed JSON after first page reply", "re = 500, also_resolves = '['", 1000, 0},
+		{"malformed JSON after later page reply", "re = 500, also_resolves = '['", 499, 0},
+		{"malformed JSON first page owner", "re = 1000, also_resolves = '['", 0, 0},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			st, _ := testutil.Store(t)
@@ -230,6 +238,9 @@ INSERT INTO records (drive, lane, kind, at, text, source, hash)
 SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' || n FROM history`); err != nil {
 				t.Fatal(err)
 			}
+			if tt.before != 0 {
+				testutil.Post(t, st, store.Record{Drive: "elsewhere", Kind: kinds.Answer, Text: "earlier answer", Re: tt.before})
+			}
 			reply := testutil.Post(t, st, store.Record{Drive: "elsewhere", Kind: kinds.Answer, Text: "answer", Re: 500})
 			if _, err := db.ExecContext(ctx, "UPDATE records SET "+tt.set+" WHERE seq = ?", reply.Seq); err != nil {
 				t.Fatal(err)
@@ -240,10 +251,7 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 				t.Fatal("corrupt selected reply did not return an error")
 			}
 			checkGrepSnapshot(t, "metadata", out.String(), err)
-			wantLines := 500
-			if tt.name == "typed array with earlier owner" || tt.name == "malformed JSON" {
-				wantLines = 0
-			}
+			wantLines := tt.wantLines
 			if got := strings.Count(out.String(), "\n"); got != wantLines {
 				t.Fatalf("corruption prefix has %d lines, want %d: %v", got, wantLines, err)
 			}

@@ -558,10 +558,11 @@ type replyScanner struct {
 	re       any
 	resolves any
 	also     any
+	seq      int64
 }
 
 func (r *replyScanner) Scan(dest ...any) error {
-	err := r.row.Scan(append(dest, &r.re, &r.resolves, &r.also)...)
+	err := r.row.Scan(append(dest, &r.re, &r.resolves, &r.also, &r.seq)...)
 	if err == nil {
 		return nil
 	}
@@ -570,7 +571,7 @@ func (r *replyScanner) Scan(dest ...any) error {
 	for i := range values {
 		raw[i] = &values[i]
 	}
-	if rawErr := r.row.Scan(append(raw, &r.re, &r.resolves, &r.also)...); rawErr != nil {
+	if rawErr := r.row.Scan(append(raw, &r.re, &r.resolves, &r.also, &r.seq)...); rawErr != nil {
 		return rawErr
 	}
 	return err
@@ -590,6 +591,7 @@ func (s *Store) Replies(ctx context.Context, seqs []int64) (map[int64][]Record, 
 // ReplyPages reads selected replies once and attributes decoding errors to each affected page.
 func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage, error) {
 	pages := make([]ReplyPage, len(selected))
+	firstReply := make([]int64, len(selected))
 	owners := map[int64][]int{}
 	var seqs []int64
 	for page, ids := range selected {
@@ -608,7 +610,7 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 	}
 	ids, _ := json.Marshal(seqs)
 	in := "SELECT value FROM json_each(?)"
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+", re, resolves, also_resolves FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
+	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+", re, resolves, also_resolves, seq FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
@@ -633,6 +635,9 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 			}
 		}
 		for page := range affected {
+			if firstReply[page] == 0 {
+				firstReply[page] = r.Seq
+			}
 			if r.Re != 0 {
 				pages[page].Replies[r.Re] = append(pages[page].Replies[r.Re], r)
 			}
@@ -656,6 +661,9 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 		if err != nil {
 			if pages[0].Err == nil {
 				pages[0].Err = err
+				if firstReply[0] == 0 || firstReply[0] > failed.metadata.seq {
+					pages[0].Err = fmt.Errorf("read replies: %w", err)
+				}
 				for _, target := range direct {
 					if slices.Contains(owners[target], 0) {
 						pages[0].Err = failed.err
@@ -671,6 +679,9 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 		}
 		for _, target := range targets {
 			for _, page := range owners[target] {
+				if firstReply[page] == 0 || firstReply[page] > failed.metadata.seq {
+					firstReply[page] = failed.metadata.seq
+				}
 				if pages[page].Err == nil {
 					pages[page].Err = failed.err
 				}
@@ -681,6 +692,9 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 		for page := range pages {
 			if pages[page].Err == nil {
 				pages[page].Err = queryErr
+				if firstReply[page] == 0 {
+					pages[page].Err = fmt.Errorf("read replies: %w", queryErr)
+				}
 			}
 		}
 	}
