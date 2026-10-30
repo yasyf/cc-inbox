@@ -35,11 +35,13 @@ const clockLabel = `\b\d{1,2}:\d{2} ?[AaPp][Mm]\b`
 func newPostCmd() *cobra.Command {
 	var (
 		drive, lane, kind, text string
+		parsedKind              kinds.Kind
 		r                       store.Record
 		counts                  map[string]string
 		census, bodyFile        string
 		ttl                     time.Duration
 		asJSON, label, force    bool
+		pairwise                bool
 		re, resolves            []int64
 	)
 	cmd := &cobra.Command{
@@ -54,7 +56,14 @@ func newPostCmd() *cobra.Command {
 			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path"):
 				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
 			}
-			return nil
+			if !cmd.Flags().Changed("kind") {
+				return nil
+			}
+			var err error
+			if parsedKind, err = kinds.Parse(kind); err != nil {
+				return err
+			}
+			return validateTargets(re, resolves, pairwise)
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
@@ -96,10 +105,7 @@ func newPostCmd() *cobra.Command {
 				}
 				text, fromPath = firstLine(string(body)), true
 			}
-			k, err := kinds.Parse(kind)
-			if err != nil {
-				return err
-			}
+			k := parsedKind
 			if (k == kinds.Opened || k == kinds.Head && r.Refs.CCN == "") && len(r.Refs.PRs) == 0 {
 				if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
 					return err
@@ -145,7 +151,7 @@ func newPostCmd() *cobra.Command {
 			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, force, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
-			records, err := perTarget(r, re, resolves)
+			records, err := perTarget(r, re, resolves, pairwise)
 			if err != nil {
 				return err
 			}
@@ -174,6 +180,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64SliceVar(&re, "re", nil, "seq this record answers or closes; repeated, each seq gets its own record")
 	f.Int64SliceVar(&resolves, "resolves", nil, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every seq")
+	f.BoolVar(&pairwise, "pairwise", false, "pair equal non-empty --re and --resolves lists in order, posting one record per pair")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
 	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
@@ -218,9 +225,33 @@ func threadLane(ctx context.Context, st *store.Store) (string, error) {
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")
 
-func perTarget(r store.Record, re, resolves []int64) ([]store.Record, error) {
+func validateTargets(re, resolves []int64, pairwise bool) error {
+	if pairwise {
+		if len(re) == 0 || len(re) != len(resolves) {
+			return fmt.Errorf("--pairwise needs equal non-empty --re and --resolves lists; got %d and %d", len(re), len(resolves))
+		}
+		return nil
+	}
 	if len(re) > 1 && len(resolves) > 1 {
-		return nil, errManyTargets
+		return errManyTargets
+	}
+	return nil
+}
+
+func perTarget(r store.Record, re, resolves []int64, pairwise bool) ([]store.Record, error) {
+	if err := validateTargets(re, resolves, pairwise); err != nil {
+		return nil, err
+	}
+	if pairwise {
+		out := make([]store.Record, len(re))
+		for i, seq := range re {
+			out[i] = r
+			out[i].Re, out[i].Resolves = seq, resolves[i]
+			if r.ID != "" {
+				out[i].ID = fmt.Sprintf("%s#%d:%d", r.ID, seq, resolves[i])
+			}
+		}
+		return out, nil
 	}
 	for _, seq := range resolves {
 		switch {

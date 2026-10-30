@@ -394,7 +394,8 @@ ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin, drive = exc
 	(SELECT MIN(seq) - 1 FROM records WHERE at >= MAX(?, COALESCE((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0))),
 	(SELECT MAX(seq) FROM records),
 	0)
-ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli(), k.Session, k.Agent, s.Self()); err != nil {
+WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
+ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli(), k.Session, k.Agent, s.Self(), LaneCursor(k), drive); err != nil {
 		return fmt.Errorf("start lane cursor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

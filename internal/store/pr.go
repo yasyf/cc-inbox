@@ -11,7 +11,7 @@ import (
 var (
 	prURL     = regexp.MustCompile(`^https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)(?:[/?#]\S*)?$`)
 	prRef     = regexp.MustCompile(`^([\w.-]+/[\w.-]+)#(\d+)$`)
-	prMention = regexp.MustCompile(`#(\d+)\b`)
+	prMention = regexp.MustCompile(`\brecord[ \t]+#\d+\b|#(\d+)\b`)
 )
 
 type PR struct {
@@ -76,11 +76,16 @@ func (p *PR) UnmarshalJSON(b []byte) error {
 
 func UnboundPRs(r Record) []int {
 	var missing []int
-	for _, m := range prMention.FindAllStringSubmatch(r.Topic+" "+r.Text, -1) {
-		n, _ := strconv.Atoi(m[1])
-		bound := slices.ContainsFunc(r.Refs.PRs, func(p PR) bool { return p.Number == n })
-		if !bound && !slices.Contains(missing, n) {
-			missing = append(missing, n)
+	for _, text := range []string{r.Topic, r.Text} {
+		for _, m := range prMention.FindAllStringSubmatch(text, -1) {
+			if m[1] == "" {
+				continue
+			}
+			n, _ := strconv.Atoi(m[1])
+			bound := slices.ContainsFunc(r.Refs.PRs, func(p PR) bool { return p.Number == n })
+			if !bound && !slices.Contains(missing, n) {
+				missing = append(missing, n)
+			}
 		}
 	}
 	return missing
