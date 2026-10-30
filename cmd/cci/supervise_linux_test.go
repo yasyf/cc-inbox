@@ -56,7 +56,7 @@ func TestSuperviseKeepsAJoinedRelayPushing(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = out.Close() })
 	cmd := exec.Command(os.Args[0], "supervise")
-	cmd.Env = append(os.Environ(), "CCI_TEST_AS_CCI=1", "HOME="+t.TempDir(), "CCI_HOME="+home)
+	cmd.Env = append(os.Environ(), "CCI_TEST_AS_CCI=1", "CCI_HOME="+home)
 	cmd.Stdout, cmd.Stderr = out, out
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)

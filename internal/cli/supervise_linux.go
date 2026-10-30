@@ -28,7 +28,7 @@ func runSupervisor(ctx context.Context) error {
 		if errors.Is(err, supervise.ErrNoSupervisor) {
 			continue
 		}
-		if err != nil {
+		if err != nil && ctx.Err() == nil {
 			cancel()
 			return errors.Join(err, <-supervised)
 		}
