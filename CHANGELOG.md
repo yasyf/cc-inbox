@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so state, head, red, report, review, note and evidence records copied to
   the root stay in `cci tail` and `cci digest`. `cci watch` takes the same
   flag and default; `cci tail` and `cci grep` take the flag with no default.
+- The root's default `--to-kind` also carries `mechanism`, `fix-live` and
+  `owner`: a root reports an incident at its mechanism and at fix-live, and
+  relays the owner's words.
 
 ## [0.41.0] - 2026-10-29
 
