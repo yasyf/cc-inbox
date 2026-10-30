@@ -124,14 +124,14 @@ func marks(seq int64, replies []store.Record) string {
 	var b strings.Builder
 	for _, r := range replies {
 		if slices.Contains(r.Closes(), seq) {
-			fmt.Fprintf(&b, " [RESOLVED %s]", r.Num)
+			fmt.Fprintf(&b, " [RESOLVED %s]", r.Name())
 			continue
 		}
 		label, ok := replyMarks[r.Kind]
 		if !ok {
 			label = "RE"
 		}
-		fmt.Fprintf(&b, " [%s %s]", label, r.Num)
+		fmt.Fprintf(&b, " [%s %s]", label, r.Name())
 	}
 	return b.String()
 }

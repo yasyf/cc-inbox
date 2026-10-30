@@ -310,7 +310,7 @@ func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
 	if dup {
 		suffix = " (duplicate)"
 	}
-	_, err := fmt.Fprintf(w, "%s%s\n", got.Num, suffix)
+	_, err := fmt.Fprintf(w, "%s%s\n", got.Name(), suffix)
 	return err
 }
 

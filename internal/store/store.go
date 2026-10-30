@@ -277,6 +277,34 @@ type Record struct {
 	alsoOrigins []Pointer
 }
 
+// Name is how every node names r, or its local seq for a record no store numbered.
+func (r Record) Name() string {
+	if r.Num == "" {
+		return fmt.Sprintf("#%d", r.Seq)
+	}
+	return r.Num
+}
+
+// ReName names the record r answers.
+func (r Record) ReName() string {
+	if r.ReNum == "" {
+		return fmt.Sprintf("#%d", r.Re)
+	}
+	return r.ReNum
+}
+
+// CloseNames names the records r resolves.
+func (r Record) CloseNames() []string {
+	if r.CloseNums != nil {
+		return r.CloseNums
+	}
+	var out []string
+	for _, seq := range r.Closes() {
+		out = append(out, fmt.Sprintf("#%d", seq))
+	}
+	return out
+}
+
 func (r Record) Closes() []int64 {
 	if r.Resolves == 0 {
 		return nil

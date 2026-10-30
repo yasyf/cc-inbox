@@ -137,7 +137,7 @@ func untracked(b *render.Budget, holds []store.Record) {
 	}
 	names := make([]string, 0, len(holds))
 	for _, r := range slices.Backward(holds) {
-		names = append(names, fmt.Sprintf("%s %s", r.Num, r.Lane))
+		names = append(names, fmt.Sprintf("%s %s", r.Name(), r.Lane))
 	}
 	if len(names) > 8 {
 		names = append(names[:8], fmt.Sprintf("+%d more", len(holds)-8))

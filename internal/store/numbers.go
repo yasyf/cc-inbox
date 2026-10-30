@@ -63,12 +63,11 @@ func (s *Store) numbered(ctx context.Context, records []Record) error {
 	if err != nil {
 		return err
 	}
-	for i, r := range records {
-		records[i].Num = s.name(owners, r)
-		records[i].ReNum = names[r.Re]
-		records[i].CloseNums = nil
+	for i := range records {
+		r := &records[i]
+		r.Num, r.ReNum, r.CloseNums = s.name(owners, *r), names[r.Re], nil
 		for _, seq := range r.Closes() {
-			records[i].CloseNums = append(records[i].CloseNums, names[seq])
+			r.CloseNums = append(r.CloseNums, names[seq])
 		}
 	}
 	return nil
@@ -111,6 +110,23 @@ func (s *Store) names(ctx context.Context, owners map[string]bool, seqs []int64)
 	return out, rows.Err()
 }
 
+func (s *Store) origins(ctx context.Context, tag string, tagged bool) (string, []any, error) {
+	if tagged {
+		return "origin LIKE ?", []any{tag + "%"}, nil
+	}
+	owners, err := s.owners(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	args := make([]any, 0, len(owners))
+	for origin, owner := range owners {
+		if owner && origin != s.Self() {
+			args = append(args, origin)
+		}
+	}
+	return "origin IN (" + placeholders(len(args)) + ")", args, nil
+}
+
 // Number names r the way every node names it.
 func (s *Store) Number(ctx context.Context, r Record) (string, error) {
 	owners, err := s.owners(ctx)
@@ -128,28 +144,18 @@ var ErrNoNumber = errors.New("no record has this number")
 func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
 	digits, tag, tagged := strings.Cut(strings.TrimPrefix(ref, "#"), "@")
 	n, err := strconv.ParseInt(digits, 10, 64)
-	if err != nil || n <= 0 || tagged && tag == "" {
+	if err != nil || n < 0 || tagged && (tag == "" || n == 0) {
 		return 0, fmt.Errorf("%q is not a record number (#N or #N@node)", ref)
 	}
-	if tagged && strings.HasPrefix(s.Self(), tag) || !tagged && s.owner {
+	if tagged && strings.HasPrefix(s.Self(), tag) || !tagged && (s.owner || n == 0) {
 		return n, nil
 	}
-	match, args := "origin LIKE ?", []any{tag + "%"}
-	if !tagged {
-		owners, err := s.owners(ctx)
-		if err != nil {
-			return 0, err
-		}
-		args = nil
-		for origin, owner := range owners {
-			if owner && origin != s.Self() {
-				args = append(args, origin)
-			}
-		}
-		if len(args) == 0 {
-			return 0, fmt.Errorf("%s: %w", ref, ErrNoNumber)
-		}
-		match = "origin IN (" + placeholders(len(args)) + ")"
+	match, args, err := s.origins(ctx, tag, tagged)
+	if err != nil {
+		return 0, err
+	}
+	if len(args) == 0 {
+		return 0, fmt.Errorf("%s: %w", ref, ErrNoNumber)
 	}
 	var seq int64
 	err = s.db.QueryRowContext(ctx, "SELECT seq FROM records WHERE "+match+" AND origin_seq = ? UNION ALL SELECT seq FROM aliases WHERE "+match+" AND origin_seq = ? LIMIT 1",

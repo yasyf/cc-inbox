@@ -50,7 +50,7 @@ func fit(head string, r store.Record, width int) string {
 }
 
 func header(r store.Record, now time.Time) string {
-	return fmt.Sprintf("%s %s %s %s", r.Num, Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
+	return fmt.Sprintf("%s %s %s %s", r.Name(), Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
 }
 
 func rest(r store.Record, brief, elide bool) string {
@@ -73,7 +73,7 @@ func rest(r store.Record, brief, elide bool) string {
 		fmt.Fprintf(&b, " -> %s", strings.Join(to, ","))
 	}
 	if r.Re != 0 {
-		fmt.Fprintf(&b, " re %s", r.ReNum)
+		fmt.Fprintf(&b, " re %s", r.ReName())
 	}
 	if r.Topic != "" && !slices.Contains(words, r.Topic) {
 		fmt.Fprintf(&b, " [%s]", r.Topic)
@@ -96,8 +96,8 @@ func rest(r store.Record, brief, elide bool) string {
 	for _, target := range r.Refs.Targets {
 		fmt.Fprintf(&b, " target:%s", target)
 	}
-	if len(r.CloseNums) > 0 {
-		fmt.Fprintf(&b, " resolves %s", strings.Join(r.CloseNums, ","))
+	if closes := r.CloseNames(); len(closes) > 0 {
+		fmt.Fprintf(&b, " resolves %s", strings.Join(closes, ","))
 	}
 	if r.Refs.CCN != "" {
 		fmt.Fprintf(&b, " ccn:%s", r.Refs.CCN)
