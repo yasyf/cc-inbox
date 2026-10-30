@@ -87,6 +87,8 @@ jobs:
           CCI_GREP_SNAPSHOTS="$RUNNER_TEMP/cci-grep-errors" go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
       - name: Build
         run: go build ./...
+      - name: Tail actual caller baseline operation counts and full requested output
+        run: go test -run '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$' -v ./internal/cli
 
   lint:
     runs-on: ubuntu-latest
