@@ -100,7 +100,7 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if (k == kinds.Head || k == kinds.Opened) && len(r.Refs.PRs) == 0 {
+			if (k == kinds.Opened || k == kinds.Head && r.Refs.CCN == "") && len(r.Refs.PRs) == 0 {
 				if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
 					return err
 				}
@@ -300,6 +300,9 @@ func labels(prefix, colon, lane string) bool {
 func namedPR(w io.Writer, r store.Record) ([]store.PR, error) {
 	named := store.UnboundPRs(r)
 	if len(named) != 1 || named[0] == 0 {
+		if r.Kind == kinds.Head {
+			return nil, fmt.Errorf("a %s record needs --pr or --ccn: the finder and landing desks key a pull request's head by --pr 43922, and a head that names a note, such as an experiment's method note, takes --ccn <note id>", r.Kind)
+		}
 		return nil, fmt.Errorf("a %s record needs --pr: the finder and landing desks key it by pull request, so name the one it is for, e.g. --pr 43922", r.Kind)
 	}
 	if _, err := fmt.Fprintf(w, "cci: %s names #%d; recorded as --pr %d\n", r.Kind, named[0], named[0]); err != nil {

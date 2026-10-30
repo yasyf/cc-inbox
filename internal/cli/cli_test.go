@@ -544,6 +544,18 @@ func TestPostHeadAndOpenedTakeTheirPullRequestOrRefuse(t *testing.T) {
 	}
 }
 
+func TestPostHeadNamingANoteNeedsNoPullRequest(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	out, err := run(t, "post", "--json", "--drive", "d", "--lane", "exp-a", "--kind", "head", "--ccn", "4f2a1b9", "--text", "method note 4f2a1b9")
+	var got store.Record
+	if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil || got.Refs.CCN != "4f2a1b9" || len(got.Refs.PRs) != 0 {
+		t.Fatalf("post = %q, %v; want a head naming note 4f2a1b9 and no pull request", out, err)
+	}
+	if out, err := run(t, "post", "--drive", "d", "--lane", "exp-a", "--kind", "opened", "--ccn", "4f2a1b9", "--text", "method note 4f2a1b9"); err == nil || !strings.Contains(err.Error(), "a opened record needs --pr") {
+		t.Fatalf("opened post = %q, %v; want a refusal naming --pr", out, err)
+	}
+}
+
 func TestPostSpillsTheStampedText(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	typed := time.Now().Add(7 * time.Minute).Format("3:04 PM")
