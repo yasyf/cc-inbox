@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"ops":[{"kind":"set_branch","branch":"perf/cci-post-engineering"}]}
+{"v":1,"lamport":4,"ops":[{"kind":"set_criterion_status","id":"62f89c405035b6fe58f6f54f177134ee","status":"met","note":"Paired actual Linux/macOS CI: old BindLane evaluates64/4096 history rows for existing cursor; correctedf5179bc6 evaluates0 for both. Full coreCI41041666508 all5PASS. Rawlogs+hashes in fundamental-efficiency/cci-post-cost-ci and canonical record. Finalunion164 pending but core5files frozen."}]}
