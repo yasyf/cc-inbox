@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.41.0] - 2026-10-29
+
+### Changed
+
+- `cci post --kind head --ccn <note id>` records a head that names a note,
+  such as an experiment's method note, with no pull request. A head with
+  neither `--pr`, `--ccn`, nor one `#N` in the text still refuses.
+
 ## [0.40.0] - 2026-10-29
 
 ### Changed
