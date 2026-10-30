@@ -48,6 +48,32 @@ func TestNewestRanksPluginAndCaskInstallsBySemver(t *testing.T) {
 	}
 }
 
+func TestNewerThanHandsAStaleBinaryToTheNewestInstall(t *testing.T) {
+	plugin := filepath.Join(t.TempDir(), "cc-inbox")
+	cask := filepath.Join(t.TempDir(), "cci")
+	installAt(t, filepath.Join(plugin, "0.41.6", "bin", "cci"))
+	installAt(t, filepath.Join(cask, "0.42.0", "cci"))
+	roots := Roots{Plugin: plugin, Casks: []string{cask}}
+	tests := []struct {
+		running string
+		want    Install
+		ok      bool
+	}{
+		{"0.22.2", Install{Path: filepath.Join(cask, "0.42.0", "cci"), Version: "0.42.0"}, true},
+		{"0.41.6", Install{Path: filepath.Join(cask, "0.42.0", "cci"), Version: "0.42.0"}, true},
+		{"0.42.0", Install{Path: filepath.Join(cask, "0.42.0", "cci"), Version: "0.42.0"}, false},
+		{"0.43.0", Install{Path: filepath.Join(cask, "0.42.0", "cci"), Version: "0.42.0"}, false},
+		{"dev", Install{}, false},
+		{"0.42.0-3-gabc1234", Install{}, false},
+	}
+	for _, tt := range tests {
+		got, ok, err := roots.NewerThan(tt.running)
+		if err != nil || got != tt.want || ok != tt.ok {
+			t.Errorf("NewerThan(%q) = %+v, %v, %v; want %+v, %v", tt.running, got, ok, err, tt.want, tt.ok)
+		}
+	}
+}
+
 func TestNewestFindsNothingWithoutInstalls(t *testing.T) {
 	got, err := Roots{Plugin: filepath.Join(t.TempDir(), "absent")}.Newest()
 	if err != nil || got != (Install{}) {

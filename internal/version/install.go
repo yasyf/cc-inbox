@@ -42,6 +42,20 @@ func (r Roots) Newest() (Install, error) {
 	return plugin, nil
 }
 
+// NewerThan returns the newest cci installed on this machine when it is a
+// newer release than running, so a binary that a session's stale plugin
+// directory or PATH entry still reaches can hand off to it.
+func (r Roots) NewerThan(running string) (Install, bool, error) {
+	if !IsRelease(running) {
+		return Install{}, false, nil
+	}
+	newest, err := r.Newest()
+	if err != nil {
+		return Install{}, false, err
+	}
+	return newest, Newer(newest.Version, running), nil
+}
+
 func (r Roots) newest() (plugin, casks Install, err error) {
 	if plugin, err = newestIn(r.Plugin, filepath.Join("bin", "cci"), true); err != nil {
 		return Install{}, Install{}, err

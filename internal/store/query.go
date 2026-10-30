@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -456,6 +457,9 @@ func LaneMail(k PeerKey, b Binding) Filter {
 // BindLane names the lane k writes as in drive and starts its lane cursor. A
 // thread already bound to another drive, or already bound as a lane, keeps
 // that binding: only Bind moves it, so a post as another lane never rebinds it.
+// The first thread to bind a lane nobody has bound or posted as on drive
+// starts its cursor before the first record addressed to that lane, so the
+// lane reads what was posted to it before it started.
 func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, started time.Time) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -465,17 +469,21 @@ func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, sta
 	if err := s.claimSession(ctx, tx, k.Session); err != nil {
 		return err
 	}
+	waiting, err := waitingFor(ctx, tx, k, drive, lane)
+	if err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, origin, drive, root, lane, role) VALUES (?, ?, ?, ?, 0, ?, 'lane')
 ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, lane = excluded.lane,
 	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND sessions.lane = ''`, k.Session, k.Agent, s.Self(), drive, lane); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(
+	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, MIN(?, COALESCE(
 	(SELECT MIN(seq) - 1 FROM records WHERE at >= MAX(?, COALESCE((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0))),
 	(SELECT MAX(seq) FROM records),
-	0)
+	0))
 WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
-ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli(), k.Session, k.Agent, s.Self(), LaneCursor(k), drive); err != nil {
+ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, waiting, started.UnixMilli(), k.Session, k.Agent, s.Self(), LaneCursor(k), drive); err != nil {
 		return fmt.Errorf("start lane cursor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -484,11 +492,58 @@ ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, started.UnixMilli()
 	return nil
 }
 
+func waitingFor(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string) (int64, error) {
+	var started bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)", LaneCursor(k), drive).Scan(&started); err != nil || started {
+		return math.MaxInt64, err
+	}
+	waiting := int64(math.MaxInt64)
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MIN(r.seq) - 1, ?) FROM record_recipients a JOIN records r ON r.seq = a.source_seq
+WHERE a.address = ? AND r.drive = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE drive = ? AND lane = ?) AND NOT EXISTS (SELECT 1 FROM records WHERE drive = ? AND lane = ?)`,
+		waiting, lane, drive, drive, lane, drive, lane).Scan(&waiting); err != nil {
+		return 0, fmt.Errorf("find records waiting for lane %s: %w", lane, err)
+	}
+	return waiting, nil
+}
+
 // Registered reports whether lane is bound to a thread in drive or has posted there.
 func (s *Store) Registered(ctx context.Context, drive, lane string) (bool, error) {
 	var ok bool
 	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sessions WHERE drive = ? AND lane = ?) OR EXISTS (SELECT 1 FROM records WHERE drive = ? AND lane = ?)", drive, lane, drive, lane).Scan(&ok); err != nil {
 		return false, fmt.Errorf("read lane %s on %s: %w", lane, drive, err)
+	}
+	return ok, nil
+}
+
+// Successors follows the stand-down records of drive from lane, each naming the
+// lane that took the last one over; stoodDown reports whether lane itself stood down.
+func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []string, stoodDown bool, err error) {
+	successor, stoodDown, err := s.successor(ctx, drive, lane)
+	for err == nil && successor != "" && successor != lane && !slices.Contains(chain, successor) {
+		chain = append(chain, successor)
+		successor, _, err = s.successor(ctx, drive, successor)
+	}
+	return chain, stoodDown, err
+}
+
+func (s *Store) successor(ctx context.Context, drive, lane string) (string, bool, error) {
+	var successor string
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(json_extract(fields, '$.successor'), '') FROM records
+WHERE drive = ? AND kind = ? AND seq IN (SELECT source_seq FROM record_recipients WHERE address = ?) ORDER BY seq DESC LIMIT 1`, drive, string(kinds.StandDown), lane).Scan(&successor)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read the stand-down of %s on %s: %w", lane, drive, err)
+	}
+	return successor, true, nil
+}
+
+// NamedSuccessor reports whether a stand-down record in drive hands a lane over to lane.
+func (s *Store) NamedSuccessor(ctx context.Context, drive, lane string) (bool, error) {
+	var ok bool
+	if err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM records WHERE drive = ? AND kind = ? AND json_extract(fields, '$.successor') = ?)`, drive, string(kinds.StandDown), lane).Scan(&ok); err != nil {
+		return false, fmt.Errorf("read successors on %s: %w", drive, err)
 	}
 	return ok, nil
 }

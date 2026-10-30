@@ -11,8 +11,11 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -59,8 +62,11 @@ func newMeCmd() *cobra.Command {
 		Short: "Print this session's registry line, the one to paste into a handoff, and its channel subscription",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			self, _, err := peerIdentity()
+			self, window, err := peerIdentity()
 			if err != nil {
+				return err
+			}
+			if err := bindNamedLane(cmd.Context(), st, self, window); err != nil {
 				return err
 			}
 			if err := printPeer(cmd, st, self); err != nil {
@@ -74,6 +80,21 @@ func newMeCmd() *cobra.Command {
 			return err
 		}),
 	}
+}
+
+func bindNamedLane(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window) error {
+	lane, err := namedLane(ctx, st, self)
+	if err != nil || lane == "" {
+		return err
+	}
+	drive, err := resolveDrive(ctx, st, "")
+	if errors.Is(err, store.ErrNoDrive) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return st.BindLane(ctx, self, drive, lane, time.UnixMilli(window.Started))
 }
 
 func printPeer(cmd *cobra.Command, st *store.Store, self store.PeerKey) error {
@@ -90,10 +111,10 @@ func printPeer(cmd *cobra.Command, st *store.Store, self store.PeerKey) error {
 
 func newWhoCmd() *cobra.Command {
 	var (
-		f          peers.Filter
-		pr         store.PR
-		build, ref string
-		asJSON     bool
+		f                     peers.Filter
+		pr                    store.PR
+		build, ref, successor string
+		asJSON                bool
 	)
 	cmd := &cobra.Command{
 		Use:   "who",
@@ -107,11 +128,17 @@ func newWhoCmd() *cobra.Command {
 			if len(refs) > 1 {
 				return errors.New("pass one of --pr, --build or --ref")
 			}
+			if successor != "" {
+				return printSuccessor(cmd, st, f.Drive, successor, asJSON)
+			}
 			if len(refs) == 1 {
 				f.Kind, f.Key = refs[0].Kind, refs[0].Key
 			}
 			views, err := peers.Resolve(cmd.Context(), st, f)
 			if err != nil {
+				return err
+			}
+			if err := markStoodDown(cmd.Context(), st, views); err != nil {
 				return err
 			}
 			if asJSON {
@@ -158,8 +185,58 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&ref, "ref", "", "sessions with a claim on this <kind>:<key>, e.g. branch:yasyf/eng-1062 or thread:C0822AHFY3G/1759")
 	fl.StringVar(&f.Rel, "rel", "", "only claims with this relation, e.g. opened, watches, started")
 	fl.BoolVar(&f.All, "all", false, "include sessions whose process has ended")
+	fl.StringVar(&successor, "successor-of", "", "print the lane that now stands in for this lane on --drive (default: this session's drive), following every stand-down that named a successor, or nothing when it never stood down with one; with --json, one object naming the drive, the lane, whether it stood down, its successor and the chain")
 	fl.BoolVar(&asJSON, "json", false, "one JSON object per peer")
 	return cmd
+}
+
+func markStoodDown(ctx context.Context, st *store.Store, views []peers.View) error {
+	for i, v := range views {
+		if v.Lane == "" || v.Drive == "" {
+			continue
+		}
+		chain, stoodDown, err := st.Successors(ctx, v.Drive, v.Lane)
+		if err != nil {
+			return err
+		}
+		views[i].StoodDown = stoodDown
+		if len(chain) > 0 {
+			views[i].Successor = chain[len(chain)-1]
+		}
+	}
+	return nil
+}
+
+func printSuccessor(cmd *cobra.Command, st *store.Store, drive, lane string, asJSON bool) error {
+	drive, err := resolveDrive(cmd.Context(), st, drive)
+	if err != nil {
+		return err
+	}
+	chain, stoodDown, err := st.Successors(cmd.Context(), drive, lane)
+	if err != nil {
+		return err
+	}
+	successor := ""
+	if len(chain) > 0 {
+		successor = chain[len(chain)-1]
+	}
+	if asJSON {
+		if chain == nil {
+			chain = []string{}
+		}
+		return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+			Drive     string   `json:"drive"`
+			Lane      string   `json:"lane"`
+			StoodDown bool     `json:"stood_down"`
+			Successor string   `json:"successor"`
+			Chain     []string `json:"chain"`
+		}{drive, lane, stoodDown, successor, chain})
+	}
+	if successor == "" {
+		return nil
+	}
+	_, err = fmt.Fprintln(cmd.OutOrStdout(), successor)
+	return err
 }
 
 func announceSelf(ctx context.Context, st *store.Store) error {
@@ -471,7 +548,7 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 				reading, err = laneDrives(ctx, st, lanes)
 			}
 			if err == nil && !force && len(reading[t]) == 0 {
-				err = registeredLane(ctx, st, drive, t)
+				err = mistypedLane(ctx, st, drive, t)
 			}
 			if err == nil {
 				out[i], err = routeLane(t, drive, reading[t], notices)
@@ -550,7 +627,7 @@ func routeLane(lane, drive string, reading []string, notices io.Writer) (string,
 	return addr, err
 }
 
-func registeredLane(ctx context.Context, st *store.Store, drive, lane string) error {
+func mistypedLane(ctx context.Context, st *store.Store, drive, lane string) error {
 	ok, err := st.Registered(ctx, drive, lane)
 	if err != nil || ok {
 		return err
@@ -559,14 +636,41 @@ func registeredLane(ctx context.Context, st *store.Store, drive, lane string) er
 	if err != nil {
 		return err
 	}
-	msg := fmt.Sprintf("--to %s: no live session or registered lane on drive %s is named %s", lane, drive, lane)
-	if len(reading) > 0 {
-		names := slices.Sorted(maps.Keys(reading))
-		msg += "; the nearest live lane is " + slices.MinFunc(names, func(a, b string) int {
-			return cmp.Compare(distance(lane, a), distance(lane, b))
-		})
+	near := slices.DeleteFunc(slices.Collect(maps.Keys(reading)), func(live string) bool { return !mistyped(lane, live) })
+	if len(near) == 0 {
+		return nil
 	}
-	return errors.New(msg + "; --force addresses a lane that has not started yet")
+	if ok, err := st.NamedSuccessor(ctx, drive, lane); err != nil || ok {
+		return err
+	}
+	slices.Sort(near)
+	nearest := slices.MinFunc(near, func(a, b string) int {
+		return cmp.Compare(distance(lane, a), distance(lane, b))
+	})
+	return fmt.Errorf("--to %s: no lane on drive %s has registered as %s, which looks like a slip for the live lane %s; --force addresses %s as typed", lane, drive, lane, nearest, lane)
+}
+
+var (
+	digits     = regexp.MustCompile(`\d+`)
+	generation = regexp.MustCompile(`^(.*)-(\d+)$`)
+)
+
+func mistyped(lane, live string) bool {
+	if digits.ReplaceAllString(lane, "#") == digits.ReplaceAllString(live, "#") {
+		family, n, ok := numbered(lane)
+		liveFamily, liveN, liveOK := numbered(live)
+		return ok && liveOK && family == liveFamily && n < liveN
+	}
+	return distance(lane, live) <= min(2, len(lane)/4)
+}
+
+func numbered(lane string) (string, int, bool) {
+	m := generation.FindStringSubmatch(lane)
+	if m == nil {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(m[2])
+	return m[1], n, err == nil
 }
 
 func distance(a, b string) int {

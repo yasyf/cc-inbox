@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -39,6 +42,7 @@ func newPostCmd() *cobra.Command {
 		r                       store.Record
 		counts                  map[string]string
 		census, bodyFile        string
+		successor               string
 		ttl                     time.Duration
 		asJSON, label, force    bool
 		pairwise                bool
@@ -62,6 +66,9 @@ func newPostCmd() *cobra.Command {
 			var err error
 			if parsedKind, err = kinds.Parse(kind); err != nil {
 				return err
+			}
+			if successor != "" && (parsedKind != kinds.StandDown || len(r.To) != 1) {
+				return errors.New("--successor names who takes over the one --to lane of a --kind stand-down record")
 			}
 			return validateTargets(re, resolves, pairwise)
 		},
@@ -151,6 +158,11 @@ func newPostCmd() *cobra.Command {
 			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, force, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
+			if k == kinds.StandDown {
+				r.Fields.Successor = successor
+			} else if r.To, err = forwarded(cmd.Context(), st, r.Drive, r.To); err != nil {
+				return err
+			}
 			records, err := perTarget(r, re, resolves, pairwise)
 			if err != nil {
 				return err
@@ -175,8 +187,9 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time later than the post is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is refused, naming the nearest live lane, unless --force; owner and all always pass")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; owner and all always pass")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.Int64SliceVar(&re, "re", nil, "seq this record answers or closes; repeated, each seq gets its own record")
 	f.Int64SliceVar(&resolves, "resolves", nil, "seq of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every seq")
@@ -201,12 +214,12 @@ func newPostCmd() *cobra.Command {
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	f.BoolVar(&label, "stamp", false, "cci writes the leading H:MM AM/PM label from the post's own clock: it replaces a typed leading label, or opens the text when it has none")
-	f.BoolVar(&force, "force", false, "address a bare --to lane that no live session holds and no thread has registered or posted as on the drive, such as a lane not yet started; without it the post is refused and names the nearest live lane")
+	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
 	_ = cmd.MarkFlagRequired("kind")
 	return cmd
 }
 
-var errNoLane = errors.New("post needs --lane: this thread is bound to no lane, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
+var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and was spawned with no name, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
 
 func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	self := selfPeer()
@@ -217,10 +230,54 @@ func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !bound || b.Lane == "" || b.Lane == "root" {
-		return "", errNoLane
+	if bound && b.Lane != "" {
+		if b.Lane == "root" {
+			return "", errNoLane
+		}
+		return b.Lane, nil
 	}
-	return b.Lane, nil
+	lane, err := namedLane(ctx, st, self)
+	if err != nil || lane == "" {
+		return "", cmp.Or(err, errNoLane)
+	}
+	return lane, nil
+}
+
+func namedLane(ctx context.Context, st *store.Store, self store.PeerKey) (string, error) {
+	if self.Agent == "" {
+		return "", nil
+	}
+	p, err := st.Peer(ctx, self)
+	if errors.Is(err, sql.ErrNoRows) || p.Role == peers.RoleWorkflow {
+		return "", nil
+	}
+	return p.AgentName, err
+}
+
+func forwarded(ctx context.Context, st *store.Store, drive string, to []string) ([]string, error) {
+	out := slices.Clone(to)
+	for _, t := range to {
+		lane, laneDrive, cross := strings.Cut(t, "@")
+		if strings.HasPrefix(t, "peer:") || store.RootName(lane) || t == "owner" || t == "all" {
+			continue
+		}
+		if !cross {
+			laneDrive = drive
+		}
+		chain, _, err := st.Successors(ctx, laneDrive, lane)
+		if err != nil {
+			return nil, err
+		}
+		for _, successor := range chain {
+			if cross {
+				successor += "@" + laneDrive
+			}
+			if !slices.Contains(out, successor) {
+				out = append(out, successor)
+			}
+		}
+	}
+	return out, nil
 }
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")
