@@ -468,6 +468,13 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if schema == len(migrations) {
+		created, err := createQueryIndexes(ctx, tx)
+		if err != nil || !created {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit query indexes: %w", err)
+		}
 		return nil
 	}
 	if schema > len(migrations) {
@@ -503,6 +510,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+		return err
+	}
+	if _, err := createQueryIndexes(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {

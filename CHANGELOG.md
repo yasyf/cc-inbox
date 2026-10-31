@@ -59,6 +59,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   macOS holds at launch for a minute stops the upgrade with the cask and its
   link untouched.
 
+- **A store that never built the reply index builds it when cci opens it.**
+  `cci grep` names `records_re` for its reply lookups, and only a fresh store
+  or `cci maintain-indexes` created it, so an upgraded store, a Sprite replica
+  among them, failed every grep with `no such index: records_re`. Opening the
+  store now creates that index when it is missing, once, without changing the
+  schema version, so older cci builds keep reading the store.
+
 - `cci post --re <seq>` with no `--to` addresses the lane that wrote the record it
   answers, as `<lane>@<drive>` when that record is on another drive. A reply used
   to go to no one. A record whose every `--to` is the posting lane itself is

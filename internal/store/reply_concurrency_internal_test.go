@@ -78,10 +78,6 @@ SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' ||
 				t.Fatal(err)
 			}
 			defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
-			missing, err := missingPhysicalIndexes(ctx, st.db)
-			if err != nil {
-				t.Fatal(err)
-			}
 			tx, err := st.db.BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -99,7 +95,7 @@ SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' ||
 				t.Fatalf("old writer completed while provisioning held the writer lock: %v: %s", processErr, stderr.String())
 			case <-time.After(100 * time.Millisecond):
 			}
-			if err := createPhysicalIndexes(ctx, tx, missing); err != nil {
+			if _, err := createQueryIndexes(ctx, tx); err != nil {
 				t.Fatal(err)
 			}
 			if err := tx.Commit(); err != nil {
