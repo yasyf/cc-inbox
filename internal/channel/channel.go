@@ -7,8 +7,10 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"reflect"
 	"strconv"
+	"syscall"
 	"time"
 
 	mcp "github.com/yasyf/cc-interact/channel"
@@ -25,10 +27,31 @@ const (
 	notifyMethod = "notifications/claude/channel"
 )
 
+// Resumed is the channel flag a re-executed channel server runs with: Claude
+// Code finished the MCP handshake with the binary it replaced.
+const Resumed = "resumed"
+
 var (
 	idle     = 5 * time.Second
 	interval = time.Second
+
+	newerInstall = defaultNewerInstall
+	execve       = syscall.Exec
 )
+
+func defaultNewerInstall() (version.Install, bool, error) {
+	roots, err := version.DefaultRoots()
+	if err != nil {
+		return version.Install{}, false, err
+	}
+	return roots.NewerThan(version.String())
+}
+
+type upgrade struct{ version.Install }
+
+func (u upgrade) Error() string {
+	return "cci " + u.Version + " is installed at " + u.Path
+}
 
 const instructions = `This MCP server is cci's channel. It carries coordination records from a long-running drive. After this session runs ` + "`cci subscribe`" + `, every new record for the subscription's reader arrives as a <channel source="` + Source + `" seq="..." kind="..." lane="..."> tag. The tag's body is the record line without the seq, kind and lane the tag already carries: ` + "`<time> -> <to> <text> [path]`" + `; ` + "`cci show <seq>`" + ` prints the whole record.
 
@@ -38,11 +61,21 @@ The channel never speaks unsolicited: outside a ` + "`cci subscribe`" + `d sessi
 
 var errStale = errors.New("subscription replaced")
 
-func Serve(ctx context.Context, st *store.Store, window store.Window, channeled bool, in io.Reader, out io.Writer) error {
+// Serve answers the MCP session on in and out and streams the window's
+// subscription once Claude Code reports the session initialized, or at once
+// when resumed. When a newer cci is installed, the server re-executes it on
+// the same stdio, resumed, so a long-lived window never keeps filtering with
+// the release it started on.
+func Serve(ctx context.Context, st *store.Store, window store.Window, channeled, resumed bool, in io.Reader, out io.Writer) error {
 	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions}, nil)
 	initialized := make(chan struct{})
+	watch := initialized
+	if resumed {
+		close(initialized)
+		watch = nil
+	}
 	requests, relay := io.Pipe()
-	go func() { _ = relay.CloseWithError(untilInitialized(in, relay, initialized)) }()
+	go func() { _ = relay.CloseWithError(untilInitialized(in, relay, watch)) }()
 	streamCtx, stop := context.WithCancel(ctx)
 	done := make(chan struct{})
 	go func() {
@@ -84,6 +117,10 @@ func Stream(ctx context.Context, st *store.Store, window store.Window, channeled
 		sub, ok, err := st.Subscription(ctx, window)
 		if err == nil && ok {
 			err = follow(ctx, st, sub, channeled, notify)
+		}
+		var newer upgrade
+		if errors.As(err, &newer) {
+			err = execve(newer.Path, []string{newer.Path, "channel", "--" + Resumed}, os.Environ())
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("cci channel", "pid", window.PID, "err", err)
@@ -197,6 +234,15 @@ func untilChanged(ctx context.Context, st *store.Store, sub store.Subscription, 
 		if !ok || !reflect.DeepEqual(now, sub) {
 			stop()
 			return nil
+		}
+		newer, found, err := newerInstall()
+		if err != nil {
+			stop()
+			return err
+		}
+		if found {
+			stop()
+			return upgrade{newer}
 		}
 	}
 	return nil
