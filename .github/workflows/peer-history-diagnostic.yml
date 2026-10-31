@@ -5,6 +5,8 @@ on:
     paths:
       - internal/cli/peer_history_diagnostic_test.go
       - internal/store/peer_history_diagnostic_internal_test.go
+      - internal/cli/peer_time_planner_probe_test.go
+      - internal/store/peer_time_planner_probe_internal_test.go
       - .github/workflows/peer-history-diagnostic.yml
   workflow_dispatch:
     inputs:
@@ -39,6 +41,19 @@ jobs:
           for operation in grep query count; do
             for population in 32 10000; do
               grep -F "PEER_HISTORY_WORK operation=$operation M=$population eligible_rows=2 " "$RUNNER_TEMP/peer-history-diagnostic.log"
+            done
+          done
+      - name: Probe unchanged production SQL across index and statistics profiles
+        run: |
+          set -o pipefail
+          CCI_PEER_TIME_PLANNER_PROBE=1 go test -p 2 -count=1 -race -run '^TestPeerTimePlanner(ActualGrep|PublicReads)Probe$' -v ./internal/cli ./internal/store 2>&1 | tee "$RUNNER_TEMP/peer-history-planner-probe.log"
+          for operation in grep query count; do
+            for scenario in same-drive-stale many-drive-stale unrelated-recent; do
+              for profile in drive-at drive-at-analyze drive-at-global-at drive-at-global-at-analyze; do
+                for population in 32 10000; do
+                  grep -F "PEER_PLANNER_WORK operation=$operation scenario=$scenario profile=$profile M=$population eligible_rows=2 " "$RUNNER_TEMP/peer-history-planner-probe.log"
+                done
+              done
             done
           done
       - name: Record separate logarithmic-reference result
