@@ -481,6 +481,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
+| `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
 | `review` | None | A rules-review verdict. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |

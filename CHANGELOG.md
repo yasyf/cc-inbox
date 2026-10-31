@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A `queue` kind for a pull request's merge-queue state change. It requires
+  `--pr` and carries the state in `--outcome`.
+- `service.Writer` posts records to a relay mesh as a scoped service member
+  with no local store, and `trunk.Handler` turns Svix-signed Trunk
+  merge-queue webhooks into one `queue` record per state change.
+
 ### Changed
 
 - `cci subscribe --to-kind <kinds>` limits the records addressed to `--reader`
