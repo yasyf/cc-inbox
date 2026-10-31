@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -8,9 +9,10 @@ import (
 )
 
 type incidentKqueue struct {
-	fd int
-	files map[incidentWatchKey]int
-	keys map[int]incidentWatchKey
+	fd     int
+	files  map[incidentWatchKey]int
+	keys   map[int]incidentWatchKey
+	events []unix.Kevent_t
 }
 
 func newIncidentWatchBackend() (incidentWatchBackend, error) {
@@ -37,6 +39,7 @@ func (q *incidentKqueue) Add(key incidentWatchKey) error {
 		return err
 	}
 	q.files[key], q.keys[fd] = fd, key
+	q.resizeEvents()
 	return nil
 }
 
@@ -47,37 +50,48 @@ func (q *incidentKqueue) Remove(key incidentWatchKey) error {
 	}
 	delete(q.files, key)
 	delete(q.keys, fd)
+	q.resizeEvents()
 	return unix.Close(fd)
 }
 
-func (q *incidentKqueue) Drain() ([]incidentWatchEvent, error) {
+func (q *incidentKqueue) resizeEvents() {
+	n := len(q.keys)
+	if n == 0 {
+		q.events = nil
+		return
+	}
+	if cap(q.events) < n || n < cap(q.events)/4 {
+		q.events = make([]unix.Kevent_t, n*2)
+	}
+}
+
+func (q *incidentKqueue) Drain(ctx context.Context) ([]incidentWatchEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	if len(q.keys) == 0 {
 		return nil, nil
 	}
-	var events [64]unix.Kevent_t
-	var out []incidentWatchEvent
-	for {
-		n, err := unix.Kevent(q.fd, nil, events[:], &unix.Timespec{})
-		if errors.Is(err, unix.EINTR) {
-			return nil, fmt.Errorf("incident watch drain interrupted: %w", err)
-		}
-		if err != nil {
-			return nil, err
-		}
-		for _, event := range events[:n] {
-			if event.Flags&unix.EV_ERROR != 0 || event.Fflags&unix.NOTE_REVOKE != 0 {
-				return nil, fmt.Errorf("incident watch authority lost: flags=%d data=%d", event.Fflags, event.Data)
-			}
-			key, ok := q.keys[int(event.Ident)]
-			if !ok {
-				return nil, fmt.Errorf("unknown incident watch descriptor %d", event.Ident)
-			}
-			out = append(out, incidentWatchEvent{Key: key, Invalidated: event.Fflags&(unix.NOTE_RENAME|unix.NOTE_DELETE|unix.NOTE_ATTRIB) != 0})
-		}
-		if n < len(events) {
-			return out, nil
-		}
+	events := q.events[:len(q.keys)]
+	n, err := unix.Kevent(q.fd, nil, events, &unix.Timespec{})
+	if errors.Is(err, unix.EINTR) {
+		return nil, fmt.Errorf("incident watch drain interrupted: %w", err)
 	}
+	if err != nil {
+		return nil, err
+	}
+	out := make([]incidentWatchEvent, 0, n)
+	for _, event := range events[:n] {
+		if event.Flags&unix.EV_ERROR != 0 || event.Fflags&unix.NOTE_REVOKE != 0 {
+			return nil, fmt.Errorf("incident watch authority lost: flags=%d data=%d", event.Fflags, event.Data)
+		}
+		key, ok := q.keys[int(event.Ident)]
+		if !ok {
+			return nil, fmt.Errorf("unknown incident watch descriptor %d", event.Ident)
+		}
+		out = append(out, incidentWatchEvent{Keys: map[incidentWatchKey]bool{key: true}, Invalidated: event.Fflags&(unix.NOTE_RENAME|unix.NOTE_DELETE|unix.NOTE_ATTRIB) != 0})
+	}
+	return out, nil
 }
 
 func (q *incidentKqueue) Close() error {

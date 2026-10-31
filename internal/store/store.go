@@ -502,6 +502,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := createIncidentOwnerLock(s.home); err != nil {
+		return err
+	}
 	if err := installIncidentProjection(ctx, tx); err != nil {
 		return err
 	}

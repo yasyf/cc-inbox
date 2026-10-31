@@ -11,18 +11,18 @@ import (
 )
 
 type incidentIdentity struct {
-	Device uint64
-	Inode uint64
-	Size int64
+	Device   uint64
+	Inode    uint64
+	Size     int64
 	Modified int64
-	Changed int64
-	Mode os.FileMode
+	Changed  int64
+	Mode     os.FileMode
 }
 
 type incidentBody struct {
 	Identity string
-	Words map[string]bool
-	Valid bool
+	Words    map[string]bool
+	Valid    bool
 }
 
 func incidentFileIdentity(info os.FileInfo) string {
@@ -34,12 +34,14 @@ func incidentFileIdentity(info os.FileInfo) string {
 
 type incidentCountingReader struct {
 	reader io.Reader
-	stats *IncidentIndexStats
+	stats  *IncidentIndexStats
 }
 
 func (r incidentCountingReader) Read(buffer []byte) (int, error) {
 	n, err := r.reader.Read(buffer)
-	r.stats.BodyBytes += uint64(n)
+	if n > 0 {
+		r.stats.BodyBytes += uint64(n)
+	}
 	return n, err
 }
 
@@ -56,7 +58,7 @@ func readIncidentBody(ctx context.Context, path string, stats *IncidentIndexStat
 		return incidentBody{Identity: incidentFileIdentity(info)}, nil
 	}
 	stats.BodyOpens++
-	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // G304: incident records intentionally select body paths; nonblocking open prevents a replacement FIFO from blocking the reader.
 	if err != nil {
 		return incidentBody{}, fmt.Errorf("open incident body %s: %w", path, err)
 	}

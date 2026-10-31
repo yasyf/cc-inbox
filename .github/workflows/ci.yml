@@ -76,6 +76,10 @@ jobs:
         with:
           ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
           path: .ci-lane-score-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: b7da336975a6651226912c5c129a38bec9c0e3da
+          path: .ci-incident-negative
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -158,6 +162,21 @@ jobs:
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailCLIReference$' -v ./internal/cli
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailHTTPParity$' -v ./internal/cli
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
+
+      - name: Incident native lifecycle, immutable failure controls, and writer budget
+        run: |
+          test "$(git -C .ci-incident-negative rev-parse HEAD)" = b7da336975a6651226912c5c129a38bec9c0e3da
+          cp internal/store/incident_alias_internal_test.go internal/store/incident_owner_internal_test.go .ci-incident-negative/internal/store/
+          if (cd .ci-incident-negative && go test -count=1 -run '^TestIncidentWatchPreservesSymlinkDotDotRoutes$|^TestIncidentColdOwnerDiscardsRetiredPathBeforeFileAccess$|^TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-incident-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-incident-negative.log"
+          grep -F 'native watch stale after write' "$RUNNER_TEMP/cci-incident-negative.log"
+          grep -F 'retired canonical body was inspected' "$RUNNER_TEMP/cci-incident-negative.log"
+          grep -F 'concurrent incident projector accepted; reversed publication permanently regressed membership' "$RUNNER_TEMP/cci-incident-negative.log"
+          go test -count=1 -race -run '^TestIncident' -v ./internal/store ./internal/cli
+          CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
 
   lint:
     runs-on: ubuntu-latest

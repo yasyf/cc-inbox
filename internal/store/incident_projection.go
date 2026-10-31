@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -133,4 +135,12 @@ func writeIncidentRecord(ctx context.Context, tx *sql.Tx, values []any, revision
 	values = append(values, revision, decodeError, path, unsupported)
 	_, err := tx.ExecContext(ctx, "INSERT INTO incident_records("+incidentRecordColumns+",revision,decode_error,body_path,unsupported_path) VALUES("+placeholders(len(values))+") ON CONFLICT(seq) DO UPDATE SET "+strings.Join(assignments, ",")+",revision=excluded.revision,decode_error=excluded.decode_error,body_path=excluded.body_path,unsupported_path=excluded.unsupported_path", values...)
 	return err
+}
+
+func createIncidentOwnerLock(home string) error {
+	file, err := os.OpenFile(filepath.Join(home, "incident-owner.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: explicit physical provisioning creates this fixed owner lock in the selected CCI home.
+	if err != nil {
+		return fmt.Errorf("create incident projection owner lock: %w", err)
+	}
+	return file.Close()
 }

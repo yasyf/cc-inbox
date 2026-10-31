@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -9,35 +10,38 @@ import (
 )
 
 type incidentWatchKey struct {
-	Path string
+	Path   string
 	Follow bool
 }
 
 type incidentWatchEvent struct {
-	Key incidentWatchKey
-	Name string
+	Keys        map[incidentWatchKey]bool
+	Name        string
 	Invalidated bool
 }
 
 type incidentWatchBackend interface {
 	Add(incidentWatchKey) error
 	Remove(incidentWatchKey) error
-	Drain() ([]incidentWatchEvent, error)
+	Drain(context.Context) ([]incidentWatchEvent, error)
 	Close() error
 }
 
 type incidentWatchNode struct {
 	Directory bool
-	Leaves map[string]bool
-	Missing map[string]map[string]bool
+	Leaves    map[string]bool
+	Missing   map[string]map[string]bool
 }
 
 type incidentFileWatch struct {
-	backend incidentWatchBackend
-	nodes map[incidentWatchKey]*incidentWatchNode
-	paths map[string]bool
-	routes map[string]map[incidentWatchKey]map[string]bool
-	stats uint64
+	backend      incidentWatchBackend
+	nodes        map[incidentWatchKey]*incidentWatchNode
+	paths        map[string]bool
+	routes       map[string]map[incidentWatchKey]map[string]bool
+	stats        uint64
+	missingNames uint64
+	pending      []incidentWatchEvent
+	rebind       map[string]bool
 }
 
 func newIncidentFileWatch() (*incidentFileWatch, error) {
@@ -45,7 +49,7 @@ func newIncidentFileWatch() (*incidentFileWatch, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &incidentFileWatch{backend: backend, nodes: map[incidentWatchKey]*incidentWatchNode{}, paths: map[string]bool{}, routes: map[string]map[incidentWatchKey]map[string]bool{}}, nil
+	return &incidentFileWatch{backend: backend, nodes: map[incidentWatchKey]*incidentWatchNode{}, paths: map[string]bool{}, routes: map[string]map[incidentWatchKey]map[string]bool{}, rebind: map[string]bool{}}, nil
 }
 
 func (w *incidentFileWatch) addNode(key incidentWatchKey, directory bool, leaf string) error {
@@ -69,7 +73,7 @@ func (w *incidentFileWatch) Register(path string) error {
 		return nil
 	}
 	w.routes[path] = map[incidentWatchKey]map[string]bool{}
-	if err := w.registerRoute(filepath.Clean(path), path, map[string]bool{}); err != nil {
+	if err := w.registerRoute(path, path, map[string]bool{}); err != nil {
 		return err
 	}
 	w.paths[path] = true
@@ -88,7 +92,10 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 		return err
 	}
 	for i, name := range parts {
-		current := filepath.Join(parent.Path, name)
+		current := parent.Path + string(filepath.Separator) + name
+		if parent.Path == string(filepath.Separator) {
+			current = parent.Path + name
+		}
 		w.stats++
 		info, err := os.Lstat(current)
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
@@ -108,24 +115,25 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 			if err := w.addNode(incidentWatchKey{Path: current}, false, path); err != nil {
 				return err
 			}
+			w.stats++
+			followed, followErr := os.Stat(current)
+			if followErr != nil && !errors.Is(followErr, os.ErrNotExist) && !errors.Is(followErr, syscall.ENOTDIR) {
+				return followErr
+			}
 			target, err := os.Readlink(current)
 			if err != nil {
 				return err
 			}
 			if !filepath.IsAbs(target) {
-				target = filepath.Join(parent.Path, target)
+				target = parent.Path + string(filepath.Separator) + target
 			}
-			if err := w.registerRoute(filepath.Clean(target), path, seen); err != nil {
+			if err := w.registerRoute(target, path, seen); err != nil {
 				return err
 			}
-			w.stats++
-			info, err = os.Stat(current)
-			if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+			if followErr != nil {
 				return nil
 			}
-			if err != nil {
-				return err
-			}
+			info = followed
 		}
 		key := incidentWatchKey{Path: current, Follow: true}
 		if err := w.addNode(key, info.IsDir(), path); err != nil {
@@ -162,45 +170,90 @@ func (w *incidentFileWatch) Forget(path string) error {
 	return nil
 }
 
-func (w *incidentFileWatch) Drain() (map[string]bool, error) {
-	events, err := w.backend.Drain()
-	if err != nil {
-		return nil, err
-	}
+func (w *incidentFileWatch) Drain(ctx context.Context) (map[string]bool, error) {
 	dirty := map[string]bool{}
-	rebind := map[string]bool{}
-	for _, event := range events {
-		node := w.nodes[event.Key]
-		if node == nil {
-			continue
-		}
-		if event.Invalidated || !node.Directory {
-			for leaf := range node.Leaves {
-				dirty[leaf] = true
-				if event.Invalidated || !event.Key.Follow {
-					rebind[leaf] = true
-				}
+	if err := w.collect(ctx, dirty); err != nil {
+		return dirty, err
+	}
+	if err := w.rebindPending(ctx, dirty); err != nil {
+		return dirty, err
+	}
+	events, err := w.backend.Drain(ctx)
+	w.pending = events
+	if err != nil {
+		return dirty, err
+	}
+	if err := w.collect(ctx, dirty); err != nil {
+		return dirty, err
+	}
+	return dirty, w.rebindPending(ctx, dirty)
+}
+
+func (w *incidentFileWatch) collect(ctx context.Context, dirty map[string]bool) error {
+	for len(w.pending) != 0 {
+		event := w.pending[0]
+		for key := range event.Keys {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			continue
-		}
-		for name, leaves := range node.Missing {
-			if event.Name != "" && event.Name != name {
+			node := w.nodes[key]
+			if node == nil {
 				continue
 			}
-			for leaf := range leaves {
-				dirty[leaf], rebind[leaf] = true, true
+			if event.Invalidated || !node.Directory {
+				if err := w.mark(ctx, node.Leaves, event.Invalidated || !key.Follow, dirty); err != nil {
+					return err
+				}
+				continue
+			}
+			if event.Name != "" {
+				w.missingNames++
+				if err := w.mark(ctx, node.Missing[event.Name], true, dirty); err != nil {
+					return err
+				}
+				continue
+			}
+			for _, leaves := range node.Missing {
+				w.missingNames++
+				if err := w.mark(ctx, leaves, true, dirty); err != nil {
+					return err
+				}
 			}
 		}
+		w.pending = w.pending[1:]
 	}
-	for path := range rebind {
+	w.pending = nil
+	return ctx.Err()
+}
+
+func (w *incidentFileWatch) mark(ctx context.Context, leaves map[string]bool, rebind bool, dirty map[string]bool) error {
+	for leaf := range leaves {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		dirty[leaf] = true
+		if rebind {
+			w.rebind[leaf] = true
+		}
+	}
+	return nil
+}
+
+func (w *incidentFileWatch) rebindPending(ctx context.Context, dirty map[string]bool) error {
+	for path := range w.rebind {
+		dirty[path] = true
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if err := w.Forget(path); err != nil {
-			return nil, err
+			return err
 		}
 		if err := w.Register(path); err != nil {
-			return nil, err
+			return err
 		}
+		delete(w.rebind, path)
 	}
-	return dirty, nil
+	return nil
 }
 
 func (w *incidentFileWatch) Close() error {

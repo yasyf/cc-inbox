@@ -77,7 +77,7 @@ func countedLaneStore(t *testing.T, collation string) *Store {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	definitions, err := production.db.QueryContext(ctx, `SELECT type, sql FROM sqlite_schema
-WHERE tbl_name IN ('records', 'sessions', 'record_recipients', 'record_also_resolves', 'record_json_errors') AND type IN ('table', 'index', 'trigger') AND sql IS NOT NULL
+WHERE (tbl_name IN ('records', 'sessions', 'record_recipients', 'record_also_resolves', 'record_json_errors') OR name GLOB 'incident_*') AND type IN ('table', 'index', 'trigger') AND sql IS NOT NULL
 ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 	if err != nil {
 		t.Fatal(err)

@@ -132,6 +132,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	if !incidents {
+		if err := createIncidentOwnerLock(home); err != nil {
+			return report, err
+		}
+	}
 	if len(missing) > 0 || !installed || !incidents {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {

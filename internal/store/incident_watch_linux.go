@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -10,11 +11,14 @@ import (
 )
 
 type incidentInotify struct {
-	fd int
-	files map[incidentWatchKey]int
-	keys map[int]map[incidentWatchKey]bool
-	removed map[int]bool
-	dead map[int]bool
+	fd            int
+	files         map[incidentWatchKey]int
+	keys          map[int]map[incidentWatchKey]bool
+	removed       map[int]bool
+	dead          map[int]bool
+	lastCutBytes  int
+	lastReadBytes int
+	lastReads     int
 }
 
 func newIncidentWatchBackend() (incidentWatchBackend, error) {
@@ -33,6 +37,9 @@ func (q *incidentInotify) Add(key incidentWatchKey) error {
 	wd, err := unix.InotifyAddWatch(q.fd, key.Path, mask)
 	if err != nil {
 		return fmt.Errorf("watch incident body route %s: %w", key.Path, err)
+	}
+	if q.removed[wd] || q.dead[wd] {
+		return fmt.Errorf("incident watch descriptor %d reused before retirement completed", wd)
 	}
 	if q.keys[wd] == nil {
 		q.keys[wd] = map[incidentWatchKey]bool{}
@@ -53,35 +60,52 @@ func (q *incidentInotify) Remove(key incidentWatchKey) error {
 	if len(q.keys[wd]) != 0 {
 		return nil
 	}
-	if _, err := unix.InotifyRmWatch(q.fd, uint32(wd)); err != nil && !(q.dead[wd] && errors.Is(err, unix.EINVAL)) {
+	if _, err := unix.InotifyRmWatch(q.fd, uint32(wd)); err != nil && !errors.Is(err, unix.EINVAL) { //nolint:gosec // G115: wd is the nonnegative signed32 descriptor returned by InotifyAddWatch.
 		return err
 	}
+	ignoredRead := q.dead[wd]
 	delete(q.keys, wd)
 	delete(q.dead, wd)
-	q.removed[wd] = true
+	if !ignoredRead {
+		q.removed[wd] = true
+	}
 	return nil
 }
 
-func (q *incidentInotify) Drain() ([]incidentWatchEvent, error) {
+func (q *incidentInotify) Drain(ctx context.Context) ([]incidentWatchEvent, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	remaining, err := unix.IoctlGetInt(q.fd, unix.TIOCINQ)
+	if err != nil {
+		return nil, err
+	}
+	if remaining < 0 {
+		return nil, errors.New("negative incident watch entry prefix")
+	}
+	q.lastCutBytes, q.lastReadBytes, q.lastReads = remaining, 0, 0
 	var buffer [16 * 1024]byte
 	var out []incidentWatchEvent
-	for {
-		n, err := unix.Read(q.fd, buffer[:])
-		if errors.Is(err, unix.EAGAIN) {
-			return out, nil
+	for remaining > 0 {
+		if err := ctx.Err(); err != nil {
+			return out, err
 		}
+		n, err := unix.Read(q.fd, buffer[:min(len(buffer), remaining)])
 		if err != nil {
-			return nil, fmt.Errorf("drain incident watch: %w", err)
+			return out, fmt.Errorf("drain incident watch entry prefix: %w", err)
 		}
 		if n == 0 {
-			return nil, errors.New("incident watch closed during drain")
+			return out, errors.New("incident watch closed during drain")
 		}
+		remaining -= n
+		q.lastReadBytes += n
+		q.lastReads++
 		for offset := 0; offset < n; {
 			if n-offset < unix.SizeofInotifyEvent {
 				return nil, errors.New("incomplete incident watch event")
 			}
 			data := buffer[offset:n]
-			wd := int(int32(binary.NativeEndian.Uint32(data)))
+			wd := int(int32(binary.NativeEndian.Uint32(data))) //nolint:gosec // G115: the kernel wire field is signed32; negative one identifies queue overflow.
 			mask := binary.NativeEndian.Uint32(data[4:])
 			length := int(binary.NativeEndian.Uint32(data[12:]))
 			if length > n-offset-unix.SizeofInotifyEvent {
@@ -105,11 +129,10 @@ func (q *incidentInotify) Drain() ([]incidentWatchEvent, error) {
 			if mask&unix.IN_IGNORED != 0 {
 				q.dead[wd] = true
 			}
-			for key := range keys {
-				out = append(out, incidentWatchEvent{Key: key, Name: name, Invalidated: mask&(unix.IN_MOVE_SELF|unix.IN_DELETE_SELF|unix.IN_IGNORED) != 0 || name == "" && mask&unix.IN_ATTRIB != 0})
-			}
+			out = append(out, incidentWatchEvent{Keys: keys, Name: name, Invalidated: mask&(unix.IN_MOVE_SELF|unix.IN_DELETE_SELF|unix.IN_IGNORED) != 0 || name == "" && mask&unix.IN_ATTRIB != 0})
 		}
 	}
+	return out, nil
 }
 
 func (q *incidentInotify) Close() error {
