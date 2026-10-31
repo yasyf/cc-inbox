@@ -1,0 +1,30 @@
+name: Selected closure source counterexamples
+on:
+  push:
+    branches: [perf/cci-openamong-refute]
+permissions:
+  contents: read
+jobs:
+  actual-handler-controls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: 53c067b27a53ac3798753309221a6b4f4190e5b7
+          path: .ci-openamong-candidate
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: |
+          cp internal/server/openamong_refutation_test.go .ci-openamong-candidate/internal/server/
+          go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server
+          if (cd .ci-openamong-candidate && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server) > "$RUNNER_TEMP/openamong-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/openamong-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/foreign_nonmatching_typed_suffix' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/raw_topic_bytes' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/Go-valid_deep_refs' "$RUNNER_TEMP/openamong-negative.log"
