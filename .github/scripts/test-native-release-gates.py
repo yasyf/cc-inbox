@@ -8,14 +8,29 @@ EXPECTED_CANCEL = "${{ inputs.commit == '' && github.event_name == 'pull_request
 EXPECTED_DYNAMIC_PROFILES = 1
 
 
+def load_yaml(path):
+    return json.loads(subprocess.check_output(["ruby", "-rjson", "-ryaml", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))", str(path)], text=True))
+
+
 def load_workflow(name):
-    return json.loads(subprocess.check_output(["ruby", "-rjson", "-ryaml", "-e", "puts JSON.generate(YAML.load_file(ARGV[0]))", str(Path(".github/workflows") / name)], text=True))
+    return load_yaml(Path(".github/workflows") / name)
 
 
 class NativeReleaseGateTest(unittest.TestCase):
     def setUp(self):
         self.release = load_workflow("release.yml")
         self.ci = load_workflow("ci.yml")
+
+    def test_cask_clears_quarantine_before_first_execution(self):
+        casks = load_yaml(Path(".goreleaser.yaml"))["homebrew_casks"]
+        cask = next(cask for cask in casks if cask["name"] == "cci")
+        self.assertEqual(cask["binaries"], ["cci"])
+        self.assertEqual(cask["hooks"]["pre"]["install_steps"].splitlines(), [
+            "on_macos do",
+            '  run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci"]',
+            '  run "{{ .StagedPath }}/cci", args: ["--version"]',
+            "end",
+        ])
 
     def test_exact_commit_and_native_failure_dependencies(self):
         jobs = self.release["jobs"]
