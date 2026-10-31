@@ -25,7 +25,7 @@ UNION ALL SELECT drive, 'ref-ambiguous', '', seq FROM closers WHERE json_error_p
 var closerMemberships = [...]physicalObject{
 	{
 		"table", "record_closer_keys",
-		"CREATE TABLE record_closer_keys (drive TEXT NOT NULL, axis TEXT NOT NULL, key TEXT NOT NULL, source_seq INTEGER NOT NULL, PRIMARY KEY (source_seq, axis, key))",
+		"CREATE TABLE record_closer_keys (drive TEXT NOT NULL, axis TEXT NOT NULL, key TEXT NOT NULL, source_seq INTEGER NOT NULL, PRIMARY KEY (source_seq, axis, key)) WITHOUT ROWID",
 		"INSERT INTO record_closer_keys (drive, axis, key, source_seq) SELECT * FROM (" + closerKeyRows("1") + ") WHERE true ON CONFLICT (source_seq, axis, key) DO NOTHING",
 	},
 	{"index", "record_closer_keys_lookup", "CREATE INDEX record_closer_keys_lookup ON record_closer_keys(drive, axis, key, source_seq)", ""},
