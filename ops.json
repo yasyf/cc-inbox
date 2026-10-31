@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"ops":[{"kind":"set_branch","branch":"perf/cci-daemon-cpu"}]}
+{"v":1,"lamport":4,"ops":[{"kind":"add_comment","body":"Actual immutable5e61 baseline CI41187503334 PASS: cold one-row export reads66/20002 at N32/10000; repeat snapshot33/10001, unchanged delta0. Raw FE/cci-remaining-perf-20261031/mesh-baseline-41280.log. Indexed-prefix candidate scoped to existing records_origin and selected-prefix errors now shipping; no local tests/live queries."}]}
