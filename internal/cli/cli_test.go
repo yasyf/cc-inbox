@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1647,5 +1648,45 @@ func TestALaneThatRegistersByPostingReadsMailSentBeforeItStarted(t *testing.T) {
 	seq, ok, err := st.Cursor(context.Background(), store.LaneCursor(store.PeerKey{Session: "019a3c3e-fresh-lane"}), "d")
 	if err != nil || !ok || seq != 0 {
 		t.Fatalf("fresh-lane's lane cursor = %d, %v, %v; want 0, before the go posted to it before it started", seq, ok, err)
+	}
+}
+
+func TestPostReplyAddressesTheLaneThatWroteTheRecordItAnswers(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	post := func(args ...string) store.Record {
+		t.Helper()
+		out, err := run(t, append([]string{"post", "--json"}, args...)...)
+		var got store.Record
+		if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil {
+			t.Fatalf("post %v = %q, %v", args, out, err)
+		}
+		return got
+	}
+	ask := post("--lane", "lane-a", "--kind", "ask", "--text", "who owns the relay?")
+	peerAsk := post("--lane", "lane-c", "--drive", "peer-drive", "--kind", "ask", "--text", "can root take this?")
+	for _, tt := range []struct {
+		re   store.Record
+		want []string
+	}{
+		{ask, []string{"lane-a"}},
+		{peerAsk, []string{"lane-c@peer-drive"}},
+	} {
+		if got := post("--lane", "root", "--kind", "answer", "--re", strconv.FormatInt(tt.re.Seq, 10), "--text", "lane-b does"); !reflect.DeepEqual(got.To, tt.want) {
+			t.Errorf("reply to #%d is addressed to %v, want %v", tt.re.Seq, got.To, tt.want)
+		}
+	}
+	if got := post("--lane", "lane-a", "--kind", "note", "--re", strconv.FormatInt(ask.Seq, 10), "--text", "still open"); len(got.To) != 0 {
+		t.Errorf("a lane's follow-up to its own record is addressed to %v, want no one", got.To)
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "answer", "--re", strconv.FormatInt(peerAsk.Seq, 10), "--to", "main", "--text", "taking it")
+	if want := fmt.Sprintf("--to main addresses only root, the lane posting this record; #%d came from lane-c@peer-drive, which a reply with no --to reaches", peerAsk.Seq); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("post --to its own lane = %q, %v; want the refusal %q", out, err, want)
+	}
+	if got := post("--lane", "lane-a", "--kind", "note", "--to", "desk-runner,lane-a", "--text", "pushed a new head"); !reflect.DeepEqual(got.To, []string{"desk-runner", "lane-a"}) {
+		t.Errorf("a record to another lane and itself is addressed to %v", got.To)
 	}
 }

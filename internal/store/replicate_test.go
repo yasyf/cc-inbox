@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -370,5 +372,57 @@ func TestOneRecordClosingSeveralSeqsReplicatesEveryClosure(t *testing.T) {
 	resolved, err := b.Resolvers(ctx, "d")
 	if err != nil || resolved[asks["first?"]] != got.Seq || resolved[asks["second?"]] != got.Seq {
 		t.Fatalf("Resolvers(d) = %v, %v; want both asks resolved by #%d", resolved, err, got.Seq)
+	}
+}
+
+func TestARecordsBodyFileTravelsWithItIntoTheReceiversBlobs(t *testing.T) {
+	ctx := context.Background()
+	sprite, _ := testutil.Store(t)
+	mac, _ := testutil.Store(t)
+	dir := t.TempDir()
+	short := filepath.Join(dir, "short.md")
+	if err := os.WriteFile(short, []byte("fidelity: ok at the head\nevery row graded\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long := filepath.Join(dir, "long.md")
+	line := strings.Repeat("x", 99) + "\n"
+	if err := os.WriteFile(long, []byte(strings.Repeat(line, store.MaxBody/len(line)+50)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(dir, "gone.md")
+	for _, path := range []string{short, long, gone} {
+		testutil.Post(t, sprite, store.Record{Lane: "fidelity-desk", Kind: kinds.Review, Text: "graded " + filepath.Base(path), Refs: store.Refs{Path: path}})
+	}
+	rows, err := sprite.Export(ctx, sprite.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mac.Apply(ctx, rows, nil); err != nil || got.Inserted != 3 {
+		t.Fatalf("Apply() = %+v, %v", got, err)
+	}
+	held, err := mac.Query(ctx, store.Filter{Drive: "d"})
+	if err != nil || len(held) != 3 {
+		t.Fatalf("mac holds %+v, %v", held, err)
+	}
+	read := func(r store.Record) string {
+		t.Helper()
+		if r.Refs.Path == short || r.Refs.Path == long || filepath.Base(filepath.Dir(r.Refs.Path)) != "blobs" {
+			t.Fatalf("record %q names %s, want a file in the receiver's blobs", r.Text, r.Refs.Path)
+		}
+		body, err := os.ReadFile(r.Refs.Path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+	if body := read(held[0]); body != "fidelity: ok at the head\nevery row graded\n" {
+		t.Fatalf("short body = %q", body)
+	}
+	cut := read(held[1])
+	if len(cut) > store.MaxBody+300 || !strings.HasPrefix(cut, line) || !strings.Contains(cut, "\n… cut at 63 KiB of 68 KiB; the whole file is "+long+" on the node that wrote this record\n") {
+		t.Fatalf("long body is %d bytes ending %q", len(cut), cut[len(cut)-200:])
+	}
+	if held[2].Refs.Path != gone {
+		t.Fatalf("a record whose file is gone names %s, want %s", held[2].Refs.Path, gone)
 	}
 }

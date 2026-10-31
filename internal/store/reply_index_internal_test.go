@@ -27,7 +27,7 @@ func TestGrepReplyIndexRequiresExplicitMaintenance(t *testing.T) {
 	if _, err := other.ReplyPages(ctx, [][]int64{{1}}); err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaFingerprint() != fingerprint || len(migrations) != 14 || WireFormat != 3 {
+	if st.SchemaFingerprint() != fingerprint || len(migrations) != 14 || WireFormat != 4 {
 		t.Fatal("reply index changed schema/wire/fingerprint")
 	}
 }

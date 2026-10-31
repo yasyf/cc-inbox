@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,32 +76,27 @@ SELECT 'd','history','answer',x,'unrelated',1000000+x,'other-'||x,'post','noise-
 					t.Fatal(err)
 				}
 
-				columns, err := db.QueryContext(ctx, "PRAGMA table_info(records)")
+				triggers, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'records'")
 				if err != nil {
 					t.Fatal(err)
 				}
-				var selection []string
-				for columns.Next() {
-					var cid, notNull, pk int
-					var column, kind string
-					var defaultValue any
-					if err := columns.Scan(&cid, &column, &kind, &notNull, &defaultValue, &pk); err != nil {
+				var drops, creates []string
+				for triggers.Next() {
+					var trigger, definition string
+					if err := triggers.Scan(&trigger, &definition); err != nil {
 						t.Fatal(err)
 					}
-					if column == "refs" {
-						selection = append(selection, name+"(refs) AS refs")
-					} else {
-						selection = append(selection, column)
-					}
+					drops, creates = append(drops, "DROP TRIGGER "+trigger), append(creates, definition)
 				}
-				if err := columns.Err(); err != nil {
+				if err := triggers.Err(); err != nil {
 					t.Fatal(err)
 				}
-				if err := columns.Close(); err != nil {
+				if err := triggers.Close(); err != nil {
 					t.Fatal(err)
 				}
-				for _, query := range []string{"ALTER TABLE records RENAME TO counted_owed_records", "CREATE VIEW records AS SELECT " + strings.Join(selection, ", ") + " FROM counted_owed_records"} {
-					if _, err := db.ExecContext(ctx, query); err != nil {
+				swap := []string{"ALTER TABLE records RENAME COLUMN refs TO counted_refs", "ALTER TABLE records ADD COLUMN refs TEXT GENERATED ALWAYS AS (" + name + "(counted_refs)) VIRTUAL"}
+				for _, statement := range slices.Concat(drops, swap, creates) {
+					if _, err := db.ExecContext(ctx, statement); err != nil {
 						t.Fatal(err)
 					}
 				}
