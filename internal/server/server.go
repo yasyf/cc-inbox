@@ -206,22 +206,37 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, errors.New("streaming unsupported"))
 		return
 	}
+	changes, err := s.st.OpenChangeVersion(r.Context())
+	if err != nil {
+		respond(w, nil, err)
+		return
+	}
+	defer func() { _ = changes.Close() }()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 	tick := time.NewTicker(s.interval)
 	defer tick.Stop()
+	var previous int64
+	idle := false
 	for {
-		records, err := s.st.Query(r.Context(), f)
+		version, err := changes.Read(r.Context())
 		if err != nil {
 			return
 		}
-		for _, rec := range records {
-			if _, err := fmt.Fprintf(w, "id: %d\nevent: record\ndata: %s\n\n", rec.Seq, render.JSON(rec)); err != nil {
+		if !idle || version != previous {
+			records, err := s.st.Query(r.Context(), f)
+			if err != nil {
 				return
 			}
-			f.After = rec.Seq
+			previous, idle = version, len(records) < f.Limit
+			for _, rec := range records {
+				if _, err := fmt.Fprintf(w, "id: %d\nevent: record\ndata: %s\n\n", rec.Seq, render.JSON(rec)); err != nil {
+					return
+				}
+				f.After = rec.Seq
+			}
 		}
 		flusher.Flush()
 		select {

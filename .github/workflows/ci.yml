@@ -58,6 +58,11 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
       - uses: actions/checkout@v7
         with:
+          ref: 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
+          path: .ci-stream-idle-baseline
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
           ref: 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
           path: .ci-old
       - uses: actions/checkout@v7
@@ -137,6 +142,19 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: SSE idle queries, immutable history control, and commit freshness
+        run: |
+          test "$(git -C .ci-stream-idle-baseline rev-parse HEAD)" = 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
+          cp internal/server/stream_idle_cost_test.go .ci-stream-idle-baseline/internal/server/
+          if (cd .ci-stream-idle-baseline && go test -count=1 -run '^TestStreamIdleQueriesDoNotRepeatUnmatchedHistory$' -v ./internal/server) > "$RUNNER_TEMP/stream-idle-old.log" 2>&1; then
+            cat "$RUNNER_TEMP/stream-idle-old.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/stream-idle-old.log"
+          grep -F 'for 32 unmatched rows, want 1' "$RUNNER_TEMP/stream-idle-old.log"
+          grep -F 'for 10000 unmatched rows, want 1' "$RUNNER_TEMP/stream-idle-old.log"
+          go test -count=1 -race -run '^TestChangeVersion' -v ./internal/store
+          go test -count=1 -race -run '^TestStream' -v ./internal/server
       - name: Vet
         run: go vet ./...
       - name: Build immutable 0.41.1 store compatibility probe
