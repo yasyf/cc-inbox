@@ -74,7 +74,7 @@ func (r Roots) newest() (plugin, casks Install, err error) {
 }
 
 func committedCask(root string) (Install, error) {
-	raw, err := os.ReadFile(filepath.Join(root, ".metadata", "INSTALL_RECEIPT.json"))
+	raw, err := os.ReadFile(filepath.Join(root, ".metadata", "INSTALL_RECEIPT.json")) //nolint:gosec // G304: root is a configured Caskroom; the receipt path is fixed.
 	if errors.Is(err, fs.ErrNotExist) {
 		return Install{}, nil
 	}
