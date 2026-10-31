@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -75,7 +76,26 @@ SELECT 'd','history','answer',x,'unrelated',1000000+x,'other-'||x,'post','noise-
 					t.Fatal(err)
 				}
 
-				for _, statement := range []string{"ALTER TABLE records RENAME COLUMN refs TO counted_refs", "ALTER TABLE records ADD COLUMN refs TEXT GENERATED ALWAYS AS (" + name + "(counted_refs)) VIRTUAL"} {
+				triggers, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_schema WHERE type = 'trigger' AND tbl_name = 'records'")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var drops, creates []string
+				for triggers.Next() {
+					var trigger, definition string
+					if err := triggers.Scan(&trigger, &definition); err != nil {
+						t.Fatal(err)
+					}
+					drops, creates = append(drops, "DROP TRIGGER "+trigger), append(creates, definition)
+				}
+				if err := triggers.Err(); err != nil {
+					t.Fatal(err)
+				}
+				if err := triggers.Close(); err != nil {
+					t.Fatal(err)
+				}
+				swap := []string{"ALTER TABLE records RENAME COLUMN refs TO counted_refs", "ALTER TABLE records ADD COLUMN refs TEXT GENERATED ALWAYS AS (" + name + "(counted_refs)) VIRTUAL"}
+				for _, statement := range slices.Concat(drops, swap, creates) {
 					if _, err := db.ExecContext(ctx, statement); err != nil {
 						t.Fatal(err)
 					}
