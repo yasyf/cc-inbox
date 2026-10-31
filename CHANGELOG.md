@@ -52,6 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`cci upgrade` can no longer leave the Mac without a cci.** Each upgrade
+  step runs in its own session, so killing the caller mid-upgrade leaves
+  `brew upgrade --cask` to finish relinking `/opt/homebrew/bin/cci`. Before
+  the cask step, it downloads the newest release and runs it once; a release
+  macOS holds at launch for a minute stops the upgrade with the cask and its
+  link untouched.
+
 - `cci post --re <seq>` with no `--to` addresses the lane that wrote the record it
   answers, as `<lane>@<drive>` when that record is on another drive. A reply used
   to go to no one. A record whose every `--to` is the posting lane itself is
