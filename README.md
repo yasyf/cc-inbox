@@ -390,6 +390,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`); `--for <lane>@<drive>` ties the lane's live session instead. Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
+| `cci supervise` | Linux only. Run the daemon's supervisor in the foreground and start the daemon under it, for a host with no launchd. |
 | `cci upgrade` | Upgrade the plugin, the Homebrew cask, and each standalone `cci` on `PATH`, printing every command it runs, then run `serve` from the newest install. |
 | `cci hook` | Run a plugin hook entry point. |
 
@@ -659,12 +660,16 @@ problems and the records addressing them, including whether each opener is close
 
 ### Daemon
 
-`daemonkit` manages `com.yasyf.cc-inbox` through launchd on macOS. Linux requires
-the daemonkit supervisor for `Ensure`. It runs a copy of `cci` at
+`daemonkit` manages `com.yasyf.cc-inbox` through launchd on macOS. The daemon runs a copy of `cci` at
 `~/.daemonkit/bin/com.yasyf.cc-inbox`, with state under
 `~/.daemonkit/a/com.yasyf.cc-inbox`. It restarts on failure. When a different
 `cci` build calls `Ensure` through `cci serve` or the `SessionStart` hook,
 daemonkit drains and replaces the running daemon.
+
+Linux has no launchd, so run `cci supervise` wherever the host starts
+long-lived processes, such as a container entrypoint or a service-manager
+entry. It holds the daemonkit supervisor in the foreground, starts the daemon
+under it, and resumes the daemon when the host restarts it after a reboot.
 
 A release daemon also follows upgrades by itself. When it starts, and every 30
 seconds after, it reads the version directories of the plugin cache, skipping
@@ -682,6 +687,11 @@ the `addr` operation returns the HTTP address. Each CLI process still writes
 directly to SQLite's write-ahead log. CLI reads, including `tail`, `digest`,
 `grep`, and `watch`, also stay direct and use the same reader code as the daemon.
 Posting and CLI reads work without the daemon.
+
+The daemon also pushes this node's records to every joined relay mesh and
+pulls the mesh's records into the store. A failed push or pull retries with
+backoff that doubles up to a minute, so a node that joined a relay needs no
+`cci relay push` or `cci relay pull` loop of its own.
 
 ### Mesh
 

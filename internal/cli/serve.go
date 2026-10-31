@@ -37,6 +37,19 @@ func newServeCmd() *cobra.Command {
 	}
 }
 
+func newSuperviseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "supervise",
+		Short: "Supervise the cci daemon in the foreground on a linux host with no launchd, as its container entrypoint or service-manager entry",
+		Long: "Supervise runs the daemon's supervisor in the foreground and starts the daemon under it, which serves HTTP and keeps every joined relay mesh pushing and pulling, retrying failures with backoff. " +
+			"Run it wherever the host starts long-lived processes; restarted after a reboot, it resumes the daemon. It runs on linux only.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runSupervisor(cmd.Context())
+		},
+	}
+}
+
 func newUpgradeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upgrade",

@@ -3,6 +3,7 @@ package relay_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -379,5 +380,56 @@ func TestPushResealsAfterAConcurrentRotation(t *testing.T) {
 	}
 	if got := pull(t, b); got.Inserted != 1 || srv.Epoch() != 2 {
 		t.Fatalf("owner inserted %d at epoch %d, want 1 at 2", got.Inserted, srv.Epoch())
+	}
+}
+
+func TestConcurrentPostsAndPushWaitOutAHeldWriteLock(t *testing.T) {
+	_, a, _, _ := mesh(t)
+	ctx := context.Background()
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Decision, Text: "before the lock"})
+	cs := configs(t, a)
+	holder, err := sql.Open("sqlite", "file:"+filepath.Join(a.st.HomeDir(), store.DBFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = holder.Close() })
+	conn, err := holder.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	const writers = 16
+	errs := make(chan error, writers+1)
+	for i := range writers {
+		go func() {
+			st, err := store.Open(ctx, a.st.HomeDir())
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, _, err = st.Post(ctx, store.Record{Drive: "d", Lane: "lane-a", Kind: kinds.Decision, Text: fmt.Sprintf("writer %d", i)}, 0)
+			errs <- errors.Join(err, st.Close())
+		}()
+	}
+	go func() {
+		res, err := a.node.Push(ctx, cs)
+		if err == nil && res.Pushed != 1 {
+			err = fmt.Errorf("push sent %d records, want 1", res.Pushed)
+		}
+		errs <- err
+	}()
+	time.Sleep(12 * time.Second)
+	if _, err := conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+		t.Fatal(err)
+	}
+	for range writers + 1 {
+		if err := <-errs; err != nil {
+			t.Errorf("a writer gave up on the held lock: %v", err)
+		}
+	}
+	if got := len(texts(t, a.st)); got != writers+1 {
+		t.Fatalf("store holds %d records, want %d", got, writers+1)
 	}
 }
