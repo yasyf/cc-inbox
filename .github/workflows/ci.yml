@@ -52,6 +52,7 @@ jobs:
         os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
     env:
       TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
+      TIMESTAMP_DIAGNOSTIC_TESTS: '^TestTimestampIndexCLIWork$|^TestTimestampIndexDiagnosticWork$|^TestTimestampIndexNativeParity$'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -60,6 +61,11 @@ jobs:
         with:
           ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
           path: .ci-audience-current491
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
+          path: .ci-timestamp-index-baseline
           persist-credentials: false
       - uses: actions/checkout@v7
         with:
@@ -168,6 +174,30 @@ jobs:
             done
           done
           CCI_AUDIENCE_REQUIRE_BOUNDED_KIND=1 go test -count=1 -race -run '^TestAudience' -v ./internal/cli ./internal/store
+      - name: Timestamp index same-SQL configuration diagnostics
+        run: |
+          set -o pipefail
+          test "$(git -C .ci-timestamp-index-baseline rev-parse HEAD)" = cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
+          cp internal/cli/timestamp_index_diagnostic_test.go .ci-timestamp-index-baseline/internal/cli/
+          cp internal/store/timestamp_index_diagnostic_internal_test.go .ci-timestamp-index-baseline/internal/store/
+          if (cd .ci-timestamp-index-baseline && CCI_TIMESTAMP_REQUIRE_MISSING_BOUND=1 go test -count=1 -run '^TestTimestampIndex(DiagnosticWork|CLIWork)$' -v ./internal/cli ./internal/store) > "$RUNNER_TEMP/timestamp-index-old-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/timestamp-index-old-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/timestamp-index-old-negative.log"
+          for operation in grep query count; do
+            for history in 32 10000; do
+              grep -F "TIMESTAMP_INDEX_UNBOUNDED operation=$operation history=$history index=missing peer=true " "$RUNNER_TEMP/timestamp-index-old-negative.log"
+            done
+          done
+          (cd .ci-timestamp-index-baseline && go test -count=1 -race -run '^TestTimestampIndex' -v ./internal/cli ./internal/store) 2>&1 | tee "$RUNNER_TEMP/timestamp-index-old-diagnostic.log"
+          go test -count=1 -race -run '^TestTimestampIndex' -v ./internal/cli ./internal/store 2>&1 | tee "$RUNNER_TEMP/timestamp-index-current-diagnostic.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: timestamp-index-diagnostic-${{ matrix.os }}-${{ inputs.commit || github.sha }}
+          path: ${{ runner.temp }}/timestamp-index-*.log
+          if-no-files-found: error
       - name: SSE idle queries, immutable history control, and commit freshness
         run: |
           test "$(git -C .ci-stream-idle-baseline rev-parse HEAD)" = 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
@@ -292,7 +322,7 @@ jobs:
           go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
-        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident" ./...
+        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident|$TIMESTAMP_DIAGNOSTIC_TESTS" ./...
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
