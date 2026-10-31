@@ -391,7 +391,7 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 			}
 			lq := url.Values{
 				"mesh": {n.Config.Mesh}, "drive": {drive}, "origin": {o.Origin},
-				"after": {strconv.FormatInt(after, 10)}, "limit": {"500"},
+				"after": {strconv.FormatInt(after, 10)}, "limit": {"100"},
 			}
 			if err := n.client().Call(ctx, http.MethodGet, "/v1/log?"+lq.Encode(), nil, &lr); err != nil {
 				return total, err

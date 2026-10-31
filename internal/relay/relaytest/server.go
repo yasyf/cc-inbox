@@ -425,7 +425,11 @@ func (s *Server) logOrigins(w http.ResponseWriter, r *http.Request, caller Membe
 func (s *Server) readLog(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
 	q := r.URL.Query()
 	after, _ := strconv.ParseInt(q.Get("after"), 10, 64)
-	limit, _ := strconv.Atoi(q.Get("limit"))
+	limit, err := strconv.Atoi(q.Get("limit"))
+	if err != nil || limit < 0 || limit > 100 {
+		fail(w, 400, "bad_request", fmt.Sprintf("%q is not between 0 and 100", q.Get("limit")))
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []e2e.Envelope{}
