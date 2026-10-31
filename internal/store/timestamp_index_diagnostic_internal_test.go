@@ -124,11 +124,15 @@ func timestampNativeRead(t *testing.T, st *Store, filter Filter) timestampNative
 }
 
 func TestTimestampIndexNativeParity(t *testing.T) {
-	root := os.Getenv("CCI_TIMESTAMP_NATIVE_ORACLE_DIR")
-	if root == "" {
+	if os.Getenv("CCI_TIMESTAMP_NATIVE_ORACLE") != "1" {
 		t.Skip("CI supplies the immutable public Query and Count oracle")
 	}
 	record := os.Getenv("CCI_TIMESTAMP_ORACLE_RECORD") == "1"
+	root := filepath.Join("..", "..", ".ci-timestamp-range-native-oracle")
+	if record {
+		root = filepath.Join("..", root)
+	}
+	t.Logf("TIMESTAMP_NATIVE_FIXTURE_BINDING record=%t root=%s", record, root)
 	variants := slices.Clone(membershipVariants)
 	recent := time.Date(2026, 10, 31, 11, 0, 0, 0, time.UTC).UnixMilli()
 	variants = append(variants, []struct {
@@ -174,7 +178,7 @@ func TestTimestampIndexNativeParity(t *testing.T) {
 					{Drive: "d", To: "api", Since: now.Add(-24 * time.Hour)},
 					{Drive: "d", Peer: "reader", Stack: "p/e", Since: now.Add(-24 * time.Hour)},
 				}
-				oracle := timestampNativeOracle{Variant: variant.name, Filters: filters}
+				var oracle timestampNativeOracle
 				if !record {
 					raw, err := os.ReadFile(filepath.Join(home, "results-old.json"))
 					if err != nil {
@@ -194,7 +198,7 @@ func TestTimestampIndexNativeParity(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-					var results []timestampNativeResult
+					results := make([]timestampNativeResult, 0, len(filters))
 					if !record && len(oracle.Results[stage]) != len(filters) {
 						t.Fatalf("immutable result count=%d, want=%d", len(oracle.Results[stage]), len(filters))
 					}
