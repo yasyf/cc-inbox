@@ -48,6 +48,8 @@ func configPath(home, mesh string) string { return filepath.Join(dir(home, mesh)
 
 func keyringPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "keyring.json") }
 
+func serviceKeyPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "service.pem") }
+
 func LoadConfig(home, mesh string) (Config, bool, error) {
 	var c Config
 	ok, err := readJSON(configPath(home, mesh), &c)
@@ -234,6 +236,10 @@ func writeJSON(path string, v any) error {
 	if err != nil {
 		return err
 	}
+	return writeFile(path, b)
+}
+
+func writeFile(path string, b []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}

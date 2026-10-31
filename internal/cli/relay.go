@@ -111,7 +111,7 @@ func newRelayJoinCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&cfg.Routes, "route", nil, "drives this mesh carries (exact or trailing *); a mesh without routes carries every other drive")
 	cmd.Flags().StringVar(&cfg.Tier, "tier", "", "the tier this node was enrolled at (owner|service|paired); kept from an earlier join")
 	cmd.Flags().StringVar(&cfg.Tap, "tap", "", "pull from the per-drive tap NAME instead of this node's queue (service members)")
-	cmd.Flags().BoolVar(&instance, "instance", false, "join as an instance delegated by the service key in $CCI_SERVICE_KEY (CI jobs sharing one service identity)")
+	cmd.Flags().BoolVar(&instance, "instance", false, "join as an instance delegated by the service key in $CCI_SERVICE_KEY, which the join keeps in the mesh's service.pem so later calls and the daemon need no key in their environment (CI jobs sharing one service identity)")
 	cmd.Flags().StringSliceVar(&drives, "drive", nil, "drives the instance may write (exact or trailing *); required with --instance")
 	cmd.Flags().StringSliceVar(&kinds, "kind", nil, "kinds the instance may write (default: the service's scope)")
 	cmd.Flags().DurationVar(&ttl, "ttl", 6*time.Hour, "how long the instance delegation lasts")

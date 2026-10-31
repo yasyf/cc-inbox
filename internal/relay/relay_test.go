@@ -433,3 +433,49 @@ func TestConcurrentPostsAndPushWaitOutAHeldWriteLock(t *testing.T) {
 		t.Fatalf("store holds %d records, want %d", got, writers+1)
 	}
 }
+
+func TestDelegatedInstanceReopensWithoutTheServiceKeyInItsEnvironment(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	svc := newPeer(t, srv, node.TierService)
+	pin(t, a, svc)
+	join(t, srv, a)
+	pemKey, err := os.ReadFile(filepath.Join(node.Dir(svc.st.HomeDir()), "key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, string(pemKey))
+	st, _ := testutil.Store(t)
+	id, err := node.Load(st.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &peer{st: st, id: id, tier: node.TierService}
+	pin(t, job, a)
+	n, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Tier: string(node.TierService)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Delegate([]string{"page:*"}, nil, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Join(context.Background()); err != nil {
+		t.Fatalf("instance join: %v", err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, "")
+	kept, err := os.Stat(filepath.Join(st.HomeDir(), "relay", relay.DefaultMesh, "service.pem"))
+	if err != nil || kept.Mode().Perm() != 0o600 {
+		t.Fatalf("kept service key = %v, %v; want a 0600 file", kept, err)
+	}
+	reopened, err := relay.Open(st.HomeDir(), st, id, mustConfig(t, job))
+	if err != nil {
+		t.Fatalf("reopen without $%s: %v", relay.ServiceKeyEnv, err)
+	}
+	testutil.Post(t, st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "after the key left the environment"})
+	if res, err := reopened.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 {
+		t.Fatalf("instance push = %+v, %v; want 1", res, err)
+	}
+	if got := pull(t, a); got.Inserted != 1 {
+		t.Fatalf("owner inserted %d instance records, want 1", got.Inserted)
+	}
+}
