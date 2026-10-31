@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -159,8 +158,8 @@ func newDaemonCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("listen %s: %w", daemon.Addr, err)
 			}
-			rt := daemon.New(home, ln, func(st *store.Store) (http.Handler, error) {
-				return TailHandler(st, home)
+			rt := daemon.New(home, ln, func(ctx context.Context, st *store.Store) (daemon.ReadAPI, error) {
+				return NativeReadHandler(ctx, st, home)
 			})
 			_, err = daemonkit.Serve(cmd.Context(), d, rt.Start)
 			return cmp.Or(err, rt.Err())

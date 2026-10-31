@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strconv"
@@ -81,7 +82,7 @@ func (s *Store) name(owners map[string]bool, r Record) string {
 }
 
 func (s *Store) names(ctx context.Context, owners map[string]bool, seqs []int64) (map[int64]string, error) {
-	var wanted []any
+	var wanted []int64
 	for _, seq := range seqs {
 		if seq != 0 {
 			wanted = append(wanted, seq)
@@ -91,7 +92,8 @@ func (s *Store) names(ctx context.Context, owners map[string]bool, seqs []int64)
 	if len(wanted) == 0 {
 		return out, nil
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT seq, origin, origin_seq FROM records WHERE seq IN ("+placeholders(len(wanted))+")", wanted...)
+	ids, _ := json.Marshal(wanted)
+	rows, err := s.db.QueryContext(ctx, "SELECT seq, origin, origin_seq FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("name targets: %w", err)
 	}

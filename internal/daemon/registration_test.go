@@ -61,8 +61,8 @@ func TestRuntimeStartRefreshesRegistrationWithoutLosingHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
-	rt := New(home, ln, func(*store.Store) (http.Handler, error) {
-		return http.NotFoundHandler(), nil
+	rt := New(home, ln, func(context.Context, *store.Store) (ReadAPI, error) {
+		return registrationReadAPI{Handler: http.NotFoundHandler()}, nil
 	})
 	var calls atomic.Int32
 	invoked := make(chan bool, 1)
@@ -143,6 +143,10 @@ func TestRuntimeStartRefreshesRegistrationWithoutLosingHTTP(t *testing.T) {
 		t.Fatalf("invalid registration changed: %q, %v", raw, err)
 	}
 }
+
+type registrationReadAPI struct { http.Handler }
+
+func (registrationReadAPI) Close() error { return nil }
 
 type registrationLogs struct {
 	mu  sync.Mutex

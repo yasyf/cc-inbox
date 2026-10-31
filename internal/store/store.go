@@ -502,6 +502,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := installIncidentProjection(ctx, tx); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}

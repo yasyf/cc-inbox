@@ -70,6 +70,7 @@ var recordMemberships = [...]struct {
 type IndexMaintenanceReport struct {
 	Created     []string          `json:"created"`
 	Memberships []string          `json:"memberships"`
+	Incidents   []string          `json:"incidents"`
 	Elapsed     time.Duration     `json:"elapsed_ns"`
 	Before      IndexStorageStats `json:"before"`
 	After       IndexStorageStats `json:"after"`
@@ -89,7 +90,7 @@ type IndexStorageStats struct {
 // lock or database writer is busy.
 func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, error) {
 	started := time.Now()
-	report := IndexMaintenanceReport{Created: []string{}, Memberships: []string{}}
+	report := IndexMaintenanceReport{Created: []string{}, Memberships: []string{}, Incidents: []string{}}
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
@@ -127,7 +128,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
-	if len(missing) > 0 || !installed {
+	incidents, err := incidentProjectionInstalled(ctx, s.db)
+	if err != nil {
+		return report, err
+	}
+	if len(missing) > 0 || !installed || !incidents {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return report, fmt.Errorf("begin index maintenance: %w", err)
@@ -141,6 +146,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		if err := createPhysicalIndexes(ctx, tx, missing); err != nil {
 			return report, err
 		}
+		if !incidents {
+			if err := installIncidentProjection(ctx, tx); err != nil {
+				return report, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return report, fmt.Errorf("commit index maintenance: %w", err)
 		}
@@ -150,6 +160,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		if !installed {
 			for _, object := range recordMemberships {
 				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !incidents {
+			for _, object := range incidentObjects {
+				report.Incidents = append(report.Incidents, object.name)
 			}
 		}
 	}
