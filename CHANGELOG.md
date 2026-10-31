@@ -29,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from it or an older number of it, is refused, naming that lane; `--force`
   addresses it as typed.
 - A subagent or teammate spawned with a name is bound as that lane by
-  `cci me`, and its posts default `--lane` to the name.
+  `cci me`, and its posts default `--lane` to the name. `cci me` registers a
+  subagent the hooks have not announced yet, so it works as the first command.
+- A lane that registers with its first `cci post --lane` reads the records
+  posted to it before it started, as one bound by `cci me` does.
 - `cci post --kind stand-down --to <lane> --successor <new>` records who took
   a lane over: later records addressed to the lane reach every successor too,
   `cci who` marks it `stood-down successor=<new>`, and

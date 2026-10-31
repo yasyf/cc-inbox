@@ -195,6 +195,11 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
+				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
+					return err
+				}
+			}
 			for _, rec := range records {
 				got, dup, err := st.PostAt(cmd.Context(), rec, ttl, at)
 				if err != nil {
@@ -206,9 +211,6 @@ func newPostCmd() *cobra.Command {
 				if err := printPosted(cmd.OutOrStdout(), got, dup, asJSON); err != nil {
 					return err
 				}
-			}
-			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
-				return st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started))
 			}
 			return nil
 		}),
