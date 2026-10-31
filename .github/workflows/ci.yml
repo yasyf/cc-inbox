@@ -32,11 +32,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Validate native workflow contracts
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
           python3 .github/scripts/test-native-release-gates.py
+          go build -o "$RUNNER_TEMP/release-version" ./scripts/release-version
+          RELEASE_VERSION_COMPARE="$RUNNER_TEMP/release-version" python3 .github/scripts/test-release-main-sync.py
 
   test:
     runs-on: ${{ matrix.os }}
