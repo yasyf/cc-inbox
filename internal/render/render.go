@@ -117,7 +117,9 @@ func rest(r store.Record, brief, elide bool) string {
 	return b.String()
 }
 
-// WithBody appends the record's JSON body, indented, on the lines after line.
+// WithBody appends the record's JSON body, indented, on the lines after line,
+// or, for a body longer than store.MaxText, its size and the command that
+// prints it, as a long text leaves only its head and blob path.
 func WithBody(line string, r store.Record) string {
 	if len(r.Body) == 0 {
 		return line
@@ -125,6 +127,9 @@ func WithBody(line string, r store.Record) string {
 	var b bytes.Buffer
 	if err := json.Indent(&b, r.Body, "", "  "); err != nil {
 		panic(fmt.Sprintf("indent body of #%d: %v", r.Seq, err))
+	}
+	if b.Len() > store.MaxText {
+		return fmt.Sprintf("%s\n(body: %d bytes; cci show %d prints it)", line, len(r.Body), r.Seq)
 	}
 	return line + "\n" + b.String()
 }
