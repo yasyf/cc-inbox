@@ -9,6 +9,7 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
+	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 var window = store.Window{PID: 4242, Started: 1791277810598}
@@ -44,13 +46,24 @@ type session struct {
 
 func open(t *testing.T, st *store.Store) *session {
 	t.Helper()
+	s := start(t, st, false)
+	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	init := s.next()
+	if _, ok := init.Result.Capabilities["experimental"].(map[string]any)["claude/channel"]; !ok || !strings.Contains(init.Result.Instructions, Source) || !strings.Contains(init.Result.Instructions, "answers to both names") {
+		t.Fatalf("initialize = %+v", init.Result)
+	}
+	return s
+}
+
+func start(t *testing.T, st *store.Store, resumed bool) *session {
+	t.Helper()
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	s := &session{t: t, in: inW, frames: make(chan frame, 64), done: make(chan error, 1), cancel: cancel}
 	go func() {
-		s.done <- Serve(ctx, st, window, false, inR, outW)
+		s.done <- Serve(ctx, st, window, false, resumed, inR, outW)
 		_ = outW.Close()
 	}()
 	go func() {
@@ -65,11 +78,6 @@ func open(t *testing.T, st *store.Store) *session {
 		}
 		close(s.frames)
 	}()
-	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
-	init := s.next()
-	if _, ok := init.Result.Capabilities["experimental"].(map[string]any)["claude/channel"]; !ok || !strings.Contains(init.Result.Instructions, Source) || !strings.Contains(init.Result.Instructions, "answers to both names") {
-		t.Fatalf("initialize = %+v", init.Result)
-	}
 	return s
 }
 
@@ -366,4 +374,51 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Fatalf("channel delivered %v, want %v", got, want)
 	}
+}
+
+func TestAChannelReexecutesANewerInstallResumedOnItsStdio(t *testing.T) {
+	st, _ := testutil.Store(t)
+	installed := make(chan version.Install, 1)
+	argvs := make(chan []string, 8)
+	newerInstall = func() (version.Install, bool, error) {
+		select {
+		case newer := <-installed:
+			return newer, true, nil
+		default:
+			return version.Install{}, false, nil
+		}
+	}
+	execve = func(_ string, argv []string, _ []string) error {
+		argvs <- argv
+		return nil
+	}
+	t.Cleanup(func() { newerInstall, execve = defaultNewerInstall, syscall.Exec })
+	s := open(t, st)
+	s.initialized()
+	subscribe(t, st)
+	time.Sleep(50 * time.Millisecond)
+
+	installed <- version.Install{Path: "/opt/cci/0.46.0/cci", Version: "0.46.0"}
+
+	select {
+	case argv := <-argvs:
+		if want := []string{"/opt/cci/0.46.0/cci", "channel", "--resumed"}; !slices.Equal(argv, want) {
+			t.Fatalf("exec argv = %q, want %q", argv, want)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the channel never re-executed the newer install")
+	}
+	s.close()
+}
+
+func TestAResumedChannelStreamsWithoutAnotherHandshake(t *testing.T) {
+	st, _ := testutil.Store(t)
+	s := start(t, st, true)
+	subscribe(t, st)
+	time.Sleep(50 * time.Millisecond)
+
+	ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "after the hand-off", To: []string{"root"}})
+
+	s.record(ask)
+	s.close()
 }

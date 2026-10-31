@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -80,6 +80,14 @@ jobs:
         with:
           ref: 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
           path: .ci-grep-selected-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          path: .ci-openamong-oracle
+      - uses: actions/checkout@v7
+        with:
+          ref: 53c067b27a53ac3798753309221a6b4f4190e5b7
+          path: .ci-openamong-negative
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -141,6 +149,22 @@ jobs:
           tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
           (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$tail_tests" -v ./internal/cli)
           go test -run "$tail_tests" -v ./internal/cli
+      - name: Selected opener closure work and error scope
+        run: |
+          cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/
+          cp internal/server/openamong_refutation_test.go .ci-openamong-negative/internal/server/
+          (cd .ci-openamong-oracle && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server)
+          if (cd .ci-openamong-negative && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server) > "$RUNNER_TEMP/openamong-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/openamong-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/foreign_nonmatching_typed_suffix' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/raw_topic_bytes' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/Go-valid_deep_refs' "$RUNNER_TEMP/openamong-negative.log"
+          go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server
+          go test -run '^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$|^TestOpenAmongResolverCandidateErrors$|^TestSelectedClosure' -v ./internal/server ./internal/store
+          CCI_CLOSER_PROVISION_ROWS=250000 go test -run '^TestSelectedClosureProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
         run: |
           go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store

@@ -84,7 +84,7 @@ func TestTailResolverHistoryBaseline(t *testing.T) {
 				t.Fatal(err)
 			}
 			tailCostOutput(t, out, []int64{1}, "closed")
-			got, wantReads := reads.Load(), int64(4)
+			got, wantReads := reads.Load(), int64(3)
 			if global {
 				wantReads = int64(population + 4)
 			}
