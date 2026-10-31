@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -99,6 +100,7 @@ func openAmongCountRefs(t *testing.T, db *sql.DB) *atomic.Int64 {
 }
 
 func TestOpenAmongHTTPHistoryBaseline(t *testing.T) {
+	global := os.Getenv("CCI_OPENAMONG_EXPECT_GLOBAL_HISTORY") == "1"
 	for _, history := range []int{32, 10000} {
 		for _, resolved := range []bool{false, true} {
 			t.Run(fmt.Sprintf("history=%d/cross-drive-resolved=%t", history, resolved), func(t *testing.T) {
@@ -111,9 +113,16 @@ VALUES ('foreign','other','note',2,'cross-drive resolver','[1]','post','resolver
 					}
 				}
 				reads := openAmongCountRefs(t, db)
+				home := st.HomeDir()
+				if err := st.Close(); err != nil { t.Fatal(err) }
+				reopened, err := store.Open(context.Background(), home)
+				if err != nil { t.Fatal(err) }
+				st = reopened
+				t.Cleanup(func() { _ = reopened.Close() })
 				handler := server.New(st, time.Second).Handler()
 				response := httptest.NewRecorder()
 				handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/records?drive=d&kind=ask&limit=1", nil))
+				if response.Code != http.StatusOK { t.Fatalf("HTTP error before cost observation: %d %s",response.Code,response.Body.String()) }
 				var records []store.Record
 				if err := json.Unmarshal(response.Body.Bytes(), &records); err != nil {
 					t.Fatal(err)
@@ -125,8 +134,10 @@ VALUES ('foreign','other','note',2,'cross-drive resolver','[1]','post','resolver
 				if response.Code != http.StatusOK || len(records) != 1 || records[0].Seq != 1 || records[0].Status != wantStatus {
 					t.Fatalf("HTTP records = %d %s, want selected #1 %s", response.Code, response.Body.String(), wantStatus)
 				}
-				if got := reads.Load(); got != int64(history+2) {
-					t.Fatalf("actual HTTP annotation refs reads=%d, want history+2=%d", got, history+2)
+				wantReads := int64(2)
+				if global { wantReads += int64(history) }
+				if got := reads.Load(); got != wantReads {
+					t.Fatalf("actual HTTP annotation refs reads=%d, want%d with global=%t", got, wantReads, global)
 				}
 				t.Logf("OPENAMONG_BASELINE history=%d selected=1 cross_drive_resolved=%t refs_reads=%d", history, resolved, reads.Load())
 				reads.Store(0)
@@ -136,7 +147,9 @@ VALUES ('foreign','other','note',2,'cross-drive resolver','[1]','post','resolver
 					t.Fatalf("empty HTTP result = %d %s refs_reads=%d, want [] and0reads", response.Code, response.Body.String(), reads.Load())
 				}
 				open, err := st.OpenAmong(context.Background(), "d", nil)
-				if err != nil || len(open) != 0 || reads.Load() != int64(history) {
+				wantEmptyReads := int64(0)
+				if global { wantEmptyReads = int64(history) }
+				if err != nil || len(open) != 0 || reads.Load() != wantEmptyReads {
 					t.Fatalf("empty direct OpenAmong = %+v %v refs_reads=%d, want empty and%d", open, err, reads.Load(), history)
 				}
 				t.Logf("OPENAMONG_EMPTY_BASELINE history=%d http_refs_reads=0 direct_refs_reads=%d", history, reads.Load())
@@ -146,27 +159,55 @@ VALUES ('foreign','other','note',2,'cross-drive resolver','[1]','post','resolver
 }
 
 func TestOpenAmongUnrelatedCorruptionBaseline(t *testing.T) {
+	global := os.Getenv("CCI_OPENAMONG_EXPECT_GLOBAL_HISTORY") == "1"
 	for _, field := range []string{"recipients", "refs", "fields", "also_resolves"} {
-		t.Run(field, func(t *testing.T) {
-			st, db := openAmongStore(t)
-			openAmongInsert(t, db, 32)
-			if _, err := db.Exec("UPDATE records SET "+field+" = '[' WHERE seq = 2"); err != nil {
-				t.Fatal(err)
-			}
-			handler := server.New(st, time.Second).Handler()
-			response := httptest.NewRecorder()
-			handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/records?drive=d&kind=ask&limit=1", nil))
-			var failure map[string]string
-			if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil {
-				t.Fatal(err)
-			}
-			if response.Code != http.StatusInternalServerError || !strings.Contains(failure["error"], "decode "+field+" of #2") {
-				t.Fatalf("unrelated %s corruption = %d %s, want existing decode error", field, response.Code, response.Body.String())
-			}
-			if _, err := st.OpenAmong(context.Background(), "d", nil); err == nil || !strings.Contains(err.Error(), "decode "+field+" of #2") {
-				t.Fatalf("empty OpenAmong with unrelated %s corruption = %v, want same existing decode error", field, err)
-			}
-			t.Logf("OPENAMONG_UNRELATED_CORRUPTION field=%s http_status=%d error=%q empty_selection_also_errors=true", field, response.Code, failure["error"])
+		for _, selected := range []string{"unrelated", "closer", "opener"} {
+			t.Run(field+"/"+selected, func(t *testing.T) {
+				st, db := openAmongStore(t)
+				openAmongInsert(t, db, 32)
+				seq := 2
+				if selected == "opener" { seq = 1 }
+				if selected == "closer" {
+					if _, err := db.Exec("UPDATE records SET re=1 WHERE seq=2"); err != nil { t.Fatal(err) }
+				}
+				if _, err := db.Exec("UPDATE records SET "+field+" = '[' WHERE seq = ?", seq); err != nil { t.Fatal(err) }
+				handler := server.New(st, time.Second).Handler()
+				response := httptest.NewRecorder()
+				handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/v1/records?drive=d&kind=ask&limit=1", nil))
+				if global || selected != "unrelated" {
+					var failure map[string]string
+					if err := json.Unmarshal(response.Body.Bytes(), &failure); err != nil { t.Fatal(err) }
+					if response.Code != http.StatusInternalServerError || !strings.Contains(failure["error"], fmt.Sprintf("decode %s of #%d",field,seq)) {
+						t.Fatalf("%s %s corruption = %d %s, want existing candidate decode error", selected, field,response.Code,response.Body.String())
+					}
+				} else {
+					var records []store.Record
+					if err := json.Unmarshal(response.Body.Bytes(), &records); err != nil { t.Fatal(err) }
+					if response.Code != http.StatusOK || len(records)!=1 || records[0].Status!="open" { t.Fatalf("unrelated corruption affected selection: %d %s",response.Code,response.Body.String()) }
+				}
+				open, err := st.OpenAmong(context.Background(), "d", nil)
+				if global && selected != "opener" {
+					if err==nil || !strings.Contains(err.Error(),fmt.Sprintf("decode %s of #2",field)) { t.Fatalf("empty global read error=%v",err) }
+				} else if global && selected=="opener" && field=="also_resolves" { if err==nil {t.Fatal("global empty resolver JSON error missing")} } else if err!=nil || len(open)!=0 { t.Fatalf("empty selection=%+v %v",open,err) }
+				t.Logf("OPENAMONG_CORRUPTION field=%s scope=%s global=%t http_status=%d",field,selected,global,response.Code)
+			})
+		}
+	}
+}
+
+func TestOpenAmongResolverCandidateErrors(t *testing.T) {
+	for _, row := range []struct { name, also, refs string; direct int64; wantError bool }{
+		{"typed candidate array",`[1,"bad"]`,`{}`,0,true},
+		{"malformed array on direct candidate",`[`,`{}`,1,true},
+		{"foreign refs do not enter resolver decoding",`[1]`,`[`,0,false},
+	} {
+		t.Run(row.name,func(t *testing.T){
+			st,db:=openAmongStore(t);openAmongInsert(t,db,32)
+			if _,err:=db.Exec(`INSERT INTO records(drive,lane,kind,at,text,also_resolves,resolves,refs,source,hash) VALUES('foreign','other','note',2,'resolver',?,?,?,'post','resolver')`,row.also,row.direct,row.refs);err!=nil {t.Fatal(err)}
+			response:=httptest.NewRecorder();server.New(st,time.Second).Handler().ServeHTTP(response,httptest.NewRequest(http.MethodGet,"/v1/records?drive=d&kind=ask&limit=1",nil))
+			if row.wantError {if response.Code!=http.StatusInternalServerError {t.Fatalf("candidate resolver error suppressed: %d %s",response.Code,response.Body.String())};return}
+			var records []store.Record;if err:=json.Unmarshal(response.Body.Bytes(),&records);err!=nil {t.Fatal(err)}
+			if response.Code!=http.StatusOK||len(records)!=1||records[0].Status!="closed" {t.Fatalf("foreign resolver changed: %d %s",response.Code,response.Body.String())}
 		})
 	}
 }

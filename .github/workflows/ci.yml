@@ -16,4 +16,4 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Actual HTTP annotation and corruption baseline
-        run: go test -count=1 -run '^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$' -v ./internal/server
+        run: CCI_OPENAMONG_EXPECT_GLOBAL_HISTORY=1 go test -count=1 -run '^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$' -v ./internal/server
