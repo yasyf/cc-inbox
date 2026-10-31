@@ -142,6 +142,13 @@ func TestTimestampIndexNativeParity(t *testing.T) {
 				}
 				before := make([]result, len(filters))
 				for i, filter := range filters {
+					if variant.name == "origin early malformed recipients" && filter.PeerAfter == 4 {
+						query, args := st.selection(filter)
+						where, params := filter.where(st.Self(), st.Now())
+						native := "SELECT " + columns + " FROM records WHERE " + where + " ORDER BY seq DESC LIMIT 2"
+						t.Logf("TIMESTAMP_FRONTIER_PLAN index=%s query_sql=%q query_args=%v query_plan=%v native_sql=%q native_args=%v native_plan=%v", index.name, query, args, queryPlan(t.Context(), t, st, query, args...), native, params, queryPlan(t.Context(), t, st, native, params...))
+						t.Logf("TIMESTAMP_FRONTIER_VM index=%s query_program=%v native_program=%v", index.name, timestampDiagnosticVM(t, st, query, args...), timestampDiagnosticVM(t, st, native, params...))
+					}
 					before[i].rows, before[i].queryErr = st.Query(t.Context(), filter)
 					before[i].count, before[i].countErr = st.Count(t.Context(), filter)
 					native, nativeErr := unboundedQuery(t.Context(), st, filter)
