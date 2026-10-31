@@ -188,6 +188,16 @@ func TestSelectedClosureProvisioningWithinWriterBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if os.Getenv("CCI_OLD_STORE_PROBE") == "" {
+		t.Fatal("the native writer-budget profile requires CCI_OLD_STORE_PROBE")
+	}
+	for _, population := range []int{32, 10000} {
+		t.Run("old-writer-"+strconv.Itoa(population), func(t *testing.T) {
+			if elapsed := selectedClosureOldCloserWriter(t, population); elapsed >= 5*time.Second {
+				t.Fatalf("native old-writer wait exceeds budget: rows=%d elapsed=%s", population, elapsed)
+			}
+		})
+	}
 	ctx := t.Context()
 	st, _ := openStore(t)
 	for i := len(closerMemberships) - 1; i >= 0; i-- {
