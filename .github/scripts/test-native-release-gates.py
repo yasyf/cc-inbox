@@ -7,7 +7,7 @@ import tempfile
 import unittest
 
 EXPECTED_CANCEL = "${{ inputs.commit == '' && github.event_name == 'pull_request' }}"
-EXPECTED_DYNAMIC_PROFILES = 0
+EXPECTED_DYNAMIC_PROFILES = 1
 
 
 def load_workflow(name):
