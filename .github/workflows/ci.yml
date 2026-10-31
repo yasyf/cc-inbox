@@ -128,8 +128,8 @@ jobs:
           test "$(git -C .ci-lane-score-baseline rev-parse HEAD)" = a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
           cp internal/cli/daemon_lanes_equivalence_test.go .ci-lane-score-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-lane-snapshots"
-          (cd .ci-lane-score-baseline && CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" CCI_LANE_SNAPSHOT_WRITE=1 go test -run '^TestDaemonLanePreservesNativeOutputAndErrors$|^TestDaemonLaneScoreTieIsNotMaximumSequence$' -v ./internal/cli)
-          CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" go test -run '^TestDaemonLane' -v ./internal/cli
+          (cd .ci-lane-score-baseline && CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" CCI_LANE_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestDaemonLanePreservesNativeOutputAndErrors$|^TestDaemonLaneScoreTieIsNotMaximumSequence$' -v ./internal/cli)
+          CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" go test -count=1 -run '^TestDaemonLane' -v ./internal/cli
           go test -run '^TestLaneScore' -v ./internal/store
           CCI_LANE_INDEX_ROWS=250000 go test -run '^TestLaneScoreIndexProvisioningWithinWriterBudget$' -v ./internal/store
 
