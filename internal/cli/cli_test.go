@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -543,6 +544,67 @@ func TestPostHeadAndOpenedTakeTheirPullRequestOrRefuse(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPostHeadCarriesEveryHeadOfARestack(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "post", "--json", "--lane", "lane-a", "--kind", "head",
+		"--head", "45001=a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+		"--head", "yasyf/cc-inbox#45002=4423264..C3B44A3FEE8EBDCD89A5BBC180D796C3C28B8FD4 restack, range-diff patch-identical (3 commits)",
+		"--text", "restacked onto dev")
+	var got store.Record
+	if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil {
+		t.Fatalf("post = %q, %v", out, err)
+	}
+	want := map[string]string{
+		"head:45001":                "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+		"head:yasyf/cc-inbox#45002": "4423264..c3b44a3fee8ebdcd89a5bbc180d796c3c28b8fd4 restack, range-diff patch-identical (3 commits)",
+	}
+	prs := []store.PR{{Number: 45001}, {Repo: "yasyf/cc-inbox", Number: 45002}}
+	if !reflect.DeepEqual(got.Fields.Attrs, want) || !reflect.DeepEqual(got.Refs.PRs, prs) || got.Fields.Commit != "" {
+		t.Fatalf("attrs %v prs %v commit %q; want %v on PRs %v and no record-wide commit", got.Fields.Attrs, got.Refs.PRs, got.Fields.Commit, want, prs)
+	}
+	if want := "HEAD 2 PRs: #45001 a1b2c3d, #45002 c3b44a3: restacked onto dev"; got.Text != want {
+		t.Errorf("text = %q, want %q", got.Text, want)
+	}
+	for _, pr := range []string{"45001", "yasyf/cc-inbox#45002"} {
+		out, err := run(t, "tail", "--since", "0", "--pr", pr)
+		if err != nil || strings.Count(out, "\n") != 1 || !strings.HasSuffix(strings.TrimSpace(out), "HEAD 2 PRs: #45001 a1b2c3d, #45002 c3b44a3: restacked onto dev") {
+			t.Fatalf("tail --pr %s = %q, %v; want the one head record with no PR refs repeated after its text", pr, out, err)
+		}
+	}
+	out, err = run(t, "post", "--json", "--lane", "lane-a", "--kind", "head", "--head", "45003=0123abc")
+	if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil || got.Text != "HEAD #45003 0123abc" {
+		t.Fatalf("post with no text = %q, %v; want the text HEAD #45003 0123abc", out, err)
+	}
+}
+
+func TestPostHeadRefusesAMalformedHead(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"not a sha", []string{"--kind", "head", "--head", "45001=main"}, `commit "main" is not a 7 to 40 character hex sha`},
+		{"was not a sha", []string{"--kind", "head", "--head", "45001=none..0123abc"}, `was "none" is not a 7 to 40 character hex sha`},
+		{"no sha", []string{"--kind", "head", "--head", "45001"}, "want <pr>=<sha>"},
+		{"no pull request", []string{"--kind", "head", "--head", "x=0123abc"}, "want a number"},
+		{"another kind", []string{"--kind", "state", "--head", "45001=0123abc"}, "--head is for a head record, not state"},
+		{"with --commit", []string{"--kind", "head", "--commit", "0123abc", "--head", "45001=0123abc"}, "drop --commit"},
+		{"one PR twice", []string{"--kind", "head", "--head", "45001=0123abc", "--head", "45001=4567def"}, "--head names 45001 twice"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := run(t, append([]string{"post", "--drive", "d", "--lane", "lane-a"}, tt.args...)...)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("post = %q, %v; want a refusal containing %q", out, err, tt.want)
+			}
+		})
 	}
 }
 

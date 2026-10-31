@@ -425,6 +425,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--mode <mode>` | Set `fields.mode`: `platy`, `cli`, `manual`, or `walker`. |
 | `--outcome <outcome>` | Set `fields.outcome`: `passed`, `failed`, `pending`, or `cancelled`. |
 | `--commit <sha>` | Set `fields.commit` to the full commit SHA. |
+| `--head <pr>=[<was>..]<sha>[ <note>]` | On a `head` record, repeat to set one `fields.attrs` entry per pull request, `head:<pr>` = `[<was>..]<sha>[ <note>]`, naming its commit, the head it replaced, and a note. Every PR joins `refs.prs`, so `cci tail --pr` finds the record, and the text opens with `HEAD <n> PRs: #<pr> <short sha>, ...` (`HEAD #<pr> <short sha>` for one), followed by the given text after a colon. Refused with `--commit` or on any other kind. |
 | `--census '<JSON>'` | Set `fields.census`, for example `{"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["api/plat-usw2-prod"]}`. |
 | `--count <name>=<integer>` | Set entries in `fields.counts`, for example `--count deletes=0`. |
 | `--id <key>` | Set the record's idempotency key. A post whose key the drive already holds returns the stored record as a duplicate. |

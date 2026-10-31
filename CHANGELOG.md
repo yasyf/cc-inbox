@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   merge-queue webhooks into one `queue` record per state change.
 - `e2e.Key` and `e2e.ParseKey` hold a P-256 node or service key in memory;
   the node key is one, so an importer of `service` links no keychain code.
+- `cci post --kind head --head <pr>=[<was>..]<sha>[ <note>]`, repeated, posts
+  one head record for a restack that moves several pull requests. Each head
+  lands in `fields.attrs` as `head:<pr>` = `[<was>..]<sha>[ <note>]`, every PR
+  joins `refs.prs`, and the text opens with `HEAD <n> PRs: #<pr> <short sha>, ...`.
+  The wire format is unchanged, so nodes on older releases keep replicating.
 
 ### Changed
 

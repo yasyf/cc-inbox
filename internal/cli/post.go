@@ -43,6 +43,7 @@ func newPostCmd() *cobra.Command {
 		counts                  map[string]string
 		census, bodyFile        string
 		successor               string
+		heads                   []store.Head
 		ttl                     time.Duration
 		asJSON, label, force    bool
 		pairwise                bool
@@ -58,7 +59,7 @@ func newPostCmd() *cobra.Command {
 				return fmt.Errorf("post takes its text as one quoted argument or --text; got %d arguments", len(args))
 			case len(args) == 1 && cmd.Flags().Changed("text"):
 				return fmt.Errorf("post takes its text once: as an argument or --text, not both")
-			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path"):
+			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path") && !cmd.Flags().Changed("head"):
 				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
 			}
 			if !cmd.Flags().Changed("kind") {
@@ -111,7 +112,7 @@ func newPostCmd() *cobra.Command {
 				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at, label); err != nil {
 					return err
 				}
-			default:
+			case r.Refs.Path != "":
 				body, err := os.ReadFile(r.Refs.Path)
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
@@ -119,6 +120,11 @@ func newPostCmd() *cobra.Command {
 				text, fromPath = firstLine(string(body)), true
 			}
 			k := parsedKind
+			if len(heads) > 0 {
+				if text, err = withHeads(&r, k, heads, text); err != nil {
+					return err
+				}
+			}
 			if (k == kinds.Opened || k == kinds.Head && r.Refs.CCN == "") && len(r.Refs.PRs) == 0 {
 				if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
 					return err
@@ -238,6 +244,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Fields.Mode, "mode", "", "how a release or apply started: platy, cli, manual, walker")
 	f.StringVar(&r.Fields.Outcome, "outcome", "", "passed, failed, pending, cancelled")
 	f.StringVar(&r.Fields.Commit, "commit", "", "full commit sha")
+	f.Var(&headsFlag{&heads}, "head", "on a head record, one pull request's new head as <pr>=<sha> or <pr>=<was>..<sha>, then an optional note after a space, such as \"45001=4423264..c3b44a3 patch-identical\"; repeated, one record carries every head of a restack: each lands in fields.attrs as head:<pr> = [<was>..]<sha>[ <note>], each PR joins its refs, and its text opens with HEAD <n> PRs: #<pr> <short sha>, ...")
 	f.StringVar(&census, "census", "", `census JSON: {"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["<project>/<env>"]}`)
 	f.StringToStringVar(&counts, "count", nil, "named counts, e.g. --count deletes=0")
 	f.StringToStringVar(&r.Fields.Attrs, "attr", nil, "named string attributes (repeatable), e.g. --attr actor=platy")
@@ -446,6 +453,33 @@ func namedPR(w io.Writer, r store.Record) ([]store.PR, error) {
 		return nil, err
 	}
 	return []store.PR{{Number: named[0]}}, nil
+}
+
+func withHeads(r *store.Record, k kinds.Kind, heads []store.Head, text string) (string, error) {
+	if k != kinds.Head {
+		return "", fmt.Errorf("--head is for a head record, not %s", k)
+	}
+	if r.Fields.Commit != "" {
+		return "", errors.New("--head carries each pull request's commit; drop --commit")
+	}
+	if r.Fields.Attrs == nil {
+		r.Fields.Attrs = map[string]string{}
+	}
+	for _, h := range heads {
+		key, value := h.Attr()
+		if _, twice := r.Fields.Attrs[key]; twice {
+			return "", fmt.Errorf("--head names %s twice", h.PR)
+		}
+		r.Fields.Attrs[key] = value
+		if !slices.Contains(r.Refs.PRs, h.PR) {
+			r.Refs.PRs = append(r.Refs.PRs, h.PR)
+		}
+	}
+	preview := store.HeadsPreview(heads)
+	if text == "" {
+		return preview, nil
+	}
+	return preview + ": " + text, nil
 }
 
 func firstLine(text string) string {
