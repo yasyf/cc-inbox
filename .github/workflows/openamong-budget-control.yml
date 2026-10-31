@@ -1,0 +1,29 @@
+name: Selected closure native budget control
+on:
+  push:
+    branches: [perf/cci-openamong-budget-control]
+permissions:
+  contents: read
+jobs:
+  native-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
+          path: .ci-old
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build immutable preopened old closer writer
+        run: |
+          test "$(git -C .ci-old rev-parse HEAD)" = 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
+          mkdir -p .ci-old/cmd/compat-probe
+          cp internal/store/testdata/compat-probe/main.go .ci-old/cmd/compat-probe/main.go
+          (cd .ci-old && go build -p 2 -o "$RUNNER_TEMP/cci-old-store-probe" ./cmd/compat-probe)
+          printf 'CCI_OLD_STORE_PROBE=%s\n' "$RUNNER_TEMP/cci-old-store-probe" >> "$GITHUB_ENV"
+      - name: Exact source normal-build oldwriter and 250k budget control
+        run: |
+          go test -run '^TestSelectedClosureProvisioningSerializesOldCloserWriter$' -v ./internal/store
+          CCI_CLOSER_PROVISION_ROWS=250000 go test -run '^TestSelectedClosureProvisioningWithinWriterBudget$' -v ./internal/store
