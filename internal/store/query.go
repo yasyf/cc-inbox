@@ -180,7 +180,7 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 	if len(peers) == 0 && len(readers) == 0 {
 		return nil, nil
 	}
-	params := []any{f.Drive}
+	var params []any
 	bounds := func(column string, after int64) string {
 		var clauses string
 		if after > 0 {
@@ -193,7 +193,24 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 		}
 		return clauses
 	}
-	arms := []string{"SELECT seq AS candidate_seq FROM records WHERE drive = ?" + bounds("seq", f.After)}
+	var arms []string
+	appendDrive := func(selector string, selected ...any) {
+		params = append(params, f.Drive)
+		params = append(params, selected...)
+		arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ?"+selector+bounds("seq", f.After))
+	}
+	if f.For == "" && f.Origin == "" && f.PeerAfter == 0 && len(f.Kinds) > 0 {
+		seen := map[kinds.Kind]bool{}
+		for _, kind := range f.Kinds {
+			if seen[kind] {
+				continue
+			}
+			seen[kind] = true
+			appendDrive(" AND kind = ?", string(kind))
+		}
+	} else {
+		appendDrive("")
+	}
 	for _, addresses := range []struct {
 		values []any
 		after  int64
