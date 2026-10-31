@@ -81,7 +81,7 @@ func rest(r store.Record, brief, elide bool) string {
 	b.WriteString(" ")
 	b.WriteString(strings.Join(strings.Fields(r.Text), " "))
 	for _, pr := range r.Refs.PRs {
-		if slices.Contains(words, "#"+pr.String()) || pr.Repo != "" && slices.Contains(words, pr.String()) {
+		if slices.Contains(words, "#"+pr.String()) || pr.Repo != "" && slices.Contains(words, pr.String()) || r.Fields.Attrs[store.HeadAttr+pr.String()] != "" {
 			continue
 		}
 		if pr.Repo == "" {
