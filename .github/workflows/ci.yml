@@ -32,11 +32,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Validate native workflow contracts
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
           python3 .github/scripts/test-native-release-gates.py
+          go build -o "$RUNNER_TEMP/release-version" ./scripts/release-version
+          RELEASE_VERSION_COMPARE="$RUNNER_TEMP/release-version" python3 .github/scripts/test-release-main-sync.py
 
   test:
     runs-on: ${{ matrix.os }}
@@ -84,6 +90,14 @@ jobs:
         with:
           ref: e2ef260846d7afb2850cc503dc6cde57baa78487
           path: .ci-mesh-frontier-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          path: .ci-openamong-oracle
+      - uses: actions/checkout@v7
+        with:
+          ref: 53c067b27a53ac3798753309221a6b4f4190e5b7
+          path: .ci-openamong-negative
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -156,6 +170,22 @@ jobs:
           tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
           (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$tail_tests" -v ./internal/cli)
           go test -run "$tail_tests" -v ./internal/cli
+      - name: Selected opener closure work and error scope
+        run: |
+          cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/
+          cp internal/server/openamong_refutation_test.go .ci-openamong-negative/internal/server/
+          (cd .ci-openamong-oracle && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server)
+          if (cd .ci-openamong-negative && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server) > "$RUNNER_TEMP/openamong-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/openamong-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/foreign_nonmatching_typed_suffix' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/raw_topic_bytes' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/Go-valid_deep_refs' "$RUNNER_TEMP/openamong-negative.log"
+          go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server
+          go test -run '^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$|^TestOpenAmongResolverCandidateErrors$|^TestSelectedClosure' -v ./internal/server ./internal/store
+          CCI_CLOSER_PROVISION_ROWS=250000 go test -run '^TestSelectedClosureProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
         run: |
           go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store

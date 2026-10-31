@@ -32,9 +32,11 @@ DELETE FROM record_json_errors WHERE source_seq = OLD.seq;
 `
 )
 
-var recordMemberships = [...]struct {
+type physicalObject struct {
 	kind, name, sql, fill string
-}{
+}
+
+var recordMemberships = [...]physicalObject{
 	{
 		"table",
 		"record_recipients",
@@ -127,7 +129,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
-	if len(missing) > 0 || !installed {
+	closersInstalled, err := projectionInstalled(ctx, s.db, closerMemberships[:], "closer membership")
+	if err != nil {
+		return report, err
+	}
+	if len(missing) > 0 || !installed || !closersInstalled {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return report, fmt.Errorf("begin index maintenance: %w", err)
@@ -135,6 +141,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		defer func() { _ = tx.Rollback() }()
 		if !installed {
 			if err := installMemberships(ctx, tx); err != nil {
+				return report, err
+			}
+		}
+		if !closersInstalled {
+			if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
 				return report, err
 			}
 		}
@@ -149,6 +160,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !installed {
 			for _, object := range recordMemberships {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !closersInstalled {
+			for _, object := range closerMemberships {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}
@@ -186,36 +202,44 @@ func createPhysicalIndexes(ctx context.Context, tx *sql.Tx, indexes []int) error
 }
 
 func membershipsInstalled(ctx context.Context, q querier) (bool, error) {
+	return projectionInstalled(ctx, q, recordMemberships[:], "record membership")
+}
+
+func projectionInstalled(ctx context.Context, q querier, objects []physicalObject, label string) (bool, error) {
 	present := 0
-	for _, object := range recordMemberships {
+	for _, object := range objects {
 		var kind, definition string
 		err := q.QueryRowContext(ctx, "SELECT type, COALESCE(sql, '') FROM sqlite_schema WHERE name = ?", object.name).Scan(&kind, &definition)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			continue
 		case err != nil:
-			return false, fmt.Errorf("inspect record membership %s: %w", object.name, err)
+			return false, fmt.Errorf("inspect %s %s: %w", label, object.name, err)
 		case kind != object.kind || definition != object.sql:
-			return false, fmt.Errorf("record membership %s is %s %q, not this cci's definition", object.name, kind, definition)
+			return false, fmt.Errorf("%s %s is %s %q, not this cci's definition", label, object.name, kind, definition)
 		}
 		present++
 	}
-	if present != 0 && present != len(recordMemberships) {
-		return false, fmt.Errorf("record memberships are partially installed: %d of %d objects", present, len(recordMemberships))
+	if present != 0 && present != len(objects) {
+		return false, fmt.Errorf("%ss are partially installed: %d of %d objects", label, present, len(objects))
 	}
-	return present == len(recordMemberships), nil
+	return present == len(objects), nil
 }
 
 func installMemberships(ctx context.Context, tx *sql.Tx) error {
-	for _, object := range recordMemberships {
+	return installProjection(ctx, tx, recordMemberships[:], "record membership")
+}
+
+func installProjection(ctx context.Context, tx *sql.Tx, objects []physicalObject, label string) error {
+	for _, object := range objects {
 		if _, err := tx.ExecContext(ctx, object.sql); err != nil {
-			return fmt.Errorf("create record membership %s: %w", object.name, err)
+			return fmt.Errorf("create %s %s: %w", label, object.name, err)
 		}
 		if object.fill == "" {
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, object.fill); err != nil {
-			return fmt.Errorf("fill record membership %s: %w", object.name, err)
+			return fmt.Errorf("fill %s %s: %w", label, object.name, err)
 		}
 	}
 	return nil

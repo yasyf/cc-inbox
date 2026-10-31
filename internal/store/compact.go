@@ -44,7 +44,7 @@ func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Re
 	if err != nil {
 		return nil, err
 	}
-	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() }))
+	return s.unclosedAmong(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() }))
 }
 
 // ReplacedAmong returns the seqs among seqs of a kind whose newest record on a

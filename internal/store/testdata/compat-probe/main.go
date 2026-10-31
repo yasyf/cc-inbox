@@ -39,7 +39,20 @@ func main() {
 
 func run() error {
 	if len(os.Args) == 3 && os.Args[1] == "wait-write" {
-		return waitingWriter(os.Args[2])
+		return waitingWriter(os.Args[2], store.Record{
+			Drive: "concurrent", Lane: "old", Kind: "note", Text: "old writer during provisioning",
+			To: []string{"peer:concurrent-old"}, Source: "post",
+		})
+	}
+	if len(os.Args) == 4 && os.Args[1] == "wait-closer" {
+		target, err := strconv.ParseInt(os.Args[3], 10, 64)
+		if err != nil {
+			return err
+		}
+		return waitingWriter(os.Args[2], store.Record{
+			Drive: "concurrent", Lane: "old", Kind: "answer", Text: "old closer during provisioning", Re: target,
+			To: []string{"peer:concurrent-old"}, Source: "post",
+		})
 	}
 	if len(os.Args) == 4 && os.Args[1] == "matrix" {
 		return matrix(os.Args[2], os.Args[3])
@@ -91,7 +104,7 @@ func run() error {
 	return json.NewEncoder(os.Stdout).Encode(result)
 }
 
-func waitingWriter(home string) error {
+func waitingWriter(home string, row store.Record) error {
 	ctx := context.Background()
 	st, err := store.Open(ctx, home)
 	if err != nil {
@@ -111,10 +124,7 @@ func waitingWriter(home string) error {
 	if _, err := fmt.Fprintln(os.Stdout, "writing"); err != nil {
 		return err
 	}
-	record, _, err := st.Post(ctx, store.Record{
-		Drive: "concurrent", Lane: "old", Kind: "note", Text: "old writer during provisioning",
-		To: []string{"peer:concurrent-old"}, Source: "post",
-	}, 0)
+	record, _, err := st.Post(ctx, row, 0)
 	if err != nil {
 		return fmt.Errorf("post while memberships provision: %w", err)
 	}
