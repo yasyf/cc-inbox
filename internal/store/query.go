@@ -208,11 +208,11 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 		}
 		return clauses
 	}
-	memberships := func(table string) string {
+	membership := func(table, selector string, after int64) string {
 		if window == "" {
-			return table
+			return "SELECT source_seq FROM " + table + " WHERE " + selector + bounds("source_seq", after)
 		}
-		return table + " JOIN records ON records.seq = source_seq"
+		return "SELECT candidate.seq FROM records candidate WHERE EXISTS (SELECT 1 FROM " + table + " WHERE " + selector + " AND source_seq = candidate.seq)" + bounds("candidate.seq", after)
 	}
 	var arms []string
 	appendDrive := func(selector string, selected ...any) {
@@ -238,10 +238,10 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 	}{{peers, max(f.After, f.PeerAfter)}, {readers, f.After}} {
 		for _, address := range addresses.values {
 			params = append(params, address)
-			arms = append(arms, "SELECT source_seq FROM "+memberships("record_recipients")+" WHERE address = ?"+bounds("source_seq", addresses.after))
+			arms = append(arms, membership("record_recipients", "address = ?", addresses.after))
 		}
 	}
-	arms = append(arms, "SELECT source_seq FROM "+memberships("record_json_errors")+" WHERE field = 'recipients'"+bounds("source_seq", f.After))
+	arms = append(arms, membership("record_json_errors", "field = 'recipients'", f.After))
 	return arms, params
 }
 

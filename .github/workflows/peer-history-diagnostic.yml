@@ -1,0 +1,78 @@
+name: Peer history diagnostic
+
+on:
+  pull_request:
+    paths:
+      - internal/cli/peer_history_diagnostic_test.go
+      - internal/store/peer_history_diagnostic_internal_test.go
+      - internal/store/peer_correlated_exists_internal_test.go
+      - internal/store/query.go
+      - .github/workflows/peer-history-diagnostic.yml
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact source commit to diagnose
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  peer-history:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Measure actual same-peer stale history
+        run: |
+          set -o pipefail
+          git rev-parse HEAD
+          CCI_PEER_HISTORY_DIAGNOSTIC=1 go test -p 2 -count=1 -race -run '^TestPeerHistory(ActualGrepDiagnostic|PublicReadsDiagnostic)$' -v ./internal/cli ./internal/store 2>&1 | tee "$RUNNER_TEMP/peer-history-diagnostic.log"
+          for operation in grep query count; do
+            for population in 32 10000; do
+              grep -F "PEER_HISTORY_WORK operation=$operation M=$population eligible_rows=2 " "$RUNNER_TEMP/peer-history-diagnostic.log"
+            done
+          done
+      - name: Check exploratory correlated EXISTS semantics and whole foreign work
+        run: |
+          set -o pipefail
+          CCI_PEER_EXISTS_DIAGNOSTIC=1 go test -p 2 -count=1 -race -run '^TestPeerCorrelatedExists(Memberships|ForeignWork)$' -v ./internal/store 2>&1 | tee "$RUNNER_TEMP/peer-history-exists.log"
+          grep -F 'PEER_EXISTS_SEMANTICS_COMPLETE cases=18' "$RUNNER_TEMP/peer-history-exists.log"
+          for operation in query count; do
+            for scenario in many-foreign-stale unrelated-recent; do
+              for population in 32 10000; do
+                grep -F "PEER_EXISTS_WORK operation=$operation scenario=$scenario M=$population eligible_rows=2 " "$RUNNER_TEMP/peer-history-exists.log"
+              done
+            done
+          done
+      - name: Record separate logarithmic-reference result
+        run: |
+          set -o pipefail
+          peer_history_bound_status=0
+          CCI_PEER_HISTORY_DIAGNOSTIC=1 CCI_PEER_HISTORY_REQUIRE_BOUND=1 go test -p 2 -count=1 -race -run '^TestPeerHistory(ActualGrepDiagnostic|PublicReadsDiagnostic)$' -v ./internal/cli ./internal/store > "$RUNNER_TEMP/peer-history-required-bound.log" 2>&1 || peer_history_bound_status=$?
+          cat "$RUNNER_TEMP/peer-history-required-bound.log"
+          printf 'PEER_HISTORY_REQUIRED_BOUND_STATUS status=%s\n' "$peer_history_bound_status" | tee "$RUNNER_TEMP/peer-history-required-bound-status.log"
+          if [ "$peer_history_bound_status" -ne 0 ]; then
+            grep -F 'PEER_HISTORY_REFERENCE_EXCEEDED ' "$RUNNER_TEMP/peer-history-required-bound.log"
+          fi
+          for operation in grep query count; do
+            for population in 32 10000; do
+              grep -F "PEER_HISTORY_WORK operation=$operation M=$population eligible_rows=2 " "$RUNNER_TEMP/peer-history-required-bound.log"
+            done
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: peer-history-diagnostic-${{ matrix.os }}-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/peer-history-*.log
+          if-no-files-found: error
