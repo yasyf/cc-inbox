@@ -39,7 +39,20 @@ func main() {
 
 func run() error {
 	if len(os.Args) == 3 && os.Args[1] == "wait-write" {
-		return waitingWriter(os.Args[2], store.Record{Drive: "concurrent", Lane: "old", Kind: "note", Text: "old writer during provisioning", To: []string{"peer:concurrent-old"}, Source: "post"})
+		return waitingWriter(os.Args[2], store.Record{
+			Drive: "concurrent", Lane: "old", Kind: "note", Text: "old writer during provisioning",
+			To: []string{"peer:concurrent-old"}, Source: "post",
+		})
+	}
+	if len(os.Args) == 4 && os.Args[1] == "wait-closer" {
+		target, err := strconv.ParseInt(os.Args[3], 10, 64)
+		if err != nil {
+			return err
+		}
+		return waitingWriter(os.Args[2], store.Record{
+			Drive: "concurrent", Lane: "old", Kind: "answer", Text: "old closer during provisioning", Re: target,
+			To: []string{"peer:concurrent-old"}, Source: "post",
+		})
 	}
 	if len(os.Args) == 3 && os.Args[1] == "wait-incident" {
 		return waitingWriter(os.Args[2], store.Record{Drive: "concurrent", Lane: "old", Kind: "incident", Text: "old incident #31415", Source: "post"})

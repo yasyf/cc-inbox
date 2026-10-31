@@ -502,6 +502,9 @@ func (s *Store) migrate(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+		return err
+	}
 	if err := createIncidentOwnerLock(s.home); err != nil {
 		return err
 	}
@@ -584,6 +587,9 @@ func Validate(r Record) error {
 	}
 	if len(r.Body) > 0 && !json.Valid(r.Body) {
 		return errors.New("body is not valid JSON")
+	}
+	if err := kinds.CheckBody(r.Kind, r.Body, r.To); err != nil {
+		return err
 	}
 	for _, stack := range r.Refs.Stacks {
 		if project, env, ok := strings.Cut(stack, "/"); !ok || project == "" || env == "" || strings.Contains(env, "/") {

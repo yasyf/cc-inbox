@@ -43,11 +43,16 @@ jobs:
           mv plugin/.claude-plugin/plugin.json.tmp plugin/.claude-plugin/plugin.json
       - name: Validate descriptor
         run: go run github.com/yasyf/binrun/cmd/binrun@v0.1.1 -- parse plugin/bin/cci.binrun
+      - name: Build the release version comparator
+        run: go build -o "$RUNNER_TEMP/release-version" ./scripts/release-version
       - name: Move the tag onto the synced descriptor and land it on main
         id: commit
+        env:
+          RELEASE_VERSION_COMPARE: ${{ runner.temp }}/release-version
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          source_commit="$(git rev-parse HEAD)"
           git add plugin/bin/cci.binrun plugin/.claude-plugin/plugin.json
           if git diff --cached --quiet; then
             echo "${GITHUB_REF_NAME} already carries its descriptor and manifest"
@@ -56,18 +61,62 @@ jobs:
             git tag -fa "${GITHUB_REF_NAME}" -m "${GITHUB_REF_NAME}"
             git push --force origin "refs/tags/${GITHUB_REF_NAME}"
           fi
-          git fetch origin main
-          if git merge-base --is-ancestor HEAD origin/main; then
-            echo "main already carries ${GITHUB_REF_NAME}'s descriptor and manifest"
-          else
-            git rebase origin/main
-            git push origin HEAD:main
+          git show HEAD:plugin/bin/cci.binrun > "$RUNNER_TEMP/cci.binrun"
+          chmod +x "$RUNNER_TEMP/cci.binrun"
+          descriptor_commit="$(git rev-parse HEAD)"
+          version="${GITHUB_REF_NAME#v}"
+          rejected_main=""
+          accepted_main=""
+          for attempt in 1 2 3; do
+            git fetch --no-tags origin refs/heads/main
+            main="$(git rev-parse FETCH_HEAD)"
+            if [ "$main" = "$rejected_main" ]; then
+              echo "main did not advance after the rejected publication" >&2
+              exit 1
+            fi
+            if ! git merge-base --is-ancestor "$source_commit" "$main"; then
+              echo "release source is not an ancestor of current main" >&2
+              exit 1
+            fi
+            git reset --hard "$main"
+            current="$(jq -r .version plugin/.claude-plugin/plugin.json)"
+            comparison="$("$RELEASE_VERSION_COMPARE" "$version" "$current")"
+            if [ "$comparison" -ge 0 ]; then
+              cp "$RUNNER_TEMP/cci.binrun" plugin/bin/cci.binrun
+              chmod +x plugin/bin/cci.binrun
+              if [ "$version" != "$current" ]; then
+                jq --arg v "$version" '.version = $v' plugin/.claude-plugin/plugin.json > "$RUNNER_TEMP/cci-main-plugin.json"
+                mv "$RUNNER_TEMP/cci-main-plugin.json" plugin/.claude-plugin/plugin.json
+              fi
+              git add plugin/bin/cci.binrun plugin/.claude-plugin/plugin.json
+            fi
+            parents=(-p "$main")
+            if git merge-base --is-ancestor "$descriptor_commit" "$main"; then
+              if git diff --cached --quiet; then
+                accepted_main="$main"
+                break
+              fi
+            else
+              parents+=(-p "$descriptor_commit")
+            fi
+            tree="$(git write-tree)"
+            candidate="$(printf 'chore: sync cci.binrun + manifest to %s\n' "$GITHUB_REF_NAME" | git commit-tree "$tree" "${parents[@]}")"
+            if git push origin "$candidate:refs/heads/main"; then
+              git reset --hard "$candidate"
+              accepted_main="$candidate"
+              break
+            fi
+            rejected_main="$main"
+          done
+          if [ -z "$accepted_main" ]; then
+            echo "failed to publish the descriptor after $attempt advancing-main attempts" >&2
+            exit 1
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Upload descriptor to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${GITHUB_REF_NAME}" plugin/bin/cci.binrun --repo "${GITHUB_REPOSITORY}" --clobber
+        run: gh release upload "${GITHUB_REF_NAME}" "$RUNNER_TEMP/cci.binrun" --repo "${GITHUB_REPOSITORY}" --clobber
 
   post-release-ci:
     needs: descriptor

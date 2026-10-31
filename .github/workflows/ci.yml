@@ -32,18 +32,24 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Validate native workflow contracts
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
           python3 .github/scripts/test-native-release-gates.py
+          go build -o "$RUNNER_TEMP/release-version" ./scripts/release-version
+          RELEASE_VERSION_COMPARE="$RUNNER_TEMP/release-version" python3 .github/scripts/test-release-main-sync.py
 
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,7 +72,7 @@ jobs:
           path: .ci-tail-baseline
       - uses: actions/checkout@v7
         with:
-          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
           path: .ci-native-tail-baseline
       - uses: actions/checkout@v7
         with:
@@ -92,6 +98,30 @@ jobs:
         with:
           ref: e9610dc3fc29a2d3aa8fb342363adacf130c4ed5
           path: .ci-incident-shared-node-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
+          path: .ci-grep-selected-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: 5e61c5bc11d417c601889cac1393b346d17a44cb
+          path: .ci-mesh-export-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: e2ef260846d7afb2850cc503dc6cde57baa78487
+          path: .ci-mesh-frontier-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          path: .ci-openamong-oracle
+      - uses: actions/checkout@v7
+        with:
+          ref: 53c067b27a53ac3798753309221a6b4f4190e5b7
+          path: .ci-openamong-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          path: .ci-hook-owed-baseline
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -148,6 +178,40 @@ jobs:
           grep -F 'shared ancestor retained stale membership' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
           grep -F 'shared changed registration did not refresh' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
           go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
+      - name: Hook owed indexed closure and immutable output
+        run: |
+          test "$(git -C .ci-hook-owed-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          cp internal/hook/owed_cost_test.go .ci-hook-owed-baseline/internal/hook/
+          mkdir -p "$RUNNER_TEMP/cci-hook-owed-snapshots"
+          (cd .ci-hook-owed-baseline && CCI_HOOK_OWED_EXPECT_GLOBAL=1 CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" CCI_HOOK_OWED_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook)
+          if (cd .ci-hook-owed-baseline && go test -count=1 -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook) > "$RUNNER_TEMP/cci-hook-owed-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-hook-owed-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-hook-owed-negative.log"
+          grep -F 'hook owed refs_reads=10002 want=2 history=10000' "$RUNNER_TEMP/cci-hook-owed-negative.log"
+          CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
+          go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
+      - name: Mesh export indexed prefix and immutable contract
+        run: |
+          test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
+          cp internal/mesh/export_cost_test.go .ci-mesh-export-baseline/internal/mesh/
+          (cd .ci-mesh-export-baseline && CCI_MESH_EXPECT_GLOBAL=1 go test -count=1 -run '^TestMeshExportHistoryBaseline$' -v ./internal/mesh)
+          if (cd .ci-mesh-export-baseline && go test -count=1 -run '^TestMeshExportHistoryBaseline$' -v ./internal/mesh) > "$RUNNER_TEMP/cci-mesh-history-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-mesh-history-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-mesh-history-negative.log"
+          grep -F 'text_reads=20002 want=snapshot/1/4' "$RUNNER_TEMP/cci-mesh-history-negative.log"
+          test "$(git -C .ci-mesh-frontier-negative rev-parse HEAD)" = e2ef260846d7afb2850cc503dc6cde57baa78487
+          cp internal/mesh/export_frontier_test.go .ci-mesh-frontier-negative/internal/mesh/
+          if (cd .ci-mesh-frontier-negative && go test -count=1 -run '^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh) > "$RUNNER_TEMP/cci-mesh-frontier-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
+          grep -F 'mesh revision included unvalidated concurrent append: seq=3 want=2' "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
+          go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
         run: go test -race -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' ./...
@@ -175,6 +239,16 @@ jobs:
           go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli
           go test -run '^TestRepliesSelectionExceedsVariableLimit$' -v ./internal/store
           go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
+      - name: Indexed selected reply counts, current public CLI oracle, and required index lifecycle
+        run: |
+          test "$(git -C .ci-grep-selected-baseline rev-parse HEAD)" = 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
+          cp internal/cli/grep_cost_test.go internal/cli/grep_selected_cost_test.go .ci-grep-selected-baseline/internal/cli/
+          (cd .ci-grep-selected-baseline && CCI_GREP_EXPECT_GLOBAL_REPLY_SCAN=1 go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$' -v ./internal/cli)
+          (cd .ci-grep-selected-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-grep-current-baseline" ./cmd/cci)
+          go build -p 2 -o "$RUNNER_TEMP/cci-grep-current" ./cmd/cci
+          CCI_GREP_CURRENT_BASELINE="$RUNNER_TEMP/cci-grep-current-baseline" CCI_GREP_CURRENT_CLI="$RUNNER_TEMP/cci-grep-current" go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$|^TestGrepIndexedRepliesPreservePublicErrorsAndBytes$' -v ./internal/cli
+          go test -count=1 -run '^TestSelectedReply|^TestGrepReplyIndex' -v ./internal/store
+          CCI_GREP_REPLY_INDEX_ROWS=250000 go test -count=1 -run '^TestGrepReplyIndexProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Build
         run: go build ./...
       - name: Tail operation counts and full requested output
@@ -184,6 +258,22 @@ jobs:
           tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
           (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$tail_tests" -v ./internal/cli)
           go test -run "$tail_tests" -v ./internal/cli
+      - name: Selected opener closure work and error scope
+        run: |
+          cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/
+          cp internal/server/openamong_refutation_test.go .ci-openamong-negative/internal/server/
+          (cd .ci-openamong-oracle && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server)
+          if (cd .ci-openamong-negative && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server) > "$RUNNER_TEMP/openamong-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/openamong-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/foreign_nonmatching_typed_suffix' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/raw_topic_bytes' "$RUNNER_TEMP/openamong-negative.log"
+          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/Go-valid_deep_refs' "$RUNNER_TEMP/openamong-negative.log"
+          go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server
+          go test -run '^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$|^TestOpenAmongResolverCandidateErrors$|^TestSelectedClosure' -v ./internal/server ./internal/store
+          CCI_CLOSER_PROVISION_ROWS=250000 go test -run '^TestSelectedClosureProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
         run: |
           go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store
@@ -208,7 +298,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' ./internal/cli)
