@@ -26,7 +26,7 @@ func TestLaneScoreIndexRequiresExplicitMaintenanceOnCurrentStore(t *testing.T) {
 	if _, err := other.LaneTips(t.Context(), "d", 500); err != nil {
 		t.Fatal(err)
 	}
-	if other.SchemaFingerprint() != fingerprint || len(migrations) != 14 || WireFormat != 3 {
+	if other.SchemaFingerprint() != fingerprint || len(migrations) != 14 || WireFormat != 4 {
 		t.Fatal("lane index changed schema/wire/fingerprint")
 	}
 }

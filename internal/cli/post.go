@@ -195,6 +195,16 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			for i := range records {
+				if len(records[i].To) == 0 && records[i].Re != 0 {
+					if records[i].To, err = replyTo(cmd.Context(), st, records[i]); err != nil {
+						return err
+					}
+				}
+				if len(records[i].To) > 0 && !slices.ContainsFunc(records[i].To, func(t string) bool { return !addressesSelf(t, lane, records[i].Drive) }) {
+					return selfAddressed(cmd.Context(), st, records[i], lane)
+				}
+			}
 			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
 				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
 					return err
@@ -222,9 +232,9 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time later than the post is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; owner and all always pass")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; owner and all always pass; a record every --to of which names the posting lane itself is refused, naming who wrote the record it answers")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
-	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) of the record this one answers or closes; repeated, each gets its own record")
+	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) of the record this one answers or closes; repeated, each gets its own record; with no --to, each is addressed to the lane that wrote the record it answers, as <lane>@<drive> when that record is on another drive")
 	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
 	f.Int64SliceVar(&reSeqs, "re-seq", nil, "internal store sequences this record answers")
 	f.Int64SliceVar(&resolvesSeqs, "resolves-seq", nil, "internal store sequences this record resolves")
@@ -292,6 +302,42 @@ func namedLane(ctx context.Context, st *store.Store, self store.PeerKey) (string
 		return "", nil
 	}
 	return p.AgentName, err
+}
+
+func replyTo(ctx context.Context, st *store.Store, reply store.Record) ([]string, error) {
+	answered, err := st.Get(ctx, reply.Re)
+	if errors.Is(err, sql.ErrNoRows) || err == nil && (answered.Lane == "" || answered.Lane == reply.Lane && answered.Drive == reply.Drive) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("--re #%d: %w", reply.Re, err)
+	}
+	to := answered.Lane
+	if answered.Drive != reply.Drive {
+		to += "@" + answered.Drive
+	}
+	return forwarded(ctx, st, reply.Drive, []string{to})
+}
+
+func addressesSelf(t, lane, drive string) bool {
+	addressed, onDrive, cross := strings.Cut(t, "@")
+	return store.SameLane(addressed, lane) && (!cross || onDrive == drive)
+}
+
+func selfAddressed(ctx context.Context, st *store.Store, r store.Record, lane string) error {
+	why := fmt.Sprintf("--to %s addresses only %s, the lane posting this record", strings.Join(r.To, ","), lane)
+	if r.Re == 0 {
+		return errors.New(why + "; name the lane that should read it")
+	}
+	answered, err := st.Get(ctx, r.Re)
+	if err != nil || answered.Lane == "" || store.SameLane(answered.Lane, lane) && answered.Drive == r.Drive {
+		return fmt.Errorf("%s; name the lane that should read this answer to #%d", why, r.Re)
+	}
+	to := answered.Lane
+	if answered.Drive != r.Drive {
+		to += "@" + answered.Drive
+	}
+	return fmt.Errorf("%s; #%d came from %s, which a reply with no --to reaches", why, r.Re, to)
 }
 
 func forwarded(ctx context.Context, st *store.Store, drive string, to []string) ([]string, error) {
