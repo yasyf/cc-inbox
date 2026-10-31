@@ -146,13 +146,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		clauses = append(clauses, "seq < ?")
 		params = append(params, f.Before)
 	}
-	if !f.Since.IsZero() {
-		clauses = append(clauses, "at >= ?")
-		params = append(params, f.Since.UnixMilli())
-	}
-	if !f.Until.IsZero() {
-		clauses = append(clauses, "at < ?")
-		params = append(params, f.Until.UnixMilli())
+	if window, bounds := f.timeWhere(); window != "" {
+		clauses = append(clauses, window)
+		params = append(params, bounds...)
 	}
 	if !f.IncludeExpired {
 		clauses = append(clauses, "(expires_at IS NULL OR expires_at > ?)")
@@ -161,12 +157,26 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	return strings.Join(clauses, " AND "), params
 }
 
+func (f Filter) timeWhere() (string, []any) {
+	var clauses []string
+	var params []any
+	if !f.Since.IsZero() {
+		clauses = append(clauses, "at >= ?")
+		params = append(params, f.Since.UnixMilli())
+	}
+	if !f.Until.IsZero() {
+		clauses = append(clauses, "at < ?")
+		params = append(params, f.Until.UnixMilli())
+	}
+	return strings.Join(clauses, " AND "), params
+}
+
 func (f Filter) bounded(self string, now time.Time) (string, []any) {
-	where, params := f.where(self, now)
 	arms, candidates := f.candidateArms(self)
 	if len(arms) == 0 {
-		return where, params
+		return f.where(self, now)
 	}
+	where, params := f.where(self, now)
 	candidate := "seq"
 	if f.Origin != "" || f.PeerAfter > 0 {
 		// Unary plus retains records_origin and peer-after OR scans, including their native error order.
@@ -181,6 +191,7 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 		return nil, nil
 	}
 	var params []any
+	window, timestamps := f.timeWhere()
 	bounds := func(column string, after int64) string {
 		var clauses string
 		if after > 0 {
@@ -191,7 +202,17 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 			clauses += " AND " + column + " < ?"
 			params = append(params, f.Before)
 		}
+		if window != "" {
+			clauses += " AND " + window
+			params = append(params, timestamps...)
+		}
 		return clauses
+	}
+	memberships := func(table string) string {
+		if window == "" {
+			return table
+		}
+		return table + " JOIN records ON records.seq = source_seq"
 	}
 	var arms []string
 	appendDrive := func(selector string, selected ...any) {
@@ -217,10 +238,10 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 	}{{peers, max(f.After, f.PeerAfter)}, {readers, f.After}} {
 		for _, address := range addresses.values {
 			params = append(params, address)
-			arms = append(arms, "SELECT source_seq FROM record_recipients WHERE address = ?"+bounds("source_seq", addresses.after))
+			arms = append(arms, "SELECT source_seq FROM "+memberships("record_recipients")+" WHERE address = ?"+bounds("source_seq", addresses.after))
 		}
 	}
-	arms = append(arms, "SELECT source_seq FROM record_json_errors WHERE field = 'recipients'"+bounds("source_seq", f.After))
+	arms = append(arms, "SELECT source_seq FROM "+memberships("record_json_errors")+" WHERE field = 'recipients'"+bounds("source_seq", f.After))
 	return arms, params
 }
 
@@ -376,13 +397,15 @@ func (s *Store) selectionColumns(f Filter, projection string) (string, []any) {
 	if f.Origin != "" {
 		where, params = f.bounded(s.Self(), s.Now())
 	} else {
-		where, params = f.where(s.Self(), s.Now())
 		arms, candidates := f.candidateArms(s.Self())
 		if len(arms) > 0 {
+			where, params = f.where(s.Self(), s.Now())
 			// LIMIT -1 prevents flattening from moving validation ahead of the ordered candidate stream.
 			from = "(" + strings.Join(arms, " UNION ") + " ORDER BY candidate_seq " + order + " LIMIT -1) c CROSS JOIN records ON records.seq = c.candidate_seq"
 			ordered = "c.candidate_seq"
 			params = append(candidates, params...)
+		} else {
+			where, params = f.where(s.Self(), s.Now())
 		}
 	}
 	q := "SELECT " + projection + " FROM " + from + " WHERE " + where + " ORDER BY " + ordered + " " + order

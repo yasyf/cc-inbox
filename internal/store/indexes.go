@@ -21,6 +21,7 @@ var physicalIndexes = [...]namedIndex{
 	{"records_drive_lane_score", "CREATE INDEX records_drive_lane_score ON records(drive, lane, (at * 1000000 + seq) DESC, seq ASC) WHERE kind != 'digest'"},
 	{"sessions_drive_lane", "CREATE INDEX sessions_drive_lane ON sessions(drive, lane)"},
 	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
+	{"records_drive_at_seq", "CREATE INDEX records_drive_at_seq ON records(drive, at, seq)"},
 }
 
 var queryIndexes = [...]namedIndex{
