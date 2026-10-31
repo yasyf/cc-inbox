@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci post --to <lane>` accepts a lane that has not started yet without
+  `--force`, and that lane reads the record when it first binds. Only a
+  never-seen name that looks like a slip for a live lane, one or two edits
+  from it or an older number of it, is refused, naming that lane; `--force`
+  addresses it as typed.
+- A subagent or teammate spawned with a name is bound as that lane by
+  `cci me`, and its posts default `--lane` to the name.
+- `cci post --kind stand-down --to <lane> --successor <new>` records who took
+  a lane over: later records addressed to the lane reach every successor too,
+  `cci who` marks it `stood-down successor=<new>`, and
+  `cci who --successor-of <lane> [--json]` prints the lane standing in now.
+- A cci binary that an older plugin copy or PATH entry reaches hands off to
+  the newest cci installed on the machine, plugin or cask.
+
 - `cci subscribe --to-kind <kinds>` limits the records addressed to `--reader`
   that the channel and the reader's `PostToolUse` hook deliver. For `root` it
   defaults to `incident,decide,ask,blocker,urgent,answer,correction,defect`,

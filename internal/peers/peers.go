@@ -138,12 +138,14 @@ func inferRole(ctx context.Context, st *store.Store, k store.PeerKey) (string, e
 // and with the claims a ref selector matched.
 type View struct {
 	store.Peer
-	Name     string        `json:"name,omitempty"`
-	Address  string        `json:"address,omitempty"`
-	Status   string        `json:"status,omitempty"`
-	StatusAt time.Time     `json:"status_at,omitzero"`
-	Live     bool          `json:"live"`
-	Claims   []store.Claim `json:"claims,omitempty"`
+	Name      string        `json:"name,omitempty"`
+	Address   string        `json:"address,omitempty"`
+	Status    string        `json:"status,omitempty"`
+	StatusAt  time.Time     `json:"status_at,omitzero"`
+	Live      bool          `json:"live"`
+	Claims    []store.Claim `json:"claims,omitempty"`
+	StoodDown bool          `json:"stood_down,omitempty"`
+	Successor string        `json:"successor,omitempty"`
 }
 
 // Filter selects peers. Every set field must match; Session and Origin match
@@ -361,6 +363,12 @@ func (v View) Line(now time.Time) string {
 	}
 	if v.Lane != "" {
 		fmt.Fprintf(&b, " lane=%s", v.Lane)
+	}
+	if v.StoodDown {
+		b.WriteString(" stood-down")
+	}
+	if v.Successor != "" {
+		fmt.Fprintf(&b, " successor=%s", v.Successor)
 	}
 	if v.Branch != "" {
 		fmt.Fprintf(&b, " branch=%s", v.Branch)

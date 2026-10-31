@@ -297,7 +297,7 @@ func TestGrepSinceTakesAClockTime(t *testing.T) {
 
 func TestPostTakesItsTextAsOneArgument(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
-	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--force", "--to", "cci-fix-4"}
+	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--to", "cci-fix-4"}
 	if out, err := run(t, append(post, "land the fix")...); err != nil || out != "#1\n" {
 		t.Fatalf("post with a text argument = %q, %v", out, err)
 	}
@@ -903,7 +903,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner,desk", "--text", "RELEASE #45190"); err == nil || err.Error() != "--to release-owner: no live session or registered lane on drive drive-a is named release-owner; the nearest live lane is release-owner-4; --force addresses a lane that has not started yet" {
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner,desk", "--text", "RELEASE #45190"); err == nil || err.Error() != "--to release-owner: no lane on drive drive-a has registered as release-owner, which looks like a slip for the live lane release-owner-4; --force addresses release-owner as typed" {
 		t.Fatalf("post to a lane nobody holds: %v", err)
 	}
 	for _, to := range []string{"owner", "all"} {
@@ -911,7 +911,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 			t.Fatalf("post --to %s: %v", to, err)
 		}
 	}
-	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--force", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
+	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
 	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#3\n" {
 		t.Fatalf("post to a lane reading another drive = %q, %v", out, err)
 	}
@@ -1420,5 +1420,131 @@ func TestTailCutsResolvedRecordsUnlessAll(t *testing.T) {
 	}
 	if out, err = run(t, "tail", "--since", "0", "--all"); err != nil || strings.Count(out, "B build it") != 2 || strings.Contains(out, "cut to") {
 		t.Fatalf("tail --all = %q, %v", out, err)
+	}
+}
+
+func TestPostReachesALaneThatHasNotStartedYet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lane := range []string{"gate-fault-5", "n-enum-45410-1"} {
+		k := store.PeerKey{Session: "bbbb2222-" + lane, Agent: "a" + lane}
+		if err := st.BindLane(ctx, k, "d", lane, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []string{"gate-fault-6", "n-enum-45414-1", "fresh-desk"} {
+		if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "GO start "+to); err != nil || !strings.HasPrefix(out, "#") {
+			t.Fatalf("post --to %s, a lane that has not started = %q, %v", to, out, err)
+		}
+	}
+	for _, to := range []string{"gate-fault-4", "gate-falt-5"} {
+		if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "x"); err == nil || !strings.Contains(err.Error(), "slip for the live lane gate-fault-5") {
+			t.Fatalf("post --to %s, a slip for gate-fault-5: %v", to, err)
+		}
+		if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--force", "--to", to, "--text", "x"); err != nil {
+			t.Fatalf("post --force --to %s: %v", to, err)
+		}
+	}
+	st, err = store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	agent := store.PeerKey{Session: "aaaa1111-root", Agent: "agate-6"}
+	if _, err := st.Announce(ctx, store.Peer{Session: agent.Session, Agent: agent.Agent, AgentName: "gate-fault-6"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCI_AGENT_ID", agent.Agent)
+	if me, err := run(t, "me"); err != nil || !strings.Contains(me, " lane=gate-fault-6 ") {
+		t.Fatalf("me for a teammate named gate-fault-6 = %q, %v; want it bound as that lane", me, err)
+	}
+	if out, err := run(t, "tail", "--reader", "gate-fault-6", "--cursor", store.LaneCursor(agent)); err != nil || !strings.Contains(out, "GO start gate-fault-6") {
+		t.Fatalf("gate-fault-6's lane mail = %q, %v; want the go posted before it started", out, err)
+	}
+	if _, err := run(t, "post", "--kind", "state", "--text", "gate-fault-6 up"); err != nil {
+		t.Fatalf("post without --lane from a teammate bound by cci me: %v", err)
+	}
+	if out, err := run(t, "tail", "--since", "0", "--kind", "state", "--reader", "root", "--json"); err != nil || !strings.Contains(out, `"lane":"gate-fault-6","kind":"state"`) {
+		t.Fatalf("state = %q, %v", out, err)
+	}
+}
+
+func TestStandDownForwardsToTheSuccessor(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--successor", "desk-2", "--to", "desk-1", "--text", "x"); err == nil || !strings.Contains(err.Error(), "--kind stand-down") {
+		t.Fatalf("--successor on a go: %v", err)
+	}
+	for _, args := range [][]string{
+		{"--to", "desk-1", "--successor", "desk-2"},
+		{"--to", "desk-2", "--successor", "desk-3"},
+	} {
+		if _, err := run(t, append([]string{"post", "--lane", "root", "--kind", "stand-down", "--text", "stand down"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "desk-1", "--text", "take #12", "--json")
+	if err != nil || !strings.Contains(out, `"to":["desk-1","desk-2","desk-3"]`) {
+		t.Fatalf("go to a stood-down lane = %q, %v; want it addressed to every successor", out, err)
+	}
+	if out, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json"); err != nil || !strings.Contains(out, `"to":["desk-1"]`) {
+		t.Fatalf("a stand-down is forwarded = %q, %v", out, err)
+	}
+	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	desk := store.PeerKey{Session: "bbbb2222-desk", Agent: "adesk-2"}
+	if err := st.BindLane(context.Background(), desk, "d", "desk-2", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(context.Background(), store.Peer{Session: desk.Session, Agent: desk.Agent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || !strings.Contains(out, " lane=desk-2 stood-down successor=desk-3 ") {
+		t.Fatalf("who --lane desk-2 = %q, %v; want it marked stood down", out, err)
+	}
+	if out, err := run(t, "who", "--successor-of", "desk-2"); err != nil || out != "desk-3\n" {
+		t.Fatalf("who --successor-of desk-2 = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"successor":"","chain":[]}`+"\n" {
+		t.Fatalf("who --successor-of desk-1 after a stand-down naming none = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--successor-of", "desk-3", "--json"); err != nil || out != `{"drive":"d","lane":"desk-3","stood_down":false,"successor":"","chain":[]}`+"\n" {
+		t.Fatalf("who --successor-of desk-3 = %q, %v", out, err)
 	}
 }
