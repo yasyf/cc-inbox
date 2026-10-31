@@ -58,6 +58,11 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
       - uses: actions/checkout@v7
         with:
+          ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
+          path: .ci-audience-current491
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
           ref: 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
           path: .ci-stream-idle-baseline
           persist-credentials: false
@@ -142,6 +147,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Audience query private diagnostic
+        run: |
+          cp internal/cli/audience_query_cost_test.go .ci-audience-current491/internal/cli/
+          cp internal/store/audience_plan_internal_test.go .ci-audience-current491/internal/store/
+          cd .ci-audience-current491
+          test "$(git rev-parse HEAD)" = cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
+          go test -count=1 -run '^TestAudience' -v ./internal/cli ./internal/store
       - name: SSE idle queries, immutable history control, and commit freshness
         run: |
           test "$(git -C .ci-stream-idle-baseline rev-parse HEAD)" = 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
