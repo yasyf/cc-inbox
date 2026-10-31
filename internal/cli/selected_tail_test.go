@@ -144,7 +144,7 @@ func TestTailSelectedNoDefaultLimitOrResponseBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	var ids []string
+	ids := make([]string, 0, 32)
 	for i := range 32 {
 		result, err := tx.ExecContext(t.Context(), `INSERT INTO records(drive,lane,kind,at,text,source,hash) VALUES('many','all','note',4102444800000,?,'post',?)`, strings.Repeat("x", 2048), fmt.Sprintf("selected-many-%d", i))
 		if err != nil {
