@@ -157,6 +157,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Urgent repeat key-order range diagnostic
+        run: go test -count=1 -race -run '^TestUrgentRepeatIndex(Diagnostic|RangesDiagnostic)$' -v ./internal/store
       - name: Urgent repeat existing-query index diagnostic
         run: |
           cp internal/store/testdata/urgent-repeat-old/compat_test.go .ci-urgent-repeat-old/internal/store/urgent_repeat_legacy_internal_test.go

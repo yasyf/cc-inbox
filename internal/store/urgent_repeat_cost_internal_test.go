@@ -208,3 +208,83 @@ VALUES ('d','worker','urgent',?,'unread corruption','unread-topic','{','post','f
 		}
 	}
 }
+
+func TestUrgentRepeatIndexRangesDiagnostic(t *testing.T) {
+	for _, population := range []int{32, 10000} {
+		for _, shape := range []string{"older-than-window", "later-sequence"} {
+			t.Run(fmt.Sprintf("%d/%s", population, shape), func(t *testing.T) {
+				var comparisons atomic.Int64
+				collation := fmt.Sprintf("cci_urgent_ranges_%d", laneCollationID.Add(1))
+				if err := sqlite.RegisterCollationUtf8(collation, func(a, b string) int {
+					comparisons.Add(1)
+					return strings.Compare(a, b)
+				}); err != nil {
+					t.Fatal(err)
+				}
+				ctx := t.Context()
+				st := countedColumnsStore(t, collation, "drive", "topic")
+				now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+				st.Now = func() time.Time { return now }
+				if _, err := st.db.ExecContext(ctx, "DROP INDEX records_urgent_repeat"); err != nil {
+					t.Fatal(err)
+				}
+				selected := func() {
+					t.Helper()
+					if _, err := st.db.ExecContext(ctx, `INSERT INTO records(drive,lane,kind,topic,at,text,recipients,source,hash)
+VALUES ('d','worker','urgent','same-topic',?,'selected','["root"]','post','range-selected')`, now.UnixMilli()); err != nil {
+						t.Fatal(err)
+					}
+				}
+				at := now.Add(-UrgentRepeat).UnixMilli()
+				if shape == "later-sequence" {
+					selected()
+					at = now.UnixMilli()
+				}
+				if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
+VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<?
+)
+INSERT INTO records(drive,lane,kind,topic,at,text,recipients,source,hash)
+SELECT 'd','worker','urgent','same-topic',?,'unrouted','["elsewhere"]','post','range-history-'||n FROM history`, population, at); err != nil {
+					t.Fatal(err)
+				}
+				filter := (Subscription{Drive: "d", Session: "reader", Reader: "root", Kinds: []kinds.Kind{kinds.Urgent}, ToKinds: DefaultToKinds("root")}).Filter()
+				filter.Limit = 500
+				wantSeq := int64(1)
+				if shape == "older-than-window" {
+					selected()
+					filter.After = int64(population)
+					wantSeq = int64(population + 1)
+				} else {
+					filter.Before = 2
+				}
+				baseline, err := st.Query(ctx, filter)
+				if err != nil || len(baseline) != 1 || baseline[0].Seq != wantSeq {
+					t.Fatalf("range baseline records=%v err=%v", baseline, err)
+				}
+				for _, index := range []struct{ name, order string }{{"sequence", "seq,at"}, {"time", "at,seq"}} {
+					if _, err := st.db.ExecContext(ctx, "CREATE INDEX urgent_repeat_trial ON records(drive,lane,kind,topic,"+index.order+")"); err != nil {
+						t.Fatal(err)
+					}
+					comparisons.Store(0)
+					got, err := st.Query(ctx, filter)
+					work := comparisons.Load()
+					assertSameRead(t, "repeat range index", got, err, baseline, nil)
+					query, args := st.selection(filter)
+					plan := queryPlan(ctx, t, st, query, args...)
+					if !strings.Contains(strings.Join(plan, "\n"), "SEARCH prior USING COVERING INDEX urgent_repeat_trial") {
+						t.Fatalf("range trial index not selected: %v", plan)
+					}
+					bound := int64(4*bits.Len(uint(population)) + 8)
+					bounded := shape == "older-than-window" && index.name == "time" || shape == "later-sequence" && index.name == "sequence"
+					t.Logf("URGENT_REPEAT_RANGE_WORK history=%d shape=%s index=%s drive_topic_comparisons=%d finite_bound=%d expected_bounded=%t plan=%v", population, shape, index.name, work, bound, bounded, plan)
+					if work == 0 || bounded && work > bound || !bounded && work <= int64(population) {
+						t.Fatalf("repeat range work does not match access-path control: work=%d bound=%d bounded=%t history=%d", work, bound, bounded, population)
+					}
+					if _, err := st.db.ExecContext(ctx, "DROP INDEX urgent_repeat_trial"); err != nil {
+						t.Fatal(err)
+					}
+				}
+			})
+		}
+	}
+}
