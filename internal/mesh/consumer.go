@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -105,13 +106,21 @@ func (c *Consumer) Export(ctx context.Context, request syncservice.ExportRequest
 		return syncservice.ChangeEnvelope{}, err
 	}
 	head, _ := log.head()
-	newer, err := c.st.Export(ctx, c.st.Self(), head.Seq, 0)
-	if err != nil {
+	encodedPresence, presenceErr := json.Marshal(presence)
+	budget := payloadBudget - len(encodedPresence)
+	used, seq, first := 0, head.Seq, true
+	if err := c.st.VisitNewestExports(ctx, c.st.Self(), head.Seq, func(row store.Row) (bool, error) {
+		if first {
+			seq, first = row.OriginSeq, false
+		}
+		raw, err := json.Marshal(row)
+		if err != nil {
+			return false, nil
+		}
+		used += len(raw) + 1
+		return used <= budget, nil
+	}); err != nil {
 		return syncservice.ChangeEnvelope{}, err
-	}
-	seq := head.Seq
-	if len(newer) > 0 {
-		seq = newer[len(newer)-1].OriginSeq
 	}
 	if head, err = log.advance(seq, digest, c.st.Now()); err != nil {
 		return syncservice.ChangeEnvelope{}, err
@@ -126,19 +135,14 @@ func (c *Consumer) Export(ctx context.Context, request syncservice.ExportRequest
 	} else {
 		kind, base = syncservice.ChangeSnapshot, 0
 	}
-	rows, err := c.st.Export(ctx, c.st.Self(), after, 0)
+	if presenceErr != nil {
+		return syncservice.ChangeEnvelope{}, fmt.Errorf("mesh: encode presence: %w", presenceErr)
+	}
+	window, trimmed, err := c.newestExport(ctx, after, budget)
 	if err != nil {
 		return syncservice.ChangeEnvelope{}, err
 	}
-	encodedPresence, err := json.Marshal(presence)
-	if err != nil {
-		return syncservice.ChangeEnvelope{}, fmt.Errorf("mesh: encode presence: %w", err)
-	}
-	window, err := newestWithin(rows, payloadBudget-len(encodedPresence))
-	if err != nil {
-		return syncservice.ChangeEnvelope{}, err
-	}
-	if len(window) < len(rows) {
+	if trimmed {
 		kind, base = syncservice.ChangeSnapshot, 0
 	}
 	raw, err := json.Marshal(body{Node: c.st.Self(), Rows: nonNil(window), Presence: presence})
@@ -205,18 +209,24 @@ func (c *Consumer) ackPeers(ctx context.Context) error {
 	return nil
 }
 
-func newestWithin(rows []store.Row, budget int) ([]store.Row, error) {
-	used := 0
-	for i := len(rows) - 1; i >= 0; i-- {
-		raw, err := json.Marshal(rows[i])
+func (c *Consumer) newestExport(ctx context.Context, after int64, budget int) ([]store.Row, bool, error) {
+	var window []store.Row
+	used, trimmed := 0, false
+	err := c.st.VisitNewestExports(ctx, c.st.Self(), after, func(row store.Row) (bool, error) {
+		raw, err := json.Marshal(row)
 		if err != nil {
-			return nil, fmt.Errorf("mesh: encode row: %w", err)
+			return false, fmt.Errorf("mesh: encode row: %w", err)
 		}
-		if used += len(raw) + 1; used > budget {
-			return rows[i+1:], nil
+		used += len(raw) + 1
+		if used > budget {
+			trimmed = true
+			return false, nil
 		}
-	}
-	return rows, nil
+		window = append(window, row)
+		return true, nil
+	})
+	slices.Reverse(window)
+	return window, trimmed, err
 }
 
 func (c *Consumer) Apply(ctx context.Context, change syncservice.ChangeEnvelope) (syncservice.ApplyResult, error) {
