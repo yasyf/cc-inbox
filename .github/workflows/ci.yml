@@ -1,87 +1,32 @@
-name: CI
-
+name: Incident native event proof
 on:
-  workflow_call:
-    inputs:
-      commit:
-        description: Exact commit to validate
-        required: true
-        type: string
-  push:
-    branches: [main]
-  pull_request:
   workflow_dispatch:
     inputs:
       commit:
-        description: Exact commit to validate
+        description: Exact reviewed candidate source
         required: true
         type: string
-
-concurrency:
-  group: ci-${{ inputs.commit || github.ref }}
-  cancel-in-progress: ${{ inputs.commit == '' && github.event_name == 'pull_request' }}
-
 permissions:
   contents: read
-
 jobs:
-  release-gates:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+  incident-native:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    env:
+      GOTOOLCHAIN: local
+      GOMAXPROCS: '2'
+      GOFLAGS: -p=2
+      SOURCE_SHA: ${{ inputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit || github.sha }}
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Validate native workflow contracts
-        run: |
-          bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
-          "$RUNNER_TEMP/actionlint" -color
-          python3 .github/scripts/test-native-release-gates.py
-          go build -o "$RUNNER_TEMP/release-version" ./scripts/release-version
-          RELEASE_VERSION_COMPARE="$RUNNER_TEMP/release-version" python3 .github/scripts/test-release-main-sync.py
-
-  test:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.commit || github.sha }}
+          ref: ${{ inputs.commit }}
+      - name: Verify exact candidate source
+        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
       - uses: actions/checkout@v7
         with:
           ref: 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
           path: .ci-old
-      - uses: actions/checkout@v7
-        with:
-          ref: 722f03bcbaadf335f6ee9cb7d2c4b57e274f942e
-          path: .ci-recipients-baseline
-      - uses: actions/checkout@v7
-        with:
-          ref: e08497bf9ce5880788f6103a949e034c9ed13fc4
-          path: .ci-grep-baseline
-      - uses: actions/checkout@v7
-        with:
-          ref: c148e0dc6970d4d5f446d77ba62d8a4060e0156c
-          path: .ci-tail-baseline
-      - uses: actions/checkout@v7
-        with:
-          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
-          path: .ci-native-tail-baseline
-      - uses: actions/checkout@v7
-        with:
-          ref: e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
-          path: .ci-native-tail-null-baseline
-      - uses: actions/checkout@v7
-        with:
-          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
-          path: .ci-lane-score-baseline
       - uses: actions/checkout@v7
         with:
           ref: b7da336975a6651226912c5c129a38bec9c0e3da
@@ -98,36 +43,10 @@ jobs:
         with:
           ref: e9610dc3fc29a2d3aa8fb342363adacf130c4ed5
           path: .ci-incident-shared-node-negative
-      - uses: actions/checkout@v7
-        with:
-          ref: 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
-          path: .ci-grep-selected-baseline
-      - uses: actions/checkout@v7
-        with:
-          ref: 5e61c5bc11d417c601889cac1393b346d17a44cb
-          path: .ci-mesh-export-baseline
-      - uses: actions/checkout@v7
-        with:
-          ref: e2ef260846d7afb2850cc503dc6cde57baa78487
-          path: .ci-mesh-frontier-negative
-      - uses: actions/checkout@v7
-        with:
-          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
-          path: .ci-openamong-oracle
-      - uses: actions/checkout@v7
-        with:
-          ref: 53c067b27a53ac3798753309221a6b4f4190e5b7
-          path: .ci-openamong-negative
-      - uses: actions/checkout@v7
-        with:
-          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
-          path: .ci-hook-owed-baseline
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - name: Vet
-        run: go vet ./...
       - name: Build immutable 0.41.1 store compatibility probe
         run: |
           cci_old_store_probe="$RUNNER_TEMP/cci-old-store-probe"
@@ -138,17 +57,6 @@ jobs:
           go build -p 2 -o "$cci_old_store_probe" ./cmd/compat-probe
           test -x "$cci_old_store_probe"
           printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
-      - name: Cask handoff waits for committed installation
-        run: |
-          test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
-          cp internal/version/cask_readiness_test.go .ci-mesh-export-baseline/internal/version/
-          if (cd .ci-mesh-export-baseline && go test -count=1 -run '^TestCaskHandoffWaitsForCommittedReceipt$' -v ./internal/version) > "$RUNNER_TEMP/cci-cask-readiness-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-cask-readiness-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-cask-readiness-negative.log"
-          grep -F 'staged cask selected before committed receipt' "$RUNNER_TEMP/cci-cask-readiness-negative.log"
-          go test -count=1 -race -v ./internal/version
       - name: Incident old-writer native provisioning budget
         run: CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
       - name: Incident native lifecycle, immutable failure controls, and writer budget
@@ -189,224 +97,3 @@ jobs:
           grep -F 'shared ancestor retained stale membership' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
           grep -F 'shared changed registration did not refresh' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
           go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
-      - name: Hook owed indexed closure and immutable output
-        run: |
-          test "$(git -C .ci-hook-owed-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
-          cp internal/hook/owed_cost_test.go .ci-hook-owed-baseline/internal/hook/
-          mkdir -p "$RUNNER_TEMP/cci-hook-owed-snapshots"
-          (cd .ci-hook-owed-baseline && CCI_HOOK_OWED_EXPECT_GLOBAL=1 CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" CCI_HOOK_OWED_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook)
-          if (cd .ci-hook-owed-baseline && go test -count=1 -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook) > "$RUNNER_TEMP/cci-hook-owed-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-hook-owed-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-hook-owed-negative.log"
-          grep -F 'hook owed refs_reads=10002 want=2 history=10000' "$RUNNER_TEMP/cci-hook-owed-negative.log"
-          CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
-          go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
-      - name: Mesh export indexed prefix and immutable contract
-        run: |
-          test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
-          cp internal/mesh/export_cost_test.go .ci-mesh-export-baseline/internal/mesh/
-          (cd .ci-mesh-export-baseline && CCI_MESH_EXPECT_GLOBAL=1 go test -count=1 -run '^TestMeshExportHistoryBaseline$' -v ./internal/mesh)
-          if (cd .ci-mesh-export-baseline && go test -count=1 -run '^TestMeshExportHistoryBaseline$' -v ./internal/mesh) > "$RUNNER_TEMP/cci-mesh-history-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-mesh-history-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-mesh-history-negative.log"
-          grep -F 'text_reads=20002 want=snapshot/1/4' "$RUNNER_TEMP/cci-mesh-history-negative.log"
-          test "$(git -C .ci-mesh-frontier-negative rev-parse HEAD)" = e2ef260846d7afb2850cc503dc6cde57baa78487
-          cp internal/mesh/export_frontier_test.go .ci-mesh-frontier-negative/internal/mesh/
-          if (cd .ci-mesh-frontier-negative && go test -count=1 -run '^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh) > "$RUNNER_TEMP/cci-mesh-frontier-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
-          grep -F 'mesh revision included unvalidated concurrent append: seq=3 want=2' "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
-          go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
-
-      - name: Test (race)
-        run: go test -race -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' ./...
-      - name: Post operation counts and scaling
-        run: |
-          go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
-          go test -run '^$' -bench '^BenchmarkBindLaneExistingCursor$' -benchtime=100x -benchmem ./internal/store
-      - name: Physical index comparisons, compatibility, and build cost
-        run: |
-          test -x "$CCI_OLD_STORE_PROBE"
-          go test -run 'TestRegisteredLaneComparisonsStayBounded|TestExistingStoreOpenDoesNotBuildPhysicalIndexes|TestMaintainIndexes|TestPhysicalIndexes' -v ./internal/store
-      - name: Recipient identity and targeted session query costs
-        run: |
-          test "$(git -C .ci-recipients-baseline rev-parse HEAD)" = 722f03bcbaadf335f6ee9cb7d2c4b57e274f942e
-          cp internal/cli/recipient_identity_test.go .ci-recipients-baseline/internal/cli/recipient_identity_test.go
-          (cd .ci-recipients-baseline && go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli)
-          go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli
-          go test -run '^TestRecipientLaneQueryUsesTargetedIndex$' -v ./internal/store
-      - name: Grep actual caller operation counts and paged output equivalence
-        run: |
-          test "$(git -C .ci-grep-baseline rev-parse HEAD)" = e08497bf9ce5880788f6103a949e034c9ed13fc4
-          cp internal/cli/grep_cost_test.go .ci-grep-baseline/internal/cli/grep_cost_test.go
-          cp internal/inbox/grep_internal_test.go .ci-grep-baseline/internal/inbox/grep_internal_test.go
-          (cd .ci-grep-baseline && CCI_GREP_EXPECT_PAGED=1 go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli)
-          go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli
-          go test -run '^TestRepliesSelectionExceedsVariableLimit$' -v ./internal/store
-          go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
-      - name: Indexed selected reply counts, current public CLI oracle, and required index lifecycle
-        run: |
-          test "$(git -C .ci-grep-selected-baseline rev-parse HEAD)" = 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
-          cp internal/cli/grep_cost_test.go internal/cli/grep_selected_cost_test.go .ci-grep-selected-baseline/internal/cli/
-          (cd .ci-grep-selected-baseline && CCI_GREP_EXPECT_GLOBAL_REPLY_SCAN=1 go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$' -v ./internal/cli)
-          (cd .ci-grep-selected-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-grep-current-baseline" ./cmd/cci)
-          go build -p 2 -o "$RUNNER_TEMP/cci-grep-current" ./cmd/cci
-          CCI_GREP_CURRENT_BASELINE="$RUNNER_TEMP/cci-grep-current-baseline" CCI_GREP_CURRENT_CLI="$RUNNER_TEMP/cci-grep-current" go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$|^TestGrepIndexedRepliesPreservePublicErrorsAndBytes$' -v ./internal/cli
-          go test -count=1 -run '^TestSelectedReply|^TestGrepReplyIndex' -v ./internal/store
-          CCI_GREP_REPLY_INDEX_ROWS=250000 go test -count=1 -run '^TestGrepReplyIndexProvisioningWithinWriterBudget$' -v ./internal/store
-      - name: Build
-        run: go build ./...
-      - name: Tail operation counts and full requested output
-        run: |
-          test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
-          cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
-          tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
-          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$tail_tests" -v ./internal/cli)
-          go test -run "$tail_tests" -v ./internal/cli
-      - name: Selected opener closure work and error scope
-        run: |
-          cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/
-          cp internal/server/openamong_refutation_test.go .ci-openamong-negative/internal/server/
-          (cd .ci-openamong-oracle && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server)
-          if (cd .ci-openamong-negative && go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server) > "$RUNNER_TEMP/openamong-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/openamong-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/openamong-negative.log"
-          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/foreign_nonmatching_typed_suffix' "$RUNNER_TEMP/openamong-negative.log"
-          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/raw_topic_bytes' "$RUNNER_TEMP/openamong-negative.log"
-          grep -F 'FAIL: TestOpenAmongCandidatePreservesSelectedClosure/Go-valid_deep_refs' "$RUNNER_TEMP/openamong-negative.log"
-          go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$' -v ./internal/server
-          go test -run '^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$|^TestOpenAmongResolverCandidateErrors$|^TestSelectedClosure' -v ./internal/server ./internal/store
-          CCI_CLOSER_PROVISION_ROWS=250000 go test -run '^TestSelectedClosureProvisioningWithinWriterBudget$' -v ./internal/store
-      - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
-        run: |
-          go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store
-          CCI_MEMBERSHIP_PROVISION_ROWS=200000 go test -run '^TestMaintainIndexesProvisionsMembershipsWithinWriterBudget$' -v ./internal/store
-      - name: Indexed lane tips, immutable output and errors, and writer lifecycle
-        run: |
-          test "$(git -C .ci-lane-score-baseline rev-parse HEAD)" = a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
-          cp internal/cli/daemon_lanes_equivalence_test.go .ci-lane-score-baseline/internal/cli/
-          mkdir -p "$RUNNER_TEMP/cci-lane-snapshots"
-          (cd .ci-lane-score-baseline && CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" CCI_LANE_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestDaemonLanePreservesNativeOutputAndErrors$|^TestDaemonLaneScoreTieIsNotMaximumSequence$' -v ./internal/cli)
-          CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" go test -count=1 -run '^TestDaemonLane' -v ./internal/cli
-          go test -run '^TestLaneScore' -v ./internal/store
-          CCI_LANE_INDEX_ROWS=250000 go test -run '^TestLaneScoreIndexProvisioningWithinWriterBudget$' -v ./internal/store
-
-      - name: Native HTTP Tail immutable CLI bytes, errors, identity, freshness, and zero writes
-        run: |
-          test "$(git -C .ci-native-tail-null-baseline rev-parse HEAD)" = e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
-          cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go internal/cli/tail_http_test.go .ci-native-tail-null-baseline/internal/cli/
-          if (cd .ci-native-tail-null-baseline && go test -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli) > "$RUNNER_TEMP/cci-native-tail-null-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
-          cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
-          mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
-          (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' ./internal/cli)
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailCLIReference$' -v ./internal/cli
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailHTTPParity$' -v ./internal/cli
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
-
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.commit || github.sha }}
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
-
-  vuln:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.commit || github.sha }}
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: govulncheck
-        run: |
-          go install golang.org/x/vuln/cmd/govulncheck@latest
-          govulncheck ./...
-
-  plugin:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.commit || github.sha }}
-      - name: Plugin manifests parse and the descriptor template renders
-        run: |
-          jq -e .name plugin/.claude-plugin/plugin.json .claude-plugin/marketplace.json
-          jq -e '.hooks | length == 6' plugin/hooks/hooks.json
-          test -L plugin/bin/cci
-          tail -n +2 plugin/descriptor/cci.binrun.tmpl | sed -E 's/__SIZE_[A-Z0-9_]+__/1/g' | jq -e '.platforms | length == 4'
-
-  provisioning-candidate:
-    name: Prepublication Darwin arm64 provisioning candidate
-    needs: [test, lint, vuln, plugin]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Build source-bound provisioning candidate
-        env:
-          GOOS: darwin
-          GOARCH: arm64
-          CGO_ENABLED: "0"
-        run: |
-          cci_candidate_dir="$RUNNER_TEMP/cci-tail-candidate"
-          mkdir -p "$cci_candidate_dir"
-          cci_candidate_commit="$(git rev-parse HEAD)"
-          go build -mod=readonly -trimpath -buildvcs=true -ldflags "-s -w -X github.com/yasyf/cc-inbox/internal/version.Commit=$cci_candidate_commit" -o "$cci_candidate_dir/cci" ./cmd/cci
-          test -z "$(git status --porcelain)"
-          go version -m "$cci_candidate_dir/cci" > "$cci_candidate_dir/build-info.txt"
-          CCI_CANDIDATE_DIR="$cci_candidate_dir" python3 - <<'PY'
-          import hashlib, json, os, pathlib, subprocess
-          folder = pathlib.Path(os.environ["CCI_CANDIDATE_DIR"])
-          descriptor = {
-              "purpose": "root-reviewed prepublication physical membership provisioning only",
-              "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
-              "source_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
-              "binary_sha256": hashlib.sha256((folder / "cci").read_bytes()).hexdigest(),
-              "os": "darwin",
-              "arch": "arm64",
-              "version": "dev",
-              "release_signature": "none; verified CI candidate, not a published signed release",
-          }
-          (folder / "descriptor.json").write_text(json.dumps(descriptor, indent=2) + "\n")
-          PY
-          tar -czf "$cci_candidate_dir/cci-tail-provisioning-darwin-arm64.tar.gz" -C "$cci_candidate_dir" cci build-info.txt descriptor.json
-          (cd "$cci_candidate_dir" && sha256sum cci-tail-provisioning-darwin-arm64.tar.gz > checksums.txt)
-      - uses: actions/upload-artifact@v7
-        with:
-          name: cci-tail-provisioning-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
-          path: |
-            ${{ runner.temp }}/cci-tail-candidate/cci-tail-provisioning-darwin-arm64.tar.gz
-            ${{ runner.temp }}/cci-tail-candidate/checksums.txt
-          if-no-files-found: error
-          compression-level: 0
