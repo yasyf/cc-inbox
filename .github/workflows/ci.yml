@@ -98,6 +98,10 @@ jobs:
         with:
           ref: 53c067b27a53ac3798753309221a6b4f4190e5b7
           path: .ci-openamong-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          path: .ci-hook-owed-baseline
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -114,6 +118,20 @@ jobs:
           go build -p 2 -o "$cci_old_store_probe" ./cmd/compat-probe
           test -x "$cci_old_store_probe"
           printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
+      - name: Hook owed indexed closure and immutable output
+        run: |
+          test "$(git -C .ci-hook-owed-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          cp internal/hook/owed_cost_test.go .ci-hook-owed-baseline/internal/hook/
+          mkdir -p "$RUNNER_TEMP/cci-hook-owed-snapshots"
+          (cd .ci-hook-owed-baseline && CCI_HOOK_OWED_EXPECT_GLOBAL=1 CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" CCI_HOOK_OWED_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook)
+          if (cd .ci-hook-owed-baseline && go test -count=1 -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook) > "$RUNNER_TEMP/cci-hook-owed-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-hook-owed-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-hook-owed-negative.log"
+          grep -F 'hook owed refs_reads=10002 want=2 history=10000' "$RUNNER_TEMP/cci-hook-owed-negative.log"
+          CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
+          go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
       - name: Mesh export indexed prefix and immutable contract
         run: |
           test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
