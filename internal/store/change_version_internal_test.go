@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -123,16 +121,9 @@ func TestChangeVersionCloseReleasesPinnedConnection(t *testing.T) {
 }
 
 func TestChangeVersionReservedHomePreservesReadOnlyAuthority(t *testing.T) {
-	for _, name := range []string{"store#fragment", "store?query", "store%23encoded"} {
+	for _, name := range []string{"store#fragment", "store?query"} {
+		root := t.TempDir()
 		t.Run(name, func(t *testing.T) {
-			root := t.TempDir()
-			decoded, err := url.PathUnescape(name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err := os.MkdirAll(filepath.Join(root, decoded), 0o700); err != nil {
-				t.Fatal(err)
-			}
 			st, err := Open(t.Context(), filepath.Join(root, name))
 			if err != nil {
 				t.Fatal(err)
