@@ -1,0 +1,17 @@
+name: Lane score key-byte budget control
+on:
+  push:
+    branches: [perf/cci-lanes-key-budget-control]
+permissions:
+  contents: read
+jobs:
+  native-key-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Exact360 helper wider keys and full-width score budget
+        run: CCI_LANE_INDEX_ROWS=250000 go test -p 2 -count=1 -run '^TestLaneScoreIndexProvisioningWithinWriterBudget$' -v ./internal/store

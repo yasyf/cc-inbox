@@ -49,7 +49,7 @@ func TestLaneScoreIndexProvisioningWithinWriterBudget(t *testing.T) {
 VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n < ?
 )
 INSERT INTO records(drive,lane,kind,at,text,source,hash)
-SELECT 'd','lane-' || (n%512),'note',n,'history','post','row-' || n FROM history`, population); err != nil {
+SELECT 'drive-' || printf('%0128d',1),'lane-' || printf('%0128d',n%512),'note',4102444800000+n,'history','post','row-' || n FROM history`, population); err != nil {
 		t.Fatal(err)
 	}
 	fingerprint := st.SchemaFingerprint()
@@ -57,14 +57,14 @@ SELECT 'd','lane-' || (n%512),'note',n,'history','post','row-' || n FROM history
 	if err != nil || len(report.Created) != 1 || report.Elapsed >= 5*time.Second {
 		t.Fatalf("lane score provisioning exceeds writer budget: rows=%d report=%+v error=%v", population, report, err)
 	}
-	var records int
-	if err := st.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM records").Scan(&records); err != nil {
+	var records, driveBytes, laneBytes int
+	if err := st.db.QueryRowContext(t.Context(), "SELECT COUNT(*),SUM(length(CAST(drive AS BLOB))),SUM(length(CAST(lane AS BLOB))) FROM records INDEXED BY records_drive_lane").Scan(&records, &driveBytes, &laneBytes); err != nil {
 		t.Fatal(err)
 	}
-	if st.SchemaFingerprint() != fingerprint || records != population {
+	if st.SchemaFingerprint() != fingerprint || records != population || driveBytes != 134*population || laneBytes != 133*population {
 		t.Fatal("lane score provisioning changed logical state")
 	}
-	t.Logf("lane_score_index_rows=%d elapsed=%s writer_budget=%s created=%v before=%+v after=%+v", population, report.Elapsed, 5*time.Second, report.Created, report.Before, report.After)
+	t.Logf("lane_score_index_rows=%d drive_bytes=%d lane_bytes=%d elapsed=%s writer_budget=%s created=%v before=%+v after=%+v", population, driveBytes, laneBytes, report.Elapsed, 5*time.Second, report.Created, report.Before, report.After)
 }
 
 func TestLaneScorePlanSeeksLaneAndOriginalScore(t *testing.T) {
