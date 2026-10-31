@@ -86,15 +86,13 @@ func nativeTailCalls() []nativeTailCall {
 		nativeTailCall{name: "agent without session", agent: "worker", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
 		nativeTailCall{name: "explicit to suppresses peer", claude: "reader", agent: "worker", args: []string{"tail", "--drive", "d", "--since", "0", "--to", "api", "--json"}},
 	)
-	for _, call := range []nativeTailCall{
+	calls = append(calls, []nativeTailCall{
 		{name: "service json", tier: "service", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
 		{name: "service text", tier: "service", args: []string{"tail", "--drive", "d", "--since", "0"}},
 		{name: "service human bare number", tier: "service", args: []string{"tail", "--drive", "d", "--since", "12", "--json"}},
 		{name: "service human qualified number", tier: "service", args: []string{"tail", "--drive", "d", "--since", "#12@feedface", "--json"}},
 		{name: "explicit owner json", tier: "owner", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
-	} {
-		calls = append(calls, call)
-	}
+	}...)
 	return calls
 }
 

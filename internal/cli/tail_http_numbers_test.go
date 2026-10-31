@@ -111,7 +111,7 @@ func TestNativeTailInternalSequencePreservesMixedOriginMachineCursors(t *testing
 		t.Fatalf("fixture did not distinguish internal seq from owner number: %+v", result)
 	}
 	grep := runNativeTailReference(t, []string{"grep", "record", "--drive", "mixed", "--since-seq", strconv.FormatInt(first, 10), "--json"})
-	if rows := nativeTailRows(t, grep); len(rows) != 2 || rows[0].Seq != first+1 || rows[1].Seq != first+2 {
+	if rows := nativeTailRows(t, grep); len(rows) != 2 || rows[0].Seq != first+2 || rows[1].Seq != first+1 {
 		t.Fatalf("shared grep machine cursor lost internal positions: %+v", rows)
 	}
 	for _, cursor := range []int64{0, first, first + 1, first + 2} {
@@ -147,5 +147,28 @@ func TestNativeTailInternalSequencePreservesMixedOriginMachineCursors(t *testing
 		if got.Code != 1 || got.Code != want.Code || !bytes.Equal(got.Out, want.Out) || !bytes.Equal(got.Err, want.Err) {
 			t.Fatalf("internal cursor error differs for %q: %+v/%+v", args, got, want)
 		}
+	}
+}
+
+func TestNativeTailRelativeHomeConfigDiagnosticUsesOwnedCanonicalPath(t *testing.T) {
+	call := nativeTailCall{tier: "service", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}}
+	fixture := newNativeTailFixture(t, call, nil)
+	handler := nativeTailHandler(t, fixture)
+	forbidNativeTailWrites(t, fixture)
+	config := filepath.Join(fixture.home, "relay", "native", "config.json")
+	if err := os.WriteFile(config, []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Dir(fixture.home))
+	relativeHome := filepath.Base(fixture.home)
+	t.Setenv("CCI_HOME", relativeHome)
+	want := runNativeTailReference(t, call.args)
+	got := nativeTailResultFromHTTP(t, nativeTailResponse(t, handler, nativeTailBody(t, fixture, call)))
+	relativeConfig := filepath.Join(relativeHome, "relay", "native", "config.json")
+	if want.Code != 1 || got.Code != want.Code || !bytes.Equal(got.Out, want.Out) || !bytes.Contains(want.Err, []byte(relativeConfig)) || !bytes.Contains(got.Err, []byte(config)) {
+		t.Fatalf("relative-home diagnostic contract changed: CLI=%+v HTTP=%+v", want, got)
+	}
+	if !bytes.Equal(bytes.ReplaceAll(want.Err, []byte(relativeConfig), []byte(config)), got.Err) {
+		t.Fatalf("diagnostics differ beyond the owned canonical path: %q/%q", got.Err, want.Err)
 	}
 }
