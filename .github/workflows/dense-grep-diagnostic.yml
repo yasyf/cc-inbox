@@ -1,0 +1,110 @@
+name: Dense Grep diagnostic
+
+on:
+  pull_request:
+    paths:
+      - internal/store/dense_grep_export_test.go
+      - internal/store/dense_grep_diagnostic_test.go
+      - internal/store/dense_tail_diagnostic_test.go
+      - .github/workflows/dense-grep-diagnostic.yml
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact source commit to diagnose
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  dense-grep:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v7
+        with:
+          ref: 4f53db3d788dc14ff59495fb444f4fda3ad1b6a5
+          path: .ci-time-dense-grep-baseline
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prepare immutable pre-Time test-only fixture facade
+        run: |
+          test "$(git -C .ci-time-dense-grep-baseline rev-parse HEAD)" = 4f53db3d788dc14ff59495fb444f4fda3ad1b6a5
+          git rev-parse HEAD
+          cmp internal/store/index_cost_internal_test.go .ci-time-dense-grep-baseline/internal/store/index_cost_internal_test.go
+          cp internal/store/dense_grep_export_test.go internal/store/dense_grep_diagnostic_test.go internal/store/dense_tail_diagnostic_test.go .ci-time-dense-grep-baseline/internal/store/
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("internal/store/timestamp_range_internal_test.go").read_text()
+          helpers = source[source.index("func timestampRangeIndex("):]
+          assert helpers.count("\nfunc ") == 1
+          assert "func timestampCacheWork(" in helpers
+          target = Path(".ci-time-dense-grep-baseline/internal/store/dense_grep_cache_helpers_test.go")
+          target.write_text('package store\n\nimport ("testing"; "modernc.org/sqlite")\n\n' + helpers)
+          PY
+          git -C .ci-time-dense-grep-baseline diff --exit-code -- . ':!internal/store/*_test.go'
+      - name: Measure immutable pre-Time direct Query and whole Tail
+        run: |
+          set -o pipefail
+          (cd .ci-time-dense-grep-baseline && CCI_TIME_DENSE_READ_DIAGNOSTIC=1 CCI_TIME_DENSE_READ_RECORD=1 go test -p 2 -count=1 -race -run '^TestDenseRecentQueryTailDiagnostic$' -v ./internal/store) 2>&1 | tee "$RUNNER_TEMP/dense-grep-read-old.log"
+          test -O .ci-time-dense-grep/results-read-old.json
+          for operation in query tail; do
+            for population in 32 10000; do
+              for limit in 1 800 80000; do
+                grep -F "DENSE_READ_WORK operation=$operation N=$population limit=$limit " "$RUNNER_TEMP/dense-grep-read-old.log"
+              done
+            done
+          done
+      - name: Measure current Query and Tail and require full semantic parity
+        run: |
+          set -o pipefail
+          CCI_TIME_DENSE_READ_DIAGNOSTIC=1 go test -p 2 -count=1 -race -run '^TestDenseRecentQueryTailDiagnostic$' -v ./internal/store 2>&1 | tee "$RUNNER_TEMP/dense-grep-read-current.log"
+          test -O .ci-time-dense-grep/results-read-current.json
+          for operation in query tail; do
+            for population in 32 10000; do
+              for limit in 1 800 80000; do
+                grep -F "DENSE_READ_WORK operation=$operation N=$population limit=$limit " "$RUNNER_TEMP/dense-grep-read-current.log"
+                grep -F "DENSE_READ_PAIR operation=$operation N=$population limit=$limit " "$RUNNER_TEMP/dense-grep-read-current.log"
+              done
+            done
+          done
+      - name: Measure immutable pre-Time whole paged Grep
+        run: |
+          set -o pipefail
+          (cd .ci-time-dense-grep-baseline && CCI_TIME_DENSE_GREP_DIAGNOSTIC=1 CCI_TIME_DENSE_GREP_RECORD=1 go test -p 2 -count=1 -race -run '^TestDenseRecentPagedGrepDiagnostic$' -v ./internal/store) 2>&1 | tee "$RUNNER_TEMP/dense-grep-old.log"
+          test -O .ci-time-dense-grep/results-old.json
+          for population in 32 10000; do
+            for limit in 1 800 80000; do
+              grep -F "DENSE_GREP_WORK N=$population limit=$limit " "$RUNNER_TEMP/dense-grep-old.log"
+            done
+          done
+      - name: Measure current whole paged Grep and require exact byte parity
+        run: |
+          set -o pipefail
+          CCI_TIME_DENSE_GREP_DIAGNOSTIC=1 go test -p 2 -count=1 -race -run '^TestDenseRecentPagedGrepDiagnostic$' -v ./internal/store 2>&1 | tee "$RUNNER_TEMP/dense-grep-current.log"
+          test -O .ci-time-dense-grep/results-current.json
+          for population in 32 10000; do
+            for limit in 1 800 80000; do
+              grep -F "DENSE_GREP_WORK N=$population limit=$limit " "$RUNNER_TEMP/dense-grep-current.log"
+              grep -F "DENSE_GREP_PAIR N=$population limit=$limit " "$RUNNER_TEMP/dense-grep-current.log"
+            done
+          done
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: dense-grep-diagnostic-${{ matrix.os }}-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          include-hidden-files: true
+          path: |
+            ${{ runner.temp }}/dense-grep-*.log
+            .ci-time-dense-grep/results-*.json
+          if-no-files-found: error
