@@ -104,7 +104,7 @@ func TestNativeTailHTTPParity(t *testing.T) {
 	if os.Getenv("CCI_NATIVE_TAIL_SNAPSHOTS") == "" {
 		t.Skip("CI supplies immutable native Tail reference snapshots")
 	}
-	for _, variant := range tailVariants {
+	for _, variant := range nativeTailVariants {
 		for _, call := range nativeTailCalls() {
 			t.Run(variant.name+"/"+call.name, func(t *testing.T) {
 				fixture := newNativeTailFixture(t, call, variant.sets)
@@ -172,6 +172,7 @@ func TestNativeTailRejectsUnsafeModesWithoutWrites(t *testing.T) {
 		call.args,
 		{"tail", "--drive", "d", "--since", "", "--cursor", "another", "--json"},
 		{"tail", "--drive", "d", "--since=0", "--cursor", "another", "--reader", "root", "--json"},
+		{"tail", "--drive", "d", "--since-seq=0", "--cursor", "another", "--json"},
 		{"tail", "--drive", "d", "--since", "not-a-time", "--json"},
 	} {
 		got := nativeTailResultFromHTTP(t, nativeTailResponse(t, handler, nativeTailBody(t, fixture, nativeTailCall{claude: "reader", args: args})))
@@ -186,6 +187,7 @@ func TestNativeTailRejectsUnsafeModesWithoutWrites(t *testing.T) {
 		{"tail", "--drive", "d", "--cursor", "another"},
 		{"tail", "--drive", "d", "--help"},
 		{"tail", "--since", "0"},
+		{"tail", "--since-seq", "0"},
 		{"tail", "--drive", "", "--since", "0"},
 		{"tail", "--drive", "d", "--topic", "--since"},
 	} {

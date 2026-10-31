@@ -6,14 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strconv"
-	"strings"
+	"regexp"
+	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
 )
@@ -76,12 +79,31 @@ func rootCommand() *cobra.Command {
 	return root
 }
 
+var number = regexp.MustCompile(`^#?[0-9]+(@[0-9a-f]+)?$`)
+
 func openStore(ctx context.Context) (*store.Store, error) {
 	home, err := store.Home()
 	if err != nil {
 		return nil, err
 	}
-	return store.Open(ctx, home)
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		return nil, err
+	}
+	if err := configureStoreOwner(st, home); err != nil {
+		_ = st.Close()
+		return nil, err
+	}
+	return st, nil
+}
+
+func configureStoreOwner(st *store.Store, home string) error {
+	configs, err := relay.Configs(home)
+	if err != nil {
+		return err
+	}
+	st.SetOwner(!slices.ContainsFunc(configs, func(c relay.Config) bool { return c.Tier != string(node.TierOwner) }))
+	return nil
 }
 
 func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, error) {
@@ -107,23 +129,25 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 }
 
 type readFlags struct {
-	drive   string
-	origin  string
-	kinds   []string
-	mute    []string
-	toKinds []string
-	lanes   []string
-	to      string
-	reader  string
-	topics  []string
-	stack   string
-	target  string
-	pr      store.PR
-	since   string
-	limit   int
-	budget  int
-	width   int
-	json    bool
+	drive        string
+	origin       string
+	kinds        []string
+	mute         []string
+	toKinds      []string
+	lanes        []string
+	to           string
+	reader       string
+	topics       []string
+	stack        string
+	target       string
+	pr           store.PR
+	since        string
+	sinceSeq     int64
+	sinceSeqFlag *pflag.Flag
+	limit        int
+	budget       int
+	width        int
+	json         bool
 }
 
 func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, budget int) {
@@ -142,6 +166,10 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringVar(&f.origin, "origin", "", "only records written on this node (cci node prints its id)")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), a Pacific clock time (9:00 AM, 21:30, 12:0x), or an RFC3339 time")
+	cmd.Flags().Int64Var(&f.sinceSeq, "since-seq", 0, "read after this internal store sequence")
+	f.sinceSeqFlag = cmd.Flags().Lookup("since-seq")
+	_ = cmd.Flags().MarkHidden("since-seq")
+	cmd.MarkFlagsMutuallyExclusive("since", "since-seq")
 	cmd.Flags().IntVar(&f.budget, "budget", budget, "output budget in bytes")
 	cmd.Flags().BoolVar(&f.json, "json", false, "one JSON record per line")
 }
@@ -176,18 +204,27 @@ func (f *readFlags) filterPeer(ctx context.Context, st *store.Store, peer store.
 	if out.ToKinds, err = kinds.ParseAll(f.toKinds); err != nil {
 		return store.Filter{}, err
 	}
-	if out.After, out.Since, err = parseSince(f.since, st.Now()); err != nil {
-		return store.Filter{}, err
+	if f.sinceSeqFlag.Changed {
+		if f.sinceSeq < 0 {
+			return store.Filter{}, errors.New("--since-seq must be nonnegative")
+		}
+		out.After = f.sinceSeq
+	} else {
+		if out.After, out.Since, err = parseSince(ctx, st, f.since); err != nil {
+			return store.Filter{}, err
+		}
 	}
 	return out, nil
 }
 
-func parseSince(s string, now time.Time) (int64, time.Time, error) {
+func parseSince(ctx context.Context, st *store.Store, s string) (int64, time.Time, error) {
 	if s == "" {
 		return 0, time.Time{}, nil
 	}
-	if seq, err := strconv.ParseInt(strings.TrimPrefix(s, "#"), 10, 64); err == nil {
-		return seq, time.Time{}, nil
+	now := st.Now()
+	if number.MatchString(s) {
+		seq, err := st.Resolve(ctx, s)
+		return seq, time.Time{}, err
 	}
 	if d, err := time.ParseDuration(s); err == nil {
 		return 0, now.Add(-d), nil

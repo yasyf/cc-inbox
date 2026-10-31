@@ -67,8 +67,8 @@ func TailHandler(st *store.Store, home string) (http.Handler, error) {
 		root.SetOut(output)
 		root.SetErr(&stderr)
 		validate := func(cmd *cobra.Command) *tailProtocolError {
-			if !cmd.Flags().Changed("since") {
-				return &tailProtocolError{http.StatusBadRequest, "native tail requires an explicit --since"}
+			if !cmd.Flags().Changed("since") && !cmd.Flags().Changed("since-seq") {
+				return &tailProtocolError{http.StatusBadRequest, "native tail requires an explicit --since or --since-seq"}
 			}
 			if !cmd.Flags().Changed("drive") || flags.rf.drive == "" {
 				return &tailProtocolError{http.StatusBadRequest, "native tail requires a nonempty explicit --drive"}
@@ -80,7 +80,11 @@ func TailHandler(st *store.Store, home string) (http.Handler, error) {
 			if protocol = validate(cmd); protocol != nil {
 				return protocol
 			}
-			return flags.run(ctx, cmd, st, peer)
+			view := *st
+			if err := configureStoreOwner(&view, ownedHome); err != nil {
+				return err
+			}
+			return flags.run(ctx, cmd, &view, peer)
 		}
 		help := cmd.HelpFunc()
 		cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {

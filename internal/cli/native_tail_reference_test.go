@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
+	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -18,6 +19,7 @@ type nativeTailCall struct {
 	name                 string
 	claude, codex, agent string
 	args                 []string
+	tier                 string
 }
 
 type nativeTailResult struct {
@@ -35,7 +37,7 @@ type nativeTailFixture struct {
 
 func nativeTailCalls() []nativeTailCall {
 	var calls []nativeTailCall
-	for _, call := range tailCalls {
+	for _, call := range nativeTailBaseCalls {
 		if call.name == "json peer cursor" {
 			continue
 		}
@@ -61,6 +63,8 @@ func nativeTailCalls() []nativeTailCall {
 		{"limit equals", []string{"--limit=1"}},
 		{"width all", []string{"--width", "12", "--all"}},
 		{"cursor ignored", []string{"--cursor", "other"}},
+		{"human bare number", []string{"--since", "12"}},
+		{"human qualified number", []string{"--since", "#12@feedface"}},
 		{"unknown flag", []string{"--not-a-tail-flag"}},
 		{"invalid kind", []string{"--kind", "not-a-kind"}},
 		{"invalid to kind", []string{"--to-kind", "not-a-kind"}},
@@ -82,10 +86,19 @@ func nativeTailCalls() []nativeTailCall {
 		nativeTailCall{name: "agent without session", agent: "worker", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
 		nativeTailCall{name: "explicit to suppresses peer", claude: "reader", agent: "worker", args: []string{"tail", "--drive", "d", "--since", "0", "--to", "api", "--json"}},
 	)
+	for _, call := range []nativeTailCall{
+		{name: "service json", tier: "service", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
+		{name: "service text", tier: "service", args: []string{"tail", "--drive", "d", "--since", "0"}},
+		{name: "service human bare number", tier: "service", args: []string{"tail", "--drive", "d", "--since", "12", "--json"}},
+		{name: "service human qualified number", tier: "service", args: []string{"tail", "--drive", "d", "--since", "#12@feedface", "--json"}},
+		{name: "explicit owner json", tier: "owner", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
+	} {
+		calls = append(calls, call)
+	}
 	return calls
 }
 
-func newNativeTailFixture(t *testing.T, call nativeTailCall, sets []tailSet) nativeTailFixture {
+func newNativeTailFixture(t *testing.T, call nativeTailCall, sets []nativeTailSet) nativeTailFixture {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
@@ -103,7 +116,12 @@ func newNativeTailFixture(t *testing.T, call nativeTailCall, sets []tailSet) nat
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	node := st.Self()
-	seedTailFixture(t, db, node)
+	seedNativeTailFixture(t, db, node)
+	if call.tier != "" {
+		if err := relay.SaveConfig(home, relay.Config{Mesh: "native", URL: "https://relay.invalid", Tier: call.tier}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	address, err := json.Marshal([]string{store.PeerAddressOn(node, store.PeerKey{Session: "reader", Agent: "worker"}.String())})
 	if err != nil {
 		t.Fatal(err)
@@ -146,6 +164,8 @@ func runNativeTailReference(t *testing.T, args []string) nativeTailResult {
 func normalizeNativeTail(result nativeTailResult, node string) nativeTailResult {
 	result.Out = bytes.ReplaceAll(result.Out, []byte(node), []byte("<node>"))
 	result.Err = bytes.ReplaceAll(result.Err, []byte(node), []byte("<node>"))
+	result.Out = bytes.ReplaceAll(result.Out, []byte(node[:8]), []byte("<node-tag>"))
+	result.Err = bytes.ReplaceAll(result.Err, []byte(node[:8]), []byte("<node-tag>"))
 	return result
 }
 
@@ -158,7 +178,7 @@ func TestNativeTailCLIReference(t *testing.T) {
 	if os.Getenv("CCI_NATIVE_TAIL_SNAPSHOTS") == "" {
 		t.Skip("CI supplies immutable native Tail reference snapshots")
 	}
-	for _, variant := range tailVariants {
+	for _, variant := range nativeTailVariants {
 		for _, call := range nativeTailCalls() {
 			t.Run(variant.name+"/"+call.name, func(t *testing.T) {
 				fixture := newNativeTailFixture(t, call, variant.sets)

@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -52,7 +50,7 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 		return err
 	}
 	name := f.cursor
-	if cmd.Flags().Changed("since") {
+	if cmd.Flags().Changed("since") || cmd.Flags().Changed("since-seq") {
 		name = ""
 	}
 	fold := render.FoldWidth
@@ -194,9 +192,9 @@ func newShowCmd() *cobra.Command {
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			seqs := make([]int64, len(args))
 			for i, arg := range args {
-				seq, err := strconv.ParseInt(strings.TrimPrefix(arg, "#"), 10, 64)
+				seq, err := st.Resolve(cmd.Context(), arg)
 				if err != nil {
-					return fmt.Errorf("show: %q is not a record seq", arg)
+					return fmt.Errorf("show: %w", err)
 				}
 				seqs[i] = seq
 			}

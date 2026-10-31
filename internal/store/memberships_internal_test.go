@@ -540,7 +540,10 @@ func unboundedQuery(ctx context.Context, s *Store, f Filter) ([]Record, error) {
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, s.numbered(ctx, out)
 }
 
 func unboundedCount(ctx context.Context, s *Store, f Filter) (int, error) {

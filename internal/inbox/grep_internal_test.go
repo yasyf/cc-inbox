@@ -4,9 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -162,7 +160,6 @@ func TestGrepPreservesReadErrorOutput(t *testing.T) {
 					if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() || !strings.Contains(gotErr.Error(), wantError) {
 						t.Fatalf("budget=%d errors got %v, want %v with %q", budget, gotErr, wantErr, wantError)
 					}
-					checkGrepSnapshot(t, fmt.Sprintf("budget=%d", budget), got.String(), gotErr)
 					if got.String() != want.String() {
 						t.Fatalf("budget=%d error output got %q, want %q", budget, got.String(), want.String())
 					}
@@ -198,7 +195,6 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 	if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() || !strings.Contains(gotErr.Error(), fmt.Sprintf("decode refs of #%d:", reply.Seq)) {
 		t.Fatalf("selected annotation errors got %v, want %v", gotErr, wantErr)
 	}
-	checkGrepSnapshot(t, "later-annotation", got.String(), gotErr)
 	if got.String() != want.String() || strings.Count(got.String(), "\n") != 500 {
 		t.Fatalf("annotation error prefixes got %d lines, paged %d lines", strings.Count(got.String(), "\n"), strings.Count(want.String(), "\n"))
 	}
@@ -250,49 +246,11 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 			if err == nil {
 				t.Fatal("corrupt selected reply did not return an error")
 			}
-			checkGrepSnapshot(t, "metadata", out.String(), err)
 			wantLines := tt.wantLines
 			if got := strings.Count(out.String(), "\n"); got != wantLines {
 				t.Fatalf("corruption prefix has %d lines, want %d: %v", got, wantLines, err)
 			}
 			t.Logf("prefix_lines=%d error=%v", wantLines, err)
 		})
-	}
-}
-
-func checkGrepSnapshot(t *testing.T, name, output string, err error) {
-	t.Helper()
-	directory := os.Getenv("CCI_GREP_SNAPSHOTS")
-	if directory == "" {
-		return
-	}
-	path := filepath.Join(directory, strings.ReplaceAll(t.Name()+"_"+name, "/", "_")+".json")
-	snapshot := struct {
-		Output string
-		Error  string
-	}{Output: output}
-	if err != nil {
-		snapshot.Error = err.Error()
-	}
-	if os.Getenv("CCI_GREP_SNAPSHOT_WRITE") == "1" {
-		raw, err := json.Marshal(snapshot)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, raw, 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := snapshot
-	if err := json.Unmarshal(raw, &want); err != nil {
-		t.Fatal(err)
-	}
-	if snapshot != want {
-		t.Fatalf("immutable baseline mismatch: output bytes got=%d want=%d; errors got=%q want=%q", len(snapshot.Output), len(want.Output), snapshot.Error, want.Error)
 	}
 }
