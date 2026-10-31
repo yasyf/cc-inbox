@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"fmt"
+	"math/bits"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -90,6 +92,10 @@ VALUES ('foreign','noise','state',?,'selected global peer','noise','["peer:tail-
 						t.Fatal("actual CLI did not compare the selected filter column")
 					}
 					t.Logf("AUDIENCE_QUERY_DIAGNOSTIC verb=%s history=%d filter=%q column=%s actual_comparisons=%d output_rows=%d elapsed=%s", verb, population, filter.name, filter.column, comparisons.Load(), len(want), elapsed)
+					bound := int64(2*bits.Len(uint(population)) + 8)
+					if os.Getenv("CCI_AUDIENCE_REQUIRE_BOUNDED_KIND") == "1" && filter.name == "kind" && comparisons.Load() > bound {
+						t.Errorf("AUDIENCE_KIND_BOUND_EXCEEDED verb=%s history=%d comparisons=%d bound=%d", verb, population, comparisons.Load(), bound)
+					}
 				}
 			})
 		}
