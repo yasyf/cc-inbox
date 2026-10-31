@@ -144,7 +144,7 @@ func TestRuntimeStartRefreshesRegistrationWithoutLosingHTTP(t *testing.T) {
 	}
 }
 
-type registrationReadAPI struct { http.Handler }
+type registrationReadAPI struct{ http.Handler }
 
 func (registrationReadAPI) Close() error { return nil }
 

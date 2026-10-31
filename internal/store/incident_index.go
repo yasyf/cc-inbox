@@ -43,7 +43,7 @@ func (index *IncidentIndex) Stats() IncidentIndexStats {
 	defer index.mu.Unlock()
 	stats := index.stats
 	if index.watch != nil {
-		stats.RouteStats, stats.Watches, stats.MissingNameChecks = index.watch.stats, len(index.watch.nodes), index.watch.missingNames
+		stats.RouteStats, stats.Watches, stats.MissingNameChecks = index.watch.stats, index.watch.bindings, index.watch.missingNames
 	}
 	return stats
 }

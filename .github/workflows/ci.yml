@@ -88,6 +88,10 @@ jobs:
         with:
           ref: 23dcba01c1512bf876f6caf6e431cdc0f3731ec7
           path: .ci-incident-registration-window-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: e9610dc3fc29a2d3aa8fb342363adacf130c4ed5
+          path: .ci-incident-shared-node-negative
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -134,6 +138,15 @@ jobs:
           cat "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
           grep -F 'post-open registration replacement retained stale hold' "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
           grep -F 'live retired pending registration inspected path' "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
+          test "$(git -C .ci-incident-shared-node-negative rev-parse HEAD)" = e9610dc3fc29a2d3aa8fb342363adacf130c4ed5
+          cp internal/store/incident_shared_rebind_internal_test.go .ci-incident-shared-node-negative/internal/store/
+          if (cd .ci-incident-shared-node-negative && go test -count=1 -run '^TestIncidentSharedAncestorReplacementRemainsFresh$|^TestIncidentSharedChangedRegistrationRefreshesOnce$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-shared-node-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
+          grep -F 'shared ancestor retained stale membership' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
+          grep -F 'shared changed registration did not refresh' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
           go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
 
       - name: Test (race)

@@ -11,13 +11,13 @@ import (
 )
 
 type incidentChange struct {
-	Seq int64
-	Revision int64
-	Record Record
-	Values []any
+	Seq         int64
+	Revision    int64
+	Record      Record
+	Values      []any
 	DecodeError string
-	Words map[string]bool
-	References map[string]bool
+	Words       map[string]bool
+	References  map[string]bool
 	Unsupported bool
 }
 
@@ -97,7 +97,9 @@ func (s *Store) publishIncidentChanges(ctx context.Context, changes []incidentCh
 		}
 		if oldPath != "" {
 			paths[oldPath] = true
-			if _, err := tx.ExecContext(ctx, "INSERT INTO incident_body_changes(path) VALUES(?) ON CONFLICT(path) DO NOTHING", oldPath); err != nil { return nil, err }
+			if _, err := tx.ExecContext(ctx, "INSERT INTO incident_body_changes(path) VALUES(?) ON CONFLICT(path) DO NOTHING", oldPath); err != nil {
+				return nil, err
+			}
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM incident_record_prs WHERE source_seq=?", change.Seq); err != nil {
 			return nil, err
@@ -116,7 +118,9 @@ func (s *Store) publishIncidentChanges(ctx context.Context, changes []incidentCh
 			}
 			if path != "" {
 				paths[path] = true
-				if _, err := tx.ExecContext(ctx, "INSERT INTO incident_body_changes(path) VALUES(?) ON CONFLICT(path) DO NOTHING", path); err != nil { return nil, err }
+				if _, err := tx.ExecContext(ctx, "INSERT INTO incident_body_changes(path) VALUES(?) ON CONFLICT(path) DO NOTHING", path); err != nil {
+					return nil, err
+				}
 			}
 			for axis, words := range map[string]map[string]bool{"summary": change.Words, "refs": change.References} {
 				for pr := range words {

@@ -38,7 +38,8 @@ type incidentWatchBackend interface {
 }
 
 type incidentWatchNode struct {
-	Changed   bool
+	Bound     bool
+	Stale     bool
 	Directory bool
 	Symlink   bool
 	Leaves    map[string]bool
@@ -51,6 +52,7 @@ type incidentFileWatch struct {
 	paths        map[string]bool
 	routes       map[string]map[incidentWatchKey]map[string]bool
 	stats        uint64
+	bindings     int
 	missingNames uint64
 	pending      []incidentWatchEvent
 	rebind       map[string]bool
@@ -66,20 +68,32 @@ func newIncidentFileWatch() (*incidentFileWatch, error) {
 
 func (w *incidentFileWatch) addNode(key incidentWatchKey, leaf string) (*incidentWatchNode, error) {
 	node := w.nodes[key]
-	if node == nil {
+	if node == nil || node.Stale {
+		if node != nil && node.Bound {
+			if err := w.backend.Remove(key); err != nil {
+				return nil, err
+			}
+			node.Bound = false
+			w.bindings--
+		}
 		w.stats++
 		if err := w.backend.Add(key); err != nil {
 			return nil, err
 		}
 		info := w.backend.Info(key)
-		node = &incidentWatchNode{Changed: info.Changed, Directory: info.Directory, Symlink: info.Symlink, Leaves: map[string]bool{}, Missing: map[string]map[string]bool{}}
-		w.nodes[key] = node
+		if node == nil {
+			node = &incidentWatchNode{Leaves: map[string]bool{}, Missing: map[string]map[string]bool{}}
+			w.nodes[key] = node
+		}
+		node.Bound, node.Stale = true, info.Changed
+		node.Directory, node.Symlink = info.Directory, info.Symlink
+		w.bindings++
 	}
 	node.Leaves[leaf] = true
 	if w.routes[leaf][key] == nil {
 		w.routes[leaf][key] = map[string]bool{}
 	}
-	if node.Changed {
+	if node.Stale {
 		w.rebind[leaf] = true
 	}
 	return node, nil
@@ -128,7 +142,7 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 		if err != nil {
 			return err
 		}
-		if node.Changed {
+		if node.Stale {
 			w.rebind[path] = true
 			return nil
 		}
@@ -156,7 +170,7 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 			if err != nil {
 				return err
 			}
-			if node.Changed {
+			if node.Stale {
 				return nil
 			}
 		}
@@ -182,8 +196,11 @@ func (w *incidentFileWatch) Forget(path string) error {
 			}
 		}
 		if len(node.Leaves) == 0 {
-			if err := w.backend.Remove(key); err != nil {
-				return err
+			if node.Bound {
+				if err := w.backend.Remove(key); err != nil {
+					return err
+				}
+				w.bindings--
 			}
 			delete(w.nodes, key)
 		}
@@ -235,6 +252,9 @@ func (w *incidentFileWatch) collect(ctx context.Context, dirty map[string]bool) 
 				continue
 			}
 			if event.Invalidated || !node.Directory {
+				if event.Invalidated || node.Symlink {
+					node.Stale = true
+				}
 				if err := w.mark(ctx, node.Leaves, event.Invalidated || node.Symlink, dirty); err != nil {
 					return err
 				}
