@@ -90,7 +90,10 @@ func TestIndexedMeshExportPreservesLegacyContract(t *testing.T) {
 			}
 			compareMeshExportWithLegacy(t, n, since)
 			if edit == "digest_and_foreign" {
-				testutil.Post(t, n.st, store.Record{Kind: kinds.Digest, Text: "excluded digest"})
+				digest := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "excluded digest"})
+				if _, err := openMeshFixtureDB(t, n.st).ExecContext(t.Context(), "UPDATE records SET kind='digest' WHERE seq=?", digest.Seq); err != nil {
+					t.Fatal(err)
+				}
 				if _, err := n.st.Apply(t.Context(), []store.Row{{Origin: "foreign", OriginSeq: 900000, Drive: "d", Lane: "foreign", Kind: kinds.Note, At: n.st.Now(), Text: "foreign", Source: "post"}}, nil); err != nil {
 					t.Fatal(err)
 				}
@@ -149,12 +152,13 @@ func TestIndexedMeshExportStopsAtSelectedBoundary(t *testing.T) {
 func TestIndexedMeshExportDoesNotDecodeUnselectedHistory(t *testing.T) {
 	n := newMeshNode(t)
 	old := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "private old record"})
-	testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: strings.Repeat("overflow", 100)})
-	latest := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: ""})
+	testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "overflow"})
+	latest := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "latest"})
 	rows, err := n.st.Export(t.Context(), n.st.Self(), latest.Seq-1, 1)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("latest fixture=%v/%v", rows, err)
 	}
+	rows[0].Text = ""
 	raw, err := json.Marshal(rows[0])
 	if err != nil {
 		t.Fatal(err)

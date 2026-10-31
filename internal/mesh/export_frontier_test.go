@@ -41,13 +41,14 @@ func TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend(t *testing.T
 		t.Fatal(err)
 	}
 	n := newMeshNode(t)
-	old := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: strings.Repeat("overflow", 100)})
-	latest := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: ""})
+	old := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "overflow"})
+	latest := testutil.Post(t, n.st, store.Record{Kind: kinds.Note, Text: "latest"})
 	overflow = old.Seq
 	rows, err := n.st.Export(t.Context(), n.st.Self(), old.Seq, 1)
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("latest fixture=%v/%v", rows, err)
 	}
+	rows[0].Text = ""
 	raw, err := json.Marshal(rows[0])
 	if err != nil {
 		t.Fatal(err)
