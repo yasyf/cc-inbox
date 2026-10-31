@@ -280,6 +280,15 @@ jobs:
           CCI_GREP_REPLY_INDEX_ROWS=250000 go test -count=1 -run '^TestGrepReplyIndexProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Build
         run: go build ./...
+      - uses: actions/checkout@v7
+        with:
+          ref: af644830c49d339afe038477762152bc80c7650f
+          path: .ci-native-tail-fixture-baseline
+          persist-credentials: false
+      - name: Native HTTP fixture setup phase baseline
+        run: |
+          test "$(git -C .ci-native-tail-fixture-baseline rev-parse HEAD)" = af644830c49d339afe038477762152bc80c7650f
+          (cd .ci-native-tail-fixture-baseline && CCI_NATIVE_TAIL_FIXTURE_TIMINGS=1 go test -count=1 -race -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli)
       - name: Native HTTP fixture setup phase attribution
         run: CCI_NATIVE_TAIL_FIXTURE_TIMINGS=1 go test -count=1 -race -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli
       - name: Tail operation counts and full requested output

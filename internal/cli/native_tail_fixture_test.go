@@ -61,6 +61,11 @@ var nativeTailBaseCalls = []struct {
 
 func seedNativeTailFixture(t *testing.T, db *sql.DB, node string) {
 	t.Helper()
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
 	const at = 4102444800000
 	for i, row := range []struct {
 		drive, lane, kind, recipients string
@@ -84,7 +89,7 @@ func seedNativeTailFixture(t *testing.T, db *sql.DB, node string) {
 		{"x", "irrelevant", "note", `["someone"]`, nil, 0, `{}`},
 		{"d", "api", "note", `[]`, nil, 0, `{}`},
 	} {
-		res, err := db.Exec(`INSERT INTO records (drive, lane, kind, at, text, recipients, also_resolves, resolves, refs, source, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'post', ?)`,
+		res, err := tx.Exec(`INSERT INTO records (drive, lane, kind, at, text, recipients, also_resolves, resolves, refs, source, hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'post', ?)`,
 			row.drive, row.lane, row.kind, at, fmt.Sprintf("fixture %d", i+1), row.recipients, row.also, row.resolves, row.refs, fmt.Sprintf("fixture-%d", i+1))
 		if err != nil {
 			t.Fatal(err)
@@ -93,7 +98,10 @@ func seedNativeTailFixture(t *testing.T, db *sql.DB, node string) {
 			t.Fatalf("fixture seq = %d, %v; want %d", seq, err, i+1)
 		}
 	}
-	if _, err := db.Exec("UPDATE records SET origin = 'feedfacefeedface', origin_seq = seq WHERE seq >= 12"); err != nil {
+	if _, err := tx.Exec("UPDATE records SET origin = 'feedfacefeedface', origin_seq = seq WHERE seq >= 12"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 }
