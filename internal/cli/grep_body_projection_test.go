@@ -114,8 +114,10 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 			}
 			invoke := func(binary string) ([]byte, []byte, int) {
 				t.Helper()
-				args := []string{"grep", test.pattern, "--drive", "d", "--since", "24h", "-n", "800", "--budget", "600000"}
-				command := exec.CommandContext(t.Context(), binary, append(args, test.args...)...)
+				args := make([]string, 0, 10+len(test.args))
+				args = append(args, "grep", test.pattern, "--drive", "d", "--since", "24h", "-n", "800", "--budget", "600000")
+				args = append(args, test.args...)
+				command := exec.CommandContext(t.Context(), binary, args...)
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				if err := command.Run(); err != nil {
