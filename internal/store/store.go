@@ -579,6 +579,9 @@ func Validate(r Record) error {
 	if len(r.Body) > 0 && !json.Valid(r.Body) {
 		return errors.New("body is not valid JSON")
 	}
+	if err := kinds.CheckBody(r.Kind, r.Body, r.To); err != nil {
+		return err
+	}
 	for _, stack := range r.Refs.Stacks {
 		if project, env, ok := strings.Cut(stack, "/"); !ok || project == "" || env == "" || strings.Contains(env, "/") {
 			return fmt.Errorf("stack %q is not <project>/<env>", stack)
