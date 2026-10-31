@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func selectedPost(t *testing.T, st *Store, r Record) Record {
@@ -109,7 +110,7 @@ func TestSelectedClosureMaintenanceIsExplicitAndIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+	names := make([]string, 0, len(closerMemberships))
 	for _, object := range closerMemberships {
 		names = append(names, object.name)
 	}
@@ -176,4 +177,46 @@ func TestSelectedClosureProjectionFollowsActualOldWriter(t *testing.T) {
 	if err != nil || len(open) != 0 {
 		t.Fatalf("old-writer cross-record closure = %+v, %v", open, err)
 	}
+}
+
+func TestSelectedClosureProvisioningWithinWriterBudget(t *testing.T) {
+	raw := os.Getenv("CCI_CLOSER_PROVISION_ROWS")
+	if raw == "" {
+		t.Skip("CI supplies the representative closer projection population")
+	}
+	population, err := strconv.Atoi(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := t.Context()
+	st, _ := openStore(t)
+	for i := len(closerMemberships) - 1; i >= 0; i-- {
+		object := closerMemberships[i]
+		if _, err := st.db.ExecContext(ctx, "DROP "+object.kind+" "+object.name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
+ VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n < ?
+ )
+ INSERT INTO records(drive,lane,kind,at,text,re,topic,refs,source,hash)
+ SELECT 'd','history','answer',n,'closer',1000000+n,'topic-'||n,'{"stacks":["a/x"],"targets":["api"]}','post','closer-'||n FROM history`, population); err != nil {
+		t.Fatal(err)
+	}
+	fingerprint := st.SchemaFingerprint()
+	report, err := MaintainIndexes(ctx, st.HomeDir())
+	if err != nil || len(report.Memberships) != len(closerMemberships) || report.Elapsed >= 5*time.Second {
+		t.Fatalf("new closer projection writer budget: records=%d report=%+v error=%v", population, report, err)
+	}
+	var keys, records int
+	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM record_closer_keys").Scan(&keys); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records").Scan(&records); err != nil {
+		t.Fatal(err)
+	}
+	if keys != 4*population || records != population || st.SchemaFingerprint() != fingerprint {
+		t.Fatalf("projection changed logical state/keys: keys=%d records=%d fingerprint=%s", keys, records, st.SchemaFingerprint())
+	}
+	t.Logf("closer_projection_records=%d keys=%d elapsed=%s writer_budget=%s before=%+v after=%+v", records, keys, report.Elapsed, 5*time.Second, report.Before, report.After)
 }

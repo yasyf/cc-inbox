@@ -17,8 +17,18 @@ candidates(seq) AS MATERIALIZED (
 SELECT seq FROM records WHERE resolves != 0 AND resolves IN (SELECT seq FROM wanted)
 UNION SELECT source_seq FROM record_also_resolves INDEXED BY record_also_resolves_target WHERE target IN (SELECT seq FROM wanted)
 )
-SELECT r.resolves, r.seq FROM candidates c JOIN records r ON r.seq = c.seq WHERE r.resolves != 0
-UNION ALL SELECT j.value, r.seq FROM candidates c JOIN records r ON r.seq = c.seq, json_each(r.also_resolves) j`
+SELECT resolves, seq FROM (
+SELECT r.resolves, r.seq FROM candidates c JOIN records r ON r.seq = c.seq
+WHERE r.resolves != 0 AND r.drive = ? ORDER BY r.resolves, r.seq
+)
+UNION ALL SELECT resolves, seq FROM (
+SELECT r.resolves, r.seq FROM candidates c JOIN records r ON r.seq = c.seq
+WHERE r.resolves != 0 AND r.drive != ?
+AND EXISTS (SELECT 1 FROM records target WHERE target.seq = r.resolves AND target.drive = ?)
+ORDER BY r.resolves, r.drive, r.seq
+)
+UNION ALL SELECT j.value, r.seq FROM candidates c JOIN records r ON r.seq = c.seq, json_each(r.also_resolves) j
+WHERE r.drive = ? OR EXISTS (SELECT 1 FROM records target WHERE target.seq = j.value AND target.drive = ?)`
 
 func (s *Store) unclosedAmong(ctx context.Context, drive string, openers []Record) ([]Record, error) {
 	if len(openers) == 0 {
@@ -32,7 +42,7 @@ func (s *Store) unclosedAmong(ctx context.Context, drive string, openers []Recor
 	for i, o := range openers {
 		seqs[i] = o.Seq
 	}
-	resolved, err := s.resolversAmong(ctx, seqs)
+	resolved, err := s.resolversAmong(ctx, drive, seqs)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +72,7 @@ func (s *Store) closersAmong(ctx context.Context, drive string, openers []Record
 	for _, o := range openers {
 		add("re", strconv.FormatInt(o.Seq, 10))
 		if o.Topic != "" {
-			add("topic", o.Topic)
+			add("topic", fmt.Sprintf("%X", []byte(o.Topic)))
 		}
 		for _, key := range o.Refs.Stacks {
 			add("ref", key)
@@ -97,12 +107,12 @@ func (s *Store) closersAmong(ctx context.Context, drive string, openers []Record
 	return out, s.numbered(ctx, out)
 }
 
-func (s *Store) resolversAmong(ctx context.Context, seqs []int64) (map[int64]int64, error) {
+func (s *Store) resolversAmong(ctx context.Context, drive string, seqs []int64) (map[int64]int64, error) {
 	ids, err := json.Marshal(seqs)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, selectedResolversSQL, string(ids))
+	rows, err := s.db.QueryContext(ctx, selectedResolversSQL, string(ids), drive, drive, drive, drive, drive)
 	if err != nil {
 		return nil, fmt.Errorf("read resolvers: %w", err)
 	}

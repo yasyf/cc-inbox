@@ -7,19 +7,19 @@ import (
 )
 
 func closerKeyRows(where string) string {
-	// Ref atoms overselect; Store.scan and indexClosers retain Go's field-name and pairing semantics.
-	var names []string
-	for _, k := range kinds.Closers() {
+	closers := kinds.Closers()
+	names := make([]string, 0, len(closers))
+	for _, k := range closers {
 		names = append(names, "'"+string(k)+"'")
 	}
 	return `WITH closers AS MATERIALIZED (
 SELECT drive, seq, re, topic, refs FROM records WHERE ` + where + ` AND kind IN (` + strings.Join(names, ",") + `)
 )
 SELECT drive, 're', CAST(re AS TEXT), seq FROM closers
-UNION SELECT drive, 'topic', topic, seq FROM closers WHERE topic != ''
+UNION SELECT drive, 'topic', hex(topic), seq FROM closers WHERE topic != ''
 UNION SELECT c.drive, 'ref', j.atom, c.seq FROM closers c,
 json_tree(CASE WHEN json_error_position(c.refs) = 0 THEN c.refs ELSE '{}' END) j WHERE j.type = 'text'
-UNION SELECT drive, 'ref-ambiguous', '', seq FROM closers WHERE instr(lower(refs), '\ud') > 0 OR refs GLOB '*�*'`
+UNION SELECT drive, 'ref-ambiguous', '', seq FROM closers WHERE json_error_position(refs) != 0 OR instr(lower(refs), '\ud') > 0 OR refs GLOB '*�*'`
 }
 
 var closerMemberships = [...]physicalObject{

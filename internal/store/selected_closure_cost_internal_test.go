@@ -59,7 +59,7 @@ SELECT 'd','history','answer',n+1,'unrelated',1000000+n,'other-'||n,'post','hist
 				args       []any
 			}{
 				{selectedClosersSQL, "record_closer_keys_lookup (drive=? AND axis=? AND key=?)", []any{`[["re","1"]]`, "d"}},
-				{selectedResolversSQL, "records_resolves_target", []any{`[1]`}},
+				{selectedResolversSQL, "records_resolves_target", []any{`[1]`, "d", "d", "d", "d", "d"}},
 			} {
 				rows, err := st.db.QueryContext(ctx, "EXPLAIN QUERY PLAN "+query.sql, query.args...)
 				if err != nil {
