@@ -12,6 +12,7 @@ type incidentKqueue struct {
 	fd     int
 	files  map[incidentWatchKey]int
 	keys   map[int]incidentWatchKey
+	info   map[incidentWatchKey]incidentWatchInfo
 	events []unix.Kevent_t
 }
 
@@ -21,7 +22,7 @@ func newIncidentWatchBackend() (incidentWatchBackend, error) {
 		return nil, err
 	}
 	unix.CloseOnExec(fd)
-	return &incidentKqueue{fd: fd, files: map[incidentWatchKey]int{}, keys: map[int]incidentWatchKey{}}, nil
+	return &incidentKqueue{fd: fd, files: map[incidentWatchKey]int{}, keys: map[int]incidentWatchKey{}, info: map[incidentWatchKey]incidentWatchInfo{}}, nil
 }
 
 func (q *incidentKqueue) Add(key incidentWatchKey) error {
@@ -33,15 +34,24 @@ func (q *incidentKqueue) Add(key incidentWatchKey) error {
 	if err != nil {
 		return fmt.Errorf("watch incident body route %s: %w", key.Path, err)
 	}
+	var metadata unix.Stat_t
+	if err := unix.Fstat(fd, &metadata); err != nil {
+		_ = unix.Close(fd)
+		return err
+	}
+	info := incidentWatchInfo{Directory: metadata.Mode&unix.S_IFMT == unix.S_IFDIR, Symlink: metadata.Mode&unix.S_IFMT == unix.S_IFLNK}
 	change := unix.Kevent_t{Ident: uint64(fd), Filter: unix.EVFILT_VNODE, Flags: unix.EV_ADD | unix.EV_CLEAR, Fflags: unix.NOTE_WRITE | unix.NOTE_EXTEND | unix.NOTE_ATTRIB | unix.NOTE_LINK | unix.NOTE_RENAME | unix.NOTE_DELETE | unix.NOTE_REVOKE}
 	if _, err := unix.Kevent(q.fd, []unix.Kevent_t{change}, nil, nil); err != nil {
 		_ = unix.Close(fd)
 		return err
 	}
 	q.files[key], q.keys[fd] = fd, key
+	q.info[key] = info
 	q.resizeEvents()
 	return nil
 }
+
+func (q *incidentKqueue) Info(key incidentWatchKey) incidentWatchInfo { return q.info[key] }
 
 func (q *incidentKqueue) Remove(key incidentWatchKey) error {
 	fd, ok := q.files[key]
@@ -49,6 +59,7 @@ func (q *incidentKqueue) Remove(key incidentWatchKey) error {
 		return nil
 	}
 	delete(q.files, key)
+	delete(q.info, key)
 	delete(q.keys, fd)
 	q.resizeEvents()
 	return unix.Close(fd)
@@ -89,7 +100,7 @@ func (q *incidentKqueue) Drain(ctx context.Context) ([]incidentWatchEvent, error
 		if !ok {
 			return nil, fmt.Errorf("unknown incident watch descriptor %d", event.Ident)
 		}
-		out = append(out, incidentWatchEvent{Keys: map[incidentWatchKey]bool{key: true}, Invalidated: event.Fflags&(unix.NOTE_RENAME|unix.NOTE_DELETE|unix.NOTE_ATTRIB) != 0})
+		out = append(out, incidentWatchEvent{Keys: map[incidentWatchKey]bool{key: true}, Invalidated: event.Fflags&(unix.NOTE_RENAME|unix.NOTE_DELETE|unix.NOTE_ATTRIB) != 0 || event.Fflags&unix.NOTE_LINK != 0 && !q.info[key].Directory})
 	}
 	return out, nil
 }

@@ -14,6 +14,7 @@ type incidentInotify struct {
 	fd            int
 	files         map[incidentWatchKey]int
 	keys          map[int]map[incidentWatchKey]bool
+	info          map[incidentWatchKey]incidentWatchInfo
 	removed       map[int]bool
 	dead          map[int]bool
 	lastCutBytes  int
@@ -26,15 +27,26 @@ func newIncidentWatchBackend() (incidentWatchBackend, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &incidentInotify{fd: fd, files: map[incidentWatchKey]int{}, keys: map[int]map[incidentWatchKey]bool{}, removed: map[int]bool{}, dead: map[int]bool{}}, nil
+	return &incidentInotify{fd: fd, files: map[incidentWatchKey]int{}, keys: map[int]map[incidentWatchKey]bool{}, removed: map[int]bool{}, dead: map[int]bool{}, info: map[incidentWatchKey]incidentWatchInfo{}}, nil
 }
 
 func (q *incidentInotify) Add(key incidentWatchKey) error {
 	mask := uint32(unix.IN_MODIFY | unix.IN_ATTRIB | unix.IN_CLOSE_WRITE | unix.IN_CREATE | unix.IN_DELETE | unix.IN_MOVED_FROM | unix.IN_MOVED_TO | unix.IN_MOVE_SELF | unix.IN_DELETE_SELF | unix.IN_MASK_ADD)
+	flags := unix.O_PATH | unix.O_CLOEXEC
 	if !key.Follow {
-		mask |= unix.IN_DONT_FOLLOW
+		flags |= unix.O_NOFOLLOW
 	}
-	wd, err := unix.InotifyAddWatch(q.fd, key.Path, mask)
+	pathFD, err := unix.Open(key.Path, flags, 0)
+	if err != nil {
+		return fmt.Errorf("watch incident body route %s: %w", key.Path, err)
+	}
+	defer func() { _ = unix.Close(pathFD) }()
+	var metadata unix.Stat_t
+	if err := unix.Fstat(pathFD, &metadata); err != nil {
+		return err
+	}
+	info := incidentWatchInfo{Directory: metadata.Mode&unix.S_IFMT == unix.S_IFDIR, Symlink: metadata.Mode&unix.S_IFMT == unix.S_IFLNK}
+	wd, err := unix.InotifyAddWatch(q.fd, fmt.Sprintf("/proc/self/fd/%d", pathFD), mask)
 	if err != nil {
 		return fmt.Errorf("watch incident body route %s: %w", key.Path, err)
 	}
@@ -45,10 +57,13 @@ func (q *incidentInotify) Add(key incidentWatchKey) error {
 		q.keys[wd] = map[incidentWatchKey]bool{}
 	}
 	q.files[key], q.keys[wd][key] = wd, true
+	q.info[key] = info
 	delete(q.removed, wd)
 	delete(q.dead, wd)
 	return nil
 }
+
+func (q *incidentInotify) Info(key incidentWatchKey) incidentWatchInfo { return q.info[key] }
 
 func (q *incidentInotify) Remove(key incidentWatchKey) error {
 	wd, ok := q.files[key]
@@ -56,6 +71,7 @@ func (q *incidentInotify) Remove(key incidentWatchKey) error {
 		return nil
 	}
 	delete(q.files, key)
+	delete(q.info, key)
 	delete(q.keys[wd], key)
 	if len(q.keys[wd]) != 0 {
 		return nil

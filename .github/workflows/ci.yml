@@ -80,6 +80,10 @@ jobs:
         with:
           ref: b7da336975a6651226912c5c129a38bec9c0e3da
           path: .ci-incident-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: e65cf4da214ea889e729c7cfdae79a8eb4f6cec0
+          path: .ci-incident-registration-negative
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -175,6 +179,13 @@ jobs:
           grep -F 'native watch stale after write' "$RUNNER_TEMP/cci-incident-negative.log"
           grep -F 'retired canonical body was inspected' "$RUNNER_TEMP/cci-incident-negative.log"
           grep -F 'concurrent incident projector accepted; reversed publication permanently regressed membership' "$RUNNER_TEMP/cci-incident-negative.log"
+          cp internal/store/incident_registration_race_internal_test.go .ci-incident-registration-negative/internal/store/
+          if (cd .ci-incident-registration-negative && go test -count=1 -run '^TestIncidentRegistrationUsesBoundObjectType$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-registration-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
+          grep -F 'watch registration type race retained stale hold' "$RUNNER_TEMP/cci-incident-registration-negative.log"
           go test -count=1 -race -run '^TestIncident' -v ./internal/store ./internal/cli
           CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
 

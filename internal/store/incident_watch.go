@@ -20,8 +20,14 @@ type incidentWatchEvent struct {
 	Invalidated bool
 }
 
+type incidentWatchInfo struct {
+	Directory bool
+	Symlink   bool
+}
+
 type incidentWatchBackend interface {
 	Add(incidentWatchKey) error
+	Info(incidentWatchKey) incidentWatchInfo
 	Remove(incidentWatchKey) error
 	Drain(context.Context) ([]incidentWatchEvent, error)
 	Close() error
@@ -29,6 +35,7 @@ type incidentWatchBackend interface {
 
 type incidentWatchNode struct {
 	Directory bool
+	Symlink   bool
 	Leaves    map[string]bool
 	Missing   map[string]map[string]bool
 }
@@ -52,20 +59,22 @@ func newIncidentFileWatch() (*incidentFileWatch, error) {
 	return &incidentFileWatch{backend: backend, nodes: map[incidentWatchKey]*incidentWatchNode{}, paths: map[string]bool{}, routes: map[string]map[incidentWatchKey]map[string]bool{}, rebind: map[string]bool{}}, nil
 }
 
-func (w *incidentFileWatch) addNode(key incidentWatchKey, directory bool, leaf string) error {
+func (w *incidentFileWatch) addNode(key incidentWatchKey, leaf string) (*incidentWatchNode, error) {
 	node := w.nodes[key]
 	if node == nil {
+		w.stats++
 		if err := w.backend.Add(key); err != nil {
-			return err
+			return nil, err
 		}
-		node = &incidentWatchNode{Directory: directory, Leaves: map[string]bool{}, Missing: map[string]map[string]bool{}}
+		info := w.backend.Info(key)
+		node = &incidentWatchNode{Directory: info.Directory, Symlink: info.Symlink, Leaves: map[string]bool{}, Missing: map[string]map[string]bool{}}
 		w.nodes[key] = node
 	}
 	node.Leaves[leaf] = true
 	if w.routes[leaf][key] == nil {
 		w.routes[leaf][key] = map[string]bool{}
 	}
-	return nil
+	return node, nil
 }
 
 func (w *incidentFileWatch) Register(path string) error {
@@ -87,8 +96,8 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 	seen[route] = true
 	defer delete(seen, route)
 	parts := strings.Split(strings.TrimPrefix(route, string(filepath.Separator)), string(filepath.Separator))
-	parent := incidentWatchKey{Path: string(filepath.Separator), Follow: true}
-	if err := w.addNode(parent, true, path); err != nil {
+	parent := incidentWatchKey{Path: string(filepath.Separator)}
+	if _, err := w.addNode(parent, path); err != nil {
 		return err
 	}
 	for i, name := range parts {
@@ -96,8 +105,8 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 		if parent.Path == string(filepath.Separator) {
 			current = parent.Path + name
 		}
-		w.stats++
-		info, err := os.Lstat(current)
+		key := incidentWatchKey{Path: current}
+		node, err := w.addNode(key, path)
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 			missing := w.nodes[parent].Missing[name]
 			if missing == nil {
@@ -111,12 +120,9 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 		if err != nil {
 			return err
 		}
-		if info.Mode()&os.ModeSymlink != 0 {
-			if err := w.addNode(incidentWatchKey{Path: current}, false, path); err != nil {
-				return err
-			}
+		if node.Symlink {
 			w.stats++
-			followed, followErr := os.Stat(current)
+			_, followErr := os.Stat(current)
 			if followErr != nil && !errors.Is(followErr, os.ErrNotExist) && !errors.Is(followErr, syscall.ENOTDIR) {
 				return followErr
 			}
@@ -133,13 +139,13 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 			if followErr != nil {
 				return nil
 			}
-			info = followed
+			key = incidentWatchKey{Path: current, Follow: true}
+			node, err = w.addNode(key, path)
+			if err != nil {
+				return err
+			}
 		}
-		key := incidentWatchKey{Path: current, Follow: true}
-		if err := w.addNode(key, info.IsDir(), path); err != nil {
-			return err
-		}
-		if !info.IsDir() && i != len(parts)-1 {
+		if !node.Directory && i != len(parts)-1 {
 			return nil
 		}
 		parent = key
@@ -201,7 +207,7 @@ func (w *incidentFileWatch) collect(ctx context.Context, dirty map[string]bool) 
 				continue
 			}
 			if event.Invalidated || !node.Directory {
-				if err := w.mark(ctx, node.Leaves, event.Invalidated || !key.Follow, dirty); err != nil {
+				if err := w.mark(ctx, node.Leaves, event.Invalidated || node.Symlink, dirty); err != nil {
 					return err
 				}
 				continue
