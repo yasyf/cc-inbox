@@ -84,6 +84,14 @@ jobs:
           path: .ci-lane-score-baseline
       - uses: actions/checkout@v7
         with:
+          ref: 5e61c5bc11d417c601889cac1393b346d17a44cb
+          path: .ci-mesh-export-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: e2ef260846d7afb2850cc503dc6cde57baa78487
+          path: .ci-mesh-frontier-negative
+      - uses: actions/checkout@v7
+        with:
           ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
           path: .ci-openamong-oracle
       - uses: actions/checkout@v7
@@ -124,6 +132,26 @@ jobs:
           grep -F 'hook owed refs_reads=10002 want=2 history=10000' "$RUNNER_TEMP/cci-hook-owed-negative.log"
           CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
           go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
+      - name: Mesh export indexed prefix and immutable contract
+        run: |
+          test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
+          cp internal/mesh/export_cost_test.go .ci-mesh-export-baseline/internal/mesh/
+          (cd .ci-mesh-export-baseline && CCI_MESH_EXPECT_GLOBAL=1 go test -count=1 -run '^TestMeshExportHistoryBaseline$' -v ./internal/mesh)
+          if (cd .ci-mesh-export-baseline && go test -count=1 -run '^TestMeshExportHistoryBaseline$' -v ./internal/mesh) > "$RUNNER_TEMP/cci-mesh-history-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-mesh-history-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-mesh-history-negative.log"
+          grep -F 'text_reads=20002 want=snapshot/1/4' "$RUNNER_TEMP/cci-mesh-history-negative.log"
+          test "$(git -C .ci-mesh-frontier-negative rev-parse HEAD)" = e2ef260846d7afb2850cc503dc6cde57baa78487
+          cp internal/mesh/export_frontier_test.go .ci-mesh-frontier-negative/internal/mesh/
+          if (cd .ci-mesh-frontier-negative && go test -count=1 -run '^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh) > "$RUNNER_TEMP/cci-mesh-frontier-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
+          grep -F 'mesh revision included unvalidated concurrent append: seq=3 want=2' "$RUNNER_TEMP/cci-mesh-frontier-negative.log"
+          go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
         run: go test -race ./...
