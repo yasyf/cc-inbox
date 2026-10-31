@@ -141,7 +141,9 @@ jobs:
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -run '^TestNativeTailCLIReference$' ./internal/cli)
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -race -run '^TestNativeTail' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -race -run '^TestNativeTailCLIReference$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -race -run '^TestNativeTailHTTPParity$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -race -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
 
   lint:
     runs-on: ubuntu-latest
