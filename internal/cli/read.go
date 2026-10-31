@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -45,7 +46,7 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	f.rf.registerWidth(cmd)
 	f.rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
 	cmd.Flags().StringVar(&f.cursor, "cursor", peer, "cursor name, read and advanced when --since is absent")
-	cmd.Flags().StringSliceVar(&f.seqs, "seqs", nil, "read these internal store sequences")
+	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")
 	_ = cmd.Flags().MarkHidden("seqs")
 	return cmd, f
 }
@@ -93,12 +94,17 @@ func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *sto
 		return fmt.Errorf("--seqs does not support --%s", unsupported[0])
 	}
 	seqs := make([]int64, 0, len(f.seqs))
-	for _, value := range f.seqs {
-		seq, err := strconv.ParseInt(value, 0, 64)
-		if err != nil || seq <= 0 {
-			return errors.New("--seqs requires positive internal store sequences")
+	for _, argument := range f.seqs {
+		if argument == "" {
+			continue
 		}
-		seqs = append(seqs, seq)
+		for _, value := range strings.Split(argument, ",") {
+			seq, err := strconv.ParseInt(value, 0, 64)
+			if err != nil || seq <= 0 {
+				return errors.New("--seqs requires positive internal store sequences")
+			}
+			seqs = append(seqs, seq)
+		}
 	}
 	records, err := st.RecordsAmong(ctx, f.rf.drive, seqs)
 	if err != nil {

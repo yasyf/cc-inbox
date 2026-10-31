@@ -180,7 +180,7 @@ func TestTailSelectedRejectsInvalidAndIncompatibleModesWithoutWrites(t *testing.
 	fixture := newNativeTailFixture(t, call, nil)
 	handler := nativeTailHandler(t, fixture)
 	forbidNativeTailWrites(t, fixture)
-	for _, value := range []string{"0", "-1", "1,0", "1.5", "#17", "9223372036854775808", "not-a-seq"} {
+	for _, value := range []string{"0", "-1", "1,0", "1.5", "#17", "9223372036854775808", "not-a-seq", "1\n2", "1\ninvalid", "1,2\n3", "1,", ",1"} {
 		t.Run(value, func(t *testing.T) {
 			bad := call
 			bad.args = selectedTailArgs("d", value)
