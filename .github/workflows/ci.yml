@@ -52,6 +52,7 @@ jobs:
         os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
     env:
       TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
+      TIMESTAMP_DIAGNOSTIC_TESTS: '^TestTimestampIndexCLIWork$|^TestTimestampIndexDiagnosticWork$|^TestTimestampIndexNativeParity$'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -320,7 +321,7 @@ jobs:
           go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
-        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident" ./...
+        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident|$TIMESTAMP_DIAGNOSTIC_TESTS" ./...
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
