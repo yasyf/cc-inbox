@@ -334,8 +334,8 @@ cci relay enroll --tier service --pub <base64 key> --allow 'trunk|queue' --label
 ```
 
 The receiver wraps `trunk.Handler` from `github.com/yasyf/cc-inbox/trunk`
-around a `service.Writer` that holds the PEM key and the owner public keys
-it trusts. Each Svix-signed `pull_request.*` delivery from Trunk becomes one
+around a `service.Writer` that holds the key `e2e.ParseKey` reads from its
+PEM and the owner public keys it trusts. Each Svix-signed `pull_request.*` delivery from Trunk becomes one
 `queue` record on the `trunk` drive, carrying the pull request, Trunk's state
 as its outcome, the reason, the failing checks, and Trunk's details URL. A
 redelivery of the same message stays one record. A bad signature answers

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yasyf/cc-inbox/e2e"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/relay/relaytest"
@@ -87,7 +88,7 @@ func handler(t *testing.T) (trunk.Handler, *store.Store, *relay.Node, *relaytest
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc, err := service.ParseKey(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	svc, err := e2e.ParseKey(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 	if err != nil {
 		t.Fatal(err)
 	}

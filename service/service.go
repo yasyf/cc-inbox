@@ -16,7 +16,6 @@ import (
 
 	"github.com/yasyf/cc-inbox/e2e"
 	"github.com/yasyf/cc-inbox/internal/kinds"
-	"github.com/yasyf/cc-inbox/internal/node"
 )
 
 // Writer seals each record under the mesh's current group key, which an owner
@@ -45,11 +44,6 @@ type Record struct {
 	Outcome string
 	Commit  string
 	Attrs   map[string]string
-}
-
-// ParseKey reads a service key from the PKCS#8 PEM a secret store holds.
-func ParseKey(pem []byte) (e2e.Identity, error) {
-	return node.Parse(pem)
 }
 
 // Post seals r and pushes it, failing unless the relay accepts it.

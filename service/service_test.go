@@ -31,7 +31,7 @@ func serviceKey(t *testing.T) e2e.Identity {
 	if err != nil {
 		t.Fatal(err)
 	}
-	id, err := service.ParseKey(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
+	id, err := e2e.ParseKey(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}))
 	if err != nil {
 		t.Fatal(err)
 	}

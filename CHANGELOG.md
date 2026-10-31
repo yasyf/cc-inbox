@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `service.Writer` posts records to a relay mesh as a scoped service member
   with no local store, and `trunk.Handler` turns Svix-signed Trunk
   merge-queue webhooks into one `queue` record per state change.
+- `e2e.Key` and `e2e.ParseKey` hold a P-256 node or service key in memory;
+  the node key is one, so an importer of `service` links no keychain code.
 
 ### Changed
 
