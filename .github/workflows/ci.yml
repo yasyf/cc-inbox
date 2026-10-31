@@ -191,6 +191,7 @@ jobs:
           CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
       - name: Timestamp range immutable control, native parity, and actual work
         run: |
+          set -o pipefail
           test "$(git -C .ci-timestamp-range-baseline rev-parse HEAD)" = cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
           cp internal/cli/timestamp_index_diagnostic_test.go .ci-timestamp-range-baseline/internal/cli/
           cp internal/store/timestamp_index_diagnostic_internal_test.go .ci-timestamp-range-baseline/internal/store/
