@@ -84,6 +84,10 @@ jobs:
         with:
           ref: e65cf4da214ea889e729c7cfdae79a8eb4f6cec0
           path: .ci-incident-registration-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: 23dcba01c1512bf876f6caf6e431cdc0f3731ec7
+          path: .ci-incident-registration-window-negative
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -102,6 +106,36 @@ jobs:
           printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
       - name: Incident old-writer native provisioning budget
         run: CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
+      - name: Incident native lifecycle, immutable failure controls, and writer budget
+        run: |
+          test "$(git -C .ci-incident-negative rev-parse HEAD)" = b7da336975a6651226912c5c129a38bec9c0e3da
+          cp internal/store/incident_alias_internal_test.go internal/store/incident_owner_internal_test.go .ci-incident-negative/internal/store/
+          if (cd .ci-incident-negative && go test -count=1 -run '^TestIncidentWatchPreservesSymlinkDotDotRoutes$|^TestIncidentColdOwnerDiscardsRetiredPathBeforeFileAccess$|^TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-incident-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-incident-negative.log"
+          grep -F 'native watch stale after write' "$RUNNER_TEMP/cci-incident-negative.log"
+          grep -F 'retired canonical body was inspected' "$RUNNER_TEMP/cci-incident-negative.log"
+          grep -F 'concurrent incident projector accepted; reversed publication permanently regressed membership' "$RUNNER_TEMP/cci-incident-negative.log"
+          cp internal/store/incident_registration_race_internal_test.go .ci-incident-registration-negative/internal/store/
+          if (cd .ci-incident-registration-negative && go test -count=1 -run '^TestIncidentRegistrationUsesBoundObjectType$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-registration-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
+          grep -F 'watch registration type race retained stale hold' "$RUNNER_TEMP/cci-incident-registration-negative.log"
+          python3 .github/scripts/incident-registration-syscall-seam.py .ci-incident-registration-window-negative
+          cp internal/store/incident_registration_window_*test.go .ci-incident-registration-window-negative/internal/store/
+          if (cd .ci-incident-registration-window-negative && go test -count=1 -run '^TestIncidentPostOpenRegistrationReplacementRemainsFresh$|^TestIncidentLiveRetiredPendingRegistrationSkipsPathInspection$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-registration-window-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
+          grep -F 'post-open registration replacement retained stale hold' "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
+          grep -F 'live retired pending registration inspected path' "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
+          go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
+
       - name: Test (race)
         run: go test -race -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' ./...
       - name: Post operation counts and scaling
@@ -169,26 +203,6 @@ jobs:
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailHTTPParity$' -v ./internal/cli
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
 
-      - name: Incident native lifecycle, immutable failure controls, and writer budget
-        run: |
-          test "$(git -C .ci-incident-negative rev-parse HEAD)" = b7da336975a6651226912c5c129a38bec9c0e3da
-          cp internal/store/incident_alias_internal_test.go internal/store/incident_owner_internal_test.go .ci-incident-negative/internal/store/
-          if (cd .ci-incident-negative && go test -count=1 -run '^TestIncidentWatchPreservesSymlinkDotDotRoutes$|^TestIncidentColdOwnerDiscardsRetiredPathBeforeFileAccess$|^TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-incident-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-incident-negative.log"
-          grep -F 'native watch stale after write' "$RUNNER_TEMP/cci-incident-negative.log"
-          grep -F 'retired canonical body was inspected' "$RUNNER_TEMP/cci-incident-negative.log"
-          grep -F 'concurrent incident projector accepted; reversed publication permanently regressed membership' "$RUNNER_TEMP/cci-incident-negative.log"
-          cp internal/store/incident_registration_race_internal_test.go .ci-incident-registration-negative/internal/store/
-          if (cd .ci-incident-registration-negative && go test -count=1 -run '^TestIncidentRegistrationUsesBoundObjectType$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-registration-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
-          grep -F 'watch registration type race retained stale hold' "$RUNNER_TEMP/cci-incident-registration-negative.log"
-          go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
 
   lint:
     runs-on: ubuntu-latest

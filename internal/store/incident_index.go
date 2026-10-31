@@ -145,6 +145,11 @@ func (index *IncidentIndex) publishBody(ctx context.Context, path string) error 
 		}
 		return index.linkBody(ctx, path, "")
 	}
+	if index.watch.rebind[path] {
+		if err := index.watch.Forget(path); err != nil {
+			return err
+		}
+	}
 	if err := index.watch.Register(path); err != nil {
 		index.authorityError = err
 		return &IncidentError{Code: "watch_authority_lost", Cause: err}

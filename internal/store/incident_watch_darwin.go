@@ -26,6 +26,13 @@ func newIncidentWatchBackend() (incidentWatchBackend, error) {
 }
 
 func (q *incidentKqueue) Add(key incidentWatchKey) error {
+	return q.addWithRegistration(key, func(change unix.Kevent_t) error {
+		_, err := unix.Kevent(q.fd, []unix.Kevent_t{change}, nil, nil)
+		return err
+	})
+}
+
+func (q *incidentKqueue) addWithRegistration(key incidentWatchKey, register func(unix.Kevent_t) error) error {
 	flags := unix.O_EVTONLY | unix.O_CLOEXEC
 	if !key.Follow {
 		flags |= unix.O_SYMLINK
@@ -39,13 +46,14 @@ func (q *incidentKqueue) Add(key incidentWatchKey) error {
 		_ = unix.Close(fd)
 		return err
 	}
-	info := incidentWatchInfo{Directory: metadata.Mode&unix.S_IFMT == unix.S_IFDIR, Symlink: metadata.Mode&unix.S_IFMT == unix.S_IFLNK}
+	info := incidentWatchInfo{Device: uint64(metadata.Dev), Inode: metadata.Ino, Kind: uint32(metadata.Mode) & unix.S_IFMT, Directory: metadata.Mode&unix.S_IFMT == unix.S_IFDIR, Symlink: metadata.Mode&unix.S_IFMT == unix.S_IFLNK}
 	change := unix.Kevent_t{Ident: uint64(fd), Filter: unix.EVFILT_VNODE, Flags: unix.EV_ADD | unix.EV_CLEAR, Fflags: unix.NOTE_WRITE | unix.NOTE_EXTEND | unix.NOTE_ATTRIB | unix.NOTE_LINK | unix.NOTE_RENAME | unix.NOTE_DELETE | unix.NOTE_REVOKE}
-	if _, err := unix.Kevent(q.fd, []unix.Kevent_t{change}, nil, nil); err != nil {
+	if err := register(change); err != nil {
 		_ = unix.Close(fd)
 		return err
 	}
 	q.files[key], q.keys[fd] = fd, key
+	info.Changed = incidentWatchPathChanged(key, info)
 	q.info[key] = info
 	q.resizeEvents()
 	return nil

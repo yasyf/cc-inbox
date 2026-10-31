@@ -31,6 +31,10 @@ func newIncidentWatchBackend() (incidentWatchBackend, error) {
 }
 
 func (q *incidentInotify) Add(key incidentWatchKey) error {
+	return q.addWithRegistration(key, unix.InotifyAddWatch)
+}
+
+func (q *incidentInotify) addWithRegistration(key incidentWatchKey, register func(int, string, uint32) (int, error)) error {
 	mask := uint32(unix.IN_MODIFY | unix.IN_ATTRIB | unix.IN_CLOSE_WRITE | unix.IN_CREATE | unix.IN_DELETE | unix.IN_MOVED_FROM | unix.IN_MOVED_TO | unix.IN_MOVE_SELF | unix.IN_DELETE_SELF | unix.IN_MASK_ADD)
 	flags := unix.O_PATH | unix.O_CLOEXEC
 	if !key.Follow {
@@ -45,8 +49,8 @@ func (q *incidentInotify) Add(key incidentWatchKey) error {
 	if err := unix.Fstat(pathFD, &metadata); err != nil {
 		return err
 	}
-	info := incidentWatchInfo{Directory: metadata.Mode&unix.S_IFMT == unix.S_IFDIR, Symlink: metadata.Mode&unix.S_IFMT == unix.S_IFLNK}
-	wd, err := unix.InotifyAddWatch(q.fd, fmt.Sprintf("/proc/self/fd/%d", pathFD), mask)
+	info := incidentWatchInfo{Device: uint64(metadata.Dev), Inode: metadata.Ino, Kind: uint32(metadata.Mode) & unix.S_IFMT, Directory: metadata.Mode&unix.S_IFMT == unix.S_IFDIR, Symlink: metadata.Mode&unix.S_IFMT == unix.S_IFLNK}
+	wd, err := register(q.fd, fmt.Sprintf("/proc/self/fd/%d", pathFD), mask)
 	if err != nil {
 		return fmt.Errorf("watch incident body route %s: %w", key.Path, err)
 	}
@@ -57,6 +61,7 @@ func (q *incidentInotify) Add(key incidentWatchKey) error {
 		q.keys[wd] = map[incidentWatchKey]bool{}
 	}
 	q.files[key], q.keys[wd][key] = wd, true
+	info.Changed = incidentWatchPathChanged(key, info)
 	q.info[key] = info
 	delete(q.removed, wd)
 	delete(q.dead, wd)

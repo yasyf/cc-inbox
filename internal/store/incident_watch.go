@@ -21,6 +21,10 @@ type incidentWatchEvent struct {
 }
 
 type incidentWatchInfo struct {
+	Device    uint64
+	Inode     uint64
+	Kind      uint32
+	Changed   bool
 	Directory bool
 	Symlink   bool
 }
@@ -34,6 +38,7 @@ type incidentWatchBackend interface {
 }
 
 type incidentWatchNode struct {
+	Changed   bool
 	Directory bool
 	Symlink   bool
 	Leaves    map[string]bool
@@ -67,12 +72,15 @@ func (w *incidentFileWatch) addNode(key incidentWatchKey, leaf string) (*inciden
 			return nil, err
 		}
 		info := w.backend.Info(key)
-		node = &incidentWatchNode{Directory: info.Directory, Symlink: info.Symlink, Leaves: map[string]bool{}, Missing: map[string]map[string]bool{}}
+		node = &incidentWatchNode{Changed: info.Changed, Directory: info.Directory, Symlink: info.Symlink, Leaves: map[string]bool{}, Missing: map[string]map[string]bool{}}
 		w.nodes[key] = node
 	}
 	node.Leaves[leaf] = true
 	if w.routes[leaf][key] == nil {
 		w.routes[leaf][key] = map[string]bool{}
+	}
+	if node.Changed {
+		w.rebind[leaf] = true
 	}
 	return node, nil
 }
@@ -120,6 +128,10 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 		if err != nil {
 			return err
 		}
+		if node.Changed {
+			w.rebind[path] = true
+			return nil
+		}
 		if node.Symlink {
 			w.stats++
 			_, followErr := os.Stat(current)
@@ -144,6 +156,9 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 			if err != nil {
 				return err
 			}
+			if node.Changed {
+				return nil
+			}
 		}
 		if !node.Directory && i != len(parts)-1 {
 			return nil
@@ -154,6 +169,7 @@ func (w *incidentFileWatch) registerRoute(route, path string, seen map[string]bo
 }
 
 func (w *incidentFileWatch) Forget(path string) error {
+	delete(w.rebind, path)
 	delete(w.paths, path)
 	for key, missingNames := range w.routes[path] {
 		node := w.nodes[key]
@@ -176,12 +192,27 @@ func (w *incidentFileWatch) Forget(path string) error {
 	return nil
 }
 
+func incidentWatchPathChanged(key incidentWatchKey, bound incidentWatchInfo) bool {
+	info, err := os.Lstat(key.Path)
+	if key.Follow {
+		info, err = os.Stat(key.Path)
+	}
+	if err != nil {
+		return true
+	}
+	stat := info.Sys().(*syscall.Stat_t)
+	return uint64(stat.Dev) != bound.Device || stat.Ino != bound.Inode || uint32(stat.Mode)&syscall.S_IFMT != bound.Kind
+}
+
 func (w *incidentFileWatch) Drain(ctx context.Context) (map[string]bool, error) {
 	dirty := map[string]bool{}
-	if err := w.collect(ctx, dirty); err != nil {
-		return dirty, err
+	for path := range w.rebind {
+		if err := ctx.Err(); err != nil {
+			return dirty, err
+		}
+		dirty[path] = true
 	}
-	if err := w.rebindPending(ctx, dirty); err != nil {
+	if err := w.collect(ctx, dirty); err != nil {
 		return dirty, err
 	}
 	events, err := w.backend.Drain(ctx)
@@ -189,10 +220,7 @@ func (w *incidentFileWatch) Drain(ctx context.Context) (map[string]bool, error) 
 	if err != nil {
 		return dirty, err
 	}
-	if err := w.collect(ctx, dirty); err != nil {
-		return dirty, err
-	}
-	return dirty, w.rebindPending(ctx, dirty)
+	return dirty, w.collect(ctx, dirty)
 }
 
 func (w *incidentFileWatch) collect(ctx context.Context, dirty map[string]bool) error {
@@ -244,23 +272,6 @@ func (w *incidentFileWatch) mark(ctx context.Context, leaves map[string]bool, re
 		if rebind {
 			w.rebind[leaf] = true
 		}
-	}
-	return nil
-}
-
-func (w *incidentFileWatch) rebindPending(ctx context.Context, dirty map[string]bool) error {
-	for path := range w.rebind {
-		dirty[path] = true
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := w.Forget(path); err != nil {
-			return err
-		}
-		if err := w.Register(path); err != nil {
-			return err
-		}
-		delete(w.rebind, path)
 	}
 	return nil
 }

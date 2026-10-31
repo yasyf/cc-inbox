@@ -56,13 +56,13 @@ func TestIncidentAutomaticRemovalDoesNotRetainConsumedTombstones(t *testing.T) {
 		if err := os.Remove(path); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := watch.Drain(t.Context()); err != nil {
+		if err := drainActiveIncidentTestRoutes(t, watch); err != nil {
 			t.Fatal(err)
 		}
 		if err := os.WriteFile(path, []byte("recreated"), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := watch.Drain(t.Context()); err != nil {
+		if err := drainActiveIncidentTestRoutes(t, watch); err != nil {
 			t.Fatal(err)
 		}
 		if len(raw.removed) > len(raw.files)+2 {
@@ -78,4 +78,23 @@ func TestIncidentAutomaticRemovalDoesNotRetainConsumedTombstones(t *testing.T) {
 	if len(raw.removed) != 0 || len(raw.dead) != 0 || len(raw.files) != 0 {
 		t.Fatalf("retired kernel state remains: removed=%d dead=%d live=%d", len(raw.removed), len(raw.dead), len(raw.files))
 	}
+}
+
+func drainActiveIncidentTestRoutes(t *testing.T, watch *incidentFileWatch) error {
+	t.Helper()
+	dirty, err := watch.Drain(t.Context())
+	if err != nil {
+		return err
+	}
+	for path := range dirty {
+		if watch.rebind[path] {
+			if err := watch.Forget(path); err != nil {
+				return err
+			}
+			if err := watch.Register(path); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
