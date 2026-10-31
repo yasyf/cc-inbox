@@ -257,9 +257,18 @@ SELECT 'd','worker','urgent','same-topic',?,'unrouted','["elsewhere"]','post','r
 				} else {
 					filter.Before = 2
 				}
+				comparisons.Store(0)
 				baseline, err := st.Query(ctx, filter)
+				stockWork := comparisons.Load()
 				if err != nil || len(baseline) != 1 || baseline[0].Seq != wantSeq {
 					t.Fatalf("range baseline records=%v err=%v", baseline, err)
+				}
+				stockQuery, stockArgs := st.selection(filter)
+				stockPlan := queryPlan(ctx, t, st, stockQuery, stockArgs...)
+				stockBound := int64(4*bits.Len(uint(population)) + 8)
+				t.Logf("URGENT_REPEAT_RANGE_STOCK history=%d shape=%s drive_topic_comparisons=%d finite_bound=%d plan=%v", population, shape, stockWork, stockBound, stockPlan)
+				if stockWork == 0 || shape == "later-sequence" && stockWork > stockBound || shape == "older-than-window" && stockWork <= int64(population) {
+					t.Fatalf("stock repeat range control changed: work=%d bound=%d shape=%s history=%d", stockWork, stockBound, shape, population)
 				}
 				for _, index := range []struct{ name, order string }{{"sequence", "seq,at"}, {"time", "at,seq"}} {
 					if _, err := st.db.ExecContext(ctx, "CREATE INDEX urgent_repeat_trial ON records(drive,lane,kind,topic,"+index.order+")"); err != nil {
@@ -276,7 +285,7 @@ SELECT 'd','worker','urgent','same-topic',?,'unrouted','["elsewhere"]','post','r
 					}
 					bound := int64(4*bits.Len(uint(population)) + 8)
 					bounded := shape == "older-than-window" && index.name == "time" || shape == "later-sequence" && index.name == "sequence"
-					t.Logf("URGENT_REPEAT_RANGE_WORK history=%d shape=%s index=%s drive_topic_comparisons=%d finite_bound=%d expected_bounded=%t plan=%v", population, shape, index.name, work, bound, bounded, plan)
+					t.Logf("URGENT_REPEAT_RANGE_WORK history=%d shape=%s index=%s drive_topic_comparisons=%d stock_comparisons=%d finite_bound=%d expected_bounded=%t plan=%v", population, shape, index.name, work, stockWork, bound, bounded, plan)
 					if work == 0 || bounded && work > bound || !bounded && work <= int64(population) {
 						t.Fatalf("repeat range work does not match access-path control: work=%d bound=%d bounded=%t history=%d", work, bound, bounded, population)
 					}
