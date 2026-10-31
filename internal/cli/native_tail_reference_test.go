@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/relay"
@@ -103,18 +104,33 @@ func newNativeTailFixture(t *testing.T, call nativeTailCall, sets []nativeTailSe
 	t.Setenv("CLAUDE_CODE_SESSION_ID", call.claude)
 	t.Setenv("CODEX_THREAD_ID", call.codex)
 	t.Setenv("CCI_AGENT_ID", call.agent)
+	started := time.Now()
 	st, err := store.Open(t.Context(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = st.Close() })
+	opened := time.Now()
+	t.Cleanup(func() {
+		started := time.Now()
+		_ = st.Close()
+		if os.Getenv("CCI_NATIVE_TAIL_FIXTURE_TIMINGS") == "1" {
+			t.Logf("st_close=%s", time.Since(started))
+		}
+	})
 	db, err := sql.Open("sqlite", filepath.Join(home, store.DBFile))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
+	t.Cleanup(func() {
+		started := time.Now()
+		_ = db.Close()
+		if os.Getenv("CCI_NATIVE_TAIL_FIXTURE_TIMINGS") == "1" {
+			t.Logf("db_close=%s", time.Since(started))
+		}
+	})
 	node := st.Self()
 	seedNativeTailFixture(t, db, node)
+	seeded := time.Now()
 	if call.tier != "" {
 		if err := relay.SaveConfig(home, relay.Config{Mesh: "native", URL: "https://relay.invalid", Tier: call.tier}); err != nil {
 			t.Fatal(err)
@@ -140,6 +156,9 @@ VALUES('d','held','hold',4102444800000,'hold #29020','#29020',?,'post','native-h
 		if _, err := db.ExecContext(t.Context(), "UPDATE records SET "+set.set+" WHERE seq = ?", set.seq); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if os.Getenv("CCI_NATIVE_TAIL_FIXTURE_TIMINGS") == "1" {
+		t.Logf("fresh_store_open=%s seed_15_rows_and_origin=%s remaining_setup=%s", opened.Sub(started), seeded.Sub(opened), time.Since(seeded))
 	}
 	return nativeTailFixture{home: home, node: node, st: st, db: db}
 }

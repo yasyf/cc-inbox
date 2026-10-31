@@ -280,6 +280,8 @@ jobs:
           CCI_GREP_REPLY_INDEX_ROWS=250000 go test -count=1 -run '^TestGrepReplyIndexProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Build
         run: go build ./...
+      - name: Native HTTP fixture setup phase attribution
+        run: CCI_NATIVE_TAIL_FIXTURE_TIMINGS=1 go test -count=1 -race -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli
       - name: Tail operation counts and full requested output
         run: |
           test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
