@@ -43,6 +43,7 @@ func newPostCmd() *cobra.Command {
 		asJSON, label, force    bool
 		pairwise                bool
 		re, resolves            []string
+		reSeqs, resolvesSeqs    []int64
 	)
 	cmd := &cobra.Command{
 		Use:   "post [TEXT]",
@@ -63,7 +64,12 @@ func newPostCmd() *cobra.Command {
 			if parsedKind, err = kinds.Parse(kind); err != nil {
 				return err
 			}
-			return validateTargets(re, resolves, pairwise)
+			for _, seq := range append(slices.Clone(reSeqs), resolvesSeqs...) {
+				if seq < 0 {
+					return errors.New("--re-seq and --resolves-seq must be nonnegative")
+				}
+			}
+			return validateTargets(len(re)+len(reSeqs), len(resolves)+len(resolvesSeqs), pairwise)
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
@@ -151,13 +157,15 @@ func newPostCmd() *cobra.Command {
 			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, force, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
-			reSeqs, err := resolveAll(cmd.Context(), st, re)
-			if err != nil {
-				return err
+			if cmd.Flags().Changed("re") {
+				if reSeqs, err = resolveAll(cmd.Context(), st, re); err != nil {
+					return err
+				}
 			}
-			resolvesSeqs, err := resolveAll(cmd.Context(), st, resolves)
-			if err != nil {
-				return err
+			if cmd.Flags().Changed("resolves") {
+				if resolvesSeqs, err = resolveAll(cmd.Context(), st, resolves); err != nil {
+					return err
+				}
 			}
 			records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
 			if err != nil {
@@ -191,6 +199,12 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) of the record this one answers or closes; repeated, each gets its own record")
 	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
+	f.Int64SliceVar(&reSeqs, "re-seq", nil, "internal store sequences this record answers")
+	f.Int64SliceVar(&resolvesSeqs, "resolves-seq", nil, "internal store sequences this record resolves")
+	_ = f.MarkHidden("re-seq")
+	_ = f.MarkHidden("resolves-seq")
+	cmd.MarkFlagsMutuallyExclusive("re", "re-seq")
+	cmd.MarkFlagsMutuallyExclusive("resolves", "resolves-seq")
 	f.BoolVar(&pairwise, "pairwise", false, "pair equal non-empty --re and --resolves lists in order, posting one record per pair")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
@@ -236,21 +250,21 @@ func threadLane(ctx context.Context, st *store.Store) (string, error) {
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")
 
-func validateTargets[T any](re, resolves []T, pairwise bool) error {
+func validateTargets(re, resolves int, pairwise bool) error {
 	if pairwise {
-		if len(re) == 0 || len(re) != len(resolves) {
-			return fmt.Errorf("--pairwise needs equal non-empty --re and --resolves lists; got %d and %d", len(re), len(resolves))
+		if re == 0 || re != resolves {
+			return fmt.Errorf("--pairwise needs equal non-empty --re and --resolves lists; got %d and %d", re, resolves)
 		}
 		return nil
 	}
-	if len(re) > 1 && len(resolves) > 1 {
+	if re > 1 && resolves > 1 {
 		return errManyTargets
 	}
 	return nil
 }
 
 func perTarget(r store.Record, re, resolves []int64, pairwise bool) ([]store.Record, error) {
-	if err := validateTargets(re, resolves, pairwise); err != nil {
+	if err := validateTargets(len(re), len(resolves), pairwise); err != nil {
 		return nil, err
 	}
 	if pairwise {
