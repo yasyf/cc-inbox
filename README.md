@@ -668,7 +668,8 @@ daemonkit drains and replaces the running daemon.
 Linux has no launchd, so run `cci supervise` wherever the host starts
 long-lived processes, such as a container entrypoint or a service-manager
 entry. It holds the daemonkit supervisor in the foreground, starts the daemon
-under it, and resumes the daemon when the host restarts it after a reboot.
+under it, and resumes the daemon when the host restarts it after a reboot. A
+second `cci supervise` waits for the first to exit, then takes over.
 
 A release daemon also follows upgrades by itself. When it starts, and every 30
 seconds after, it reads the version directories of the plugin cache, skipping
