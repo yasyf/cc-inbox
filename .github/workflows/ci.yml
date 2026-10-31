@@ -1,4 +1,4 @@
-name: Incident native event proof
+name: Incident provisioning artifact
 on:
   workflow_dispatch:
     inputs:
@@ -9,91 +9,55 @@ on:
 permissions:
   contents: read
 jobs:
-  incident-native:
-    runs-on: macos-latest
-    timeout-minutes: 25
+  provisioning-candidate:
+    name: Prepublication Darwin arm64 provisioning candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     env:
-      GOTOOLCHAIN: local
-      GOMAXPROCS: '2'
+      GOMAXPROCS: "2"
       GOFLAGS: -p=2
-      SOURCE_SHA: ${{ inputs.commit }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.commit }}
-      - name: Verify exact candidate source
-        run: test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
-      - uses: actions/checkout@v7
-        with:
-          ref: 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
-          path: .ci-old
-      - uses: actions/checkout@v7
-        with:
-          ref: b7da336975a6651226912c5c129a38bec9c0e3da
-          path: .ci-incident-negative
-      - uses: actions/checkout@v7
-        with:
-          ref: e65cf4da214ea889e729c7cfdae79a8eb4f6cec0
-          path: .ci-incident-registration-negative
-      - uses: actions/checkout@v7
-        with:
-          ref: 23dcba01c1512bf876f6caf6e431cdc0f3731ec7
-          path: .ci-incident-registration-window-negative
-      - uses: actions/checkout@v7
-        with:
-          ref: e9610dc3fc29a2d3aa8fb342363adacf130c4ed5
-          path: .ci-incident-shared-node-negative
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache: true
-      - name: Build immutable 0.41.1 store compatibility probe
+      - name: Build source-bound provisioning candidate
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+          CGO_ENABLED: "0"
         run: |
-          cci_old_store_probe="$RUNNER_TEMP/cci-old-store-probe"
-          test "$(git -C .ci-old rev-parse HEAD)" = 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
-          mkdir -p .ci-old/cmd/compat-probe
-          cp internal/store/testdata/compat-probe/main.go .ci-old/cmd/compat-probe/main.go
-          cd .ci-old
-          go build -p 2 -o "$cci_old_store_probe" ./cmd/compat-probe
-          test -x "$cci_old_store_probe"
-          printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
-      - name: Incident old-writer native provisioning budget
-        run: CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
-      - name: Incident native lifecycle, immutable failure controls, and writer budget
-        run: |
-          test "$(git -C .ci-incident-negative rev-parse HEAD)" = b7da336975a6651226912c5c129a38bec9c0e3da
-          cp internal/store/incident_alias_internal_test.go internal/store/incident_owner_internal_test.go .ci-incident-negative/internal/store/
-          if (cd .ci-incident-negative && go test -count=1 -run '^TestIncidentWatchPreservesSymlinkDotDotRoutes$|^TestIncidentColdOwnerDiscardsRetiredPathBeforeFileAccess$|^TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-incident-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-incident-negative.log"
-          grep -F 'native watch stale after write' "$RUNNER_TEMP/cci-incident-negative.log"
-          grep -F 'retired canonical body was inspected' "$RUNNER_TEMP/cci-incident-negative.log"
-          grep -F 'concurrent incident projector accepted; reversed publication permanently regressed membership' "$RUNNER_TEMP/cci-incident-negative.log"
-          cp internal/store/incident_registration_race_internal_test.go .ci-incident-registration-negative/internal/store/
-          if (cd .ci-incident-registration-negative && go test -count=1 -run '^TestIncidentRegistrationUsesBoundObjectType$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-registration-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
-          grep -F 'watch registration type race retained stale hold' "$RUNNER_TEMP/cci-incident-registration-negative.log"
-          python3 .github/scripts/incident-registration-syscall-seam.py .ci-incident-registration-window-negative
-          cp internal/store/incident_registration_window_*test.go .ci-incident-registration-window-negative/internal/store/
-          if (cd .ci-incident-registration-window-negative && go test -count=1 -run '^TestIncidentPostOpenRegistrationReplacementRemainsFresh$|^TestIncidentLiveRetiredPendingRegistrationSkipsPathInspection$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-registration-window-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
-          grep -F 'post-open registration replacement retained stale hold' "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
-          grep -F 'live retired pending registration inspected path' "$RUNNER_TEMP/cci-incident-registration-window-negative.log"
-          test "$(git -C .ci-incident-shared-node-negative rev-parse HEAD)" = e9610dc3fc29a2d3aa8fb342363adacf130c4ed5
-          cp internal/store/incident_shared_rebind_internal_test.go .ci-incident-shared-node-negative/internal/store/
-          if (cd .ci-incident-shared-node-negative && go test -count=1 -run '^TestIncidentSharedAncestorReplacementRemainsFresh$|^TestIncidentSharedChangedRegistrationRefreshesOnce$' -v ./internal/store) > "$RUNNER_TEMP/cci-incident-shared-node-negative.log" 2>&1; then
-            cat "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
-            exit 1
-          fi
-          cat "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
-          grep -F 'shared ancestor retained stale membership' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
-          grep -F 'shared changed registration did not refresh' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
-          go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
+          cci_candidate_dir="$RUNNER_TEMP/cci-tail-candidate"
+          mkdir -p "$cci_candidate_dir"
+          cci_candidate_commit="$(git rev-parse HEAD)"
+          go build -mod=readonly -trimpath -buildvcs=true -ldflags "-s -w -X github.com/yasyf/cc-inbox/internal/version.Commit=$cci_candidate_commit" -o "$cci_candidate_dir/cci" ./cmd/cci
+          test -z "$(git status --porcelain)"
+          go version -m "$cci_candidate_dir/cci" > "$cci_candidate_dir/build-info.txt"
+          CCI_CANDIDATE_DIR="$cci_candidate_dir" python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          folder = pathlib.Path(os.environ["CCI_CANDIDATE_DIR"])
+          descriptor = {
+              "purpose": "root-reviewed prepublication physical membership provisioning only",
+              "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+              "source_tree": subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], text=True).strip(),
+              "binary_sha256": hashlib.sha256((folder / "cci").read_bytes()).hexdigest(),
+              "os": "darwin",
+              "arch": "arm64",
+              "version": "dev",
+              "release_signature": "none; verified CI candidate, not a published signed release",
+          }
+          (folder / "descriptor.json").write_text(json.dumps(descriptor, indent=2) + "\n")
+          PY
+          tar -czf "$cci_candidate_dir/cci-tail-provisioning-darwin-arm64.tar.gz" -C "$cci_candidate_dir" cci build-info.txt descriptor.json
+          (cd "$cci_candidate_dir" && sha256sum cci-tail-provisioning-darwin-arm64.tar.gz > checksums.txt)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cci-tail-provisioning-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}/cci-tail-candidate/cci-tail-provisioning-darwin-arm64.tar.gz
+            ${{ runner.temp }}/cci-tail-candidate/checksums.txt
+          if-no-files-found: error
+          compression-level: 0
