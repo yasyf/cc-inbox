@@ -61,7 +61,9 @@ func TestRuntimeStartRefreshesRegistrationWithoutLosingHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ln.Close() })
-	rt := New(home, ln)
+	rt := New(home, ln, func(*store.Store) (http.Handler, error) {
+		return http.NotFoundHandler(), nil
+	})
 	var calls atomic.Int32
 	invoked := make(chan bool, 1)
 	rt.refreshRegistration = func(ctx context.Context, gotHome, gotSchema string) error {
