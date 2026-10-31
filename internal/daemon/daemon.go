@@ -63,10 +63,11 @@ type Runtime struct {
 	mu                  sync.Mutex
 	failed              error
 	refreshRegistration func(context.Context, string, string) error
+	tail                func(*store.Store) (http.Handler, error)
 }
 
-func New(home string, ln net.Listener) *Runtime {
-	return &Runtime{home: home, ln: ln, refreshRegistration: mesh.RefreshRegistration}
+func New(home string, ln net.Listener, tail func(*store.Store) (http.Handler, error)) *Runtime {
+	return &Runtime{home: home, ln: ln, refreshRegistration: mesh.RefreshRegistration, tail: tail}
 }
 
 func (r *Runtime) Err() error {
@@ -98,9 +99,16 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	if err := r.refreshRegistration(c.Context, r.home, st.SchemaFingerprint()); err != nil {
 		slog.Warn("cci daemon cannot refresh mesh registration", "err", err)
 	}
+	tail, err := r.tail(st)
+	if err != nil {
+		return nil, errors.Join(err, st.Close())
+	}
+	handler := http.NewServeMux()
+	handler.Handle("/v1/tail", tail)
+	handler.Handle("/", server.New(st, time.Second).Handler())
 	p := &Product{
 		st:     st,
-		http:   &http.Server{Handler: server.New(st, time.Second).Handler(), ReadHeaderTimeout: 5 * time.Second},
+		http:   &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second},
 		done:   make(chan struct{}),
 		synced: make(chan struct{}),
 	}

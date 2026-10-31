@@ -6,6 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A `queue` kind for a pull request's merge-queue state change. It requires
+  `--pr` and carries the state in `--outcome`.
+- `service.Writer` posts records to a relay mesh as a scoped service member
+  with no local store, and `trunk.Handler` turns Svix-signed Trunk
+  merge-queue webhooks into one `queue` record per state change.
+- `e2e.Key` and `e2e.ParseKey` hold a P-256 node or service key in memory;
+  the node key is one, so an importer of `service` links no keychain code.
+- `cci post --kind head --head <pr>=[<was>..]<sha>[ <note>]`, repeated, posts
+  one head record for a restack that moves several pull requests. Each head
+  lands in `fields.attrs` as `head:<pr>` = `[<was>..]<sha>[ <note>]`, every PR
+  joins `refs.prs`, and the text opens with `HEAD <n> PRs: #<pr> <short sha>, ...`.
+  The wire format is unchanged, so nodes on older releases keep replicating.
+
 ### Changed
 
 - `cci post --to <lane>` accepts a lane that has not started yet without
@@ -14,7 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from it or an older number of it, is refused, naming that lane; `--force`
   addresses it as typed.
 - A subagent or teammate spawned with a name is bound as that lane by
-  `cci me`, and its posts default `--lane` to the name.
+  `cci me`, and its posts default `--lane` to the name. `cci me` registers a
+  subagent the hooks have not announced yet, so it works as the first command.
+- A lane that registers with its first `cci post --lane` reads the records
+  posted to it before it started, as one bound by `cci me` does.
 - `cci post --kind stand-down --to <lane> --successor <new>` records who took
   a lane over: later records addressed to the lane reach every successor too,
   `cci who` marks it `stood-down successor=<new>`, and

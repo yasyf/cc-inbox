@@ -3,16 +3,11 @@ package relay
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -100,19 +95,5 @@ func (c Client) sign(req *http.Request, path string, body []byte) error {
 	if c.Now != nil {
 		now = c.Now
 	}
-	nonce := make([]byte, 16)
-	if _, err := rand.Read(nonce); err != nil {
-		return fmt.Errorf("request nonce: %w", err)
-	}
-	ts := strconv.FormatInt(now().Unix(), 10)
-	sum := sha256.Sum256(body)
-	sig, err := c.Identity.Sign(e2e.RequestMessage(req.Method, path, ts, base64.StdEncoding.EncodeToString(nonce), hex.EncodeToString(sum[:])))
-	if err != nil {
-		return fmt.Errorf("sign relay request: %w", err)
-	}
-	req.Header.Set("X-CCI-Node", c.Identity.ID())
-	req.Header.Set("X-CCI-Time", ts)
-	req.Header.Set("X-CCI-Nonce", base64.StdEncoding.EncodeToString(nonce))
-	req.Header.Set("X-CCI-Sig", base64.StdEncoding.EncodeToString(sig))
-	return nil
+	return e2e.SignRequest(c.Identity, req, path, body, now())
 }

@@ -36,7 +36,7 @@ const (
 // Node is one machine's key, plus the Secure Enclave endorsement of it when
 // the owner has run `cci node endorse`.
 type Node struct {
-	key         *ecdsa.PrivateKey
+	e2e.Key
 	endorsement *Endorsement
 }
 
@@ -45,17 +45,17 @@ type Node struct {
 func Load(home string) (Node, error) {
 	dir := Dir(home)
 	if env := os.Getenv(KeyEnv); env != "" {
-		key, err := parse([]byte(env))
+		key, err := e2e.ParseKey([]byte(env))
 		if err != nil {
 			return Node{}, fmt.Errorf("%s: %w", KeyEnv, err)
 		}
-		return Node{key: key}, nil
+		return Node{Key: key}, nil
 	}
 	key, err := loadOrCreate(filepath.Join(dir, "key.pem"))
 	if err != nil {
 		return Node{}, err
 	}
-	n := Node{key: key}
+	n := Node{Key: key}
 	raw, err := os.ReadFile(filepath.Join(dir, endorsementFile)) //nolint:gosec // G304: dir is the node directory under the cci home.
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -77,11 +77,11 @@ func Load(home string) (Node, error) {
 // Parse reads a node key from PKCS#8 PEM, the form $CCI_NODE_KEY and
 // service secrets carry.
 func Parse(raw []byte) (Node, error) {
-	key, err := parse(raw)
+	key, err := e2e.ParseKey(raw)
 	if err != nil {
 		return Node{}, err
 	}
-	return Node{key: key}, nil
+	return Node{Key: key}, nil
 }
 
 // Dir is where the node key and its endorsement live.
@@ -89,70 +89,48 @@ func Dir(home string) string {
 	return filepath.Join(home, "node")
 }
 
-func loadOrCreate(path string) (*ecdsa.PrivateKey, error) {
+func loadOrCreate(path string) (e2e.Key, error) {
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the node key under the cci home.
 	if err == nil {
-		key, err := parse(raw)
+		key, err := e2e.ParseKey(raw)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", path, err)
+			return e2e.Key{}, fmt.Errorf("%s: %w", path, err)
 		}
 		return key, nil
 	}
 	if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("read node key: %w", err)
+		return e2e.Key{}, fmt.Errorf("read node key: %w", err)
 	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("generate node key: %w", err)
+		return e2e.Key{}, fmt.Errorf("generate node key: %w", err)
 	}
 	der, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
-		return nil, fmt.Errorf("encode node key: %w", err)
+		return e2e.Key{}, fmt.Errorf("encode node key: %w", err)
 	}
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("create node dir: %w", err)
+		return e2e.Key{}, fmt.Errorf("create node dir: %w", err)
 	}
 	tmp, err := os.CreateTemp(dir, ".key-*.pem")
 	if err != nil {
-		return nil, fmt.Errorf("create node key: %w", err)
+		return e2e.Key{}, fmt.Errorf("create node key: %w", err)
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
 	if err := pem.Encode(tmp, &pem.Block{Type: "PRIVATE KEY", Bytes: der}); err != nil {
 		_ = tmp.Close()
-		return nil, fmt.Errorf("write node key: %w", err)
+		return e2e.Key{}, fmt.Errorf("write node key: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return nil, fmt.Errorf("write node key: %w", err)
+		return e2e.Key{}, fmt.Errorf("write node key: %w", err)
 	}
 	if err := os.Link(tmp.Name(), path); errors.Is(err, os.ErrExist) {
 		return loadOrCreate(path)
 	} else if err != nil {
-		return nil, fmt.Errorf("install node key: %w", err)
+		return e2e.Key{}, fmt.Errorf("install node key: %w", err)
 	}
-	return key, nil
-}
-
-func parse(raw []byte) (*ecdsa.PrivateKey, error) {
-	block, _ := pem.Decode(raw)
-	if block == nil || block.Type != "PRIVATE KEY" {
-		return nil, errors.New("not a PKCS#8 PEM private key")
-	}
-	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("parse node key: %w", err)
-	}
-	ec, ok := key.(*ecdsa.PrivateKey)
-	if !ok || ec.Curve != elliptic.P256() {
-		return nil, errors.New("node key is not a P-256 ECDSA key")
-	}
-	return ec, nil
-}
-
-// ID is the node's name in origins and peer:<node>/<session> addresses: the
-// first 16 hex characters of its fingerprint. Trust a full key, never an ID.
-func (n Node) ID() string {
-	return IDOf(n.PublicKey())
+	return e2e.NewKey(key), nil
 }
 
 // Fingerprint is the lowercase hex SHA-256 of the X9.63 public key, the same
@@ -161,27 +139,8 @@ func (n Node) Fingerprint() string {
 	return FingerprintOf(n.PublicKey())
 }
 
-// PublicKey is the uncompressed X9.63 encoding of the node's P-256 point.
-func (n Node) PublicKey() []byte {
-	pub, err := n.key.PublicKey.Bytes()
-	if err != nil {
-		panic("node: encode a valid P-256 public key: " + err.Error())
-	}
-	return pub
-}
-
 func (n Node) ECDSAPublic() *ecdsa.PublicKey {
-	return &n.key.PublicKey
-}
-
-// Sign signs SHA-256(msg) with ECDSA, ASN.1 DER encoded.
-func (n Node) Sign(msg []byte) ([]byte, error) {
-	sum := sha256.Sum256(msg)
-	sig, err := ecdsa.SignASN1(rand.Reader, n.key, sum[:])
-	if err != nil {
-		return nil, fmt.Errorf("sign: %w", err)
-	}
-	return sig, nil
+	return &n.Private().PublicKey
 }
 
 // Verify reports whether sig is an ECDSA P-256 signature over SHA-256(msg) by
@@ -195,15 +154,6 @@ func Verify(pub, msg, sig []byte) bool {
 	return ecdsa.VerifyASN1(key, sum[:], sig)
 }
 
-// KeyExchanger is the node key as an ECDH private key, for HPKE and key wraps.
-func (n Node) KeyExchanger() ecdh.KeyExchanger {
-	priv, err := n.key.ECDH()
-	if err != nil {
-		panic("node: convert a valid P-256 key to ECDH: " + err.Error())
-	}
-	return priv
-}
-
 // Agree returns the raw P-256 ECDH shared secret with peerPub; derive keys
 // from it with a KDF, never use it directly.
 func (n Node) Agree(peerPub []byte) ([]byte, error) {
@@ -211,7 +161,7 @@ func (n Node) Agree(peerPub []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("peer public key: %w", err)
 	}
-	priv, err := n.key.ECDH()
+	priv, err := n.Private().ECDH()
 	if err != nil {
 		return nil, fmt.Errorf("node ECDH key: %w", err)
 	}

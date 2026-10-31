@@ -64,6 +64,18 @@ jobs:
         with:
           ref: c148e0dc6970d4d5f446d77ba62d8a4060e0156c
           path: .ci-tail-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          path: .ci-native-tail-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
+          path: .ci-native-tail-null-baseline
+      - uses: actions/checkout@v7
+        with:
+          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          path: .ci-lane-score-baseline
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -119,6 +131,33 @@ jobs:
         run: |
           go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store
           CCI_MEMBERSHIP_PROVISION_ROWS=200000 go test -run '^TestMaintainIndexesProvisionsMembershipsWithinWriterBudget$' -v ./internal/store
+      - name: Indexed lane tips, immutable output and errors, and writer lifecycle
+        run: |
+          test "$(git -C .ci-lane-score-baseline rev-parse HEAD)" = a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          cp internal/cli/daemon_lanes_equivalence_test.go .ci-lane-score-baseline/internal/cli/
+          mkdir -p "$RUNNER_TEMP/cci-lane-snapshots"
+          (cd .ci-lane-score-baseline && CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" CCI_LANE_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestDaemonLanePreservesNativeOutputAndErrors$|^TestDaemonLaneScoreTieIsNotMaximumSequence$' -v ./internal/cli)
+          CCI_LANE_SNAPSHOTS="$RUNNER_TEMP/cci-lane-snapshots" go test -count=1 -run '^TestDaemonLane' -v ./internal/cli
+          go test -run '^TestLaneScore' -v ./internal/store
+          CCI_LANE_INDEX_ROWS=250000 go test -run '^TestLaneScoreIndexProvisioningWithinWriterBudget$' -v ./internal/store
+
+      - name: Native HTTP Tail immutable CLI bytes, errors, identity, freshness, and zero writes
+        run: |
+          test "$(git -C .ci-native-tail-null-baseline rev-parse HEAD)" = e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
+          cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go internal/cli/tail_http_test.go .ci-native-tail-null-baseline/internal/cli/
+          if (cd .ci-native-tail-null-baseline && go test -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli) > "$RUNNER_TEMP/cci-native-tail-null-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
+          grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
+          mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
+          (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' ./internal/cli)
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailCLIReference$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailHTTPParity$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
 
   lint:
     runs-on: ubuntu-latest

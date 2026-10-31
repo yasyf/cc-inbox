@@ -108,6 +108,14 @@ PR in another repo, such as `--pr Forge-FDE/iris-chime#243`.
 `opened` record needs `--pr`, and so does a `head`, unless it names a note with
 `--ccn`, such as an experiment's method note posted before any PR exists.
 Without either, cci takes the one `#N` the text names or refuses.
+A restack that moves several PRs posts one `head` record, not one per PR:
+repeat `--head <pr>=<sha>`, or `--head <pr>=<was>..<sha>` with the head it
+replaced, and an optional note after a space, such as
+`--head "45002=4423264..c3b44a3 patch-identical"`. The record names every PR in
+its refs, stores each head as `fields.attrs["head:<pr>"]` =
+`[<was>..]<sha>[ <note>]`, and opens its text with
+`HEAD 3 PRs: #45001 a1b2c3d, #45002 c3b44a3, ...`; the text argument, when
+given, follows after a colon.
 `--path`, `--ccn`, `--url`, and `--board` also set refs. Put long bodies in a file
 and post it with `--path <file>`; without `--text`, the file's first line becomes
 the text, so open the file with a one-line summary. `--path -` reads the body
@@ -489,6 +497,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
+| `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
 | `review` | None | A rules-review verdict. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |

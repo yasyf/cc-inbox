@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -30,14 +31,7 @@ const (
 var errNoPeerSession = errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
 
 func NewRootCmd() *cobra.Command {
-	root := &cobra.Command{
-		Use:           "cci",
-		Short:         "Typed, bounded coordination records for long-running agent drives",
-		Version:       version.String(),
-		SilenceUsage:  true,
-		SilenceErrors: true,
-	}
-	root.SetVersionTemplate("{{.Version}}\n")
+	root := rootCommand()
 	root.AddCommand(
 		newPostCmd(),
 		newTailCmd(),
@@ -74,6 +68,18 @@ func NewRootCmd() *cobra.Command {
 	return root
 }
 
+func rootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:           "cci",
+		Short:         "Typed, bounded coordination records for long-running agent drives",
+		Version:       version.String(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+	}
+	root.SetVersionTemplate("{{.Version}}\n")
+	return root
+}
+
 var number = regexp.MustCompile(`^#?[0-9]+(@[0-9a-f]+)?$`)
 
 func openStore(ctx context.Context) (*store.Store, error) {
@@ -85,13 +91,20 @@ func openStore(ctx context.Context) (*store.Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	configs, err := relay.Configs(home)
-	if err != nil {
+	if err := configureStoreOwner(st, home); err != nil {
 		_ = st.Close()
 		return nil, err
 	}
-	st.SetOwner(!slices.ContainsFunc(configs, func(c relay.Config) bool { return c.Tier != string(node.TierOwner) }))
 	return st, nil
+}
+
+func configureStoreOwner(st *store.Store, home string) error {
+	configs, err := relay.Configs(home)
+	if err != nil {
+		return err
+	}
+	st.SetOwner(!slices.ContainsFunc(configs, func(c relay.Config) bool { return c.Tier != string(node.TierOwner) }))
+	return nil
 }
 
 func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, error) {
@@ -117,23 +130,25 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 }
 
 type readFlags struct {
-	drive   string
-	origin  string
-	kinds   []string
-	mute    []string
-	toKinds []string
-	lanes   []string
-	to      string
-	reader  string
-	topics  []string
-	stack   string
-	target  string
-	pr      store.PR
-	since   string
-	limit   int
-	budget  int
-	width   int
-	json    bool
+	drive        string
+	origin       string
+	kinds        []string
+	mute         []string
+	toKinds      []string
+	lanes        []string
+	to           string
+	reader       string
+	topics       []string
+	stack        string
+	target       string
+	pr           store.PR
+	since        string
+	sinceSeq     int64
+	sinceSeqFlag *pflag.Flag
+	limit        int
+	budget       int
+	width        int
+	json         bool
 }
 
 func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, budget int) {
@@ -152,6 +167,10 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringVar(&f.origin, "origin", "", "only records written on this node (cci node prints its id)")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), a Pacific clock time (9:00 AM, 21:30, 12:0x), or an RFC3339 time")
+	cmd.Flags().Int64Var(&f.sinceSeq, "since-seq", 0, "read after this internal store sequence")
+	f.sinceSeqFlag = cmd.Flags().Lookup("since-seq")
+	_ = cmd.Flags().MarkHidden("since-seq")
+	cmd.MarkFlagsMutuallyExclusive("since", "since-seq")
 	cmd.Flags().IntVar(&f.budget, "budget", budget, "output budget in bytes")
 	cmd.Flags().BoolVar(&f.json, "json", false, "one JSON record per line")
 }
@@ -165,13 +184,17 @@ func (f *readFlags) registerLimit(cmd *cobra.Command, usage string) {
 }
 
 func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, error) {
+	return f.filterPeer(ctx, st, selfPeer())
+}
+
+func (f *readFlags) filterPeer(ctx context.Context, st *store.Store, peer store.PeerKey) (store.Filter, error) {
 	drive, err := resolveDrive(ctx, st, f.drive)
 	if err != nil {
 		return store.Filter{}, err
 	}
 	out := store.Filter{Drive: drive, Origin: f.origin, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
 	if f.to == "" {
-		out.Peer = selfPeer().String()
+		out.Peer = peer.String()
 	}
 	if out.Kinds, err = kinds.ParseAll(f.kinds); err != nil {
 		return store.Filter{}, err
@@ -182,8 +205,15 @@ func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, 
 	if out.ToKinds, err = kinds.ParseAll(f.toKinds); err != nil {
 		return store.Filter{}, err
 	}
-	if out.After, out.Since, err = parseSince(ctx, st, f.since); err != nil {
-		return store.Filter{}, err
+	if f.sinceSeqFlag.Changed {
+		if f.sinceSeq < 0 {
+			return store.Filter{}, errors.New("--since-seq must be nonnegative")
+		}
+		out.After = f.sinceSeq
+	} else {
+		if out.After, out.Since, err = parseSince(ctx, st, f.since); err != nil {
+			return store.Filter{}, err
+		}
 	}
 	return out, nil
 }
