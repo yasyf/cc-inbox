@@ -136,8 +136,8 @@ func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener, func() er
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() {
-		_, err := daemonkit.Serve(ctx, d, daemon.New(home, ln, func(st *store.Store) (http.Handler, error) {
-			return cli.TailHandler(st, home)
+		_, err := daemonkit.Serve(ctx, d, daemon.New(home, ln, func(ctx context.Context, st *store.Store) (daemon.ReadAPI, error) {
+			return cli.NativeReadHandler(ctx, st, home)
 		}).Start)
 		served <- err
 	}()
@@ -196,8 +196,8 @@ func TestDaemonReportsAListenerFailure(t *testing.T) {
 	}
 	_ = ln.Close()
 	home := t.TempDir()
-	rt := daemon.New(home, ln, func(st *store.Store) (http.Handler, error) {
-		return cli.TailHandler(st, home)
+	rt := daemon.New(home, ln, func(ctx context.Context, st *store.Store) (daemon.ReadAPI, error) {
+		return cli.NativeReadHandler(ctx, st, home)
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()

@@ -518,6 +518,12 @@ func (s *Store) migrate(ctx context.Context) error {
 	if _, err := createQueryIndexes(ctx, tx); err != nil {
 		return err
 	}
+	if err := createIncidentOwnerLock(s.home); err != nil {
+		return err
+	}
+	if err := installIncidentProjection(ctx, tx); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
 		return fmt.Errorf("record schema version: %w", err)
 	}
