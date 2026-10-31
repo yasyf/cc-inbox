@@ -52,6 +52,7 @@ jobs:
         os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
     env:
       TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
+      TIMESTAMP_RANGE_TESTS: '^(TestTimestampIndexCLIWork|TestTimestampRangePublicParity|TestTimestampIndexDiagnosticWork|TestTimestampIndexNativeParity|TestTimestampRangePlanAndNativeCacheWork|TestTimestampRangeWindowBoundaries|TestTimestampRangeForeignRecentWork)$'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -60,6 +61,11 @@ jobs:
         with:
           ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
           path: .ci-audience-current491
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
+          path: .ci-timestamp-range-baseline
           persist-credentials: false
       - uses: actions/checkout@v7
         with:
@@ -183,6 +189,33 @@ jobs:
           (cd .ci-audience-current491 && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-old" ./cmd/cci)
           go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-current" ./cmd/cci
           CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
+      - name: Timestamp range immutable control, native parity, and actual work
+        run: |
+          test "$(git -C .ci-timestamp-range-baseline rev-parse HEAD)" = cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
+          cp internal/cli/timestamp_index_diagnostic_test.go .ci-timestamp-range-baseline/internal/cli/
+          cp internal/store/timestamp_index_diagnostic_internal_test.go .ci-timestamp-range-baseline/internal/store/
+          cp internal/store/timestamp_range_internal_test.go .ci-timestamp-range-baseline/internal/store/
+          if (cd .ci-timestamp-range-baseline && CCI_TIMESTAMP_REQUIRE_RANGE_BOUND=1 go test -count=1 -run '^TestTimestampIndex(DiagnosticWork|CLIWork)$' -v ./internal/cli ./internal/store) > "$RUNNER_TEMP/timestamp-range-old-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/timestamp-range-old-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/timestamp-range-old-negative.log"
+          for operation in grep query count; do
+            for history in 32 10000; do
+              grep -F "TIMESTAMP_RANGE_UNBOUNDED operation=$operation history=$history index=drive-at peer=true " "$RUNNER_TEMP/timestamp-range-old-negative.log"
+            done
+          done
+          (cd .ci-timestamp-range-baseline && go test -count=1 -race -run '^TestTimestampRangeForeignRecentWork$' -v ./internal/store) 2>&1 | tee "$RUNNER_TEMP/timestamp-range-old-foreign-recent.log"
+          (cd .ci-timestamp-range-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-timestamp-old" ./cmd/cci)
+          go build -p 2 -o "$RUNNER_TEMP/cci-timestamp-current" ./cmd/cci
+          CCI_TIMESTAMP_OLD_CLI="$RUNNER_TEMP/cci-timestamp-old" CCI_TIMESTAMP_CURRENT_CLI="$RUNNER_TEMP/cci-timestamp-current" CCI_TIMESTAMP_REQUIRE_RANGE_BOUND=1 go test -count=1 -race -run "$TIMESTAMP_RANGE_TESTS" -v ./internal/cli ./internal/store 2>&1 | tee "$RUNNER_TEMP/timestamp-range-current.log"
+          go test -count=1 -race -run '^TestBoundedReadsMatchUnboundedPredicates$|^TestExistingStoreOpenDoesNotBuildPhysicalIndexes$|^TestMaintainIndexes|^TestPhysicalIndexes' -v ./internal/store
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: timestamp-range-${{ matrix.os }}-${{ inputs.commit || github.sha }}
+          path: ${{ runner.temp }}/timestamp-range-*.log
+          if-no-files-found: error
       - name: SSE idle queries, immutable history control, and commit freshness
         run: |
           test "$(git -C .ci-stream-idle-baseline rev-parse HEAD)" = 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
@@ -307,7 +340,7 @@ jobs:
           go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
-        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident" ./...
+        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident|$TIMESTAMP_RANGE_TESTS" ./...
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
