@@ -64,6 +64,10 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'old-lane' FROM history`
 }
 
 func countedLaneStore(t *testing.T, collation string) *Store {
+	return countedColumnStore(t, "lane", collation)
+}
+
+func countedColumnStore(t *testing.T, column, collation string) *Store {
 	t.Helper()
 	ctx := context.Background()
 	production, err := Open(ctx, t.TempDir())
@@ -77,7 +81,7 @@ func countedLaneStore(t *testing.T, collation string) *Store {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	definitions, err := production.db.QueryContext(ctx, `SELECT type, sql FROM sqlite_schema
-WHERE tbl_name IN ('records', 'sessions', 'record_recipients', 'record_also_resolves', 'record_json_errors') AND type IN ('table', 'index', 'trigger') AND sql IS NOT NULL
+WHERE tbl_name IN ('records', 'sessions', 'record_recipients', 'record_also_resolves', 'record_json_errors', 'record_closer_keys', 'members') AND type IN ('table', 'index', 'trigger') AND sql IS NOT NULL
 ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +93,7 @@ ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 			t.Fatal(err)
 		}
 		if kind == "table" {
-			definition = strings.Replace(definition, "lane TEXT", "lane TEXT COLLATE "+collation, 1)
+			definition = strings.Replace(definition, column+" TEXT", column+" TEXT COLLATE "+collation, 1)
 		}
 		if _, err := db.ExecContext(ctx, definition); err != nil {
 			t.Fatal(err)
