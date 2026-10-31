@@ -16,8 +16,12 @@ func newMaintainIndexesCmd() *cobra.Command {
 		Short:  "Build local lane-registration indexes and record memberships and report storage cost",
 		Hidden: true,
 		Args: func(cmd *cobra.Command, args []string) error {
-			if err := cobra.NoArgs(cmd, args); err != nil { return err }
-			if cmd.Flags().Changed("incident-drive") && drive == "" { return errors.New("--incident-drive requires a nonempty drive") }
+			if err := cobra.NoArgs(cmd, args); err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("incident-drive") && drive == "" {
+				return errors.New("--incident-drive requires a nonempty drive")
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -31,12 +35,16 @@ func newMaintainIndexesCmd() *cobra.Command {
 			}
 			if drive != "" {
 				st, err := store.Open(cmd.Context(), home)
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				defer func() { _ = st.Close() }()
 				incident, err := st.ProvisionIncidentScope(cmd.Context(), drive)
-				if err != nil { return err }
+				if err != nil {
+					return err
+				}
 				return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
-					Indexes store.IndexMaintenanceReport `json:"indexes"`
+					Indexes  store.IndexMaintenanceReport  `json:"indexes"`
 					Incident store.IncidentProvisionReport `json:"incident"`
 				}{report, incident})
 			}

@@ -100,8 +100,10 @@ jobs:
           go build -p 2 -o "$cci_old_store_probe" ./cmd/compat-probe
           test -x "$cci_old_store_probe"
           printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
+      - name: Incident old-writer native provisioning budget
+        run: CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
       - name: Test (race)
-        run: go test -race ./...
+        run: go test -race -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' ./...
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
@@ -186,8 +188,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-incident-registration-negative.log"
           grep -F 'watch registration type race retained stale hold' "$RUNNER_TEMP/cci-incident-registration-negative.log"
-          go test -count=1 -race -run '^TestIncident' -v ./internal/store ./internal/cli
-          CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
+          go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
 
   lint:
     runs-on: ubuntu-latest

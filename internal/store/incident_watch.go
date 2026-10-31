@@ -212,6 +212,9 @@ func (w *incidentFileWatch) collect(ctx context.Context, dirty map[string]bool) 
 				}
 				continue
 			}
+			if len(node.Missing) == 0 {
+				continue
+			}
 			if event.Name != "" {
 				w.missingNames++
 				if err := w.mark(ctx, node.Missing[event.Name], true, dirty); err != nil {

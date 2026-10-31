@@ -14,9 +14,13 @@ type nativeHTTP struct {
 
 func NativeReadHandler(ctx context.Context, st *store.Store, home string) (*nativeHTTP, error) {
 	tail, err := TailHandler(st, home)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	incident, err := IncidentHoldsHandler(ctx, st)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.Handle("/v1/tail", tail)
 	mux.Handle("/v1/incident-holds", incident)
