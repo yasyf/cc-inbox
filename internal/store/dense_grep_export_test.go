@@ -43,3 +43,13 @@ SELECT 'd','writer','note',?-3600000-((n*7919)%10000)*1000,'pure port dense '||n
 	}
 	return st, now, measure, plan
 }
+
+func DenseReadDiagnosticPlan(t *testing.T, st *Store, filter Filter, count bool) (string, []any, []string) {
+	t.Helper()
+	query, args := st.selection(filter)
+	if count {
+		where, params := filter.bounded(st.Self(), st.Now())
+		query, args = "SELECT COUNT(*) FROM records WHERE "+where, params
+	}
+	return query, args, queryPlan(t.Context(), t, st, query, args...)
+}
