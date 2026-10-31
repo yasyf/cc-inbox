@@ -15,6 +15,7 @@ import (
 
 	"github.com/yasyf/daemonkit"
 
+	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/daemon"
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
@@ -135,7 +136,9 @@ func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener, func() er
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() {
-		_, err := daemonkit.Serve(ctx, d, daemon.New(home, ln).Start)
+		_, err := daemonkit.Serve(ctx, d, daemon.New(home, ln, func(st *store.Store) (http.Handler, error) {
+			return cli.TailHandler(st, home)
+		}).Start)
 		served <- err
 	}()
 	stopped := sync.OnceValue(func() error {
@@ -192,7 +195,10 @@ func TestDaemonReportsAListenerFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = ln.Close()
-	rt := daemon.New(t.TempDir(), ln)
+	home := t.TempDir()
+	rt := daemon.New(home, ln, func(st *store.Store) (http.Handler, error) {
+		return cli.TailHandler(st, home)
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if _, err := daemonkit.Serve(ctx, d, rt.Start); err != nil {

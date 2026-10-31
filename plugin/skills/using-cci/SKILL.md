@@ -31,9 +31,14 @@ file's path, and `cci post` prints that path. Read the file for the rest. Use `s
 status, `ask` for a question, `hold` for a stop, `go` for permission, and `opened`
 or `landed` for a PR event. Use `review` with `--outcome` for a rules-review verdict.
 Address lanes with `--to`; when an action needs the owner, use `--to owner`.
-`cci post` refuses a bare `--to` lane that no live session reads, no thread is
-bound as on the drive, and no record there was posted as, and names the
-nearest live lane; `--force` addresses a lane that has not started yet.
+A lane that has not started yet is addressed like any other and reads the
+record once it binds. `cci post` refuses only a never-seen bare `--to` lane
+that looks like a slip for a live one, one or two edits from it or an older
+number of it, and names that lane; `--force` addresses it as typed. When a
+lane is replaced, record it once with
+`cci post --lane root --kind stand-down --to <old> --successor <new> "<why>"`:
+later records addressed to `<old>` reach `<new>` too, `cci who` marks `<old>`
+stood down, and `cci who --successor-of <old> --json` names who stands in.
 
 Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose
@@ -103,6 +108,14 @@ PR in another repo, such as `--pr Forge-FDE/iris-chime#243`.
 `opened` record needs `--pr`, and so does a `head`, unless it names a note with
 `--ccn`, such as an experiment's method note posted before any PR exists.
 Without either, cci takes the one `#N` the text names or refuses.
+A restack that moves several PRs posts one `head` record, not one per PR:
+repeat `--head <pr>=<sha>`, or `--head <pr>=<was>..<sha>` with the head it
+replaced, and an optional note after a space, such as
+`--head "45002=4423264..c3b44a3 patch-identical"`. The record names every PR in
+its refs, stores each head as `fields.attrs["head:<pr>"]` =
+`[<was>..]<sha>[ <note>]`, and opens its text with
+`HEAD 3 PRs: #45001 a1b2c3d, #45002 c3b44a3, ...`; the text argument, when
+given, follows after a colon.
 `--path`, `--ccn`, `--url`, and `--board` also set refs. Put long bodies in a file
 and post it with `--path <file>`; without `--text`, the file's first line becomes
 the text, so open the file with a one-line summary. `--path -` reads the body
@@ -157,10 +170,13 @@ records after compaction. Both reads use a 400-character width, with a
 2,500-byte digest budget and 1,500-byte tail budget.
 
 A lane needs no reader setup: its first `cci post --lane <lane>` binds the
-session, and later posts keep that drive and default `--lane` to that lane:
-`--drive` on a post or cursor applies to that one call, and only
-`cci drive use` moves the binding. A post never defaults to `root`: the root
-passes `--lane root`, and a thread bound to no lane is refused. From
+session, and later posts keep that drive and default `--lane` to that lane.
+A subagent or teammate spawned with a name is that lane already: `cci me`
+binds it, and its posts default `--lane` to the name. Records posted to a
+lane before any thread bound it arrive on the first binding. `--drive` on a
+post or cursor applies to that one call, and only `cci drive use` moves the
+binding. A post never defaults to `root`: the root passes `--lane root`, and
+an unnamed thread bound to no lane is refused. From
 then every record addressed to the lane arrives as hook context after the
 next tool call, including records posted since the window started. A
 `head`, `review`, `state`, `report`, `claim` or `matrix` record arrives only
@@ -481,6 +497,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
+| `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
 | `review` | None | A rules-review verdict. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |

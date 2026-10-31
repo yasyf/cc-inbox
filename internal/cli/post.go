@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -39,10 +42,13 @@ func newPostCmd() *cobra.Command {
 		r                       store.Record
 		counts                  map[string]string
 		census, bodyFile        string
+		successor               string
+		heads                   []store.Head
 		ttl                     time.Duration
 		asJSON, label, force    bool
 		pairwise                bool
 		re, resolves            []string
+		reSeqs, resolvesSeqs    []int64
 	)
 	cmd := &cobra.Command{
 		Use:   "post [TEXT]",
@@ -53,7 +59,7 @@ func newPostCmd() *cobra.Command {
 				return fmt.Errorf("post takes its text as one quoted argument or --text; got %d arguments", len(args))
 			case len(args) == 1 && cmd.Flags().Changed("text"):
 				return fmt.Errorf("post takes its text once: as an argument or --text, not both")
-			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path"):
+			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path") && !cmd.Flags().Changed("head"):
 				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
 			}
 			if !cmd.Flags().Changed("kind") {
@@ -63,7 +69,15 @@ func newPostCmd() *cobra.Command {
 			if parsedKind, err = kinds.Parse(kind); err != nil {
 				return err
 			}
-			return validateTargets(re, resolves, pairwise)
+			if successor != "" && (parsedKind != kinds.StandDown || len(r.To) != 1) {
+				return errors.New("--successor names who takes over the one --to lane of a --kind stand-down record")
+			}
+			for _, seq := range append(slices.Clone(reSeqs), resolvesSeqs...) {
+				if seq < 0 {
+					return errors.New("--re-seq and --resolves-seq must be nonnegative")
+				}
+			}
+			return validateTargets(len(re)+len(reSeqs), len(resolves)+len(resolvesSeqs), pairwise)
 		},
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
@@ -98,7 +112,7 @@ func newPostCmd() *cobra.Command {
 				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at, label); err != nil {
 					return err
 				}
-			default:
+			case r.Refs.Path != "":
 				body, err := os.ReadFile(r.Refs.Path)
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
@@ -106,6 +120,11 @@ func newPostCmd() *cobra.Command {
 				text, fromPath = firstLine(string(body)), true
 			}
 			k := parsedKind
+			if len(heads) > 0 {
+				if text, err = withHeads(&r, k, heads, text); err != nil {
+					return err
+				}
+			}
 			if (k == kinds.Opened || k == kinds.Head && r.Refs.CCN == "") && len(r.Refs.PRs) == 0 {
 				if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
 					return err
@@ -151,17 +170,35 @@ func newPostCmd() *cobra.Command {
 			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, force, cmd.ErrOrStderr()); err != nil {
 				return err
 			}
-			reSeqs, err := resolveAll(cmd.Context(), st, re)
-			if err != nil {
-				return err
+			switch {
+			case k != kinds.StandDown:
+				if r.To, err = forwarded(cmd.Context(), st, r.Drive, r.To); err != nil {
+					return err
+				}
+			case successor != "":
+				if r.Fields.Attrs == nil {
+					r.Fields.Attrs = map[string]string{}
+				}
+				r.Fields.Attrs["successor"] = successor
 			}
-			resolvesSeqs, err := resolveAll(cmd.Context(), st, resolves)
-			if err != nil {
-				return err
+			if cmd.Flags().Changed("re") {
+				if reSeqs, err = resolveAll(cmd.Context(), st, re); err != nil {
+					return err
+				}
+			}
+			if cmd.Flags().Changed("resolves") {
+				if resolvesSeqs, err = resolveAll(cmd.Context(), st, resolves); err != nil {
+					return err
+				}
 			}
 			records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
 			if err != nil {
 				return err
+			}
+			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
+				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
+					return err
+				}
 			}
 			for _, rec := range records {
 				got, dup, err := st.PostAt(cmd.Context(), rec, ttl, at)
@@ -175,9 +212,6 @@ func newPostCmd() *cobra.Command {
 					return err
 				}
 			}
-			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
-				return st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started))
-			}
 			return nil
 		}),
 	}
@@ -186,11 +220,18 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time later than the post is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is refused, naming the nearest live lane, unless --force; owner and all always pass")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; owner and all always pass")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) of the record this one answers or closes; repeated, each gets its own record")
 	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
+	f.Int64SliceVar(&reSeqs, "re-seq", nil, "internal store sequences this record answers")
+	f.Int64SliceVar(&resolvesSeqs, "resolves-seq", nil, "internal store sequences this record resolves")
+	_ = f.MarkHidden("re-seq")
+	_ = f.MarkHidden("resolves-seq")
+	cmd.MarkFlagsMutuallyExclusive("re", "re-seq")
+	cmd.MarkFlagsMutuallyExclusive("resolves", "resolves-seq")
 	f.BoolVar(&pairwise, "pairwise", false, "pair equal non-empty --re and --resolves lists in order, posting one record per pair")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
@@ -205,6 +246,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Fields.Mode, "mode", "", "how a release or apply started: platy, cli, manual, walker")
 	f.StringVar(&r.Fields.Outcome, "outcome", "", "passed, failed, pending, cancelled")
 	f.StringVar(&r.Fields.Commit, "commit", "", "full commit sha")
+	f.Var(&headsFlag{&heads}, "head", "on a head record, one pull request's new head as <pr>=<sha> or <pr>=<was>..<sha>, then an optional note after a space, such as \"45001=4423264..c3b44a3 patch-identical\"; repeated, one record carries every head of a restack: each lands in fields.attrs as head:<pr> = [<was>..]<sha>[ <note>], each PR joins its refs, and its text opens with HEAD <n> PRs: #<pr> <short sha>, ...")
 	f.StringVar(&census, "census", "", `census JSON: {"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["<project>/<env>"]}`)
 	f.StringToStringVar(&counts, "count", nil, "named counts, e.g. --count deletes=0")
 	f.StringToStringVar(&r.Fields.Attrs, "attr", nil, "named string attributes (repeatable), e.g. --attr actor=platy")
@@ -212,12 +254,12 @@ func newPostCmd() *cobra.Command {
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	f.BoolVar(&label, "stamp", false, "cci writes the leading H:MM AM/PM label from the post's own clock: it replaces a typed leading label, or opens the text when it has none")
-	f.BoolVar(&force, "force", false, "address a bare --to lane that no live session holds and no thread has registered or posted as on the drive, such as a lane not yet started; without it the post is refused and names the nearest live lane")
+	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
 	_ = cmd.MarkFlagRequired("kind")
 	return cmd
 }
 
-var errNoLane = errors.New("post needs --lane: this thread is bound to no lane, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
+var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and was spawned with no name, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
 
 func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	self := selfPeer()
@@ -228,29 +270,73 @@ func threadLane(ctx context.Context, st *store.Store) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if !bound || b.Lane == "" || b.Lane == "root" {
-		return "", errNoLane
+	if bound && b.Lane != "" {
+		if b.Lane == "root" {
+			return "", errNoLane
+		}
+		return b.Lane, nil
 	}
-	return b.Lane, nil
+	lane, err := namedLane(ctx, st, self)
+	if err != nil || lane == "" {
+		return "", cmp.Or(err, errNoLane)
+	}
+	return lane, nil
+}
+
+func namedLane(ctx context.Context, st *store.Store, self store.PeerKey) (string, error) {
+	if self.Agent == "" {
+		return "", nil
+	}
+	p, err := st.Peer(ctx, self)
+	if errors.Is(err, sql.ErrNoRows) || p.Role == peers.RoleWorkflow {
+		return "", nil
+	}
+	return p.AgentName, err
+}
+
+func forwarded(ctx context.Context, st *store.Store, drive string, to []string) ([]string, error) {
+	out := slices.Clone(to)
+	for _, t := range to {
+		lane, laneDrive, cross := strings.Cut(t, "@")
+		if strings.HasPrefix(t, "peer:") || store.RootName(lane) || t == "owner" || t == "all" {
+			continue
+		}
+		if !cross {
+			laneDrive = drive
+		}
+		chain, _, err := st.Successors(ctx, laneDrive, lane)
+		if err != nil {
+			return nil, err
+		}
+		for _, successor := range chain {
+			if cross {
+				successor += "@" + laneDrive
+			}
+			if !slices.Contains(out, successor) {
+				out = append(out, successor)
+			}
+		}
+	}
+	return out, nil
 }
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")
 
-func validateTargets[T any](re, resolves []T, pairwise bool) error {
+func validateTargets(re, resolves int, pairwise bool) error {
 	if pairwise {
-		if len(re) == 0 || len(re) != len(resolves) {
-			return fmt.Errorf("--pairwise needs equal non-empty --re and --resolves lists; got %d and %d", len(re), len(resolves))
+		if re == 0 || re != resolves {
+			return fmt.Errorf("--pairwise needs equal non-empty --re and --resolves lists; got %d and %d", re, resolves)
 		}
 		return nil
 	}
-	if len(re) > 1 && len(resolves) > 1 {
+	if re > 1 && resolves > 1 {
 		return errManyTargets
 	}
 	return nil
 }
 
 func perTarget(r store.Record, re, resolves []int64, pairwise bool) ([]store.Record, error) {
-	if err := validateTargets(re, resolves, pairwise); err != nil {
+	if err := validateTargets(len(re), len(resolves), pairwise); err != nil {
 		return nil, err
 	}
 	if pairwise {
@@ -348,8 +434,14 @@ func stamped(w io.Writer, text, lane string, at time.Time, label bool) (string, 
 
 func labels(prefix, colon, lane string) bool {
 	prefix = strings.TrimSpace(prefix)
-	return prefix == "" || colon != "" || prefix == lane
+	if prefix == "" || prefix == lane {
+		return true
+	}
+	words := strings.Fields(prefix)
+	return colon != "" && !strings.ContainsAny(prefix, ".;") && !clockPrepositions[strings.ToLower(words[len(words)-1])]
 }
+
+var clockPrepositions = map[string]bool{"since": true, "at": true, "until": true, "till": true, "before": true, "after": true, "by": true, "from": true, "to": true, "around": true, "about": true}
 
 func namedPR(w io.Writer, r store.Record) ([]store.PR, error) {
 	named := store.UnboundPRs(r)
@@ -363,6 +455,33 @@ func namedPR(w io.Writer, r store.Record) ([]store.PR, error) {
 		return nil, err
 	}
 	return []store.PR{{Number: named[0]}}, nil
+}
+
+func withHeads(r *store.Record, k kinds.Kind, heads []store.Head, text string) (string, error) {
+	if k != kinds.Head {
+		return "", fmt.Errorf("--head is for a head record, not %s", k)
+	}
+	if r.Fields.Commit != "" {
+		return "", errors.New("--head carries each pull request's commit; drop --commit")
+	}
+	if r.Fields.Attrs == nil {
+		r.Fields.Attrs = map[string]string{}
+	}
+	for _, h := range heads {
+		key, value := h.Attr()
+		if _, twice := r.Fields.Attrs[key]; twice {
+			return "", fmt.Errorf("--head names %s twice", h.PR)
+		}
+		r.Fields.Attrs[key] = value
+		if !slices.Contains(r.Refs.PRs, h.PR) {
+			r.Refs.PRs = append(r.Refs.PRs, h.PR)
+		}
+	}
+	preview := store.HeadsPreview(heads)
+	if text == "" {
+		return preview, nil
+	}
+	return preview + ": " + text, nil
 }
 
 func firstLine(text string) string {

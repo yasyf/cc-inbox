@@ -131,7 +131,7 @@ func (s *Server) lanes(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
-	records, err := s.st.LatestPerLane(r.Context(), store.Filter{Drive: f.Drive, IncludeExpired: true}, maxLimit)
+	records, err := s.st.LaneTips(r.Context(), f.Drive, maxLimit)
 	if records == nil {
 		records = []store.Record{}
 	}

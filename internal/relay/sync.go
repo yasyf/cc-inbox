@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -35,6 +36,8 @@ type Node struct {
 	Config   Config
 	HTTP     *http.Client
 	Keyring  *Keyring
+
+	servicePEM []byte
 }
 
 func Open(home string, st *store.Store, id e2e.Identity, cfg Config) (*Node, error) {
@@ -44,11 +47,11 @@ func Open(home string, st *store.Store, id e2e.Identity, cfg Config) (*Node, err
 	}
 	n := &Node{Home: home, Store: st, Identity: id, Config: cfg, Keyring: ring}
 	if cfg.Delegation != nil {
-		if n.Service, err = ServiceKey(); err != nil {
+		if n.Service, err = ServiceKey(home, cfg.Mesh); err != nil {
 			return nil, err
 		}
 		if n.Service.ID() != cfg.Delegation.Service {
-			return nil, fmt.Errorf("relay: $%s is node %s, the delegation names %s", ServiceKeyEnv, n.Service.ID(), cfg.Delegation.Service)
+			return nil, fmt.Errorf("relay: the service key is node %s, the delegation names %s", n.Service.ID(), cfg.Delegation.Service)
 		}
 	}
 	return n, nil
@@ -56,14 +59,29 @@ func Open(home string, st *store.Store, id e2e.Identity, cfg Config) (*Node, err
 
 const ServiceKeyEnv = "CCI_SERVICE_KEY"
 
-func ServiceKey() (e2e.Identity, error) {
-	raw := os.Getenv(ServiceKeyEnv)
-	if raw == "" {
-		return nil, fmt.Errorf("relay: a delegated instance needs the service key in $%s", ServiceKeyEnv)
+// ServiceKey reads the service key a delegated instance holds from
+// $CCI_SERVICE_KEY, or else from the mesh's service.pem, which Delegate
+// writes so that later processes, the daemon among them, need no secret in
+// their environment.
+func ServiceKey(home, mesh string) (e2e.Identity, error) {
+	if raw := os.Getenv(ServiceKeyEnv); raw != "" {
+		return parseServiceKey([]byte(raw), "$"+ServiceKeyEnv)
 	}
-	n, err := node.Parse([]byte(raw))
+	path := serviceKeyPath(home, mesh)
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the mesh's service key under the cci home.
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("relay: a delegated instance needs the service key in $%s or %s", ServiceKeyEnv, path)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("$%s: %w", ServiceKeyEnv, err)
+		return nil, fmt.Errorf("read service key: %w", err)
+	}
+	return parseServiceKey(raw, path)
+}
+
+func parseServiceKey(raw []byte, from string) (e2e.Identity, error) {
+	n, err := node.Parse(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", from, err)
 	}
 	return n, nil
 }
@@ -76,7 +94,11 @@ func (n *Node) keyHolder() e2e.Identity {
 }
 
 func (n *Node) Delegate(drives, kinds []string, ttl time.Duration) error {
-	svc, err := ServiceKey()
+	raw := os.Getenv(ServiceKeyEnv)
+	if raw == "" {
+		return fmt.Errorf("relay: delegating an instance needs the service key in $%s", ServiceKeyEnv)
+	}
+	svc, err := parseServiceKey([]byte(raw), "$"+ServiceKeyEnv)
 	if err != nil {
 		return err
 	}
@@ -87,7 +109,7 @@ func (n *Node) Delegate(drives, kinds []string, ttl time.Duration) error {
 	if err != nil {
 		return err
 	}
-	n.Service, n.Config.Delegation = svc, &d
+	n.Service, n.Config.Delegation, n.servicePEM = svc, &d, []byte(raw)
 	return nil
 }
 
@@ -118,6 +140,11 @@ func (n *Node) Join(ctx context.Context) error {
 	}
 	if err := SaveConfig(n.Home, n.Config); err != nil {
 		return err
+	}
+	if n.servicePEM != nil {
+		if err := writeFile(serviceKeyPath(n.Home, n.Config.Mesh), n.servicePEM); err != nil {
+			return fmt.Errorf("keep service key: %w", err)
+		}
 	}
 	if err := n.RefreshKeys(ctx); err != nil {
 		return err
@@ -391,7 +418,7 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 			}
 			lq := url.Values{
 				"mesh": {n.Config.Mesh}, "drive": {drive}, "origin": {o.Origin},
-				"after": {strconv.FormatInt(after, 10)}, "limit": {"500"},
+				"after": {strconv.FormatInt(after, 10)}, "limit": {"100"},
 			}
 			if err := n.client().Call(ctx, http.MethodGet, "/v1/log?"+lq.Encode(), nil, &lr); err != nil {
 				return total, err

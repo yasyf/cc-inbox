@@ -48,3 +48,27 @@ func (f *prsFlag) String() string {
 }
 
 func (*prsFlag) Type() string { return "prs" }
+
+type headsFlag struct{ heads *[]store.Head }
+
+func (f *headsFlag) Set(s string) error {
+	head, err := store.ParseHead(s)
+	if err != nil {
+		return err
+	}
+	*f.heads = append(*f.heads, head)
+	return nil
+}
+
+func (f *headsFlag) String() string {
+	if len(*f.heads) == 0 {
+		return ""
+	}
+	keys := make([]string, len(*f.heads))
+	for i, head := range *f.heads {
+		keys[i] = head.PR.String() + "=" + head.Commit
+	}
+	return "[" + strings.Join(keys, ",") + "]"
+}
+
+func (*headsFlag) Type() string { return "head" }

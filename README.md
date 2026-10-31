@@ -324,6 +324,27 @@ cci relay enroll --tier service --pub <base64 key> --allow 'page:*|oncall.say' -
 
 The new member then runs `cci relay join --url https://<relay URL> --tier <tier> --owner <the enrolling owner's public key>`, so it trusts that owner's group-key wraps. Every other owner pins the new member from the relay's `peer.joined`, which carries the enrolling owner's signed grant; against a relay older than relay-api v3.5, pin a new service by hand with `cci relay join --service <its public key>`.
 
+### Hear Trunk merge-queue changes as records
+
+A webhook receiver can write records with no local store. Enroll its service
+key for one drive and kind:
+
+```bash
+cci relay enroll --tier service --pub <base64 key> --allow 'trunk|queue' --label trunk
+```
+
+The receiver wraps `trunk.Handler` from `github.com/yasyf/cc-inbox/trunk`
+around a `service.Writer` that holds the key `e2e.ParseKey` reads from its
+PEM and the owner public keys it trusts. Each Svix-signed `pull_request.*` delivery from Trunk becomes one
+`queue` record on the `trunk` drive, carrying the pull request, Trunk's state
+as its outcome, the reason, the failing checks, and Trunk's details URL. A
+redelivery of the same message stays one record. A bad signature answers
+401, and a relay failure answers 502 so Svix retries.
+
+```bash
+cci tail --drive trunk --kind queue --json
+```
+
 ### Let a machine outside your mesh read a drive
 
 A colleague's laptop sits outside your synckit mesh and should follow your
@@ -390,6 +411,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci claim` | Tie this session to artifacts as `<rel> <kind>:<key>`: `--pr`, `--build`, `--branch`, `--worktree`, `--issue`, `--thread`, `--stack`, `--target`, `--subsystem`, or `--ref <kind>:<key>`, with `--rel` (default `owns`); `--for <lane>@<drive>` ties the lane's live session instead. Posted records derive claims on their own `--pr`, `--build`, `--stack` and `--target` refs for the posting lane's sessions. |
 | `cci unclaim` | Drop this session's explicit claims; derived ones stay with their records. |
 | `cci serve` | Start or reuse the daemon, print its HTTP URL, and return. |
+| `cci supervise` | Linux only. Run the daemon's supervisor in the foreground and start the daemon under it, for a host with no launchd. |
 | `cci upgrade` | Upgrade the plugin, the Homebrew cask, and each standalone `cci` on `PATH`, printing every command it runs, then run `serve` from the newest install. |
 | `cci hook` | Run a plugin hook entry point. |
 
@@ -403,6 +425,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--mode <mode>` | Set `fields.mode`: `platy`, `cli`, `manual`, or `walker`. |
 | `--outcome <outcome>` | Set `fields.outcome`: `passed`, `failed`, `pending`, or `cancelled`. |
 | `--commit <sha>` | Set `fields.commit` to the full commit SHA. |
+| `--head <pr>=[<was>..]<sha>[ <note>]` | On a `head` record, repeat to set one `fields.attrs` entry per pull request, `head:<pr>` = `[<was>..]<sha>[ <note>]`, naming its commit, the head it replaced, and a note. Every PR joins `refs.prs`, so `cci tail --pr` finds the record, and the text opens with `HEAD <n> PRs: #<pr> <short sha>, ...` (`HEAD #<pr> <short sha>` for one), followed by the given text after a colon. Refused with `--commit` or on any other kind. |
 | `--census '<JSON>'` | Set `fields.census`, for example `{"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["api/plat-usw2-prod"]}`. |
 | `--count <name>=<integer>` | Set entries in `fields.counts`, for example `--count deletes=0`. |
 | `--id <key>` | Set the record's idempotency key. A post whose key the drive already holds returns the stored record as a duplicate. |
@@ -411,7 +434,8 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--to peer:<session prefix or name>[/<agent id or name>]`, `--to peer:<agent id or label>`, `--to peer:<node>/<session>[/<agent>]`, `--to <lane>@<drive>` | Address one session's root thread or one of its subagents, one of the posting session's own subagents or Workflow agents (by label, live ones first), on this machine or another node, resolved at post time, or a lane in another drive; `root@<drive>` and `main@<drive>` both reach that drive's root. A bare lane that no live thread reads in the posting drive, but one reads in exactly one other drive, becomes `<lane>@<that drive>`, with a note on stderr; one read in several other drives fails the post. Such a record reaches its recipient's reads from any drive, and `--resolves` may name it across drives. |
 | `--topic <key>`, `--re <seq>` | Group related events or link a reply to an earlier record. |
 | `--resolves <seq>` | Must name an existing record in the same drive, or one addressed across drives with `peer:` or `<lane>@<drive>`. Only a later record closes the open item, regardless of the new record's kind. Repeat the flag, or give a comma list, to close several: the one record resolves every seq, and its line reads `resolves #<a>,#<b>`. A repeated `--re` writes one record per seq with the same text, and an `--id` becomes `<id>#<seq>` on each; a post cannot repeat both. |
-| `--to <lane>` | Address one or more lanes. Use `--to owner` when the owner needs to act. A bare lane that no live session reads, no thread is bound as on the drive, and no record there was posted as is refused, naming the nearest live lane; `--force` addresses a lane that has not started yet. |
+| `--to <lane>` | Address one or more lanes. Use `--to owner` when the owner needs to act. A lane that has not started yet is addressed like any other, and reads the record once it binds. A bare lane that no thread is bound as and no record was posted as on the drive, and that looks like a slip for a live lane (one or two edits from it, or an older number of it, such as `desk-3` while `desk-4` runs), is refused naming that lane; `--force` addresses it as typed. A lane a stand-down handed to a successor is addressed with every successor too. |
+| `--successor <lane>` | With `--kind stand-down` and one `--to` lane, record the lane taking over: later records addressed to the stood-down lane also reach the successor, and `cci who` prints the lane with `stood-down successor=<lane>`. `cci who --successor-of <lane> [--json]` prints the lane standing in for it now. |
 
 | Read option | Commands | Behavior |
 | --- | --- | --- |
@@ -536,6 +560,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `done` | None | Closes a matching `incident`, `defect`, or `blocker`. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
+| `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
@@ -658,12 +683,17 @@ problems and the records addressing them, including whether each opener is close
 
 ### Daemon
 
-`daemonkit` manages `com.yasyf.cc-inbox` through launchd on macOS. Linux requires
-the daemonkit supervisor for `Ensure`. It runs a copy of `cci` at
+`daemonkit` manages `com.yasyf.cc-inbox` through launchd on macOS. The daemon runs a copy of `cci` at
 `~/.daemonkit/bin/com.yasyf.cc-inbox`, with state under
 `~/.daemonkit/a/com.yasyf.cc-inbox`. It restarts on failure. When a different
 `cci` build calls `Ensure` through `cci serve` or the `SessionStart` hook,
 daemonkit drains and replaces the running daemon.
+
+Linux has no launchd, so run `cci supervise` wherever the host starts
+long-lived processes, such as a container entrypoint or a service-manager
+entry. It holds the daemonkit supervisor in the foreground, starts the daemon
+under it, and resumes the daemon when the host restarts it after a reboot. A
+second `cci supervise` waits for the first to exit, then takes over.
 
 A release daemon also follows upgrades by itself. When it starts, and every 30
 seconds after, it reads the version directories of the plugin cache, skipping
@@ -681,6 +711,11 @@ the `addr` operation returns the HTTP address. Each CLI process still writes
 directly to SQLite's write-ahead log. CLI reads, including `tail`, `digest`,
 `grep`, and `watch`, also stay direct and use the same reader code as the daemon.
 Posting and CLI reads work without the daemon.
+
+The daemon also pushes this node's records to every joined relay mesh and
+pulls the mesh's records into the store. A failed push or pull retries with
+backoff that doubles up to a minute, so a node that joined a relay needs no
+`cci relay push` or `cci relay pull` loop of its own.
 
 ### Mesh
 

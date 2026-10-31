@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -297,7 +298,7 @@ func TestGrepSinceTakesAClockTime(t *testing.T) {
 
 func TestPostTakesItsTextAsOneArgument(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
-	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--force", "--to", "cci-fix-4"}
+	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--to", "cci-fix-4"}
 	if out, err := run(t, append(post, "land the fix")...); err != nil || out != "#1\n" {
 		t.Fatalf("post with a text argument = %q, %v", out, err)
 	}
@@ -479,6 +480,8 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 		{name: "stamped text without a label", text: "live on dev", stamp: true, want: "{at} live on dev"},
 		{name: "time in an opening clause", text: "for his " + ahead + " ask", want: "for his " + ahead + " ask", stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
 		{name: "later time inside the text", text: "live on dev, read " + ahead, want: "live on dev, read " + ahead, stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
+		{name: "time a sentence names since", text: "lane-x: reconciling. Landed since " + before + ": 45899", want: "lane-x: reconciling. Landed since " + before + ": 45899"},
+		{name: "stamped text whose sentence names a time since", text: "lane-x: reconciling. Landed since " + before + ": 45899", stamp: true, want: "{at} lane-x: reconciling. Landed since " + before + ": 45899"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			args := []string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", tt.text}
@@ -541,6 +544,67 @@ func TestPostHeadAndOpenedTakeTheirPullRequestOrRefuse(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPostHeadCarriesEveryHeadOfARestack(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "release-v3", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "post", "--json", "--lane", "lane-a", "--kind", "head",
+		"--head", "45001=a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+		"--head", "yasyf/cc-inbox#45002=4423264..C3B44A3FEE8EBDCD89A5BBC180D796C3C28B8FD4 restack, range-diff patch-identical (3 commits)",
+		"--text", "restacked onto dev")
+	var got store.Record
+	if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil {
+		t.Fatalf("post = %q, %v", out, err)
+	}
+	want := map[string]string{
+		"head:45001":                "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+		"head:yasyf/cc-inbox#45002": "4423264..c3b44a3fee8ebdcd89a5bbc180d796c3c28b8fd4 restack, range-diff patch-identical (3 commits)",
+	}
+	prs := []store.PR{{Number: 45001}, {Repo: "yasyf/cc-inbox", Number: 45002}}
+	if !reflect.DeepEqual(got.Fields.Attrs, want) || !reflect.DeepEqual(got.Refs.PRs, prs) || got.Fields.Commit != "" {
+		t.Fatalf("attrs %v prs %v commit %q; want %v on PRs %v and no record-wide commit", got.Fields.Attrs, got.Refs.PRs, got.Fields.Commit, want, prs)
+	}
+	if want := "HEAD 2 PRs: #45001 a1b2c3d, #45002 c3b44a3: restacked onto dev"; got.Text != want {
+		t.Errorf("text = %q, want %q", got.Text, want)
+	}
+	for _, pr := range []string{"45001", "yasyf/cc-inbox#45002"} {
+		out, err := run(t, "tail", "--since", "0", "--pr", pr)
+		if err != nil || strings.Count(out, "\n") != 1 || !strings.HasSuffix(strings.TrimSpace(out), "HEAD 2 PRs: #45001 a1b2c3d, #45002 c3b44a3: restacked onto dev") {
+			t.Fatalf("tail --pr %s = %q, %v; want the one head record with no PR refs repeated after its text", pr, out, err)
+		}
+	}
+	out, err = run(t, "post", "--json", "--lane", "lane-a", "--kind", "head", "--head", "45003=0123abc")
+	if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil || got.Text != "HEAD #45003 0123abc" {
+		t.Fatalf("post with no text = %q, %v; want the text HEAD #45003 0123abc", out, err)
+	}
+}
+
+func TestPostHeadRefusesAMalformedHead(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	for _, tt := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"not a sha", []string{"--kind", "head", "--head", "45001=main"}, `commit "main" is not a 7 to 40 character hex sha`},
+		{"was not a sha", []string{"--kind", "head", "--head", "45001=none..0123abc"}, `was "none" is not a 7 to 40 character hex sha`},
+		{"no sha", []string{"--kind", "head", "--head", "45001"}, "want <pr>=<sha>"},
+		{"no pull request", []string{"--kind", "head", "--head", "x=0123abc"}, "want a number"},
+		{"another kind", []string{"--kind", "state", "--head", "45001=0123abc"}, "--head is for a head record, not state"},
+		{"with --commit", []string{"--kind", "head", "--commit", "0123abc", "--head", "45001=0123abc"}, "drop --commit"},
+		{"one PR twice", []string{"--kind", "head", "--head", "45001=0123abc", "--head", "45001=4567def"}, "--head names 45001 twice"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			out, err := run(t, append([]string{"post", "--drive", "d", "--lane", "lane-a"}, tt.args...)...)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("post = %q, %v; want a refusal containing %q", out, err, tt.want)
+			}
+		})
 	}
 }
 
@@ -901,7 +965,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner,desk", "--text", "RELEASE #45190"); err == nil || err.Error() != "--to release-owner: no live session or registered lane on drive drive-a is named release-owner; the nearest live lane is release-owner-4; --force addresses a lane that has not started yet" {
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner,desk", "--text", "RELEASE #45190"); err == nil || err.Error() != "--to release-owner: no lane on drive drive-a has registered as release-owner, which looks like a slip for the live lane release-owner-4; --force addresses release-owner as typed" {
 		t.Fatalf("post to a lane nobody holds: %v", err)
 	}
 	for _, to := range []string{"owner", "all"} {
@@ -909,7 +973,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 			t.Fatalf("post --to %s: %v", to, err)
 		}
 	}
-	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--force", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
+	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
 	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#3\n" {
 		t.Fatalf("post to a lane reading another drive = %q, %v", out, err)
 	}
@@ -1418,5 +1482,170 @@ func TestTailCutsResolvedRecordsUnlessAll(t *testing.T) {
 	}
 	if out, err = run(t, "tail", "--since", "0", "--all"); err != nil || strings.Count(out, "B build it") != 2 || strings.Contains(out, "cut to") {
 		t.Fatalf("tail --all = %q, %v", out, err)
+	}
+}
+
+func TestPostReachesALaneThatHasNotStartedYet(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lane := range []string{"gate-fault-5", "n-enum-45410-1"} {
+		k := store.PeerKey{Session: "bbbb2222-" + lane, Agent: "a" + lane}
+		if err := st.BindLane(ctx, k, "d", lane, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []string{"gate-fault-6", "n-enum-45414-1", "fresh-desk"} {
+		if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "GO start "+to); err != nil || !strings.HasPrefix(out, "#") {
+			t.Fatalf("post --to %s, a lane that has not started = %q, %v", to, out, err)
+		}
+	}
+	for _, to := range []string{"gate-fault-4", "gate-falt-5"} {
+		if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "x"); err == nil || !strings.Contains(err.Error(), "slip for the live lane gate-fault-5") {
+			t.Fatalf("post --to %s, a slip for gate-fault-5: %v", to, err)
+		}
+		if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--force", "--to", to, "--text", "x"); err != nil {
+			t.Fatalf("post --force --to %s: %v", to, err)
+		}
+	}
+	st, err = store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	agent := store.PeerKey{Session: "aaaa1111-root", Agent: "agate-6"}
+	if _, err := st.Announce(ctx, store.Peer{Session: agent.Session, Agent: agent.Agent, AgentName: "gate-fault-6"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CCI_AGENT_ID", agent.Agent)
+	if me, err := run(t, "me"); err != nil || !strings.Contains(me, " lane=gate-fault-6 ") {
+		t.Fatalf("me for a teammate named gate-fault-6 = %q, %v; want it bound as that lane", me, err)
+	}
+	if out, err := run(t, "tail", "--reader", "gate-fault-6", "--cursor", store.LaneCursor(agent)); err != nil || !strings.Contains(out, "GO start gate-fault-6") {
+		t.Fatalf("gate-fault-6's lane mail = %q, %v; want the go posted before it started", out, err)
+	}
+	if _, err := run(t, "post", "--kind", "state", "--text", "gate-fault-6 up"); err != nil {
+		t.Fatalf("post without --lane from a teammate bound by cci me: %v", err)
+	}
+	if out, err := run(t, "tail", "--since", "0", "--kind", "state", "--reader", "root", "--json"); err != nil || !strings.Contains(out, `"lane":"gate-fault-6","kind":"state"`) {
+		t.Fatalf("state = %q, %v", out, err)
+	}
+}
+
+func TestStandDownForwardsToTheSuccessor(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--successor", "desk-2", "--to", "desk-1", "--text", "x"); err == nil || !strings.Contains(err.Error(), "--kind stand-down") {
+		t.Fatalf("--successor on a go: %v", err)
+	}
+	for _, args := range [][]string{
+		{"--to", "desk-1", "--successor", "desk-2"},
+		{"--to", "desk-2", "--successor", "desk-3"},
+	} {
+		if _, err := run(t, append([]string{"post", "--lane", "root", "--kind", "stand-down", "--text", "stand down"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "desk-1", "--text", "take #12", "--json")
+	if err != nil || !strings.Contains(out, `"to":["desk-1","desk-2","desk-3"]`) {
+		t.Fatalf("go to a stood-down lane = %q, %v; want it addressed to every successor", out, err)
+	}
+	if out, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json"); err != nil || !strings.Contains(out, `"to":["desk-1"]`) {
+		t.Fatalf("a stand-down is forwarded = %q, %v", out, err)
+	}
+	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	desk := store.PeerKey{Session: "bbbb2222-desk", Agent: "adesk-2"}
+	if err := st.BindLane(context.Background(), desk, "d", "desk-2", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(context.Background(), store.Peer{Session: desk.Session, Agent: desk.Agent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || !strings.Contains(out, " lane=desk-2 stood-down successor=desk-3 ") {
+		t.Fatalf("who --lane desk-2 = %q, %v; want it marked stood down", out, err)
+	}
+	if out, err := run(t, "who", "--successor-of", "desk-2"); err != nil || out != "desk-3\n" {
+		t.Fatalf("who --successor-of desk-2 = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"successor":"","chain":[]}`+"\n" {
+		t.Fatalf("who --successor-of desk-1 after a stand-down naming none = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--successor-of", "desk-3", "--json"); err != nil || out != `{"drive":"d","lane":"desk-3","stood_down":false,"successor":"","chain":[]}`+"\n" {
+		t.Fatalf("who --successor-of desk-3 = %q, %v", out, err)
+	}
+}
+
+func TestALaneThatRegistersByPostingReadsMailSentBeforeItStarted(t *testing.T) {
+	if os.Getenv("CCI_TEST_FRESH_LANE") == "1" {
+		if _, err := run(t, "post", "--drive", "d", "--lane", "fresh-lane", "--kind", "state", "--text", "fresh-lane up"); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	home, config := t.TempDir(), t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "fresh-lane", "--text", "GO before fresh-lane started"); err != nil {
+		t.Fatal(err)
+	}
+	lane := exec.Command(os.Args[0], "-test.run=^TestALaneThatRegistersByPostingReadsMailSentBeforeItStarted$", "codex")
+	lane.Env = append(os.Environ(), "CCI_TEST_FRESH_LANE=1", "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+config, "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CODEX_THREAD_ID=019a3c3e-fresh-lane")
+	for _, name := range peers.IdentityEnv {
+		if name != "CODEX_THREAD_ID" {
+			lane.Env = append(lane.Env, name+"=")
+		}
+	}
+	if out, err := lane.CombinedOutput(); err != nil {
+		t.Fatalf("fresh-lane session: %v\n%s", err, out)
+	}
+	st, err := store.Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	seq, ok, err := st.Cursor(context.Background(), store.LaneCursor(store.PeerKey{Session: "019a3c3e-fresh-lane"}), "d")
+	if err != nil || !ok || seq != 0 {
+		t.Fatalf("fresh-lane's lane cursor = %d, %v, %v; want 0, before the go posted to it before it started", seq, ok, err)
 	}
 }

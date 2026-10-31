@@ -147,7 +147,7 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 // process it runs in.
 func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() (store.Window, error), w io.Writer) error {
 	if p.AgentID != "" {
-		if err := announceAgent(ctx, st, p, window); err != nil {
+		if err := AnnounceAgent(ctx, st, p, window); err != nil {
 			return err
 		}
 	}
@@ -166,7 +166,10 @@ func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() 
 	return nil
 }
 
-func announceAgent(ctx context.Context, st *store.Store, p Payload, window func() (store.Window, error)) error {
+// AnnounceAgent registers the subagent or teammate p names as its own peer,
+// under the name and parent its harness metadata records, unless the registry
+// already lists it live in the window the harness runs it in.
+func AnnounceAgent(ctx context.Context, st *store.Store, p Payload, window func() (store.Window, error)) error {
 	existing, err := st.Peer(ctx, p.Key())
 	found := err == nil
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {

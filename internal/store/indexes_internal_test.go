@@ -279,7 +279,7 @@ func assertLaneIndexCount(t *testing.T, st *Store, want int) {
 	t.Helper()
 	var got int
 	if err := st.db.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM sqlite_schema
-WHERE type = 'index' AND name IN ('records_drive_lane', 'sessions_drive_lane', 'sessions_origin_lane')`).Scan(&got); err != nil {
+WHERE type = 'index' AND name IN ('records_drive_lane', 'records_drive_lane_score', 'sessions_drive_lane', 'sessions_origin_lane')`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got != want {

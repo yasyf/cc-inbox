@@ -56,13 +56,24 @@ jobs:
             git tag -fa "${GITHUB_REF_NAME}" -m "${GITHUB_REF_NAME}"
             git push --force origin "refs/tags/${GITHUB_REF_NAME}"
           fi
-          git fetch origin main
-          if git merge-base --is-ancestor HEAD origin/main; then
-            echo "main already carries ${GITHUB_REF_NAME}'s descriptor and manifest"
-          else
-            git rebase origin/main
-            git push origin HEAD:main
-          fi
+          synced=$(git rev-parse HEAD)
+          version="${GITHUB_REF_NAME#v}"
+          for attempt in 1 2 3; do
+            git fetch origin main
+            git checkout --quiet --detach origin/main
+            landed=$(jq -r .version plugin/.claude-plugin/plugin.json)
+            if [ "$(printf '%s\n%s\n' "$landed" "$version" | sort -V | tail -n 1)" = "$landed" ]; then
+              echo "main already carries ${landed}, at or past ${GITHUB_REF_NAME}"
+              git checkout --quiet "$synced"
+              break
+            fi
+            git checkout "$synced" -- plugin/bin/cci.binrun plugin/.claude-plugin/plugin.json
+            git commit -m "chore: sync cci.binrun + manifest to ${GITHUB_REF_NAME}"
+            if git push origin HEAD:main; then
+              break
+            fi
+            [ "$attempt" -lt 3 ] || exit 1
+          done
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Upload descriptor to release
         env:

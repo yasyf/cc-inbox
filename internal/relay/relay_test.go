@@ -3,6 +3,7 @@ package relay_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -379,5 +380,102 @@ func TestPushResealsAfterAConcurrentRotation(t *testing.T) {
 	}
 	if got := pull(t, b); got.Inserted != 1 || srv.Epoch() != 2 {
 		t.Fatalf("owner inserted %d at epoch %d, want 1 at 2", got.Inserted, srv.Epoch())
+	}
+}
+
+func TestConcurrentPostsAndPushWaitOutAHeldWriteLock(t *testing.T) {
+	_, a, _, _ := mesh(t)
+	ctx := context.Background()
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Decision, Text: "before the lock"})
+	cs := configs(t, a)
+	holder, err := sql.Open("sqlite", "file:"+filepath.Join(a.st.HomeDir(), store.DBFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = holder.Close() })
+	conn, err := holder.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	const writers = 16
+	errs := make(chan error, writers+1)
+	for i := range writers {
+		go func() {
+			st, err := store.Open(ctx, a.st.HomeDir())
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, _, err = st.Post(ctx, store.Record{Drive: "d", Lane: "lane-a", Kind: kinds.Decision, Text: fmt.Sprintf("writer %d", i)}, 0)
+			errs <- errors.Join(err, st.Close())
+		}()
+	}
+	go func() {
+		res, err := a.node.Push(ctx, cs)
+		if err == nil && res.Pushed != 1 {
+			err = fmt.Errorf("push sent %d records, want 1", res.Pushed)
+		}
+		errs <- err
+	}()
+	time.Sleep(12 * time.Second)
+	if _, err := conn.ExecContext(ctx, "ROLLBACK"); err != nil {
+		t.Fatal(err)
+	}
+	for range writers + 1 {
+		if err := <-errs; err != nil {
+			t.Errorf("a writer gave up on the held lock: %v", err)
+		}
+	}
+	if got := len(texts(t, a.st)); got != writers+1 {
+		t.Fatalf("store holds %d records, want %d", got, writers+1)
+	}
+}
+
+func TestDelegatedInstanceReopensWithoutTheServiceKeyInItsEnvironment(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	svc := newPeer(t, srv, node.TierService)
+	pin(t, a, svc)
+	join(t, srv, a)
+	pemKey, err := os.ReadFile(filepath.Join(node.Dir(svc.st.HomeDir()), "key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, string(pemKey))
+	st, _ := testutil.Store(t)
+	id, err := node.Load(st.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &peer{st: st, id: id, tier: node.TierService}
+	pin(t, job, a)
+	n, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Tier: string(node.TierService)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Delegate([]string{"page:*"}, nil, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Join(context.Background()); err != nil {
+		t.Fatalf("instance join: %v", err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, "")
+	kept, err := os.Stat(filepath.Join(st.HomeDir(), "relay", relay.DefaultMesh, "service.pem"))
+	if err != nil || kept.Mode().Perm() != 0o600 {
+		t.Fatalf("kept service key = %v, %v; want a 0600 file", kept, err)
+	}
+	reopened, err := relay.Open(st.HomeDir(), st, id, mustConfig(t, job))
+	if err != nil {
+		t.Fatalf("reopen without $%s: %v", relay.ServiceKeyEnv, err)
+	}
+	testutil.Post(t, st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "after the key left the environment"})
+	if res, err := reopened.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 {
+		t.Fatalf("instance push = %+v, %v; want 1", res, err)
+	}
+	if got := pull(t, a); got.Inserted != 1 {
+		t.Fatalf("owner inserted %d instance records, want 1", got.Inserted)
 	}
 }

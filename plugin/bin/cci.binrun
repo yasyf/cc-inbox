@@ -3,46 +3,46 @@
   "schema": 1,
   "name": "cci",
   "kind": "release-binary",
-  "version": {"static": "0.42.1"},
+  "version": {"static": "0.46.3"},
   "platforms": {
     "macos-aarch64": {
-      "size": 6767067,
+      "size": 6805583,
       "hash": "sha256",
-      "digest": "141666ba1a58e23625be823a8687a20565e1afab2f8f8c96e65449d5a630dcb0",
+      "digest": "a0fd7988229b91cf2632b7df454587803d43e9f75511f8589bc50d3c1a1615aa",
       "format": "tar.gz",
       "path": "cci",
       "providers": [
-        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.42.1", "name": "cci_0.42.1_darwin_arm64.tar.gz"}
+        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.46.3", "name": "cci_0.46.3_darwin_arm64.tar.gz"}
       ]
     },
     "macos-x86_64": {
-      "size": 7278957,
+      "size": 7327455,
       "hash": "sha256",
-      "digest": "624e53f84e6a53d959bfd9ff43f45f3fa103530c332b87db11ec2acb902ce77d",
+      "digest": "5dc57230dc063da0e6520194a4b96a05727e11a31874b756f22380dab0735b74",
       "format": "tar.gz",
       "path": "cci",
       "providers": [
-        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.42.1", "name": "cci_0.42.1_darwin_amd64.tar.gz"}
+        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.46.3", "name": "cci_0.46.3_darwin_amd64.tar.gz"}
       ]
     },
     "linux-x86_64": {
-      "size": 7107461,
+      "size": 7169793,
       "hash": "sha256",
-      "digest": "e180e3d895d58594037a9cd92e4e19c13ddcceb7c46de4c73985d6b4798f6047",
+      "digest": "2828e8240ea9288012e5a2ef750c2493fbd59112dfe013b5f936f022f963e0dd",
       "format": "tar.gz",
       "path": "cci",
       "providers": [
-        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.42.1", "name": "cci_0.42.1_linux_amd64.tar.gz"}
+        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.46.3", "name": "cci_0.46.3_linux_amd64.tar.gz"}
       ]
     },
     "linux-aarch64": {
-      "size": 6574939,
+      "size": 6631861,
       "hash": "sha256",
-      "digest": "005204507a41fa783f998a15f7ab1b2ec98fbba5b66f2836b281b40be7c9e207",
+      "digest": "6e555bade4257c8700e3edd0ba72cd4dabf6170baa4586e75a890e781fc7e18f",
       "format": "tar.gz",
       "path": "cci",
       "providers": [
-        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.42.1", "name": "cci_0.42.1_linux_arm64.tar.gz"}
+        {"type": "github-release", "repo": "yasyf/cc-inbox", "tag": "v0.46.3", "name": "cci_0.46.3_linux_arm64.tar.gz"}
       ]
     }
   }

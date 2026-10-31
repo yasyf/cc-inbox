@@ -62,6 +62,7 @@ const (
 	Urgent     Kind = "urgent"
 	Peer       Kind = "peer"
 	Red        Kind = "red"
+	Queue      Kind = "queue"
 )
 
 const EphemeralTTL = 24 * time.Hour
@@ -128,6 +129,7 @@ var specs = map[Kind]Spec{
 	NotLive:    {},
 	Urgent:     {},
 	Red:        {NeedsPR: true},
+	Queue:      {NeedsPR: true},
 }
 
 var aliases = map[string]Kind{

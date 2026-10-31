@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -33,6 +34,19 @@ func newServeCmd() *cobra.Command {
 			}
 			_, err = fmt.Fprintf(cmd.OutOrStdout(), "cci daemon pid %d serving http://%s/v1\n", ensured.After.PID, daemon.Addr)
 			return err
+		},
+	}
+}
+
+func newSuperviseCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "supervise",
+		Short: "Supervise the cci daemon in the foreground on a linux host with no launchd, as its container entrypoint or service-manager entry",
+		Long: "Supervise runs the daemon's supervisor in the foreground and starts the daemon under it, which serves HTTP and keeps every joined relay mesh pushing and pulling, retrying failures with backoff. " +
+			"Run it wherever the host starts long-lived processes; restarted after a reboot, it resumes the daemon. It runs on linux only.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runSupervisor(cmd.Context())
 		},
 	}
 }
@@ -145,7 +159,9 @@ func newDaemonCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("listen %s: %w", daemon.Addr, err)
 			}
-			rt := daemon.New(home, ln)
+			rt := daemon.New(home, ln, func(st *store.Store) (http.Handler, error) {
+				return TailHandler(st, home)
+			})
 			_, err = daemonkit.Serve(cmd.Context(), d, rt.Start)
 			return cmp.Or(err, rt.Err())
 		},

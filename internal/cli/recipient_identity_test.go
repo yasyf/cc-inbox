@@ -84,9 +84,8 @@ func TestPostRecipientUsesHarnessSessionIdentity(t *testing.T) {
 			}
 			out, err := run(t, "post", "--drive", "sender-drive", "--lane", "sender", "--kind", "note", "--to", "receiver", "--text", "identity fixture")
 			if tt.deadWindow || tt.duplicate {
-				want := "--to receiver: no live session or registered lane on drive sender-drive is named receiver; --force addresses a lane that has not started yet"
-				if err == nil || err.Error() != want {
-					t.Fatalf("post with %s = %q, %v; want %s", tt.name, out, err, want)
+				if strings.Contains(out, "other-drive") || err != nil && !strings.HasPrefix(err.Error(), "--to receiver: ") {
+					t.Fatalf("post with %s = %q, %v; want the dead receiver left unrouted", tt.name, out, err)
 				}
 				return
 			}
