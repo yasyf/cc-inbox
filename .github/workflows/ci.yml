@@ -68,6 +68,11 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v7
         with:
+          ref: ab018eb917f569717b4c67a3cd14cb9be660b41c
+          path: .ci-urgent-repeat-old
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
           ref: 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
           path: .ci-stream-idle-baseline
           persist-credentials: false
@@ -154,6 +159,9 @@ jobs:
           cache: true
       - name: Urgent repeat existing-query index diagnostic
         run: |
+          cp internal/store/testdata/urgent-repeat-old/compat_test.go .ci-urgent-repeat-old/internal/store/urgent_repeat_legacy_internal_test.go
+          test "$(git -C .ci-urgent-repeat-old rev-parse HEAD)" = ab018eb917f569717b4c67a3cd14cb9be660b41c
+          (cd .ci-urgent-repeat-old && go test -count=1 -race -run '^TestUrgentRepeatLegacyQueryCompatibility$' -v ./internal/store)
           cp internal/store/urgent_repeat_cost_internal_test.go .ci-urgent-repeat-baseline/internal/store/
           cp internal/store/index_cost_internal_test.go .ci-urgent-repeat-baseline/internal/store/
           test "$(git -C .ci-urgent-repeat-baseline rev-parse HEAD)" = 80a23237731d154e73b2ab9c908809316407ea80
