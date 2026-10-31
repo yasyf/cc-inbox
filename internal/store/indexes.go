@@ -197,6 +197,19 @@ func missingPhysicalIndexes(ctx context.Context, db *sql.DB) ([]int, error) {
 	return missing, nil
 }
 
+func queryIndexesPresent(ctx context.Context, db *sql.DB) (bool, error) {
+	for _, index := range queryIndexes {
+		var exists bool
+		if err := db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?)", index.name).Scan(&exists); err != nil {
+			return false, fmt.Errorf("inspect query index %s: %w", index.name, err)
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func createQueryIndexes(ctx context.Context, tx *sql.Tx) (bool, error) {
 	created := false
 	for _, index := range queryIndexes {

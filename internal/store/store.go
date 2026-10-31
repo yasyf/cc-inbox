@@ -411,7 +411,10 @@ func (s *Store) current(ctx context.Context) (bool, error) {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil {
 		return false, fmt.Errorf("read journal mode: %w", err)
 	}
-	return schema == len(migrations) && journal == "wal", nil
+	if schema != len(migrations) || journal != "wal" {
+		return false, nil
+	}
+	return queryIndexesPresent(ctx, s.db)
 }
 
 func (s *Store) Close() error {
