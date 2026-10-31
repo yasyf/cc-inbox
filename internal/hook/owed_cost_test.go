@@ -74,11 +74,37 @@ SELECT 'd','history','answer',x,'unrelated',1000000+x,'other-'||x,'post','noise-
 				if _, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "root", Kind: kinds.Note, Text: "delivery trigger", To: []string{"api"}, Source: "post"}, 0); err != nil {
 					t.Fatal(err)
 				}
-				for _, query := range []string{"ALTER TABLE records RENAME COLUMN refs TO counted_refs", "ALTER TABLE records ADD COLUMN refs TEXT GENERATED ALWAYS AS (" + name + "(counted_refs)) VIRTUAL"} {
+
+				columns, err := db.QueryContext(ctx, "PRAGMA table_info(records)")
+				if err != nil {
+					t.Fatal(err)
+				}
+				var selection []string
+				for columns.Next() {
+					var cid, notNull, pk int
+					var column, kind string
+					var defaultValue any
+					if err := columns.Scan(&cid, &column, &kind, &notNull, &defaultValue, &pk); err != nil {
+						t.Fatal(err)
+					}
+					if column == "refs" {
+						selection = append(selection, name+"(refs) AS refs")
+					} else {
+						selection = append(selection, column)
+					}
+				}
+				if err := columns.Err(); err != nil {
+					t.Fatal(err)
+				}
+				if err := columns.Close(); err != nil {
+					t.Fatal(err)
+				}
+				for _, query := range []string{"ALTER TABLE records RENAME TO counted_owed_records", "CREATE VIEW records AS SELECT " + strings.Join(selection, ", ") + " FROM counted_owed_records"} {
 					if _, err := db.ExecContext(ctx, query); err != nil {
 						t.Fatal(err)
 					}
 				}
+
 				if err := st.Close(); err != nil {
 					t.Fatal(err)
 				}
