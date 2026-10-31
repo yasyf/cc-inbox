@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `owner`: a root reports an incident at its mechanism and at fix-live, and
   relays the owner's words.
 
+### Fixed
+
+- `cci post --re <seq>` with no `--to` addresses the lane that wrote the record it
+  answers, as `<lane>@<drive>` when that record is on another drive. A reply used
+  to go to no one. A record whose every `--to` is the posting lane itself is
+  refused, and the refusal names who wrote the record it answers.
+
 ## [0.41.0] - 2026-10-29
 
 ### Changed
