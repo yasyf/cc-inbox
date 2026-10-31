@@ -132,7 +132,7 @@ func TestUpgradeCommandsCoverEveryInstallOnce(t *testing.T) {
 	want := []string{
 		pluginUpgrade,
 		upgradeCommand(filepath.Join(standalone, "cci"), runtime.GOOS, runtime.GOARCH),
-		caskUpgrade,
+		CaskUpgrade,
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("UpgradeCommands() = %q, want %q", got, want)

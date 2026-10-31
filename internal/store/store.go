@@ -411,7 +411,10 @@ func (s *Store) current(ctx context.Context) (bool, error) {
 	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil {
 		return false, fmt.Errorf("read journal mode: %w", err)
 	}
-	return schema == len(migrations) && journal == "wal", nil
+	if schema != len(migrations) || journal != "wal" {
+		return false, nil
+	}
+	return queryIndexesPresent(ctx, s.db)
 }
 
 func (s *Store) Close() error {
@@ -468,6 +471,13 @@ func (s *Store) migrate(ctx context.Context) error {
 		return fmt.Errorf("read schema version: %w", err)
 	}
 	if schema == len(migrations) {
+		created, err := createQueryIndexes(ctx, tx)
+		if err != nil || !created {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit query indexes: %w", err)
+		}
 		return nil
 	}
 	if schema > len(migrations) {
@@ -503,6 +513,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+		return err
+	}
+	if _, err := createQueryIndexes(ctx, tx); err != nil {
 		return err
 	}
 	if err := createIncidentOwnerLock(s.home); err != nil {

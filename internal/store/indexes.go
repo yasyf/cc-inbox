@@ -11,14 +11,19 @@ import (
 	"time"
 )
 
-var physicalIndexes = [...]struct {
+type namedIndex struct {
 	name string
 	sql  string
-}{
+}
+
+var physicalIndexes = [...]namedIndex{
 	{"records_drive_lane", "CREATE INDEX records_drive_lane ON records(drive, lane)"},
 	{"records_drive_lane_score", "CREATE INDEX records_drive_lane_score ON records(drive, lane, (at * 1000000 + seq) DESC, seq ASC) WHERE kind != 'digest'"},
 	{"sessions_drive_lane", "CREATE INDEX sessions_drive_lane ON sessions(drive, lane)"},
 	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
+}
+
+var queryIndexes = [...]namedIndex{
 	{"records_re", "CREATE INDEX records_re ON records(re)"},
 }
 
@@ -210,6 +215,37 @@ func missingPhysicalIndexes(ctx context.Context, db *sql.DB) ([]int, error) {
 		}
 	}
 	return missing, nil
+}
+
+func queryIndexesPresent(ctx context.Context, db *sql.DB) (bool, error) {
+	for _, index := range queryIndexes {
+		var exists bool
+		if err := db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?)", index.name).Scan(&exists); err != nil {
+			return false, fmt.Errorf("inspect query index %s: %w", index.name, err)
+		}
+		if !exists {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func createQueryIndexes(ctx context.Context, tx *sql.Tx) (bool, error) {
+	created := false
+	for _, index := range queryIndexes {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?)", index.name).Scan(&exists); err != nil {
+			return false, fmt.Errorf("inspect query index %s: %w", index.name, err)
+		}
+		if exists {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, index.sql); err != nil {
+			return false, fmt.Errorf("create query index %s: %w", index.name, err)
+		}
+		created = true
+	}
+	return created, nil
 }
 
 func createPhysicalIndexes(ctx context.Context, tx *sql.Tx, indexes []int) error {

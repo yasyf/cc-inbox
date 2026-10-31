@@ -1,6 +1,13 @@
 package version
 
-import "testing"
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
 
 func TestUpgradeCommandNamesTheInvokedInstall(t *testing.T) {
 	tests := []struct {
@@ -16,5 +23,29 @@ func TestUpgradeCommandNamesTheInvokedInstall(t *testing.T) {
 		if got := upgradeCommand(tt.exe, "darwin", "arm64"); got != tt.want {
 			t.Errorf("upgradeCommand(%q) = %q, want %q", tt.exe, got, tt.want)
 		}
+	}
+}
+
+func TestAReleaseThatDoesNotStartLeavesTheCaskAlone(t *testing.T) {
+	dir := t.TempDir()
+	held := filepath.Join(dir, "held")
+	if err := os.WriteFile(held, []byte("#!/bin/sh\nexec sleep 30\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err := provesStart(context.Background(), held, 300*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "did not start within 300ms") {
+		t.Fatalf("provesStart(held) = %v, want a refusal naming the bound", err)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("provesStart(held) took %s, want it bounded", elapsed)
+	}
+
+	starts := filepath.Join(dir, "starts")
+	if err := os.WriteFile(starts, []byte("#!/bin/sh\necho 0.47.1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := provesStart(context.Background(), starts, 10*time.Second); err != nil {
+		t.Fatalf("provesStart(starts) = %v, want nil", err)
 	}
 }
