@@ -58,6 +58,11 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
       - uses: actions/checkout@v7
         with:
+          ref: ab018eb917f569717b4c67a3cd14cb9be660b41c
+          path: .ci-legacy-channel
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
           ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
           path: .ci-audience-current491
           persist-credentials: false
@@ -147,6 +152,23 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Legacy no-window channel SQL and manual-index compatibility
+        run: |
+          test "$(git -C .ci-legacy-channel rev-parse HEAD)" = ab018eb917f569717b4c67a3cd14cb9be660b41c
+          cp internal/store/testdata/legacy-channel-index/compat_test.go .ci-legacy-channel/internal/store/legacy_index_compat_internal_test.go
+          if (cd .ci-legacy-channel && CCI_LEGACY_REQUIRE_BOUNDED_INDEX=1 go test -count=1 -run '^TestLegacyChannelIndexCompatibility$' -v ./internal/store) > "$RUNNER_TEMP/legacy-index-bound-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/legacy-index-bound-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/legacy-index-bound-negative.log"
+          for history in 32 10000; do
+            for placement in same-drive foreign-drive; do
+              for candidate in predicate-cover expiry; do
+                grep -F "LEGACY_INDEX_NOT_BOUNDED history=$history placement=$placement candidate=$candidate " "$RUNNER_TEMP/legacy-index-bound-negative.log"
+              done
+            done
+          done
+          (cd .ci-legacy-channel && go test -count=1 -race -run '^TestLegacyChannelIndexCompatibility$' -v ./internal/store)
       - name: Audience kind candidates and immutable491 work control
         run: |
           cp internal/cli/audience_query_cost_test.go .ci-audience-current491/internal/cli/
