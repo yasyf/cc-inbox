@@ -96,6 +96,10 @@ jobs:
           path: .ci-mesh-frontier-negative
       - uses: actions/checkout@v7
         with:
+          ref: 2bd181b53ad0384b284e8440d02b2db0a5c75fcc
+          path: .ci-mesh-body-baseline
+      - uses: actions/checkout@v7
+        with:
           ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
           path: .ci-openamong-oracle
       - uses: actions/checkout@v7
@@ -136,6 +140,18 @@ jobs:
           grep -F 'hook owed refs_reads=10002 want=2 history=10000' "$RUNNER_TEMP/cci-hook-owed-negative.log"
           CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
           go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
+      - name: Mesh exported body prefix and immutable allocation control
+        run: |
+          test "$(git -C .ci-mesh-body-baseline rev-parse HEAD)" = 2bd181b53ad0384b284e8440d02b2db0a5c75fcc
+          cp internal/store/replicate_body_cost_test.go .ci-mesh-body-baseline/internal/store/
+          (cd .ci-mesh-body-baseline && CCI_MESH_BODY_EXPECT_GLOBAL=1 go test -count=1 -run '^TestNewestExportBoundsSelectedBodyAllocation$|^TestExportBodyPrefixKeepsLineAndUTF8Contract$' -v ./internal/store)
+          if (cd .ci-mesh-body-baseline && go test -count=1 -run '^TestNewestExportBoundsSelectedBodyAllocation$' -v ./internal/store) > "$RUNNER_TEMP/cci-mesh-body-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-mesh-body-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-mesh-body-negative.log"
+          grep -F 'selected body allocation follows the unread file tail: body_bytes=33554432' "$RUNNER_TEMP/cci-mesh-body-negative.log"
+          go test -count=1 -race -run '^TestNewestExportBoundsSelectedBodyAllocation$|^TestExportBodyPrefixKeepsLineAndUTF8Contract$|^TestARecordsBodyFileTravelsWithItIntoTheReceiversBlobs$' -v ./internal/store
       - name: Mesh export indexed prefix and immutable contract
         run: |
           test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
