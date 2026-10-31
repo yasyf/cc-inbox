@@ -58,7 +58,7 @@ func TestRootHearsOnlyEscalationsAsksAndDecisions(t *testing.T) {
 		"state": {"lane": "lane-7"},
 		"done":  {"item": 3},
 		"grade": {"pr": 1, "head": head, "grader": "finder", "verdict": "clear"},
-		"item":  {"item": 3, "kind": "restack", "pr": 1, "head": head, "mover": "lane", "deadline": "2026-10-31T06:20:00Z"},
+		"item":  {"item": 3, "action": "restack", "pr": 1, "head": head, "mover": "lane", "deadline": "2026-10-31T06:20:00Z"},
 		"note":  {"text": "landing is slow"},
 	}
 	for name, fields := range refused {
