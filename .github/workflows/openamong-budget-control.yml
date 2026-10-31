@@ -25,5 +25,6 @@ jobs:
           printf 'CCI_OLD_STORE_PROBE=%s\n' "$RUNNER_TEMP/cci-old-store-probe" >> "$GITHUB_ENV"
       - name: Exact source normal-build oldwriter and 250k budget control
         run: |
-          go test -run '^TestSelectedClosureProvisioningSerializesOldCloserWriter$' -v ./internal/store
+          go test -run '^TestSelectedClosure|^TestOpenAmongResolverCandidateErrors' -v ./internal/store ./internal/server
+          go test -run '^TestOpenAmongCandidatePreservesSelectedClosure$|^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$' -v ./internal/server
           CCI_CLOSER_PROVISION_ROWS=250000 go test -run '^TestSelectedClosureProvisioningWithinWriterBudget$' -v ./internal/store
