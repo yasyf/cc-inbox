@@ -329,10 +329,19 @@ func placeholders(n int) string {
 // Query reads the records f selects. A filter with no drive must name a Peer,
 // and then reads only the records addressed to it, from every drive.
 func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
+	return s.query(ctx, f, columns)
+}
+
+// QueryText reads selected records without the inline bodies omitted by text rendering.
+func (s *Store) QueryText(ctx context.Context, f Filter) ([]Record, error) {
+	return s.query(ctx, f, textColumns)
+}
+
+func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Record, error) {
 	if f.Drive == "" && f.Peer == "" {
 		return nil, ErrNoDrive
 	}
-	q, params := s.selection(f)
+	q, params := s.selectionColumns(f, projection)
 	rows, err := s.db.QueryContext(ctx, q, params...)
 	if err != nil {
 		return nil, fmt.Errorf("query records: %w", err)
@@ -353,6 +362,10 @@ func (s *Store) Query(ctx context.Context, f Filter) ([]Record, error) {
 }
 
 func (s *Store) selection(f Filter) (string, []any) {
+	return s.selectionColumns(f, columns)
+}
+
+func (s *Store) selectionColumns(f Filter, projection string) (string, []any) {
 	order := "ASC"
 	if f.Descending {
 		order = "DESC"
@@ -372,7 +385,7 @@ func (s *Store) selection(f Filter) (string, []any) {
 			params = append(candidates, params...)
 		}
 	}
-	q := "SELECT " + columns + " FROM " + from + " WHERE " + where + " ORDER BY " + ordered + " " + order
+	q := "SELECT " + projection + " FROM " + from + " WHERE " + where + " ORDER BY " + ordered + " " + order
 	if f.Limit > 0 {
 		q += fmt.Sprintf(" LIMIT %d", f.Limit)
 	}
