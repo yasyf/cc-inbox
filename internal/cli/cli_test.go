@@ -1548,3 +1548,42 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 		t.Fatalf("who --successor-of desk-3 = %q, %v", out, err)
 	}
 }
+
+func TestALaneThatRegistersByPostingReadsMailSentBeforeItStarted(t *testing.T) {
+	if os.Getenv("CCI_TEST_FRESH_LANE") == "1" {
+		if _, err := run(t, "post", "--drive", "d", "--lane", "fresh-lane", "--kind", "state", "--text", "fresh-lane up"); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	home, config := t.TempDir(), t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "fresh-lane", "--text", "GO before fresh-lane started"); err != nil {
+		t.Fatal(err)
+	}
+	lane := exec.Command(os.Args[0], "-test.run=^TestALaneThatRegistersByPostingReadsMailSentBeforeItStarted$", "codex")
+	lane.Env = append(os.Environ(), "CCI_TEST_FRESH_LANE=1", "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+config, "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CODEX_THREAD_ID=019a3c3e-fresh-lane")
+	for _, name := range peers.IdentityEnv {
+		if name != "CODEX_THREAD_ID" {
+			lane.Env = append(lane.Env, name+"=")
+		}
+	}
+	if out, err := lane.CombinedOutput(); err != nil {
+		t.Fatalf("fresh-lane session: %v\n%s", err, out)
+	}
+	st, err := store.Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	seq, ok, err := st.Cursor(context.Background(), store.LaneCursor(store.PeerKey{Session: "019a3c3e-fresh-lane"}), "d")
+	if err != nil || !ok || seq != 0 {
+		t.Fatalf("fresh-lane's lane cursor = %d, %v, %v; want 0, before the go posted to it before it started", seq, ok, err)
+	}
+}

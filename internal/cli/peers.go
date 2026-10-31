@@ -21,6 +21,8 @@ import (
 
 	"github.com/yasyf/cc-interact/procs"
 
+	"github.com/yasyf/cc-inbox/internal/harness"
+	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -66,6 +68,9 @@ func newMeCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if err := announceThisAgent(cmd.Context(), st, self, window); err != nil {
+				return err
+			}
 			if err := bindNamedLane(cmd.Context(), st, self, window); err != nil {
 				return err
 			}
@@ -80,6 +85,26 @@ func newMeCmd() *cobra.Command {
 			return err
 		}),
 	}
+}
+
+func announceThisAgent(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window) error {
+	if self.Agent == "" || window.PID == 0 {
+		return nil
+	}
+	sessions, err := harness.Dir()
+	if err != nil {
+		return err
+	}
+	transcripts, err := filepath.Glob(filepath.Join(filepath.Dir(sessions), "projects", "*", self.Session+".jsonl"))
+	if err != nil || len(transcripts) == 0 {
+		return err
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve cwd: %w", err)
+	}
+	p := hook.Payload{SessionID: self.Session, AgentID: self.Agent, TranscriptPath: transcripts[0], Cwd: cwd}
+	return hook.AnnounceAgent(ctx, st, p, func() (store.Window, error) { return window, nil })
 }
 
 func bindNamedLane(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window) error {
