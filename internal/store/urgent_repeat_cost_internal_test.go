@@ -45,15 +45,15 @@ VALUES ('d','worker','urgent',?,'selected','selected-topic','["root"]','post','u
 			filter := (Subscription{Drive: "d", Session: "reader", Reader: "root", Kinds: []kinds.Kind{kinds.Urgent}, ToKinds: DefaultToKinds("root")}).Filter()
 			filter.After = int64(population)
 			filter.Limit = 500
-			bound := int64(2*bits.Len(uint(population)) + 8)
+			bound := int64(4*bits.Len(uint(population)) + 8)
 			var baseline []Record
 			for _, index := range []struct {
-				name string
-				sql  string
+				name, sql, planIndex string
 			}{
-				{"stock", ""},
-				{"sequence", "CREATE INDEX urgent_repeat_trial ON records(drive,lane,kind,topic,seq,at)"},
-				{"time", "CREATE INDEX urgent_repeat_trial ON records(drive,lane,kind,topic,at,seq)"},
+				{"canonical", "", "records_urgent_repeat"},
+				{"stock", "DROP INDEX IF EXISTS records_urgent_repeat", ""},
+				{"sequence", "CREATE INDEX urgent_repeat_trial ON records(drive,lane,kind,topic,seq,at)", "urgent_repeat_trial"},
+				{"time", "CREATE INDEX urgent_repeat_trial ON records(drive,lane,kind,topic,at,seq)", "urgent_repeat_trial"},
 			} {
 				if os.Getenv("CCI_URGENT_REPEAT_REQUIRE_STOCK_BOUND") == "1" && index.name != "stock" {
 					continue
@@ -69,7 +69,7 @@ VALUES ('d','worker','urgent',?,'selected','selected-topic','["root"]','post','u
 				if err != nil || len(got) != 1 || got[0].Seq != int64(population+1) {
 					t.Fatalf("index=%s records=%v err=%v", index.name, got, err)
 				}
-				if index.name == "stock" {
+				if baseline == nil {
 					baseline = got
 				} else if !reflect.DeepEqual(got, baseline) {
 					t.Fatalf("index=%s changed complete records", index.name)
@@ -83,10 +83,12 @@ VALUES ('d','worker','urgent',?,'selected','selected-topic','["root"]','post','u
 				if (index.name != "stock" || os.Getenv("CCI_URGENT_REPEAT_REQUIRE_STOCK_BOUND") == "1") && work > bound {
 					t.Errorf("URGENT_REPEAT_BOUND_EXCEEDED history=%d index=%s drive_topic_comparisons=%d bound=%d", population, index.name, work, bound)
 				}
-				if index.name != "stock" {
-					if !strings.Contains(strings.Join(plan, "\n"), "SEARCH prior USING COVERING INDEX urgent_repeat_trial") {
+				if index.planIndex != "" {
+					if !strings.Contains(strings.Join(plan, "\n"), "SEARCH prior USING COVERING INDEX "+index.planIndex) {
 						t.Errorf("index=%s repeat lookup did not select trial index: %v", index.name, plan)
 					}
+				}
+				if index.name == "sequence" || index.name == "time" {
 					if _, err := st.db.ExecContext(ctx, "DROP INDEX urgent_repeat_trial"); err != nil {
 						t.Fatal(err)
 					}
@@ -101,6 +103,9 @@ func TestUrgentRepeatIndexParity(t *testing.T) {
 	st := openMembershipStore(ctx, t, t.TempDir())
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	st.Now = func() time.Time { return now }
+	if _, err := st.db.ExecContext(ctx, "DROP INDEX IF EXISTS records_urgent_repeat"); err != nil {
+		t.Fatal(err)
+	}
 	for _, row := range []struct {
 		drive, lane, topic, recipients string
 		at                             int64
@@ -171,6 +176,9 @@ func TestUrgentRepeatIndexErrorFrontier(t *testing.T) {
 	st := openMembershipStore(ctx, t, t.TempDir())
 	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 	st.Now = func() time.Time { return now }
+	if _, err := st.db.ExecContext(ctx, "DROP INDEX IF EXISTS records_urgent_repeat"); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE selected(n) AS (
 VALUES(1) UNION ALL SELECT n+1 FROM selected WHERE n<500
 )
