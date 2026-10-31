@@ -86,6 +86,8 @@ jobs:
         with:
           ref: 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
           path: .ci-grep-selected-baseline
+      - uses: actions/checkout@v7
+        with:
           ref: 5e61c5bc11d417c601889cac1393b346d17a44cb
           path: .ci-mesh-export-baseline
       - uses: actions/checkout@v7
