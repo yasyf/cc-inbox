@@ -324,6 +324,27 @@ cci relay enroll --tier service --pub <base64 key> --allow 'page:*|oncall.say' -
 
 The new member then runs `cci relay join --url https://<relay URL> --tier <tier> --owner <the enrolling owner's public key>`, so it trusts that owner's group-key wraps. Every other owner pins the new member from the relay's `peer.joined`, which carries the enrolling owner's signed grant; against a relay older than relay-api v3.5, pin a new service by hand with `cci relay join --service <its public key>`.
 
+### Hear Trunk merge-queue changes as records
+
+A webhook receiver can write records with no local store. Enroll its service
+key for one drive and kind:
+
+```bash
+cci relay enroll --tier service --pub <base64 key> --allow 'trunk|queue' --label trunk
+```
+
+The receiver wraps `trunk.Handler` from `github.com/yasyf/cc-inbox/trunk`
+around a `service.Writer` that holds the key `e2e.ParseKey` reads from its
+PEM and the owner public keys it trusts. Each Svix-signed `pull_request.*` delivery from Trunk becomes one
+`queue` record on the `trunk` drive, carrying the pull request, Trunk's state
+as its outcome, the reason, the failing checks, and Trunk's details URL. A
+redelivery of the same message stays one record. A bad signature answers
+401, and a relay failure answers 502 so Svix retries.
+
+```bash
+cci tail --drive trunk --kind queue --json
+```
+
 ### Let a machine outside your mesh read a drive
 
 A colleague's laptop sits outside your synckit mesh and should follow your
@@ -538,6 +559,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `done` | None | Closes a matching `incident`, `defect`, or `blocker`. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
+| `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
