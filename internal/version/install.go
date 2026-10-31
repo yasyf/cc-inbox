@@ -1,6 +1,7 @@
 package version
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -57,11 +58,11 @@ func (r Roots) NewerThan(running string) (Install, bool, error) {
 }
 
 func (r Roots) newest() (plugin, casks Install, err error) {
-	if plugin, err = newestIn(r.Plugin, filepath.Join("bin", "cci"), true); err != nil {
+	if plugin, err = newestPlugin(r.Plugin); err != nil {
 		return Install{}, Install{}, err
 	}
 	for _, root := range r.Casks {
-		cask, err := newestIn(root, "cci", false)
+		cask, err := committedCask(root)
 		if err != nil {
 			return Install{}, Install{}, err
 		}
@@ -72,7 +73,33 @@ func (r Roots) newest() (plugin, casks Install, err error) {
 	return plugin, casks, nil
 }
 
-func newestIn(root, leaf string, skipOrphaned bool) (Install, error) {
+func committedCask(root string) (Install, error) {
+	raw, err := os.ReadFile(filepath.Join(root, ".metadata", "INSTALL_RECEIPT.json")) //nolint:gosec // G304: root is a configured Caskroom; the receipt path is fixed.
+	if errors.Is(err, fs.ErrNotExist) {
+		return Install{}, nil
+	}
+	if err != nil {
+		return Install{}, fmt.Errorf("read cci cask receipt: %w", err)
+	}
+	var receipt struct {
+		Source struct {
+			Version string `json:"version"`
+		} `json:"source"`
+	}
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		return Install{}, fmt.Errorf("decode cci cask receipt: %w", err)
+	}
+	if !IsRelease(receipt.Source.Version) {
+		return Install{}, nil
+	}
+	path := filepath.Join(root, receipt.Source.Version, "cci")
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm()&0o111 == 0 {
+		return Install{}, nil
+	}
+	return Install{Path: path, Version: receipt.Source.Version}, nil
+}
+
+func newestPlugin(root string) (Install, error) {
 	entries, err := os.ReadDir(root)
 	if errors.Is(err, fs.ErrNotExist) {
 		return Install{}, nil
@@ -86,10 +113,10 @@ func newestIn(root, leaf string, skipOrphaned bool) (Install, error) {
 		if !e.IsDir() || !Newer(e.Name(), newest.Version) {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(dir, ".orphaned_at")); skipOrphaned && err == nil {
+		if _, err := os.Stat(filepath.Join(dir, ".orphaned_at")); err == nil {
 			continue
 		}
-		path := filepath.Join(dir, leaf)
+		path := filepath.Join(dir, "bin", "cci")
 		if info, err := os.Stat(path); err != nil || info.Mode().Perm()&0o111 == 0 {
 			continue
 		}

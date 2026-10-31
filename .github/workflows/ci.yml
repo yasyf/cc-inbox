@@ -122,6 +122,17 @@ jobs:
           go build -p 2 -o "$cci_old_store_probe" ./cmd/compat-probe
           test -x "$cci_old_store_probe"
           printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
+      - name: Cask handoff waits for committed installation
+        run: |
+          test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
+          cp internal/version/cask_readiness_test.go .ci-mesh-export-baseline/internal/version/
+          if (cd .ci-mesh-export-baseline && go test -count=1 -run '^TestCaskHandoffWaitsForCommittedReceipt$' -v ./internal/version) > "$RUNNER_TEMP/cci-cask-readiness-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-cask-readiness-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-cask-readiness-negative.log"
+          grep -F 'staged cask selected before committed receipt' "$RUNNER_TEMP/cci-cask-readiness-negative.log"
+          go test -count=1 -race -v ./internal/version
       - name: Hook owed indexed closure and immutable output
         run: |
           test "$(git -C .ci-hook-owed-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a

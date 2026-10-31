@@ -31,6 +31,7 @@ func TestNewestRanksPluginAndCaskInstallsBySemver(t *testing.T) {
 	}
 	installAt(t, filepath.Join(cask, "0.11.0", "cci"))
 	installAt(t, filepath.Join(cask, "0.12.1", "cci"))
+	commitCask(t, cask, "0.12.1")
 	roots := Roots{Plugin: plugin, Casks: []string{cask, filepath.Join(t.TempDir(), "absent")}}
 
 	got, err := roots.Newest()
@@ -53,6 +54,7 @@ func TestNewerThanHandsAStaleBinaryToTheNewestInstall(t *testing.T) {
 	cask := filepath.Join(t.TempDir(), "cci")
 	installAt(t, filepath.Join(plugin, "0.41.6", "bin", "cci"))
 	installAt(t, filepath.Join(cask, "0.42.0", "cci"))
+	commitCask(t, cask, "0.42.0")
 	roots := Roots{Plugin: plugin, Casks: []string{cask}}
 	tests := []struct {
 		running string
@@ -109,6 +111,7 @@ func TestUpgradeCommandsCoverEveryInstallOnce(t *testing.T) {
 	installAt(t, filepath.Join(plugin, "0.12.0", "bin", "cci"))
 	cask := filepath.Join(t.TempDir(), "cci")
 	installAt(t, filepath.Join(cask, "0.12.0", "cci"))
+	commitCask(t, cask, "0.12.0")
 	standalone, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
