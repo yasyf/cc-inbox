@@ -32,11 +32,17 @@ jobs:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit || github.sha }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
       - name: Validate native workflow contracts
         run: |
           bash <(curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12 "$RUNNER_TEMP"
           "$RUNNER_TEMP/actionlint" -color
           python3 .github/scripts/test-native-release-gates.py
+          go build -o "$RUNNER_TEMP/release-version" ./scripts/release-version
+          RELEASE_VERSION_COMPARE="$RUNNER_TEMP/release-version" python3 .github/scripts/test-release-main-sync.py
 
   test:
     runs-on: ${{ matrix.os }}
@@ -66,7 +72,7 @@ jobs:
           path: .ci-tail-baseline
       - uses: actions/checkout@v7
         with:
-          ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
           path: .ci-native-tail-baseline
       - uses: actions/checkout@v7
         with:
@@ -189,7 +195,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' ./internal/cli)
