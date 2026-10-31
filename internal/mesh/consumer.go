@@ -108,8 +108,11 @@ func (c *Consumer) Export(ctx context.Context, request syncservice.ExportRequest
 	head, _ := log.head()
 	encodedPresence, presenceErr := json.Marshal(presence)
 	budget := payloadBudget - len(encodedPresence)
-	used := 0
+	used, seq, first := 0, head.Seq, true
 	if err := c.st.VisitNewestExports(ctx, c.st.Self(), head.Seq, func(row store.Row) (bool, error) {
+		if first {
+			seq, first = row.OriginSeq, false
+		}
 		raw, err := json.Marshal(row)
 		if err != nil {
 			return false, nil
@@ -117,10 +120,6 @@ func (c *Consumer) Export(ctx context.Context, request syncservice.ExportRequest
 		used += len(raw) + 1
 		return used <= budget, nil
 	}); err != nil {
-		return syncservice.ChangeEnvelope{}, err
-	}
-	seq, err := c.st.ExportHead(ctx, c.st.Self(), head.Seq)
-	if err != nil {
 		return syncservice.ChangeEnvelope{}, err
 	}
 	if head, err = log.advance(seq, digest, c.st.Now()); err != nil {

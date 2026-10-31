@@ -85,16 +85,6 @@ func (s *Store) Export(ctx context.Context, origin string, since int64, limit in
 	return out, rows.Err()
 }
 
-// ExportHead returns origin's newest exported sequence above since, or since when none exists.
-func (s *Store) ExportHead(ctx context.Context, origin string, since int64) (int64, error) {
-	var seq int64
-	err := s.db.QueryRowContext(ctx, "SELECT COALESCE((SELECT CASE WHEN origin=? THEN seq ELSE origin_seq END FROM records INDEXED BY records_origin WHERE origin=? AND origin_seq>? AND kind!=? ORDER BY origin_seq DESC LIMIT 1),?)", s.Self(), origin, since, string(kinds.Digest), since).Scan(&seq)
-	if err != nil {
-		return 0, fmt.Errorf("export %s: %w", origin, err)
-	}
-	return seq, nil
-}
-
 // VisitNewestExports visits origin's non-digest rows after since, newest first, until visit returns false.
 func (s *Store) VisitNewestExports(ctx context.Context, origin string, since int64, visit func(Row) (bool, error)) error {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records INDEXED BY records_origin WHERE origin=? AND origin_seq>? AND kind!=? ORDER BY origin_seq DESC", origin, since, string(kinds.Digest))
