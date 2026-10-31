@@ -50,6 +50,8 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
+    env:
+      TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -169,7 +171,7 @@ jobs:
           go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
-        run: go test -race ./...
+        run: go test -race -skip "$TAIL_COST_TESTS" ./...
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
@@ -210,9 +212,8 @@ jobs:
         run: |
           test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
           cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
-          tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
-          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$tail_tests" -v ./internal/cli)
-          go test -run "$tail_tests" -v ./internal/cli
+          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$TAIL_COST_TESTS" -v ./internal/cli)
+          go test -run "$TAIL_COST_TESTS" -v ./internal/cli
       - name: Selected opener closure work and error scope
         run: |
           cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/
