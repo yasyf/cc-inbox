@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"ops":[{"kind":"set_branch","branch":"perf/cci-daemon-cpu"}]}
+{"v":1,"lamport":4,"ops":[{"kind":"set_criterion_status","id":"aa786339a318c5ccf05f36731a755b30","status":"met","note":"Root-authorized27/27 exact unchanged links restored atomically to existing executable canonical script SHA cbb98a17; before/after identities/rawtargets retained. Skipped0. FE/cci-old-hook-launcher-restoration/restoration.json SHAe0f992e1. Root separately restored0301. No global link write."}]}
