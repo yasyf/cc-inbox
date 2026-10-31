@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"modernc.org/sqlite"
 )
@@ -21,6 +22,7 @@ func selectedSequenceStore(t *testing.T, count int) (*Store, *atomic.Int64, []in
 		t.Fatal(err)
 	}
 	st := countedColumnStore(t, "drive", collation)
+	st.Now = time.Now
 	st.SetOwner(true)
 	_, err := st.db.ExecContext(t.Context(), `WITH RECURSIVE history(n) AS (
 VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<?
