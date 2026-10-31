@@ -60,6 +60,7 @@ func TestWireFormatGolden(t *testing.T) {
 			ExpiresAt: &expires,
 			Source:    "post",
 			Body:      json.RawMessage(`{"detail":"full"}`),
+			PathBody:  "the whole body file\n",
 		}},
 		Presence: store.Presence{
 			Origin: "0123456789abcdef",

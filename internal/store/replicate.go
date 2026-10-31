@@ -1,12 +1,16 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"time"
+	"unicode/utf8"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
@@ -19,7 +23,9 @@ type Pointer struct {
 }
 
 // Row is a record as it travels between nodes. Its re, resolves and also_resolves are
-// pointers; Apply rewrites them to the receiving store's seqs.
+// pointers; Apply rewrites them to the receiving store's seqs. PathBody carries the
+// file its refs.path names, which Apply writes to the receiving node's blobs, since
+// that path exists only on the node that wrote the record.
 type Row struct {
 	Origin       string          `json:"origin"`
 	OriginSeq    int64           `json:"origin_seq"`
@@ -39,6 +45,7 @@ type Row struct {
 	ExpiresAt    *time.Time      `json:"expires_at,omitempty"`
 	Source       string          `json:"source"`
 	Body         json.RawMessage `json:"body,omitempty"`
+	PathBody     string          `json:"path_body,omitempty"`
 }
 
 // Receipt is the last change a transport channel applied completely from
@@ -122,12 +129,40 @@ func (s *Store) scanExportRow(row scanner) (Row, error) {
 			return Row{}, fmt.Errorf("decode also_resolves_origin of #%d: %w", r.Seq, err)
 		}
 	}
+	body, err := pathBody(r.Refs.Path)
+	if err != nil {
+		return Row{}, err
+	}
 	return Row{
 		Origin: s.origin(r.Origin), OriginSeq: originSeq(r), ID: r.ID,
 		Drive: r.Drive, Lane: r.Lane, Kind: r.Kind, At: r.At, Text: r.Text, Topic: r.Topic, To: r.To,
 		Re: pointer(r.Re, re), Resolves: pointer(r.Resolves, resolves), AlsoResolves: also,
-		Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body,
+		Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body, PathBody: body,
 	}, nil
+}
+
+func pathBody(path string) (string, error) {
+	if path == "" {
+		return "", nil
+	}
+	raw, err := os.ReadFile(path) //nolint:gosec // G304: the record names its own body file.
+	if errors.Is(err, fs.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read body file %s: %w", path, err)
+	}
+	if len(raw) <= MaxBody {
+		return string(raw), nil
+	}
+	cut := raw[:MaxBody]
+	if line := bytes.LastIndexByte(cut, '\n'); line > 0 {
+		cut = cut[:line+1]
+	}
+	for !utf8.Valid(cut) {
+		cut = cut[:len(cut)-1]
+	}
+	return fmt.Sprintf("%s… cut at %d KiB of %d KiB; the whole file is %s on the node that wrote this record\n", cut, len(cut)>>10, len(raw)>>10, path), nil
 }
 
 type exportScanner struct {
@@ -247,10 +282,18 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 		}
 		return nil
 	}
+	refs := row.Refs
+	if row.PathBody != "" {
+		path, err := s.Blob(row.PathBody)
+		if err != nil {
+			return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
+		}
+		refs.Path = path
+	}
 	r := Record{
 		Origin: row.Origin, OriginSeq: row.OriginSeq, ID: row.ID,
 		Drive: row.Drive, Lane: row.Lane, Kind: row.Kind, At: row.At, Text: row.Text, Topic: row.Topic, To: row.To,
-		Re: re, Resolves: resolves, Refs: row.Refs, Fields: row.Fields, ExpiresAt: row.ExpiresAt, Source: row.Source, Body: row.Body,
+		Re: re, Resolves: resolves, Refs: refs, Fields: row.Fields, ExpiresAt: row.ExpiresAt, Source: row.Source, Body: row.Body,
 	}
 	if len(also) > 0 {
 		r.AlsoResolves, r.alsoOrigins = also, row.AlsoResolves

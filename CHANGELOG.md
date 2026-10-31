@@ -56,6 +56,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answers, as `<lane>@<drive>` when that record is on another drive. A reply used
   to go to no one. A record whose every `--to` is the posting lane itself is
   refused, and the refusal names who wrote the record it answers.
+- A record whose body sits in a file (`--path`, or text over 400 characters)
+  now carries that file to every node it replicates to, up to 64 KiB cut at a
+  line, and the receiving node stores it in its own blobs and names that copy.
+  A reader on another machine used to see only the 400-character excerpt.
+  The file rides in a new `path_body` field, so the mesh wire format moves to
+  4 and nodes on different versions refuse each other's changes until both
+  upgrade.
 
 ## [0.41.0] - 2026-10-29
 
