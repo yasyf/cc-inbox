@@ -22,6 +22,16 @@ func TestWithBodyIndentsTheBodyUnderTheLine(t *testing.T) {
 	}
 }
 
+// TestWithBodyNamesALongBodyInsteadOfInliningIt: a 20 KB report body reached a
+// root's channel inline, where a long text leaves only its head and blob path.
+func TestWithBodyNamesALongBodyInsteadOfInliningIt(t *testing.T) {
+	body := []byte(`{"report":"` + strings.Repeat("x", store.MaxText) + `"}`)
+	got := render.WithBody("#9 line", store.Record{Seq: 9, Body: body})
+	if want := fmt.Sprintf("#9 line\n(body: %d bytes; cci show 9 prints it)", len(body)); got != want {
+		t.Fatalf("WithBody(long body) = %q, want %q", got, want)
+	}
+}
+
 func TestBriefDropsOnlyWhatTheTextAlreadyNames(t *testing.T) {
 	at := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	record := func(topic, text string, prs ...store.PR) store.Record {
