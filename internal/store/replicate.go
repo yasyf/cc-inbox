@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"time"
@@ -145,15 +146,24 @@ func pathBody(path string) (string, error) {
 	if path == "" {
 		return "", nil
 	}
-	raw, err := os.ReadFile(path) //nolint:gosec // G304: the record names its own body file.
+	file, err := os.Open(path) //nolint:gosec // G304: the record names its own body file.
 	if errors.Is(err, fs.ErrNotExist) {
 		return "", nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("read body file %s: %w", path, err)
 	}
+	defer func() { _ = file.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(file, MaxBody+1))
+	if err != nil {
+		return "", fmt.Errorf("read body file %s: %w", path, err)
+	}
 	if len(raw) <= MaxBody {
 		return string(raw), nil
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("read body file %s: %w", path, err)
 	}
 	cut := raw[:MaxBody]
 	if line := bytes.LastIndexByte(cut, '\n'); line > 0 {
@@ -162,7 +172,7 @@ func pathBody(path string) (string, error) {
 	for !utf8.Valid(cut) {
 		cut = cut[:len(cut)-1]
 	}
-	return fmt.Sprintf("%s… cut at %d KiB of %d KiB; the whole file is %s on the node that wrote this record\n", cut, len(cut)>>10, len(raw)>>10, path), nil
+	return fmt.Sprintf("%s… cut at %d KiB of %d KiB; the whole file is %s on the node that wrote this record\n", cut, len(cut)>>10, info.Size()>>10, path), nil
 }
 
 type exportScanner struct {

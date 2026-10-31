@@ -50,6 +50,8 @@ jobs:
       fail-fast: false
       matrix:
         os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
+    env:
+      TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -110,6 +112,10 @@ jobs:
         with:
           ref: e2ef260846d7afb2850cc503dc6cde57baa78487
           path: .ci-mesh-frontier-negative
+      - uses: actions/checkout@v7
+        with:
+          ref: 2bd181b53ad0384b284e8440d02b2db0a5c75fcc
+          path: .ci-mesh-body-baseline
       - uses: actions/checkout@v7
         with:
           ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
@@ -203,6 +209,18 @@ jobs:
           grep -F 'hook owed refs_reads=10002 want=2 history=10000' "$RUNNER_TEMP/cci-hook-owed-negative.log"
           CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
           go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
+      - name: Mesh exported body prefix and immutable allocation control
+        run: |
+          test "$(git -C .ci-mesh-body-baseline rev-parse HEAD)" = 2bd181b53ad0384b284e8440d02b2db0a5c75fcc
+          cp internal/store/replicate_body_cost_test.go .ci-mesh-body-baseline/internal/store/
+          (cd .ci-mesh-body-baseline && CCI_MESH_BODY_EXPECT_GLOBAL=1 go test -count=1 -run '^TestNewestExportBoundsSelectedBodyAllocation$|^TestExportBodyPrefixKeepsLineAndUTF8Contract$' -v ./internal/store)
+          if (cd .ci-mesh-body-baseline && go test -count=1 -run '^TestNewestExportBoundsSelectedBodyAllocation$' -v ./internal/store) > "$RUNNER_TEMP/cci-mesh-body-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/cci-mesh-body-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/cci-mesh-body-negative.log"
+          grep -F 'selected body allocation follows the unread file tail: body_bytes=33554432' "$RUNNER_TEMP/cci-mesh-body-negative.log"
+          go test -count=1 -race -run '^TestNewestExportBoundsSelectedBodyAllocation$|^TestExportBodyPrefixKeepsLineAndUTF8Contract$|^TestARecordsBodyFileTravelsWithItIntoTheReceiversBlobs$' -v ./internal/store
       - name: Mesh export indexed prefix and immutable contract
         run: |
           test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
@@ -225,7 +243,7 @@ jobs:
           go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
-        run: go test -race -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' ./...
+        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident" ./...
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
@@ -266,9 +284,8 @@ jobs:
         run: |
           test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
           cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
-          tail_tests='^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
-          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$tail_tests" -v ./internal/cli)
-          go test -run "$tail_tests" -v ./internal/cli
+          (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$TAIL_COST_TESTS" -v ./internal/cli)
+          go test -run "$TAIL_COST_TESTS" -v ./internal/cli
       - name: Selected opener closure work and error scope
         run: |
           cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/
