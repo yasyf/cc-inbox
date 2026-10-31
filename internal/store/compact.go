@@ -26,7 +26,7 @@ func (s *Store) OpenTo(ctx context.Context, drive, reader string, ks []kinds.Kin
 	if err != nil {
 		return nil, err
 	}
-	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() || !slices.Contains(ks, o.Kind) }))
+	return s.unclosedAmong(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() || !slices.Contains(ks, o.Kind) }))
 }
 
 func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, error) {
