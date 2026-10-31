@@ -26,6 +26,14 @@ func TestGrepReadsHistoryOnceForAnnotations(t *testing.T) {
 				t.Setenv("CCI_HOME", home)
 				t.Setenv("CLAUDE_CODE_SESSION_ID", "grep-cost-session")
 				t.Setenv("CCI_AGENT_ID", "")
+				var reads atomic.Int64
+				function := fmt.Sprintf("cci_grep_read_%d", grepCounterID.Add(1))
+				if err := sqlite.RegisterDeterministicScalarFunction(function, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
+					reads.Add(1)
+					return args[0], nil
+				}); err != nil {
+					t.Fatal(err)
+				}
 				ctx := context.Background()
 				st, err := store.Open(ctx, home)
 				if err != nil {
@@ -46,41 +54,9 @@ INSERT INTO records (drive, lane, kind, at, text, source, hash)
 SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' || n FROM history`, population); err != nil {
 					t.Fatal(err)
 				}
-				var reads atomic.Int64
-				function := fmt.Sprintf("cci_grep_read_%d", grepCounterID.Add(1))
-				if err := sqlite.RegisterScalarFunction(function, 1, func(_ *sqlite.FunctionContext, args []driver.Value) (driver.Value, error) {
-					reads.Add(1)
-					return args[0], nil
-				}); err != nil {
-					t.Fatal(err)
-				}
-				columns, err := db.QueryContext(ctx, "PRAGMA table_info(records)")
-				if err != nil {
-					t.Fatal(err)
-				}
-				var selection []string
-				for columns.Next() {
-					var cid, notNull, primaryKey int
-					var name, kind string
-					var defaultValue any
-					if err := columns.Scan(&cid, &name, &kind, &notNull, &defaultValue, &primaryKey); err != nil {
-						t.Fatal(err)
-					}
-					column := name
-					if name == "also_resolves" {
-						column = function + "(also_resolves) AS also_resolves"
-					}
-					selection = append(selection, column)
-				}
-				if err := columns.Err(); err != nil {
-					t.Fatal(err)
-				}
-				if err := columns.Close(); err != nil {
-					t.Fatal(err)
-				}
 				for _, query := range []string{
-					"ALTER TABLE records RENAME TO counted_history",
-					"CREATE VIEW records AS SELECT " + strings.Join(selection, ", ") + " FROM counted_history",
+					"ALTER TABLE records RENAME COLUMN also_resolves TO counted_also_resolves",
+					"ALTER TABLE records ADD COLUMN also_resolves TEXT GENERATED ALWAYS AS (" + function + "(counted_also_resolves)) VIRTUAL",
 				} {
 					if _, err := db.ExecContext(ctx, query); err != nil {
 						t.Fatal(err)
@@ -93,7 +69,7 @@ SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 
 				if !strings.HasPrefix(out, fmt.Sprintf("#%d ", population)) {
 					t.Fatalf("grep newest row missing: %q", out)
 				}
-				wantReads := 2 * int64(population)
+				wantReads := int64(population)
 				if os.Getenv("CCI_GREP_EXPECT_PAGED") == "1" {
 					wantReads = int64(population * (1 + (population+499)/500))
 				}

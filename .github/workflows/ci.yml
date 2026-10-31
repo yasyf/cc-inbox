@@ -84,6 +84,10 @@ jobs:
           path: .ci-lane-score-baseline
       - uses: actions/checkout@v7
         with:
+          ref: 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
+          path: .ci-grep-selected-baseline
+      - uses: actions/checkout@v7
+        with:
           ref: 5e61c5bc11d417c601889cac1393b346d17a44cb
           path: .ci-mesh-export-baseline
       - uses: actions/checkout@v7
@@ -179,6 +183,16 @@ jobs:
           go test -run '^TestGrepReadsHistoryOnceForAnnotations$' -v ./internal/cli
           go test -run '^TestRepliesSelectionExceedsVariableLimit$' -v ./internal/store
           go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
+      - name: Indexed selected reply counts, current public CLI oracle, and required index lifecycle
+        run: |
+          test "$(git -C .ci-grep-selected-baseline rev-parse HEAD)" = 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
+          cp internal/cli/grep_cost_test.go internal/cli/grep_selected_cost_test.go .ci-grep-selected-baseline/internal/cli/
+          (cd .ci-grep-selected-baseline && CCI_GREP_EXPECT_GLOBAL_REPLY_SCAN=1 go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$' -v ./internal/cli)
+          (cd .ci-grep-selected-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-grep-current-baseline" ./cmd/cci)
+          go build -p 2 -o "$RUNNER_TEMP/cci-grep-current" ./cmd/cci
+          CCI_GREP_CURRENT_BASELINE="$RUNNER_TEMP/cci-grep-current-baseline" CCI_GREP_CURRENT_CLI="$RUNNER_TEMP/cci-grep-current" go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$|^TestGrepIndexedRepliesPreservePublicErrorsAndBytes$' -v ./internal/cli
+          go test -count=1 -run '^TestSelectedReply|^TestGrepReplyIndex' -v ./internal/store
+          CCI_GREP_REPLY_INDEX_ROWS=250000 go test -count=1 -run '^TestGrepReplyIndexProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Build
         run: go build ./...
       - name: Tail operation counts and full requested output

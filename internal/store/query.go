@@ -786,8 +786,8 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 		return pages, nil
 	}
 	ids, _ := json.Marshal(seqs)
-	in := "SELECT value FROM json_each(?)"
-	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+", re, resolves, also_resolves, seq FROM records WHERE re IN ("+in+") OR resolves IN ("+in+") OR EXISTS (SELECT 1 FROM json_each(also_resolves) WHERE value IN ("+in+")) ORDER BY seq", string(ids), string(ids), string(ids))
+	query := replyPagesQuery(len(owners[0]) != 0)
+	rows, err := s.db.QueryContext(ctx, query, string(ids))
 	if err != nil {
 		return nil, fmt.Errorf("read replies: %w", err)
 	}
@@ -922,4 +922,19 @@ func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, e
 		out[target] = max(out[target], seq)
 	}
 	return out, rows.Err()
+}
+
+func replyPagesQuery(includeZero bool) string {
+	zero := ""
+	if includeZero {
+		zero = " UNION ALL SELECT seq FROM records WHERE resolves=0"
+	}
+	in := "SELECT value FROM selected"
+	return `WITH selected AS MATERIALIZED(SELECT value FROM json_each(?)), candidates AS (
+SELECT seq FROM records INDEXED BY records_re WHERE re IN (` + in + `)
+UNION ALL SELECT seq FROM records INDEXED BY records_resolves_target WHERE resolves!=0 AND resolves IN (` + in + `)
+UNION ALL SELECT source_seq FROM record_also_resolves INDEXED BY record_also_resolves_target WHERE target IN (` + in + `)
+UNION ALL SELECT source_seq FROM record_json_errors INDEXED BY record_json_errors_field WHERE field='also_resolves'` + zero + `)
+SELECT ` + columns + `, re, resolves, also_resolves, seq FROM records WHERE seq IN(SELECT seq FROM candidates)
+AND (re IN (` + in + `) OR resolves IN (` + in + `) OR EXISTS(SELECT 1 FROM json_each(also_resolves) WHERE value IN (` + in + `))) ORDER BY seq`
 }
