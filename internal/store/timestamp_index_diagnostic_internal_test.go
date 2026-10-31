@@ -2,9 +2,12 @@ package store
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"math/bits"
 	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -91,7 +94,41 @@ func TestTimestampIndexDiagnosticWork(t *testing.T) {
 	}
 }
 
+type timestampNativeResult struct {
+	Rows      string
+	QueryErr  string
+	Count     int
+	CountErr  string
+	QuerySQL  string
+	QueryArgs []any
+	CountSQL  string
+	CountArgs []any
+}
+
+type timestampNativeOracle struct {
+	Variant string
+	Filters []Filter
+	Results [][]timestampNativeResult
+}
+
+func timestampNativeRead(t *testing.T, st *Store, filter Filter) timestampNativeResult {
+	t.Helper()
+	rows, queryErr := st.Query(t.Context(), filter)
+	count, countErr := st.Count(t.Context(), filter)
+	query, args := st.selection(filter)
+	where, params := filter.bounded(st.Self(), st.Now())
+	return timestampNativeResult{
+		Rows: fmt.Sprintf("%#v", rows), QueryErr: fmt.Sprint(queryErr), Count: count, CountErr: fmt.Sprint(countErr),
+		QuerySQL: query, QueryArgs: args, CountSQL: "SELECT COUNT(*) FROM records WHERE " + where, CountArgs: params,
+	}
+}
+
 func TestTimestampIndexNativeParity(t *testing.T) {
+	root := os.Getenv("CCI_TIMESTAMP_NATIVE_ORACLE_DIR")
+	if root == "" {
+		t.Skip("CI supplies the immutable public Query and Count oracle")
+	}
+	record := os.Getenv("CCI_TIMESTAMP_ORACLE_RECORD") == "1"
 	variants := slices.Clone(membershipVariants)
 	recent := time.Date(2026, 10, 31, 11, 0, 0, 0, time.UTC).UnixMilli()
 	variants = append(variants, []struct {
@@ -106,20 +143,23 @@ func TestTimestampIndexNativeParity(t *testing.T) {
 		{"raw blob at", []membershipSet{{4, "at=X'FF'"}}},
 	}...)
 	for _, index := range timestampDiagnosticIndexes[1:] {
-		for _, variant := range variants {
+		for number, variant := range variants {
 			t.Run(index.name+"/"+variant.name, func(t *testing.T) {
-				st := openMembershipStore(t.Context(), t, t.TempDir())
+				home := filepath.Join(root, index.name, fmt.Sprint(number))
+				st := openMembershipStore(t.Context(), t, home)
 				now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
 				st.Now = func() time.Time { return now }
-				seedMembershipFixture(t.Context(), t, st, now)
 				for _, ddl := range []string{"DROP INDEX IF EXISTS records_at_seq", "DROP INDEX IF EXISTS records_drive_at_seq"} {
 					if _, err := st.db.ExecContext(t.Context(), ddl); err != nil {
 						t.Fatal(err)
 					}
 				}
-				for _, set := range variant.sets {
-					if _, err := st.db.ExecContext(t.Context(), "UPDATE records SET "+set.set+" WHERE seq=?", set.seq); err != nil {
-						t.Fatal(err)
+				if record {
+					seedMembershipFixture(t.Context(), t, st, now)
+					for _, set := range variant.sets {
+						if _, err := st.db.ExecContext(t.Context(), "UPDATE records SET "+set.set+" WHERE seq=?", set.seq); err != nil {
+							t.Fatal(err)
+						}
 					}
 				}
 				filters := []Filter{
@@ -134,36 +174,53 @@ func TestTimestampIndexNativeParity(t *testing.T) {
 					{Drive: "d", To: "api", Since: now.Add(-24 * time.Hour)},
 					{Drive: "d", Peer: "reader", Stack: "p/e", Since: now.Add(-24 * time.Hour)},
 				}
-				type result struct {
-					rows     []Record
-					queryErr error
-					count    int
-					countErr error
-				}
-				before := make([]result, len(filters))
-				for i, filter := range filters {
-					if variant.name == "origin early malformed recipients" && filter.PeerAfter == 4 {
-						query, args := st.selection(filter)
-						where, params := filter.where(st.Self(), st.Now())
-						native := "SELECT " + columns + " FROM records WHERE " + where + " ORDER BY seq DESC LIMIT 2"
-						t.Logf("TIMESTAMP_FRONTIER_PLAN index=%s query_sql=%q query_args=%v query_plan=%v native_sql=%q native_args=%v native_plan=%v", index.name, query, args, queryPlan(t.Context(), t, st, query, args...), native, params, queryPlan(t.Context(), t, st, native, params...))
-						t.Logf("TIMESTAMP_FRONTIER_VM index=%s query_program=%v native_program=%v", index.name, timestampDiagnosticVM(t, st, query, args...), timestampDiagnosticVM(t, st, native, params...))
+				oracle := timestampNativeOracle{Variant: variant.name, Filters: filters}
+				if !record {
+					raw, err := os.ReadFile(filepath.Join(home, "results-old.json"))
+					if err != nil {
+						t.Fatal(err)
 					}
-					before[i].rows, before[i].queryErr = st.Query(t.Context(), filter)
-					before[i].count, before[i].countErr = st.Count(t.Context(), filter)
-					native, nativeErr := unboundedQuery(t.Context(), st, filter)
-					count, countErr := unboundedCount(t.Context(), st, filter)
-					assertSameRead(t, fmt.Sprintf("range Query filter=%+v", filter), before[i].rows, before[i].queryErr, native, nativeErr)
-					assertSameRead(t, fmt.Sprintf("range Count filter=%+v", filter), before[i].count, before[i].countErr, count, countErr)
+					if err := json.Unmarshal(raw, &oracle); err != nil {
+						t.Fatal(err)
+					}
+					if oracle.Variant != variant.name || !reflect.DeepEqual(oracle.Filters, filters) || len(oracle.Results) != 2 {
+						t.Fatalf("immutable fixture metadata differs: %+v", oracle)
+					}
 				}
-				if _, err := st.db.ExecContext(t.Context(), index.ddl); err != nil {
+				actual := timestampNativeOracle{Variant: variant.name, Filters: filters}
+				for stage, indexed := range []bool{false, true} {
+					if indexed {
+						if _, err := st.db.ExecContext(t.Context(), index.ddl); err != nil {
+							t.Fatal(err)
+						}
+					}
+					var results []timestampNativeResult
+					if !record && len(oracle.Results[stage]) != len(filters) {
+						t.Fatalf("immutable result count=%d, want=%d", len(oracle.Results[stage]), len(filters))
+					}
+					for i, filter := range filters {
+						got := timestampNativeRead(t, st, filter)
+						results = append(results, got)
+						t.Logf("TIMESTAMP_NATIVE_PUBLIC_ORACLE record=%t index=%s indexed=%t filter=%+v result=%+v", record, index.name, indexed, filter, got)
+						if !record {
+							want := oracle.Results[stage][i]
+							if got.Rows != want.Rows || got.QueryErr != want.QueryErr || got.Count != want.Count || got.CountErr != want.CountErr {
+								t.Errorf("actual immutable public Query/Count parity index=%s indexed=%t filter=%+v current=%+v old=%+v", index.name, indexed, filter, got, want)
+							}
+						}
+					}
+					actual.Results = append(actual.Results, results)
+				}
+				name := "results-current.json"
+				if record {
+					name = "results-old.json"
+				}
+				raw, err := json.Marshal(actual)
+				if err != nil {
 					t.Fatal(err)
 				}
-				for i, filter := range filters {
-					rows, queryErr := st.Query(t.Context(), filter)
-					count, countErr := st.Count(t.Context(), filter)
-					assertSameRead(t, fmt.Sprintf("indexed Query filter=%+v", filter), rows, queryErr, before[i].rows, before[i].queryErr)
-					assertSameRead(t, fmt.Sprintf("indexed Count filter=%+v", filter), count, countErr, before[i].count, before[i].countErr)
+				if err := os.WriteFile(filepath.Join(home, name), raw, 0o600); err != nil {
+					t.Fatal(err)
 				}
 			})
 		}
