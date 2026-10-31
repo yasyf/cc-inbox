@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -66,7 +67,12 @@ func newUpgradeCmd() *cobra.Command {
 				return err
 			}
 			for _, line := range lines {
-				if err := runShown(cmd, "/bin/sh", "-c", line); err != nil {
+				if line == version.CaskUpgrade {
+					if err := version.ProveRelease(cmd.Context(), releaseStartBound); err != nil {
+						return err
+					}
+				}
+				if err := runUpgradeStep(cmd, line); err != nil {
 					return err
 				}
 			}
@@ -86,17 +92,24 @@ func newUpgradeCmd() *cobra.Command {
 			if newest.Path == "" {
 				return errors.New("no cci install found to serve from")
 			}
-			return runShown(cmd, newest.Path, "serve")
+			return runShown(cmd, exec.CommandContext(cmd.Context(), newest.Path, "serve")) //nolint:gosec // G204: an install path cci found.
 		},
 	}
 }
 
-func runShown(cmd *cobra.Command, name string, args ...string) error {
-	line := strings.Join(append([]string{name}, args...), " ")
+const releaseStartBound = time.Minute
+
+func runUpgradeStep(cmd *cobra.Command, line string) error {
+	c := exec.Command("/bin/sh", "-c", line) //nolint:gosec // G204: an upgrade command cci composed.
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	return runShown(cmd, c)
+}
+
+func runShown(cmd *cobra.Command, c *exec.Cmd) error {
+	line := strings.Join(c.Args, " ")
 	if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "$ %s\n", line); err != nil {
 		return err
 	}
-	c := exec.CommandContext(cmd.Context(), name, args...) //nolint:gosec // G204: an install path cci found or an upgrade command it composed.
 	c.Stdout = cmd.OutOrStdout()
 	c.Stderr = cmd.ErrOrStderr()
 	if err := c.Run(); err != nil {
