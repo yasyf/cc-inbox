@@ -4,11 +4,13 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -27,6 +29,7 @@ type tailFlags struct {
 	rf     readFlags
 	cursor string
 	all    bool
+	seqs   []int64
 }
 
 func tailCommand(peer string) (*cobra.Command, *tailFlags) {
@@ -41,10 +44,15 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	f.rf.registerWidth(cmd)
 	f.rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
 	cmd.Flags().StringVar(&f.cursor, "cursor", peer, "cursor name, read and advanced when --since is absent")
+	cmd.Flags().Int64SliceVar(&f.seqs, "seqs", nil, "read these internal store sequences")
+	_ = cmd.Flags().MarkHidden("seqs")
 	return cmd, f
 }
 
 func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
+	if cmd.Flags().Changed("seqs") {
+		return f.runSelected(ctx, cmd, st)
+	}
 	filter, err := f.rf.filterPeer(ctx, st, peer)
 	if err != nil {
 		return err
@@ -66,6 +74,44 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 		return err
 	}
 	return advanceLaneCursor(ctx, st, filter, start, res.Last)
+}
+
+func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *store.Store) error {
+	if f.rf.drive == "" || !cmd.Flags().Changed("since-seq") || f.rf.sinceSeq != 0 || !f.rf.json || f.rf.budget != 0 {
+		return errors.New("--seqs requires --drive, --since-seq 0, --json, and --budget 0")
+	}
+	var unsupported []string
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		switch flag.Name {
+		case "drive", "since-seq", "seqs", "json", "budget":
+		default:
+			unsupported = append(unsupported, flag.Name)
+		}
+	})
+	if len(unsupported) > 0 {
+		return fmt.Errorf("--seqs does not support --%s", unsupported[0])
+	}
+	for _, seq := range f.seqs {
+		if seq <= 0 {
+			return errors.New("--seqs requires positive internal store sequences")
+		}
+	}
+	records, err := st.RecordsAmong(ctx, f.rf.drive, f.seqs)
+	if err != nil {
+		return err
+	}
+	if err := inbox.Annotate(ctx, st, records); err != nil {
+		return err
+	}
+	for _, record := range records {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(cmd.OutOrStdout(), render.JSON(record)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, start, last int64) error {
