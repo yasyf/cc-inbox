@@ -10,6 +10,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -361,4 +362,18 @@ func TestUnknownRevisionGetsAFullSnapshot(t *testing.T) {
 	if change.Kind != syncservice.ChangeSnapshot || len(bd.Rows) != 2 {
 		t.Fatalf("export from an unknown revision = %s with %d rows", change.Kind, len(bd.Rows))
 	}
+}
+
+func newestWithin(rows []store.Row, budget int) ([]store.Row, error) {
+	used := 0
+	for i := len(rows) - 1; i >= 0; i-- {
+		raw, err := json.Marshal(rows[i])
+		if err != nil {
+			return nil, fmt.Errorf("mesh: encode row: %w", err)
+		}
+		if used += len(raw) + 1; used > budget {
+			return rows[i+1:], nil
+		}
+	}
+	return rows, nil
 }

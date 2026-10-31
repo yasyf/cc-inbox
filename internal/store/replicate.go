@@ -76,30 +76,68 @@ func (s *Store) Export(ctx context.Context, origin string, since int64, limit in
 	defer func() { _ = rows.Close() }()
 	var out []Row
 	for rows.Next() {
-		var (
-			re, resolves Pointer
-			alsoOrigins  string
-			extra        exportScanner
-		)
-		extra.row, extra.tail = rows, []any{&re.Origin, &re.Seq, &resolves.Origin, &resolves.Seq, &alsoOrigins}
-		r, err := s.scan(extra)
+		row, err := s.scanExportRow(rows)
 		if err != nil {
 			return nil, err
 		}
-		var also []Pointer
-		if alsoOrigins != "" {
-			if err := json.Unmarshal([]byte(alsoOrigins), &also); err != nil {
-				return nil, fmt.Errorf("decode also_resolves_origin of #%d: %w", r.Seq, err)
-			}
-		}
-		out = append(out, Row{
-			Origin: s.origin(r.Origin), OriginSeq: originSeq(r), ID: r.ID,
-			Drive: r.Drive, Lane: r.Lane, Kind: r.Kind, At: r.At, Text: r.Text, Topic: r.Topic, To: r.To,
-			Re: pointer(r.Re, re), Resolves: pointer(r.Resolves, resolves), AlsoResolves: also,
-			Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body,
-		})
+		out = append(out, row)
 	}
 	return out, rows.Err()
+}
+
+// ExportHead returns origin's newest exported sequence above since, or since when none exists.
+func (s *Store) ExportHead(ctx context.Context, origin string, since int64) (int64, error) {
+	var seq int64
+	err := s.db.QueryRowContext(ctx, "SELECT COALESCE((SELECT CASE WHEN origin=? THEN seq ELSE origin_seq END FROM records INDEXED BY records_origin WHERE origin=? AND origin_seq>? AND kind!=? ORDER BY origin_seq DESC LIMIT 1),?)", s.Self(), origin, since, string(kinds.Digest), since).Scan(&seq)
+	if err != nil {
+		return 0, fmt.Errorf("export %s: %w", origin, err)
+	}
+	return seq, nil
+}
+
+// VisitNewestExports visits origin's non-digest rows after since, newest first, until visit returns false.
+func (s *Store) VisitNewestExports(ctx context.Context, origin string, since int64, visit func(Row) (bool, error)) error {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records INDEXED BY records_origin WHERE origin=? AND origin_seq>? AND kind!=? ORDER BY origin_seq DESC", origin, since, string(kinds.Digest))
+	if err != nil {
+		return fmt.Errorf("export %s: %w", origin, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		row, err := s.scanExportRow(rows)
+		if err != nil {
+			return err
+		}
+		more, err := visit(row)
+		if err != nil {
+			return err
+		}
+		if !more {
+			return ctx.Err()
+		}
+	}
+	return rows.Err()
+}
+
+func (s *Store) scanExportRow(row scanner) (Row, error) {
+	var re, resolves Pointer
+	var alsoOrigins string
+	extra := exportScanner{row: row, tail: []any{&re.Origin, &re.Seq, &resolves.Origin, &resolves.Seq, &alsoOrigins}}
+	r, err := s.scan(extra)
+	if err != nil {
+		return Row{}, err
+	}
+	var also []Pointer
+	if alsoOrigins != "" {
+		if err := json.Unmarshal([]byte(alsoOrigins), &also); err != nil {
+			return Row{}, fmt.Errorf("decode also_resolves_origin of #%d: %w", r.Seq, err)
+		}
+	}
+	return Row{
+		Origin: s.origin(r.Origin), OriginSeq: originSeq(r), ID: r.ID,
+		Drive: r.Drive, Lane: r.Lane, Kind: r.Kind, At: r.At, Text: r.Text, Topic: r.Topic, To: r.To,
+		Re: pointer(r.Re, re), Resolves: pointer(r.Resolves, resolves), AlsoResolves: also,
+		Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body,
+	}, nil
 }
 
 type exportScanner struct {
