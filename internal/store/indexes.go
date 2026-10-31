@@ -19,6 +19,7 @@ var physicalIndexes = [...]struct {
 	{"records_drive_lane_score", "CREATE INDEX records_drive_lane_score ON records(drive, lane, (at * 1000000 + seq) DESC, seq ASC) WHERE kind != 'digest'"},
 	{"sessions_drive_lane", "CREATE INDEX sessions_drive_lane ON sessions(drive, lane)"},
 	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
+	{"records_re", "CREATE INDEX records_re ON records(re)"},
 }
 
 const (
