@@ -69,6 +69,11 @@ func countedLaneStore(t *testing.T, collation string) *Store {
 
 func countedColumnStore(t *testing.T, column, collation string) *Store {
 	t.Helper()
+	return countedColumnsStore(t, collation, column)
+}
+
+func countedColumnsStore(t *testing.T, collation string, columns ...string) *Store {
+	t.Helper()
 	ctx := context.Background()
 	production, err := Open(ctx, t.TempDir())
 	if err != nil {
@@ -93,7 +98,9 @@ ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 			t.Fatal(err)
 		}
 		if kind == "table" && !strings.HasPrefix(tableName, "incident_") {
-			definition = strings.Replace(definition, column+" TEXT", column+" TEXT COLLATE "+collation, 1)
+			for _, column := range columns {
+				definition = strings.Replace(definition, column+" TEXT", column+" TEXT COLLATE "+collation, 1)
+			}
 		}
 		if _, err := db.ExecContext(ctx, definition); err != nil {
 			t.Fatal(err)
