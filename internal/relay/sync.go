@@ -36,6 +36,8 @@ type Node struct {
 	Config   Config
 	HTTP     *http.Client
 	Keyring  *Keyring
+
+	servicePEM []byte
 }
 
 func Open(home string, st *store.Store, id e2e.Identity, cfg Config) (*Node, error) {
@@ -107,10 +109,7 @@ func (n *Node) Delegate(drives, kinds []string, ttl time.Duration) error {
 	if err != nil {
 		return err
 	}
-	if err := writeFile(serviceKeyPath(n.Home, n.Config.Mesh), []byte(raw)); err != nil {
-		return fmt.Errorf("keep service key: %w", err)
-	}
-	n.Service, n.Config.Delegation = svc, &d
+	n.Service, n.Config.Delegation, n.servicePEM = svc, &d, []byte(raw)
 	return nil
 }
 
@@ -141,6 +140,11 @@ func (n *Node) Join(ctx context.Context) error {
 	}
 	if err := SaveConfig(n.Home, n.Config); err != nil {
 		return err
+	}
+	if n.servicePEM != nil {
+		if err := writeFile(serviceKeyPath(n.Home, n.Config.Mesh), n.servicePEM); err != nil {
+			return fmt.Errorf("keep service key: %w", err)
+		}
 	}
 	if err := n.RefreshKeys(ctx); err != nil {
 		return err
