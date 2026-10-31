@@ -171,17 +171,12 @@ func (f Filter) timeWhere() (string, []any) {
 	return strings.Join(clauses, " AND "), params
 }
 
-func (f Filter) whereWithoutTime(self string, now time.Time) (string, []any) {
-	f.Since, f.Until = time.Time{}, time.Time{}
-	return f.where(self, now)
-}
-
 func (f Filter) bounded(self string, now time.Time) (string, []any) {
 	arms, candidates := f.candidateArms(self)
 	if len(arms) == 0 {
 		return f.where(self, now)
 	}
-	where, params := f.whereWithoutTime(self, now)
+	where, params := f.where(self, now)
 	candidate := "seq"
 	if f.Origin != "" || f.PeerAfter > 0 {
 		// Unary plus retains records_origin and peer-after OR scans, including their native error order.
@@ -404,7 +399,7 @@ func (s *Store) selectionColumns(f Filter, projection string) (string, []any) {
 	} else {
 		arms, candidates := f.candidateArms(s.Self())
 		if len(arms) > 0 {
-			where, params = f.whereWithoutTime(s.Self(), s.Now())
+			where, params = f.where(s.Self(), s.Now())
 			// LIMIT -1 prevents flattening from moving validation ahead of the ordered candidate stream.
 			from = "(" + strings.Join(arms, " UNION ") + " ORDER BY candidate_seq " + order + " LIMIT -1) c CROSS JOIN records ON records.seq = c.candidate_seq"
 			ordered = "c.candidate_seq"
