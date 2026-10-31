@@ -277,7 +277,7 @@ func dropLaneIndexes(t *testing.T, st *Store) {
 
 func assertLaneIndexCount(t *testing.T, st *Store, want int) {
 	t.Helper()
-	var names []string
+	names := make([]string, 0, len(physicalIndexes))
 	for _, index := range physicalIndexes {
 		names = append(names, index.name)
 	}

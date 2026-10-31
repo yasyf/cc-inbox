@@ -927,14 +927,14 @@ func (s *Store) Resolvers(ctx context.Context, drive string) (map[int64]int64, e
 func replyPagesQuery(includeZero bool) string {
 	zero := ""
 	if includeZero {
-		zero = " UNION SELECT seq FROM records WHERE resolves=0"
+		zero = " UNION ALL SELECT seq FROM records WHERE resolves=0"
 	}
 	in := "SELECT value FROM selected"
 	return `WITH selected AS MATERIALIZED(SELECT value FROM json_each(?)), candidates AS (
-SELECT seq FROM records INDEXED BY records_re WHERE re IN (`+in+`)
-UNION SELECT seq FROM records INDEXED BY records_resolves_target WHERE resolves!=0 AND resolves IN (`+in+`)
-UNION SELECT source_seq FROM record_also_resolves INDEXED BY record_also_resolves_target WHERE target IN (`+in+`)
-UNION SELECT source_seq FROM record_json_errors INDEXED BY record_json_errors_field WHERE field='also_resolves'`+zero+`)
-SELECT `+columns+`, re, resolves, also_resolves, seq FROM records WHERE seq IN(SELECT seq FROM candidates)
-AND (re IN (`+in+`) OR resolves IN (`+in+`) OR EXISTS(SELECT 1 FROM json_each(also_resolves) WHERE value IN (`+in+`))) ORDER BY seq`
+SELECT seq FROM records INDEXED BY records_re WHERE re IN (` + in + `)
+UNION ALL SELECT seq FROM records INDEXED BY records_resolves_target WHERE resolves!=0 AND resolves IN (` + in + `)
+UNION ALL SELECT source_seq FROM record_also_resolves INDEXED BY record_also_resolves_target WHERE target IN (` + in + `)
+UNION ALL SELECT source_seq FROM record_json_errors INDEXED BY record_json_errors_field WHERE field='also_resolves'` + zero + `)
+SELECT ` + columns + `, re, resolves, also_resolves, seq FROM records WHERE seq IN(SELECT seq FROM candidates)
+AND (re IN (` + in + `) OR resolves IN (` + in + `) OR EXISTS(SELECT 1 FROM json_each(also_resolves) WHERE value IN (` + in + `))) ORDER BY seq`
 }
