@@ -257,6 +257,10 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 }
 
 func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w io.Writer) error {
+	query := st.QueryText
+	if asJSON {
+		query = st.Query
+	}
 	b := render.NewBudget(w, budget)
 	candidateBudget := render.NewBudget(io.Discard, budget)
 	matched, printed, kept := 0, 0, 0
@@ -266,7 +270,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	f.Limit = pageRows
 	now := st.Now()
 	for {
-		records, err := st.Query(ctx, f)
+		records, err := query(ctx, f)
 		if err != nil {
 			readErr = err
 			break

@@ -168,6 +168,21 @@ jobs:
             done
           done
           CCI_AUDIENCE_REQUIRE_BOUNDED_KIND=1 go test -count=1 -race -run '^TestAudience' -v ./internal/cli ./internal/store
+      - name: Text Grep body projection, immutable work control, and public parity
+        run: |
+          test "$(git -C .ci-audience-current491 rev-parse HEAD)" = cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
+          cp internal/cli/grep_body_projection_test.go .ci-audience-current491/internal/cli/
+          if (cd .ci-audience-current491 && go test -count=1 -run '^TestGrepTextBodyProjectionWork$' -v ./internal/cli) > "$RUNNER_TEMP/grep-body-old.log" 2>&1; then
+            cat "$RUNNER_TEMP/grep-body-old.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/grep-body-old.log"
+          for history in 32 10000; do
+            grep -F "GREP_BODY_TRANSFER_BOUND_EXCEEDED rows=$history json=false reads=$history want=0" "$RUNNER_TEMP/grep-body-old.log"
+          done
+          (cd .ci-audience-current491 && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-old" ./cmd/cci)
+          go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-current" ./cmd/cci
+          CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
       - name: SSE idle queries, immutable history control, and commit freshness
         run: |
           test "$(git -C .ci-stream-idle-baseline rev-parse HEAD)" = 4e6e169dee4f18963df7fd3e00f4d5b89ee40891

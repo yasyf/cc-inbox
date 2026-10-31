@@ -883,7 +883,11 @@ func (s *Store) args(r Record, hash string, lineHash *string) []any {
 	return []any{s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), redact(r.Text), redact(r.Topic), string(recipients), r.Re, r.Resolves, redact(string(refs)), redact(string(fields)), expires, r.Source, hash, line, body, also, alsoOrigins}
 }
 
-const columns = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, '')"
+const recordColumns = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source"
+
+const columns = recordColumns + ", COALESCE(body, ''), COALESCE(also_resolves, '')"
+
+const textColumns = recordColumns + ", '', COALESCE(also_resolves, '')"
 
 type scanner interface {
 	Scan(dest ...any) error
