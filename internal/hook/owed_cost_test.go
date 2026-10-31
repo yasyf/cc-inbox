@@ -75,34 +75,46 @@ SELECT 'd','history','answer',x,'unrelated',1000000+x,'other-'||x,'post','noise-
 					t.Fatal(err)
 				}
 
-				columns, err := db.QueryContext(ctx, "PRAGMA table_info(records)")
+				definitions, err := db.QueryContext(ctx, "SELECT name, sql FROM sqlite_schema WHERE type='trigger' AND sql IS NOT NULL ORDER BY rowid")
 				if err != nil {
 					t.Fatal(err)
 				}
-				var selection []string
-				for columns.Next() {
-					var cid, notNull, pk int
-					var column, kind string
-					var defaultValue any
-					if err := columns.Scan(&cid, &column, &kind, &notNull, &defaultValue, &pk); err != nil {
+				var triggers [][2]string
+				for definitions.Next() {
+					var definition [2]string
+					if err := definitions.Scan(&definition[0], &definition[1]); err != nil {
 						t.Fatal(err)
 					}
-					if column == "refs" {
-						selection = append(selection, name+"(refs) AS refs")
-					} else {
-						selection = append(selection, column)
-					}
+					triggers = append(triggers, definition)
 				}
-				if err := columns.Err(); err != nil {
+				if err := definitions.Err(); err != nil {
 					t.Fatal(err)
 				}
-				if err := columns.Close(); err != nil {
+				if err := definitions.Close(); err != nil {
 					t.Fatal(err)
 				}
-				for _, query := range []string{"ALTER TABLE records RENAME TO counted_owed_records", "CREATE VIEW records AS SELECT " + strings.Join(selection, ", ") + " FROM counted_owed_records"} {
-					if _, err := db.ExecContext(ctx, query); err != nil {
+				tx, err := db.BeginTx(ctx, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _ = tx.Rollback() }()
+				for _, definition := range triggers {
+					if _, err := tx.ExecContext(ctx, fmt.Sprintf("DROP TRIGGER %q", definition[0])); err != nil {
 						t.Fatal(err)
 					}
+				}
+				for _, query := range []string{"ALTER TABLE records RENAME COLUMN refs TO counted_refs", "ALTER TABLE records ADD COLUMN refs TEXT GENERATED ALWAYS AS (" + name + "(counted_refs)) VIRTUAL"} {
+					if _, err := tx.ExecContext(ctx, query); err != nil {
+						t.Fatal(err)
+					}
+				}
+				for _, definition := range triggers {
+					if _, err := tx.ExecContext(ctx, definition[1]); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := tx.Commit(); err != nil {
+					t.Fatal(err)
 				}
 
 				if err := st.Close(); err != nil {
