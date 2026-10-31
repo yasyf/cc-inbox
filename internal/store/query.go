@@ -611,6 +611,43 @@ func (s *Store) CountBy(ctx context.Context, f Filter, column string) (map[strin
 	return out, rows.Err()
 }
 
+// LaneTips returns up to n non-digest lane winners in drive, ordered by newest sequence.
+func (s *Store) LaneTips(ctx context.Context, drive string, n int) ([]Record, error) {
+	rows, err := s.db.QueryContext(ctx, laneTipsSQL, drive, drive, drive, n)
+	if err != nil {
+		return nil, fmt.Errorf("latest per lane: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Record
+	for rows.Next() {
+		r, err := s.scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, s.numbered(ctx, out)
+}
+
+const laneTipsSQL = `WITH RECURSIVE lane_keys(lane) AS (
+SELECT (SELECT lane FROM records INDEXED BY records_drive_lane_score
+WHERE drive = ? AND kind != 'digest' ORDER BY lane LIMIT 1)
+UNION ALL
+SELECT (SELECT lane FROM records INDEXED BY records_drive_lane_score
+WHERE drive = ? AND kind != 'digest' AND lane > lane_keys.lane ORDER BY lane LIMIT 1)
+FROM lane_keys WHERE lane IS NOT NULL
+), winners(seq) AS (
+SELECT (SELECT seq FROM records INDEXED BY records_drive_lane_score
+WHERE drive = ? AND lane = lane_keys.lane AND kind != 'digest'
+ORDER BY at * 1000000 + seq DESC, seq ASC LIMIT 1)
+FROM lane_keys WHERE lane IS NOT NULL
+)
+SELECT ` + columns + ` FROM records WHERE seq IN (SELECT seq FROM winners)
+ORDER BY seq DESC LIMIT ?`
+
 func (s *Store) LatestPerLane(ctx context.Context, f Filter, n int) ([]Record, error) {
 	where, params := f.where(s.Self(), s.Now())
 	q := "SELECT " + columns + " FROM records WHERE seq IN (SELECT seq FROM (SELECT seq, MAX(at * 1000000 + seq) FROM records WHERE " + where + " AND kind != 'digest' GROUP BY lane)) ORDER BY seq DESC LIMIT ?"
