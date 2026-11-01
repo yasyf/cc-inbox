@@ -84,9 +84,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	}
 	if f.To != "" {
 		names := addressees(f.To)
-		addressed, kindParams := f.addressedKinds("EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(names)) + "))")
+		in := "(" + placeholders(len(names)) + ")"
+		addressed, kindParams := f.addressedKinds("(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR (EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all') AND lane NOT IN " + in + "))")
 		scoped = append(scoped, addressed)
-		params = append(append(params, names...), kindParams...)
+		params = append(append(append(params, names...), names...), kindParams...)
 	}
 	branches := []string{"(" + strings.Join(scoped, " AND ") + ")"}
 	if peers := f.peerAddresses(self); len(peers) > 0 {
