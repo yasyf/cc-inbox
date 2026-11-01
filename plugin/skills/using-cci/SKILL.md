@@ -462,7 +462,7 @@ subscribing; records in the overlap arrive twice.
 
 A record addressed to the reader arrives only when its kind is a
 `--to-kind`. For `--reader root` (or `main`) that defaults to
-`incident,mechanism,fix-live,decide,ask,blocker,urgent,answer,correction,defect,owner`, the kinds a root
+`incident,mechanism,fix-live,decide,ask,blocker,blocked,urgent,answer,done,release,correction,defect,owner`, the kinds a root
 acts on; the state, head, red, report, review, note and evidence records lanes
 copy to root stay in `cci tail` and `cci digest`, and the root's `PostToolUse`
 hook holds them back too. Other readers get every addressed kind unless they

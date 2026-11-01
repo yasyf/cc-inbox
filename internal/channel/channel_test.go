@@ -359,8 +359,11 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 		t.Fatalf("hook delivered %q", got)
 	}
 	ask := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Ask, To: []string{"main"}, Text: "merge go 1?"})
+	release := testutil.Post(t, st, store.Record{Lane: "release-lane", Kind: kinds.Release, To: []string{"root"}, Text: "11665 LIVE"})
+	done := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Done, To: []string{"main"}, Text: "PR merged"})
+	blocked := testutil.Post(t, st, store.Record{Lane: "mq-lane", Kind: kinds.Blocked, To: []string{"root"}, Text: "waits on the owner's pick"})
 	decide := testutil.Post(t, st, store.Record{Lane: "design-lane", Kind: kinds.Decide, Text: "pick a schema?"})
-	want := []string{fmt.Sprint(ask.Seq), fmt.Sprint(decide.Seq)}
+	want := []string{fmt.Sprint(ask.Seq), fmt.Sprint(release.Seq), fmt.Sprint(done.Seq), fmt.Sprint(blocked.Seq), fmt.Sprint(decide.Seq)}
 	var got []string
 	if err := follow(ctx, st, sub, true, func(_ string, params any) error {
 		got = append(got, params.(map[string]any)["meta"].(map[string]string)["seq"])
