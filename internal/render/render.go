@@ -55,7 +55,7 @@ func header(r store.Record, now time.Time) string {
 
 func rest(r store.Record, brief, elide bool) string {
 	var words []string
-	if elide {
+	if elide && (r.Topic != "" || len(r.Refs.PRs) > 0) {
 		words = strings.FieldsFunc(r.Text, func(c rune) bool { return unicode.IsSpace(c) || strings.ContainsRune(",;()[]", c) })
 		for i, w := range words {
 			words[i] = strings.TrimRight(w, ".:!?")
