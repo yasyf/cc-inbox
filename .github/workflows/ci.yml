@@ -104,7 +104,7 @@ jobs:
           path: .ci-tail-baseline
       - uses: actions/checkout@v7
         with:
-          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          ref: da7027b6a85ca32c6aa46c52e89859b78ed609dd
           path: .ci-native-tail-baseline
       - uses: actions/checkout@v7
         with:
@@ -156,7 +156,7 @@ jobs:
           path: .ci-openamong-negative
       - uses: actions/checkout@v7
         with:
-          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          ref: da7027b6a85ca32c6aa46c52e89859b78ed609dd
           path: .ci-hook-owed-baseline
       - uses: actions/checkout@v7
         with:
@@ -338,7 +338,7 @@ jobs:
           go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
       - name: Hook owed indexed closure and immutable output
         run: |
-          test "$(git -C .ci-hook-owed-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          test "$(git -C .ci-hook-owed-baseline rev-parse HEAD)" = da7027b6a85ca32c6aa46c52e89859b78ed609dd
           cp internal/hook/owed_cost_test.go .ci-hook-owed-baseline/internal/hook/
           mkdir -p "$RUNNER_TEMP/cci-hook-owed-snapshots"
           (cd .ci-hook-owed-baseline && CCI_HOOK_OWED_EXPECT_GLOBAL=1 CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" CCI_HOOK_OWED_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook)
@@ -560,7 +560,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = da7027b6a85ca32c6aa46c52e89859b78ed609dd
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
