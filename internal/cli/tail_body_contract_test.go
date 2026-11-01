@@ -120,7 +120,7 @@ func TestTailBodyContractPageFrontier(t *testing.T) {
 				`WITH RECURSIVE history(n) AS (VALUES(18) UNION ALL SELECT n+1 FROM history WHERE n<501)
 INSERT INTO records(drive,lane,kind,at,text,source,hash)
 SELECT 'd','worker','note',4102444800000,'page-'||n,'post','page-'||n FROM history`,
-				"UPDATE records SET refs='{' WHERE seq=501",
+				"UPDATE records SET refs='{' WHERE seq=1",
 			} {
 				if _, err := fixture.db.ExecContext(t.Context(), statement); err != nil {
 					t.Fatal(err)
@@ -137,7 +137,7 @@ SELECT 'd','worker','note',4102444800000,'page-'||n,'post','page-'||n FROM histo
 			if !slices.Equal(before, tailBodyRecords(t, fixture.db)) || len(got.CursorsBefore) != 0 || len(got.CursorsAfter) != 0 || got.Panic != "" {
 				t.Fatalf("private page state or panic changed: %+v", got)
 			}
-			if budget == "64" && got.CLI.Code != 0 || budget == "4000000" && (got.CLI.Code != 1 || !bytes.Contains(got.CLI.Err, []byte("decode refs of #501"))) {
+			if budget == "64" && got.CLI.Code != 0 || budget == "4000000" && (got.CLI.Code != 1 || !bytes.Contains(got.CLI.Err, []byte("decode refs of #1:"))) {
 				t.Fatalf("unexpected private page frontier: %+v", got)
 			}
 			tailBodyCheckSnapshot(t, dir, got)
