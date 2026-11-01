@@ -466,11 +466,13 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	ahead, before := time.Now().Add(7*time.Minute).Format("3:04 PM"), time.Now().Add(-30*time.Minute).Format("3:04 PM")
+	yesterday, skewed := time.Now().Add(5*time.Hour).Format("3:04 PM"), time.Now().Add(2*time.Minute).Format("3:04 PM")
 	for _, tt := range []struct {
 		name, text   string
 		stamp        bool
 		want, stderr string
 		refused      string
+		future       string
 	}{
 		{name: "leading label ahead of the clock", text: ahead + ": live on dev", refused: ahead},
 		{name: "leading label before the clock", text: before + ": live on dev", refused: before},
@@ -479,8 +481,12 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 		{name: "stamped label ahead of the clock", text: ahead + ": live on dev", stamp: true, want: "{at}: live on dev"},
 		{name: "stamped label after the lane's name", text: "root " + before + " count: 0 ungraded", stamp: true, want: "root {at} count: 0 ungraded"},
 		{name: "stamped text without a label", text: "live on dev", stamp: true, want: "{at} live on dev"},
-		{name: "time in an opening clause", text: "for his " + ahead + " ask", want: "for his " + ahead + " ask", stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
-		{name: "later time inside the text", text: "live on dev, read " + ahead, want: "live on dev, read " + ahead, stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
+		{name: "time in an opening clause", text: "for his " + ahead + " ask", future: ahead},
+		{name: "later time inside the text", text: "live on dev, read " + ahead, future: ahead},
+		{name: "plan for a time ahead", text: "live on dev; next state by " + ahead, want: "live on dev; next state by " + ahead},
+		{name: "time a date follows", text: "per the owner's " + ahead + " Oct 30 ask", want: "per the owner's " + ahead + " Oct 30 ask"},
+		{name: "time hours ahead read as yesterday's", text: "per the owner's " + yesterday + " ask", want: "per the owner's " + yesterday + " ask", stderr: "cci: time " + yesterday + " in the text is later than the post time {at}; stored as typed"},
+		{name: "time inside the clock skew", text: "live on dev, read " + skewed, want: "live on dev, read " + skewed},
 		{name: "time a sentence names since", text: "lane-x: reconciling. Landed since " + before + ": 45899", want: "lane-x: reconciling. Landed since " + before + ": 45899"},
 		{name: "stamped text whose sentence names a time since", text: "lane-x: reconciling. Landed since " + before + ": 45899", stamp: true, want: "{at} lane-x: reconciling. Landed since " + before + ": 45899"},
 	} {
@@ -490,6 +496,12 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 				args = append(args, "--stamp")
 			}
 			out, err := run(t, args...)
+			if tt.future != "" {
+				if err == nil || !strings.Contains(err.Error(), "time "+tt.future+" in the text is ") || !strings.Contains(err.Error(), "has not happened yet") {
+					t.Fatalf("post %q = %q, %v; want a refusal naming %s as not happened yet", tt.text, out, err, tt.future)
+				}
+				return
+			}
 			if tt.refused != "" {
 				if err == nil || !strings.Contains(err.Error(), "time label "+tt.refused+" is not the post time") || strings.Contains(err.Error(), "\n") {
 					t.Fatalf("post %q = %q, %v; want a one-line refusal naming %s", tt.text, out, err, tt.refused)

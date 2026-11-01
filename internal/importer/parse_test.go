@@ -247,6 +247,7 @@ func TestParseClockResolvesToTheLatestPastInstant(t *testing.T) {
 		{"11:30pm", time.Date(2026, 10, 4, 23, 30, 0, 0, time.Local)},
 		{"13:15", time.Date(2026, 10, 4, 13, 15, 0, 0, time.Local)},
 		{"12:40 PT", now},
+		{"12:26:07 AM", time.Date(2026, 10, 5, 0, 26, 0, 0, time.Local)},
 	}
 	for _, tt := range tests {
 		c := importer.ParseClock(tt.in)

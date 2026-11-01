@@ -34,7 +34,7 @@ type Entry struct {
 var (
 	timeParen = regexp.MustCompile(`\(([^()]*?)\b(\d{1,2}):(\d[\dx])(?::\d{2})?\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?\b([^()]*)\)`)
 	bareClock = regexp.MustCompile(`\b(\d{1,2}):(\d[\dx])\s*([AaPp][Mm])\b(?:\s*(?:PT|PDT|PST)\b)?`)
-	clockOnly = regexp.MustCompile(`^(\d{1,2}):(\d[\dx])\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?$`)
+	clockOnly = regexp.MustCompile(`^(\d{1,2}):(\d[\dx])(?::\d{2})?\s*([AaPp][Mm])?\s*(PT|PDT|PST|Z|UTC)?$`)
 	zulu      = regexp.MustCompile(`\b(\d{1,2}):(\d{2})Z\b`)
 	runner    = regexp.MustCompile(`^(\d{1,2}):(\d{2})(Z)?\s+([A-Z][A-Z0-9_-]+)\s+(.*)$`)
 	dispatch  = regexp.MustCompile(`\b([a-z][a-z0-9]*(?:-[a-z0-9]+)+)=ctx_`)

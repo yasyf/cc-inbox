@@ -27,6 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pages until its byte budget fills or the range ends, so a `--json` read with
   a large `--budget` returns every record in the range instead of stopping at
   500 and naming the rest only on stderr.
+- `cci post` refuses a clock time in its text that is more than 3 minutes and
+  less than 3 hours after the post time, since it names something that has not
+  happened yet. A time after a tense word in the four words before it (by,
+  until, till, before, next, ETA, due, expected, since), a time a date follows,
+  and a time 3 hours or more ahead, which a clock without a date reads as
+  yesterday's, still post; the last still warns. `H:MM:SS AM` reads as one time.
 
 - `cci post --to <lane>` accepts a lane that has not started yet without
   `--force`, and that lane reads the record when it first binds. Only a
