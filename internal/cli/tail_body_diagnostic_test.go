@@ -67,8 +67,8 @@ CASE WHEN n=1 THEN ? ELSE '{"payload":"tiny"}' END,
 			if got != want || strings.Count(got, "\n") != population || strings.Contains(got, "body-only-token") {
 				t.Fatalf("text Tail output changed or omitted records: got bytes=%d want bytes=%d", len(got), len(want))
 			}
-			if reads.Load() != int64(population) {
-				t.Fatalf("immutable Tail body projection reads=%d, want=%d", reads.Load(), population)
+			if reads.Load() != 0 {
+				t.Fatalf("TAIL_BODY_TRANSFER_BOUND_EXCEEDED rows=%d json=false reads=%d want=0", population, reads.Load())
 			}
 			t.Logf("TAIL_BODY_DIAGNOSTIC rows=%d json=false actual_body_reads=%d actual_body_bytes=%d output_bytes=%d", population, reads.Load(), transferred.Load(), len(got))
 			reads.Store(0)
