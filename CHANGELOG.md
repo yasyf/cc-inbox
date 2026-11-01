@@ -31,11 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   update to that incident, never a new one: an evidence lane's progress line
   and root's closing line no longer each open an incident, so the digest's
   open incidents and every hook reading them count real incidents only.
-- `cci tail --since` and `cci tail -n` keep the newest records when the
+- Text `cci tail --since` and `cci tail -n` reads keep the newest records when the
   budget cuts the window, and end with `... CUT <n> older records before
   #<seq>; --oldest reads them first`. Before, a window wider than
   its budget printed only its oldest records, so a watch for a new record in
-  a fixed window never matched. `--oldest` keeps the oldest records, as
+  a fixed window never matched. `--json` reads still keep the oldest records
+  and name the `--since` to resume from, since machine readers page by it.
+  `--oldest` keeps the oldest records, as
   before. Cursor reads, `cci watch`, and the hooks are unchanged.
 - `cci tail` reads past its 500-record page within one call: it keeps reading
   pages until its byte budget fills or the range ends, so a `--json` read with
@@ -81,6 +83,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A root reader hears `release`, `done` and `blocked` records addressed to it.
+  Run `cci subscribe --reader root` again, since a subscription keeps the
+  addressed kinds it was made with.
+- `cci tail --to <lane>` and a lane's hook mail include records addressed to
+  `all` from other lanes.
+- A bare record number that two nodes share in a drive is refused with both
+  tagged spellings, never resolved to the local record.
+- Root's records lead a lane's hook mail when a backlog from other lanes
+  would push them past the budget.
 - `cci post` refuses a go withdrawal written `Withdrawn: go #N on #PR` as well,
   and the `cci post --kind withdraw` command it names carries only the go seqs,
   never a pull request number that follows `on`, `for` or `of`.
