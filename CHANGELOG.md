@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci claim --for <lane>@<drive>` falls back to the newest ended session
+  bound as that lane when none is live, so the runner can record the codex
+  lane that started a release build; a codex lane's session never announces a
+  process and so never reads as live.
 - An `incident` record that replies to or resolves an incident record is an
   update to that incident, never a new one: an evidence lane's progress line
   and root's closing line no longer each open an incident, so the digest's
