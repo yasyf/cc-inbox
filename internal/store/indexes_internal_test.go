@@ -57,6 +57,7 @@ func TestExistingStoreOpenDoesNotBuildPhysicalIndexes(t *testing.T) {
 func TestMaintainIndexesPreservesLogicalStore(t *testing.T) {
 	for _, history := range []int{64, 4096, 65536} {
 		t.Run(fmt.Sprint(history), func(t *testing.T) {
+			phase := indexFixturePhases(t)
 			ctx := context.Background()
 			st, err := Open(ctx, t.TempDir())
 			if err != nil {
@@ -64,7 +65,9 @@ func TestMaintainIndexesPreservesLogicalStore(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = st.Close() })
 			dropLaneIndexes(t, st)
+			phase("seed_records")
 			seedLaneHistory(t, st, history)
+			phase("seed_sessions")
 			if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
@@ -73,10 +76,12 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'registered-session' FROM history`, 
 				t.Fatal(err)
 			}
 			fingerprint := st.SchemaFingerprint()
+			phase("maintenance")
 			report, err := MaintainIndexes(ctx, st.home)
 			if err != nil {
 				t.Fatal(err)
 			}
+			phase("verify")
 			if len(report.Created) != len(physicalIndexes) {
 				t.Fatalf("created indexes = %v, want %d", report.Created, len(physicalIndexes))
 			}
@@ -109,6 +114,7 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'registered-session' FROM history`, 
 				}
 			}
 			assertRegisteredPlan(t, st)
+			phase("repeat_maintenance")
 			tx, err := st.db.BeginTx(ctx, nil)
 			if err != nil {
 				t.Fatal(err)
@@ -126,6 +132,7 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'registered-session' FROM history`, 
 				t.Fatal(err)
 			}
 			t.Logf("records_rows=%d sessions_rows=%d actual_index_build_report=%s", history, history, encoded)
+			phase("cleanup")
 		})
 	}
 }

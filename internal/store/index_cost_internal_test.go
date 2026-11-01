@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"modernc.org/sqlite"
 )
@@ -18,6 +19,7 @@ func TestRegisteredLaneComparisonsStayBounded(t *testing.T) {
 	for _, table := range []string{"records", "sessions"} {
 		for _, rows := range []int{64, 4096, 65536} {
 			t.Run(fmt.Sprintf("%s/%d", table, rows), func(t *testing.T) {
+				phase := indexFixturePhases(t)
 				var comparisons atomic.Int64
 				collation := fmt.Sprintf("cci_lane_%d", laneCollationID.Add(1))
 				if err := sqlite.RegisterCollationUtf8(collation, func(a, b string) int {
@@ -28,6 +30,7 @@ func TestRegisteredLaneComparisonsStayBounded(t *testing.T) {
 				}
 				st := countedLaneStore(t, collation)
 				ctx := context.Background()
+				phase("seed")
 				query := `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
@@ -43,6 +46,7 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'old-lane' FROM history`
 				if _, err := st.db.ExecContext(ctx, query, rows); err != nil {
 					t.Fatal(err)
 				}
+				phase("queries")
 				comparisons.Store(0)
 				registered, err := st.Registered(ctx, "drive", "missing-lane")
 				if err != nil || registered {
@@ -58,8 +62,26 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'old-lane' FROM history`
 					t.Fatalf("Registered present lane = %v, %v", registered, err)
 				}
 				assertRegisteredPlan(t, st)
+				phase("cleanup")
 			})
 		}
+	}
+}
+
+func indexFixturePhases(t *testing.T) func(string) {
+	t.Helper()
+	phase := "setup"
+	started := time.Now()
+	log := func() {
+		t.Helper()
+		t.Logf("INDEX_FIXTURE_PHASE phase=%s elapsed_ns=%d", phase, time.Since(started).Nanoseconds())
+	}
+	t.Cleanup(log)
+	return func(next string) {
+		t.Helper()
+		log()
+		phase = next
+		started = time.Now()
 	}
 }
 
