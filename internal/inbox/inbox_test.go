@@ -117,6 +117,23 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 	}
 }
 
+func TestTailReadsEveryRecordItsBudgetHoldsPastOnePage(t *testing.T) {
+	st, _ := testutil.Store(t)
+	for i := range 1200 {
+		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("step %04d", i)})
+	}
+	for _, asJSON := range []bool{false, true} {
+		var out, notes bytes.Buffer
+		res, err := inbox.Tail(context.Background(), st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 4_000_000, JSON: asJSON, Notes: &notes}, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Printed != 1200 || res.More != 0 || notes.Len() != 0 || !strings.Contains(out.String(), "step 1199") {
+			t.Fatalf("json=%t tail printed %d, %d more, notes %q; want all 1200 records in one read", asJSON, res.Printed, res.More, notes.String())
+		}
+	}
+}
+
 func TestReadsClipRecordsToWidth(t *testing.T) {
 	const width = 400
 	st, _ := testutil.Store(t)

@@ -65,17 +65,33 @@ func BenchmarkRenderedText(b *testing.B) {
 			b.Run(fmt.Sprintf("%s/N%d", tt.name, n), func(b *testing.B) {
 				records := make([]store.Record, n)
 				for i := range records {
-					records[i] = store.Record{Seq: int64(i + 1), At: at, Kind: kinds.Report, Lane: "desk", Text: tt.text}
+					records[i] = store.Record{Seq: int64(i + 10000), Num: fmt.Sprintf("#%d", i+10000), At: at, Kind: kinds.Report, Lane: "desk", Text: tt.text}
 				}
-				for _, r := range records {
-					renderedTextCost = render.Line(r, at)
-				}
-				b.ReportAllocs()
-				b.SetBytes(int64(n * len(tt.text)))
-				for b.Loop() {
-					for _, r := range records {
-						renderedTextCost = render.Line(r, at)
-					}
+				for _, mode := range []string{"Record", "Aggregate"} {
+					b.Run(mode, func(b *testing.B) {
+						for _, r := range records {
+							renderedTextCost = render.Line(r, at)
+						}
+						b.ReportAllocs()
+						if mode == "Aggregate" {
+							b.SetBytes(int64(n * len(tt.text)))
+							for b.Loop() {
+								for _, r := range records {
+									renderedTextCost = render.Line(r, at)
+								}
+							}
+							return
+						}
+						b.SetBytes(int64(len(tt.text)))
+						i := 0
+						for b.Loop() {
+							renderedTextCost = render.Line(records[i], at)
+							i++
+							if i == len(records) {
+								i = 0
+							}
+						}
+					})
 				}
 			})
 		}
