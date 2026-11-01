@@ -100,7 +100,7 @@ SELECT 'drive', 'old-lane', 'note', n, 'history', 'post', 'history-' || n, n FRO
 
 func TestLaneHistorySeedPreservesIdentityTriggerRows(t *testing.T) {
 	ctx := t.Context()
-	var stores []*Store
+	stores := make([]*Store, 0, 2)
 	for range 2 {
 		st, err := Open(ctx, t.TempDir())
 		if err != nil {
