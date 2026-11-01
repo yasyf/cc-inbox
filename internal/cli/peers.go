@@ -321,7 +321,7 @@ type claimFlags struct {
 
 func (c *claimFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
-	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive, else the one live teammate named that lane with no lane yet, which it binds")
+	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive, else the one live teammate named that lane with no lane yet, which it binds, else the newest ended session bound as that lane, such as a codex lane's")
 	fl.StringVar(&c.rel, "rel", relOwns, "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
 	fl.Var(&prsFlag{&c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
@@ -370,11 +370,20 @@ func (c *claimFlags) holder(ctx context.Context, st *store.Store) (store.PeerKey
 			return unbound[0].Key(), st.BindLane(ctx, unbound[0].Key(), drive, lane, unbound[0].AnnouncedAt)
 		}
 	}
+	if len(views) == 0 {
+		ended, err := peers.Resolve(ctx, st, peers.Filter{Origin: peers.LocalOrigin, Drive: drive, Lane: lane, All: true})
+		if err != nil {
+			return store.PeerKey{}, err
+		}
+		if len(ended) > 0 {
+			return slices.MaxFunc(ended, func(a, b peers.View) int { return a.AnnouncedAt.Compare(b.AnnouncedAt) }).Key(), nil
+		}
+	}
 	switch len(views) {
 	case 1:
 		return views[0].Key(), nil
 	case 0:
-		return store.PeerKey{}, fmt.Errorf("--for %s: no live session on this machine is bound as lane %s in drive %s, and no one live teammate is named %s with no lane yet; cci who --all --drive %s --lane %s lists ended ones", c.forLane, lane, drive, lane, drive, lane)
+		return store.PeerKey{}, fmt.Errorf("--for %s: no session on this machine was ever bound as lane %s in drive %s, and no one live teammate is named %s with no lane yet", c.forLane, lane, drive, lane)
 	}
 	keys := make([]string, len(views))
 	for i, v := range views {

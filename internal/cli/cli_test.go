@@ -1264,6 +1264,9 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "dddd4444-codex"}, "drive-b", "exec-fix", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := st.Announce(ctx, store.Peer{Session: "aaaa1111-root", Agent: "asuccessor-2-0123", AgentName: "successor-2"}); err != nil {
 		t.Fatal(err)
 	}
@@ -1294,10 +1297,16 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 	if err != nil || !strings.Contains(out, `"session":"bbbb2222-walker"`) || strings.Contains(out, "cccc3333-walker") || strings.Count(out, "\n") != 1 {
 		t.Fatalf("who --build after claim --for = %q, %v", out, err)
 	}
+	if out, err := run(t, "claim", "--for", "exec-fix@drive-b", "--build", "11733", "--rel", "started"); err != nil || out != "started build:11733\n" {
+		t.Fatalf("claim --for a lane whose only session never announced a process, as a codex lane's = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--all", "--json", "--build", "11733"); err != nil || !strings.Contains(out, `"session":"dddd4444-codex"`) {
+		t.Fatalf("who --build after claim --for an ended lane = %q, %v", out, err)
+	}
 	for _, tt := range []struct{ lane, want string }{
 		{"walker", "name the lane as <lane>@<drive>"},
 		{"@drive-b", "name the lane as <lane>@<drive>"},
-		{"ghost@drive-b", "no live session on this machine is bound as lane ghost in drive drive-b"},
+		{"ghost@drive-b", "no session on this machine was ever bound as lane ghost in drive drive-b"},
 		{"desk@drive-b", "2 live sessions are bound as that lane"},
 		{"other@drive-b", "no one live teammate is named other with no lane yet"},
 	} {

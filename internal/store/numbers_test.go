@@ -69,3 +69,32 @@ func TestEveryNodeNamesARecordByItsOriginNumber(t *testing.T) {
 		t.Fatalf("mac resolves #2 to %d, %v; want its own #%d", seq, err, ask.Seq)
 	}
 }
+
+func TestABareNumberTwoNodesShareInADriveIsRefused(t *testing.T) {
+	ctx := context.Background()
+	mac, _ := testutil.Store(t)
+	sprite, _ := testutil.Store(t)
+	sprite.SetOwner(false)
+	local := testutil.Post(t, mac, store.Record{Lane: "root", Kind: kinds.Decide, Text: "root decide"})
+	testutil.Post(t, sprite, store.Record{Lane: "finder-desk", Kind: kinds.Review, Text: "finder: major"})
+	rows, err := sprite.Export(ctx, sprite.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := mac.Apply(ctx, rows, nil); err != nil {
+		t.Fatal(err)
+	}
+	if seq, err := mac.Resolve(ctx, "#1"); err == nil {
+		t.Fatalf("mac resolves a bare #1 to %d; want a refusal naming #1@%s", seq, sprite.Self()[:8])
+	}
+	if seq, err := mac.Resolve(ctx, "#1@"+mac.Self()[:8]); err != nil || seq != local.Seq {
+		t.Fatalf("mac resolves its own tagged #1 to %d, %v; want #%d", seq, err, local.Seq)
+	}
+	remote, err := mac.Resolve(ctx, "#1@"+sprite.Self()[:8])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mac.Get(ctx, remote); err != nil || got.Text != "finder: major" {
+		t.Fatalf("mac resolves #1@%s to %+v, %v; want the sprite's review", sprite.Self()[:8], got, err)
+	}
+}
