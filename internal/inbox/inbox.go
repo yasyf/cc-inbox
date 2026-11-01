@@ -197,8 +197,12 @@ func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, bud
 	var records []store.Record
 	var rendered []string
 	var folded []bool
+	query := st.Query
+	if !v.JSON {
+		query = st.QueryText
+	}
 	for {
-		page, err := st.Query(ctx, f)
+		page, err := query(ctx, f)
 		if err != nil {
 			return nil, nil, nil, false, err
 		}

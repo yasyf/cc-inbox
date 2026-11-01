@@ -221,6 +221,30 @@ jobs:
           (cd .ci-audience-current491 && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-old" ./cmd/cci)
           go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-current" ./cmd/cci
           CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
+      - uses: actions/checkout@v7
+        with:
+          ref: eefa897af4e7bfb33d319c2f8c8840b2f9eb22ce
+          path: .ci-tail-body-baseline
+      - name: Text Tail body projection and immutable work control
+        run: |
+          test "$(git -C .ci-tail-body-baseline rev-parse HEAD)" = eefa897af4e7bfb33d319c2f8c8840b2f9eb22ce
+          cp internal/cli/tail_body_diagnostic_test.go .ci-tail-body-baseline/internal/cli/
+          if (cd .ci-tail-body-baseline && go test -count=1 -race -run '^TestTailTextBodyTransferDiagnostic$' -v ./internal/cli) > "$RUNNER_TEMP/tail-body-old.log" 2>&1; then
+            cat "$RUNNER_TEMP/tail-body-old.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/tail-body-old.log"
+          for rows in 32 10000; do
+            grep -F "TAIL_BODY_TRANSFER_BOUND_EXCEEDED rows=$rows json=false reads=$rows want=0" "$RUNNER_TEMP/tail-body-old.log"
+          done
+          go test -count=1 -race -run '^TestTailTextBodyTransferDiagnostic$' -v ./internal/cli
+      - name: Text Tail Body immutable output error and cursor contract
+        run: |
+          test "$(git -C .ci-tail-body-baseline rev-parse HEAD)" = eefa897af4e7bfb33d319c2f8c8840b2f9eb22ce
+          cp internal/cli/tail_body_contract_test.go .ci-tail-body-baseline/internal/cli/
+          mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
+          (cd .ci-tail-body-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
+          CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli
       - name: Channel watch unchanged work and immutable 0.49.9 control
         run: |
           test "$(git -C .ci-channel-watch-baseline rev-parse HEAD)" = 696cde4efcdb47697901bebb2d6b1aa12a3496c9
