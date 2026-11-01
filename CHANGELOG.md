@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A cci hands off only to an install that has already started once.** An
+  older cci that finds a newer plugin or cask install starts it once in the
+  background with `--version` and keeps running the call itself; the newer
+  install records `cci.started` beside itself when it runs, and from then on
+  every call hands off to it. A release macOS holds at its first launch no
+  longer hangs every caller: on Oct 31 about 50 posts sat up to 22 minutes in
+  the first exec of the 0.47.0 cask binary, and seven never landed. A warm-up
+  that has not started after 10 minutes is tried again by the next call.
 - **`cci upgrade` can no longer leave the Mac without a cci.** Each upgrade
   step runs in its own session, so killing the caller mid-upgrade leaves
   `brew upgrade --cask` to finish relinking `/opt/homebrew/bin/cci`. Before
