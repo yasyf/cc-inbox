@@ -525,6 +525,28 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 	}
 }
 
+func TestPostRefusesAGoWithdrawalWrittenAsProse(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	post := func(args ...string) (string, error) {
+		return run(t, append([]string{"post", "--drive", "release-v3", "--lane", "root"}, args...)...)
+	}
+	for _, text := range []string{"go #46823 at 52dbea3 on green", "go #46906 at 7ac70d2 on green"} {
+		if _, err := post("--kind", "go", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := post("--kind", "correction", "--text", "9:23 PM WITHDRAW gos #1 #2 (#46823 52dbea3, #46906 7ac70d2) this minute: the runner misread their bracket")
+	if err == nil || !strings.Contains(err.Error(), "cci post --kind withdraw --re 1 --re 2 --text") {
+		t.Fatalf("prose withdrawal = %v, want a refusal naming cci post --kind withdraw --re 1 --re 2", err)
+	}
+	if _, err := post("--kind", "withdraw", "--re", "1", "--re", "2", "--text", "withdraw gos #1 #2: the runner misread their bracket"); err != nil {
+		t.Fatalf("structured withdrawal = %v, want it posted", err)
+	}
+	if _, err := post("--kind", "note", "--text", "the go #1 the runner landed was withdrawn"); err != nil {
+		t.Fatalf("a note naming a withdrawn go = %v, want it posted", err)
+	}
+}
+
 func TestPostHeadAndOpenedTakeTheirPullRequestOrRefuse(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	for _, kind := range []string{"head", "opened"} {
