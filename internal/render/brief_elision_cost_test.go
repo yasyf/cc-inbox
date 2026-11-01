@@ -77,18 +77,23 @@ func TestBriefElisionImmutableOutput(t *testing.T) {
 	t.Logf("BRIEF_ELISION_IMMUTABLE_OUTPUT raw_byte_cases=%d", len(outputs))
 }
 
-func TestBriefUnusedElisionAllocations(t *testing.T) {
+func BenchmarkBriefUnusedElisionAllocations(b *testing.B) {
 	at := time.Date(2026, 11, 1, 6, 22, 0, 0, time.UTC)
 	r := store.Record{Seq: 10000, Num: "#10000", At: at, Kind: kinds.Report, Lane: "desk", Text: "selected-10000"}
 	if got, want := render.Brief(r, at, 0), render.Line(r, at); got != want {
-		t.Fatalf("no-reference Brief output=%q want=%q", got, want)
+		b.Fatalf("no-reference Brief output=%q want=%q", got, want)
 	}
-	line := testing.AllocsPerRun(100, func() { briefElisionCost = render.Line(r, at) })
-	brief := testing.AllocsPerRun(100, func() { briefElisionCost = render.Brief(r, at, 0) })
-	if brief > line {
-		t.Fatalf("BRIEF_UNUSED_ELISION_ALLOCATION_EXCEEDED brief=%g line=%g", brief, line)
+	var line, brief float64
+	for range b.N {
+		line = testing.AllocsPerRun(100, func() { briefElisionCost = render.Line(r, at) })
+		brief = testing.AllocsPerRun(100, func() { briefElisionCost = render.Brief(r, at, 0) })
+		if brief > line {
+			b.Fatalf("BRIEF_UNUSED_ELISION_ALLOCATION_EXCEEDED brief=%g line=%g", brief, line)
+		}
 	}
-	t.Logf("BRIEF_UNUSED_ELISION_ALLOCATIONS brief=%g line=%g CPU_gain=UNKNOWN", brief, line)
+	b.ReportMetric(line, "line-allocs/op")
+	b.ReportMetric(brief, "brief-allocs/op")
+	b.Logf("BRIEF_UNUSED_ELISION_ALLOCATIONS brief=%g line=%g CPU_gain=UNKNOWN", brief, line)
 }
 
 func BenchmarkBriefElision(b *testing.B) {
