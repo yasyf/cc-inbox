@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci tail --since` and `cci tail -n` keep the newest records when the
+  budget cuts the window, and end with `... CUT <n> older records before
+  #<seq>; --oldest reads them first`. Before, a window wider than
+  its budget printed only its oldest records, so a watch for a new record in
+  a fixed window never matched. `--oldest` keeps the oldest records, as
+  before. Cursor reads, `cci watch`, and the hooks are unchanged.
 - `cci tail` reads past its 500-record page within one call: it keeps reading
   pages until its byte budget fills or the range ends, so a `--json` read with
   a large `--budget` returns every record in the range instead of stopping at

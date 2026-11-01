@@ -102,7 +102,7 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 		c.Advance(time.Second)
 	}
 	var out, notes bytes.Buffer
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Oldest: true, Notes: &notes}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +114,57 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "...") {
 		t.Errorf("JSON tail put its trailer among the records:\n%s", out.String())
+	}
+	out.Reset()
+	notes.Reset()
+	if res, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("... CUT %d older records before #%d; --oldest reads them first\n", 40-res.Printed, 41-res.Printed); notes.String() != want {
+		t.Errorf("JSON tail notes = %q, want %q", notes.String(), want)
+	}
+	if !strings.Contains(out.String(), "step 39") || strings.Contains(out.String(), "...") {
+		t.Errorf("JSON window tail lost its newest record or put its trailer among the records:\n%s", out.String())
+	}
+}
+
+func TestWindowTailKeepsTheNewestRecordsItsBudgetHolds(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	start := c.Now()
+	for i := range 1200 {
+		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("step %04d %s", i, strings.Repeat("x", 80))})
+		c.Advance(time.Second)
+	}
+	window := store.Filter{Drive: "d", Since: start}
+	for _, tc := range []struct {
+		limit int
+		older int
+	}{{0, 1200}, {900, 900}} {
+		var out bytes.Buffer
+		res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: window, Limit: tc.limit, Budget: 6000}, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Printed == 0 || res.Printed >= tc.older || res.More != 0 || out.Len() > 6000 {
+			t.Fatalf("limit %d: tail = %+v in %d bytes, want a budget-cut read with nothing after it", tc.limit, res, out.Len())
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		if !strings.Contains(lines[len(lines)-2], "step 1199") || strings.Contains(out.String(), fmt.Sprintf("step %04d", 1200-tc.older)) {
+			t.Fatalf("limit %d: budget kept the oldest records instead of the newest:\n%s", tc.limit, out.String())
+		}
+		want := fmt.Sprintf("... CUT %d older records before #%d; --oldest reads them first", tc.older-res.Printed, 1201-res.Printed)
+		if lines[len(lines)-1] != want {
+			t.Fatalf("limit %d: trailer = %q, want %q", tc.limit, lines[len(lines)-1], want)
+		}
+	}
+	var oldest bytes.Buffer
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: window, Budget: 6000, Oldest: true}, &oldest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(oldest.String(), "step 0000") || strings.Contains(oldest.String(), "step 1199") || res.More != 1200-res.Printed {
+		t.Fatalf("--oldest tail = %+v, want the window's first records and a resume trailer:\n%s", res, oldest.String())
 	}
 }
 
