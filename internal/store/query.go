@@ -15,8 +15,15 @@ import (
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
 
+// Follow names another drive whose broadcasts of Kinds a filter also passes.
+type Follow struct {
+	Drive string       `json:"drive"`
+	Kinds []kinds.Kind `json:"kinds"`
+}
+
 type Filter struct {
 	Drive          string
+	Follow         []Follow
 	Origin         string
 	Peer           string
 	Kinds          []kinds.Kind
@@ -44,7 +51,7 @@ type Filter struct {
 
 // where renders the filter. Records in the drive pass the selectors;
 // <reader>@<Drive> records, and peer:<Peer> records past PeerAfter, pass
-// whatever drive they sit in.
+// whatever drive they sit in; broadcasts of a Follow's kinds pass from its drive.
 func (f Filter) where(self string, now time.Time) (string, []any) {
 	scoped := []string{"drive = ?"}
 	params := []any{f.Drive}
@@ -105,6 +112,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		branch, kindParams := f.addressedKinds("EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(readers)) + "))")
 		branches = append(branches, branch)
 		params = append(append(params, readers...), kindParams...)
+	}
+	for _, follow := range f.Follow {
+		branches = append(branches, "(drive = ? AND kind IN ("+placeholders(len(follow.Kinds))+") AND (recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all')))")
+		params = append(append(params, follow.Drive), kindArgs(follow.Kinds)...)
 	}
 	clauses := []string{"(" + strings.Join(branches, " OR ") + ")"}
 	if f.Origin != "" {
@@ -219,6 +230,12 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 		for _, address := range addresses.values {
 			params = append(params, address)
 			arms = append(arms, "SELECT source_seq FROM record_recipients WHERE address = ?"+bounds("source_seq", addresses.after))
+		}
+	}
+	for _, follow := range f.Follow {
+		for _, kind := range follow.Kinds {
+			params = append(params, follow.Drive, string(kind))
+			arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ? AND kind = ?"+bounds("seq", f.After))
 		}
 	}
 	arms = append(arms, "SELECT source_seq FROM record_json_errors WHERE field = 'recipients'"+bounds("source_seq", f.After))
