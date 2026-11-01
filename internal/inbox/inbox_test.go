@@ -102,7 +102,7 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 		c.Advance(time.Second)
 	}
 	var out, notes bytes.Buffer
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Oldest: true, Notes: &notes}, &out)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,16 +115,19 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 	if strings.Contains(out.String(), "...") {
 		t.Errorf("JSON tail put its trailer among the records:\n%s", out.String())
 	}
-	out.Reset()
-	notes.Reset()
-	if res, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out); err != nil {
-		t.Fatal(err)
+	read := strings.Count(out.String(), "\n")
+	for res.More > 0 {
+		var page bytes.Buffer
+		if res, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d", After: res.Last}, Budget: 1000, JSON: true, Notes: io.Discard}, &page); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(page.String(), fmt.Sprintf("step %02d", read)) {
+			t.Fatalf("JSON page after --since %d does not resume at step %02d, as a pager following its trailer needs:\n%s", res.Last, read, page.String())
+		}
+		read += strings.Count(page.String(), "\n")
 	}
-	if want := fmt.Sprintf("... CUT %d older records before #%d; --oldest reads them first\n", 40-res.Printed, 41-res.Printed); notes.String() != want {
-		t.Errorf("JSON tail notes = %q, want %q", notes.String(), want)
-	}
-	if !strings.Contains(out.String(), "step 39") || strings.Contains(out.String(), "...") {
-		t.Errorf("JSON window tail lost its newest record or put its trailer among the records:\n%s", out.String())
+	if read != 40 {
+		t.Fatalf("a JSON pager read %d of 40 records", read)
 	}
 }
 
