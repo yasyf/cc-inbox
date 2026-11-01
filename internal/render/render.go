@@ -79,7 +79,30 @@ func rest(r store.Record, brief, elide bool) string {
 		fmt.Fprintf(&b, " [%s]", r.Topic)
 	}
 	b.WriteString(" ")
-	b.WriteString(strings.Join(strings.Fields(r.Text), " "))
+	text := strings.TrimSpace(r.Text)
+	hasSpace := strings.Contains(text, " ")
+	if text == "" || hasSpace && !strings.Contains(text, "  ") && strings.IndexFunc(text, func(c rune) bool { return c != ' ' && unicode.IsSpace(c) }) < 0 {
+		if hasSpace {
+			b.Grow(len(text))
+		}
+		b.WriteString(text)
+	} else {
+		textWords := strings.Fields(text)
+		if len(textWords) < 2 {
+			b.WriteString(strings.Join(textWords, " "))
+		} else {
+			textSize := len(textWords) - 1
+			for _, word := range textWords {
+				textSize += len(word)
+			}
+			b.Grow(textSize)
+			b.WriteString(textWords[0])
+			for _, word := range textWords[1:] {
+				b.WriteByte(' ')
+				b.WriteString(word)
+			}
+		}
+	}
 	for _, pr := range r.Refs.PRs {
 		if slices.Contains(words, "#"+pr.String()) || pr.Repo != "" && slices.Contains(words, pr.String()) || r.Fields.Attrs[store.HeadAttr+pr.String()] != "" {
 			continue

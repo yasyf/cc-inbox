@@ -58,6 +58,11 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
       - uses: actions/checkout@v7
         with:
+          ref: 69637a6ba3370ec3a3ba11a59bb6b1d80d367dbb
+          path: .ci-render-text-baseline
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
           ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
           path: .ci-audience-current491
           persist-credentials: false
@@ -336,6 +341,70 @@ jobs:
 
       - name: Test (race)
         run: go test -json -race -skip "$TAIL_COST_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./...
+      - name: Direct native grep whole-query bytes and process CPU against official494 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci-render-text-baseline rev-parse HEAD)" = 69637a6ba3370ec3a3ba11a59bb6b1d80d367dbb
+          (cd .ci-render-text-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-render-query-old" ./cmd/cci)
+          test -x "$RUNNER_TEMP/cci-render-query-old"
+          test -x "$RUNNER_TEMP/cci-grep-body-current"
+          go version -m "$RUNNER_TEMP/cci-render-query-old" > "$RUNNER_TEMP/render-text-query-buildinfo.log"
+          go version -m "$RUNNER_TEMP/cci-grep-body-current" >> "$RUNNER_TEMP/render-text-query-buildinfo.log"
+          CCI_RENDER_GREP_OLD_CLI="$RUNNER_TEMP/cci-render-query-old" CCI_RENDER_GREP_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -run '^TestGrepRenderedTextQueryCost$' -v ./internal/cli | tee "$RUNNER_TEMP/render-text-query.log"
+      - name: Numbered rendered text per-record costs and aggregate diagnostics against official494 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci-render-text-baseline rev-parse HEAD)" = 69637a6ba3370ec3a3ba11a59bb6b1d80d367dbb
+          cp internal/render/text_cost_test.go .ci-render-text-baseline/internal/render/text_cost_test.go
+          (cd .ci-render-text-baseline && go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Record$' -benchmem -benchtime=20000x -cpu=2 ./internal/render) | tee "$RUNNER_TEMP/render-text-old.log"
+          (cd .ci-render-text-baseline && go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Aggregate$' -benchmem -benchtime=100ms -cpu=2 ./internal/render) | tee -a "$RUNNER_TEMP/render-text-old.log"
+          go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Record$' -benchmem -benchtime=20000x -cpu=2 ./internal/render | tee "$RUNNER_TEMP/render-text-current.log"
+          go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Aggregate$' -benchmem -benchtime=100ms -cpu=2 ./internal/render | tee -a "$RUNNER_TEMP/render-text-current.log"
+          python3 - "$RUNNER_TEMP/render-text-old.log" "$RUNNER_TEMP/render-text-current.log" <<'PY' | tee "$RUNNER_TEMP/render-text-summary.log"
+          import json
+          import re
+          import statistics
+          import sys
+          from pathlib import Path
+
+          def read(path):
+              samples = {}
+              for line in Path(path).read_text().splitlines():
+                  fields = line.split()
+                  if not fields or not fields[0].startswith("BenchmarkRenderedText/"):
+                      continue
+                  match = re.fullmatch(r"(BenchmarkRenderedText/(ASCII|ASCIIWhitespace|Unicode|Whitespace|Empty|SingleWord|LongWord)/N(32|10000)/(Record|Aggregate))-2", fields[0])
+                  assert match, fields
+                  if match[4] == "Record":
+                      assert int(fields[1]) >= int(match[3]), ("incomplete measured working-set sweep", fields)
+                  metrics = {key: float(fields[fields.index(key) - 1]) for key in ("ns/op", "B/op", "allocs/op")}
+                  samples.setdefault(match[1], []).append(metrics)
+              expected = {f"BenchmarkRenderedText/{kind}/N{n}/{mode}" for kind in ("ASCII", "ASCIIWhitespace", "Unicode", "Whitespace", "Empty", "SingleWord", "LongWord") for n in (32, 10000) for mode in ("Record", "Aggregate")}
+              assert set(samples) == expected, samples
+              assert all(len(rows) == 3 for rows in samples.values()), samples
+              return {name: {key: statistics.median(row[key] for row in rows) for key in ("ns/op", "B/op", "allocs/op")} for name, rows in samples.items()}
+
+          before, after = map(read, sys.argv[1:])
+          aggregate = {name: {"time_ratio": after[name]["ns/op"] / before[name]["ns/op"], "byte_delta": after[name]["B/op"] - before[name]["B/op"], "allocation_delta": after[name]["allocs/op"] - before[name]["allocs/op"]} for name in before if name.endswith("/Aggregate")}
+          print(json.dumps({"before": before, "after": after, "aggregate_diagnostics": aggregate, "allocation_units": "Record gates use integer bytes and allocations per rendered record; Aggregate retains measured bytes and allocations per full batch as a diagnostic", "timing": "Recorded steady-state samples; aggregate timing and affected-query CPU acceptance remain separate from per-record allocation gates"}, sort_keys=True), flush=True)
+          for name in before:
+              if name.endswith("/Aggregate"):
+                  continue
+              if any(f"/{kind}/" in name for kind in ("ASCIIWhitespace", "Whitespace", "Empty", "SingleWord", "LongWord")):
+                  assert after[name]["B/op"] <= before[name]["B/op"], (name, before[name], after[name])
+                  assert after[name]["allocs/op"] <= before[name]["allocs/op"], (name, before[name], after[name])
+              else:
+                  assert after[name]["B/op"] < before[name]["B/op"], (name, before[name], after[name])
+                  assert after[name]["allocs/op"] < before[name]["allocs/op"], (name, before[name], after[name])
+          PY
+      - name: Retain rendered text cost samples
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rendered-text-cost-${{ matrix.os }}
+          path: ${{ runner.temp }}/render-text-*.log
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
