@@ -20,6 +20,13 @@ func TestRenderedTextWhitespace(t *testing.T) {
 		{"one word", "ready", "ready"},
 		{"large one word", strings.Repeat("x", store.MaxText), strings.Repeat("x", store.MaxText)},
 		{"already normalized", "only, no non-test", "only, no non-test"},
+		{"trimmed normalized", " \tonly, no non-test\r\n", "only, no non-test"},
+		{"double ASCII spaces", "only,  no   non-test", "only, no non-test"},
+		{"single-byte separator", "only,\tno non-test", "only, no non-test"},
+		{"canonical Unicode", "α β γ δ", "α β γ δ"},
+		{"trimmed canonical Unicode", "\u3000α β γ δ\u0085", "α β γ δ"},
+		{"canonical invalid UTF8", "\xffa \xc0b \x80", "\xffa \xc0b \x80"},
+		{"canonical NUL", "a\x00b c", "a\x00b c"},
 		{"ASCII whitespace", " \t only,\r\n no\v\f non-test\t ", "only, no non-test"},
 		{"Unicode whitespace", "\u0085only,\u00a0\u1680no\u2000\u2001\u2028non-test\u2029\u3000", "only, no non-test"},
 		{"mixed Unicode", " \tα\u00a0β \u3000γ\r\nδ ", "α β γ δ"},
@@ -40,6 +47,27 @@ func TestRenderedTextWhitespace(t *testing.T) {
 				t.Fatalf("Brief = %q, want %q", got, want)
 			}
 			if got, want := render.Untagged(r, at, 0), stamp+" "+tt.want; got != want {
+				t.Fatalf("Untagged = %q, want %q", got, want)
+			}
+		})
+	}
+	path := strings.Repeat("p/", 64) + "path"
+	for _, text := range []string{"ready", strings.TrimSpace(strings.Repeat("only, no non-test ", 20)), "α β γ δ"} {
+		t.Run(text, func(t *testing.T) {
+			r := store.Record{
+				Seq: 10000, Num: "#10000", At: at, Kind: kinds.Report, Lane: "desk", Topic: "tracking", Text: text,
+				Refs: store.Refs{PRs: []store.PR{{Number: 42}}, Stacks: []string{"stack/env"}, Targets: []string{"target"}, CCN: "note", Builds: []string{"green"}, Board: "board", Path: path},
+			}
+			stamp := render.Stamp(at, at)
+			rest := " [tracking] " + text + " pr#42 stack:stack/env target:target ccn:note build:green board:board " + path
+			want := "#10000 " + stamp + " REPORT desk" + rest
+			if got := render.Line(r, at); got != want {
+				t.Fatalf("Line = %q, want %q", got, want)
+			}
+			if got := render.Brief(r, at, 0); got != want {
+				t.Fatalf("Brief = %q, want %q", got, want)
+			}
+			if got, want := render.Untagged(r, at, 0), stamp+rest; got != want {
 				t.Fatalf("Untagged = %q, want %q", got, want)
 			}
 		})

@@ -79,19 +79,27 @@ func rest(r store.Record, brief, elide bool) string {
 		fmt.Fprintf(&b, " [%s]", r.Topic)
 	}
 	b.WriteString(" ")
-	textWords := strings.Fields(r.Text)
-	if len(textWords) < 2 {
-		b.WriteString(strings.Join(textWords, " "))
-	} else {
-		textSize := len(textWords) - 1
-		for _, word := range textWords {
-			textSize += len(word)
+	text := strings.TrimSpace(r.Text)
+	if !strings.Contains(text, "  ") && strings.IndexFunc(text, func(c rune) bool { return c != ' ' && unicode.IsSpace(c) }) < 0 {
+		if strings.Contains(text, " ") {
+			b.Grow(len(text))
 		}
-		b.Grow(textSize)
-		b.WriteString(textWords[0])
-		for _, word := range textWords[1:] {
-			b.WriteByte(' ')
-			b.WriteString(word)
+		b.WriteString(text)
+	} else {
+		textWords := strings.Fields(r.Text)
+		if len(textWords) < 2 {
+			b.WriteString(strings.Join(textWords, " "))
+		} else {
+			textSize := len(textWords) - 1
+			for _, word := range textWords {
+				textSize += len(word)
+			}
+			b.Grow(textSize)
+			b.WriteString(textWords[0])
+			for _, word := range textWords[1:] {
+				b.WriteByte(' ')
+				b.WriteString(word)
+			}
 		}
 	}
 	for _, pr := range r.Refs.PRs {

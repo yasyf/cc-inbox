@@ -31,9 +31,16 @@ var (
 	typedStamp   = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
 	leadingLabel = regexp.MustCompile(`^\s*((?:\S+\s+){0,4}?)(` + clockLabel + `)(:?)`)
 	anyLabel     = regexp.MustCompile(clockLabel)
+	datedAfter   = regexp.MustCompile(`^,?\s*(?:on\s+)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b`)
 )
 
-const clockLabel = `\b\d{1,2}:\d{2} ?[AaPp][Mm]\b`
+const (
+	clockLabel   = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
+	clockSkew    = 3 * time.Minute
+	refuseWithin = 3 * time.Hour
+)
+
+var tenseWords = map[string]bool{"by": true, "until": true, "till": true, "before": true, "next": true, "eta": true, "due": true, "expected": true, "since": true}
 
 func newPostCmd() *cobra.Command {
 	var (
@@ -229,7 +236,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time later than the post is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time more than 3 minutes and less than 3 hours after the post refuses it unless a date follows the time or by, until, till, before, next, ETA, due, expected or since sits in the four words before it, and one 3 hours or more ahead is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; owner and all always pass; a record every --to of which names the posting lane itself is refused, naming who wrote the record it answers")
@@ -467,15 +474,30 @@ func stamped(w io.Writer, text, lane string, at time.Time, label bool) (string, 
 	} else if label {
 		text = stamp + " " + text
 	}
-	for _, typed := range anyLabel.FindAllString(text, -1) {
-		if off(typed) <= time.Minute {
+	for _, m := range anyLabel.FindAllStringIndex(text, -1) {
+		typed := text[m[0]:m[1]]
+		d := off(typed)
+		if d <= clockSkew || datedAfter.MatchString(text[m[1]:]) || tensed(text[:m[0]]) {
 			continue
+		}
+		if d <= refuseWithin {
+			return "", fmt.Errorf("time %s in the text is %d minutes after the post time %s, so it names something that has not happened yet: write the time it happened, or put by, until or next before a time still ahead", typed, int(d.Minutes()), stamp)
 		}
 		if _, err := fmt.Fprintf(w, "cci: time %s in the text is later than the post time %s; stored as typed\n", typed, stamp); err != nil {
 			return "", err
 		}
 	}
 	return strings.ReplaceAll(text, "{at}", stamp), nil
+}
+
+func tensed(before string) bool {
+	words := strings.Fields(strings.ToLower(before))
+	for _, word := range words[max(len(words)-4, 0):] {
+		if tenseWords[strings.Trim(word, ".,;:()'\"")] {
+			return true
+		}
+	}
+	return false
 }
 
 func labels(prefix, colon, lane string) bool {
