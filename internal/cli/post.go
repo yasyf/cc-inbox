@@ -28,10 +28,13 @@ import (
 )
 
 var (
-	typedStamp   = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
-	leadingLabel = regexp.MustCompile(`^\s*((?:\S+\s+){0,4}?)(` + clockLabel + `)(:?)`)
-	anyLabel     = regexp.MustCompile(clockLabel)
-	datedAfter   = regexp.MustCompile(`^,?\s*(?:on\s+)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b`)
+	typedStamp      = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
+	leadingLabel    = regexp.MustCompile(`^\s*((?:\S+\s+){0,4}?)(` + clockLabel + `)(:?)`)
+	anyLabel        = regexp.MustCompile(clockLabel)
+	datedAfter      = regexp.MustCompile(`^,?\s*(?:on\s+)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b`)
+	proseWithdrawal = regexp.MustCompile(`(?i)\bwithdraw(?:s|n|ing)?\s+(?:the\s+|root\s+|my\s+)?go(?:s|\s+records?)?\b[^.;]*`)
+	seqRef          = regexp.MustCompile(`#(\d+)\b`)
+	parenthetical   = regexp.MustCompile(`\([^)]*\)`)
 )
 
 const (
@@ -127,6 +130,13 @@ func newPostCmd() *cobra.Command {
 				text, fromPath = firstLine(string(body)), true
 			}
 			k := parsedKind
+			if clause := proseWithdrawal.FindString(text); clause != "" && k != kinds.Withdraw {
+				var re []string
+				for _, m := range seqRef.FindAllStringSubmatch(parenthetical.ReplaceAllString(clause, ""), -1) {
+					re = append(re, "--re "+m[1])
+				}
+				return fmt.Errorf("a withdrawn go is one withdraw record every lane reads as gone, never a sentence in a %s record: post cci post --kind withdraw %s --text '<why>', then this record without the withdrawal", cmp.Or(string(k), "note"), cmp.Or(strings.Join(re, " "), "--re <go seq>"))
+			}
 			if len(heads) > 0 {
 				if text, err = withHeads(&r, k, heads, text); err != nil {
 					return err

@@ -62,6 +62,8 @@ Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
 record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`.
 `go`, `opened`, `landed`, and `fix-live` can all carry `--resolves`.
 `answer`, `lift`, `withdraw`, and `unblock` require `--re`, `--topic`, or `--resolves`.
+Withdraw a go with `cci post --kind withdraw --re <go seq>`, one `--re` per go;
+`cci post` refuses a go withdrawal written as a sentence in any other kind.
 Repeat `--resolves`, or give a comma list, to close several at once: one record
 resolves every seq, and its line reads `resolves #<a>,#<b>,#<c>`.
 
