@@ -26,6 +26,7 @@ func TestRenderedTextWhitespace(t *testing.T) {
 		{"non-whitespace Unicode", "a\u200bb\ufeffc", "a\u200bb\ufeffc"},
 		{"invalid UTF8", " \xffa\t\xc0b \x80 ", "\xffa \xc0b \x80"},
 		{"NUL", " a\x00b\t c ", "a\x00b c"},
+		{"only ASCII whitespace", strings.Repeat(" \t\n", 1024), ""},
 		{"only whitespace", strings.Repeat(" \t\n\u3000", 1024), ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -56,6 +57,7 @@ func BenchmarkRenderedText(b *testing.B) {
 		{"SingleWord", "ready"},
 		{"LongWord", strings.Repeat("x", store.MaxText)},
 		{"ASCII", strings.Repeat("only, no non-test ", 32)},
+		{"ASCIIWhitespace", strings.Repeat(" \t\n", 1024)},
 		{"Unicode", strings.Repeat("only,\u00a0no\u3000non-test\u0085", 32)},
 		{"Whitespace", strings.Repeat(" \t\n\u3000", 1024)},
 	} {
@@ -64,6 +66,9 @@ func BenchmarkRenderedText(b *testing.B) {
 				records := make([]store.Record, n)
 				for i := range records {
 					records[i] = store.Record{Seq: int64(i + 1), At: at, Kind: kinds.Report, Lane: "desk", Text: tt.text}
+				}
+				for _, r := range records {
+					renderedTextCost = render.Line(r, at)
 				}
 				b.ReportAllocs()
 				b.SetBytes(int64(n * len(tt.text)))

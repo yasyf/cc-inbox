@@ -362,24 +362,24 @@ jobs:
                   fields = line.split()
                   if not fields or not fields[0].startswith("BenchmarkRenderedText/"):
                       continue
-                  match = re.fullmatch(r"(BenchmarkRenderedText/(ASCII|Unicode|Whitespace|Empty|SingleWord|LongWord)/N(32|10000))-2", fields[0])
+                  match = re.fullmatch(r"(BenchmarkRenderedText/(ASCII|ASCIIWhitespace|Unicode|Whitespace|Empty|SingleWord|LongWord)/N(32|10000))-2", fields[0])
                   assert match, fields
                   metrics = {key: float(fields[fields.index(key) - 1]) for key in ("ns/op", "B/op", "allocs/op")}
                   samples.setdefault(match[1], []).append(metrics)
-              expected = {f"BenchmarkRenderedText/{kind}/N{n}" for kind in ("ASCII", "Unicode", "Whitespace", "Empty", "SingleWord", "LongWord") for n in (32, 10000)}
+              expected = {f"BenchmarkRenderedText/{kind}/N{n}" for kind in ("ASCII", "ASCIIWhitespace", "Unicode", "Whitespace", "Empty", "SingleWord", "LongWord") for n in (32, 10000)}
               assert set(samples) == expected, samples
               assert all(len(rows) == 3 for rows in samples.values()), samples
               return {name: {key: statistics.median(row[key] for row in rows) for key in ("ns/op", "B/op", "allocs/op")} for name, rows in samples.items()}
 
           before, after = map(read, sys.argv[1:])
           for name in before:
-              if any(f"/{kind}/" in name for kind in ("Whitespace", "Empty", "SingleWord", "LongWord")):
+              if any(f"/{kind}/" in name for kind in ("ASCIIWhitespace", "Whitespace", "Empty", "SingleWord", "LongWord")):
                   assert after[name]["B/op"] <= before[name]["B/op"], (name, before[name], after[name])
                   assert after[name]["allocs/op"] <= before[name]["allocs/op"], (name, before[name], after[name])
               else:
                   assert after[name]["B/op"] < before[name]["B/op"], (name, before[name], after[name])
                   assert after[name]["allocs/op"] < before[name]["allocs/op"], (name, before[name], after[name])
-          print(json.dumps({"before": before, "after": after, "timing": "Recorded, not a CI wall-time or live CPU claim"}, sort_keys=True))
+          print(json.dumps({"before": before, "after": after, "timing": "Recorded steady-state samples, not a CI wall-time or live CPU claim"}, sort_keys=True))
           PY
       - name: Retain rendered text cost samples
         if: always()
