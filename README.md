@@ -452,7 +452,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--target <name>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.targets`. |
 | `--pr <PR>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.prs`, written as a number, `owner/repo#N`, or a URL. A bare number matches only bare numbers. |
 | `--origin <node>` | `tail`, `watch`, `grep`, `state` | Keep only records written on that node; `cci node` prints this machine's id. |
-| `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
+| `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane, or contains `all` and another lane wrote them. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts, including the root's own prompts for `root` and `main`. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, local clock time such as `9:00 AM`, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
 | `--oldest` | `tail` | When the budget cuts a `--since` window, keep its oldest records and end with a resume trailer. By default the window keeps its newest records and ends with `... CUT <n> older records before #<seq>; --oldest reads them first`. |
