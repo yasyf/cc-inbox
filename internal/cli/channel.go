@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,6 +25,7 @@ func newSubscribeCmd() *cobra.Command {
 		kindsF []string
 		muteF  []string
 		toF    []string
+		follow []string
 		cursor string
 	)
 	cmd := &cobra.Command{
@@ -60,6 +62,17 @@ hook's overdue-ask nudge.`,
 			if len(sub.ToKinds) == 0 {
 				sub.ToKinds = store.DefaultToKinds(reader)
 			}
+			for _, spec := range follow {
+				other, list, ok := strings.Cut(spec, "=")
+				if !ok || other == "" || list == "" {
+					return fmt.Errorf("--follow %q is not <drive>=<kind>[,<kind>...], e.g. oncall=incident", spec)
+				}
+				ks, err := kinds.ParseAll(strings.Split(list, ","))
+				if err != nil {
+					return err
+				}
+				sub.Follow = append(sub.Follow, store.Follow{Drive: other, Kinds: ks})
+			}
 			if sub.Cursor == "" {
 				sub.Cursor = "channel-" + session
 			}
@@ -80,6 +93,7 @@ hook's overdue-ask nudge.`,
 	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
 	cmd.Flags().StringSliceVar(&muteF, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
 	cmd.Flags().StringSliceVar(&toF, "to-kind", nil, "deliver records addressed to --reader only of these kinds; cci tail still reads the rest (repeatable; default for root: "+kindList(kinds.RootAddressed())+", otherwise every kind)")
+	cmd.Flags().StringArrayVar(&follow, "follow", nil, "also deliver another drive's broadcasts of these kinds, as <drive>=<kind>[,<kind>...], e.g. oncall=incident (repeatable)")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")
 	_ = cmd.MarkFlagRequired("reader")
 	return cmd
@@ -205,7 +219,11 @@ func channelArgs(args []string) []string {
 }
 
 func describe(sub store.Subscription) string {
-	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, urgent repeats held %s", sub.Drive, sub.Reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), store.UrgentRepeat)
+	followed := make([]string, len(sub.Follow))
+	for i, f := range sub.Follow {
+		followed[i] = f.Drive + "=" + kindList(f.Kinds)
+	}
+	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, followed %s, urgent repeats held %s", sub.Drive, sub.Reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), cmp.Or(strings.Join(followed, " "), "none"), store.UrgentRepeat)
 }
 
 func addressedList(ks []kinds.Kind) string {

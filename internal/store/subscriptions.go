@@ -25,6 +25,7 @@ type Subscription struct {
 	Session string       `json:"session"`
 	Window  Window       `json:"window"`
 	Drive   string       `json:"drive"`
+	Follow  []Follow     `json:"follow,omitempty"`
 	Reader  string       `json:"reader"`
 	Kinds   []kinds.Kind `json:"kinds"`
 	Mute    []kinds.Kind `json:"mute,omitempty"`
@@ -45,7 +46,7 @@ func DefaultToKinds(reader string) []kinds.Kind {
 }
 
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Mute, ToKinds: s.ToKinds, RepeatWindow: UrgentRepeat}
+	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Mute, ToKinds: s.ToKinds, RepeatWindow: UrgentRepeat}
 }
 
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {

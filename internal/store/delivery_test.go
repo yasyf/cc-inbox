@@ -134,3 +134,37 @@ func TestALaneHearsRecordsAddressedToAllButNotItsOwn(t *testing.T) {
 		t.Fatalf("lane mail delivered %q, want %q", got, want)
 	}
 }
+
+func TestAFollowedDriveDeliversOnlyItsBroadcastsOfTheFollowedKinds(t *testing.T) {
+	corpus := []timed{
+		{0, store.Record{Drive: "oncall", Lane: "ai-oncall", Kind: kinds.Incident, Text: "page opened"}},
+		{0, store.Record{Drive: "oncall", Lane: "ai-oncall", Kind: kinds.Incident, To: []string{"all"}, Text: "page resolved"}},
+		{0, store.Record{Drive: "oncall", Lane: "ai-oncall", Kind: kinds.Note, Text: "oncall note"}},
+		{0, store.Record{Drive: "oncall", Lane: "ai-oncall", Kind: kinds.Incident, To: []string{"responder"}, Text: "page to its responder"}},
+		{0, store.Record{Drive: "other", Lane: "ai-oncall", Kind: kinds.Incident, Text: "unfollowed drive"}},
+		{0, store.Record{Lane: "fix-lane", Kind: kinds.Incident, To: []string{"root"}, Text: "incident to root"}},
+	}
+	follow := []store.Follow{{Drive: "oncall", Kinds: []kinds.Kind{kinds.Incident}}}
+	for _, tc := range []struct {
+		name   string
+		filter store.Filter
+		want   []string
+	}{
+		{
+			name:   "subscription",
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "root", ToKinds: store.DefaultToKinds("root"), Follow: follow}.Filter(),
+			want:   []string{"page opened", "page resolved", "incident to root"},
+		},
+		{
+			name:   "unfollowed",
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "root", ToKinds: store.DefaultToKinds("root")}.Filter(),
+			want:   []string{"incident to root"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := delivered(t, tc.filter, corpus); !slices.Equal(got, tc.want) {
+				t.Fatalf("delivered %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
