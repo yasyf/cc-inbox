@@ -160,7 +160,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		trailer(fmt.Sprintf("... %d to %s first", t.first, f.For))
 	}
 	if cut > 0 {
-		trailer(fmt.Sprintf("... CUT %d older records past the budget; --oldest --since %s reads them", cut, windowStart(f)))
+		trailer(fmt.Sprintf("... CUT %d older records before %s; --oldest reads them first", cut, records[0].Name()))
 	}
 	if shortened > 0 {
 		trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
@@ -252,13 +252,6 @@ func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, bud
 		}
 		f.After = page[len(page)-1].Seq
 	}
-}
-
-func windowStart(f store.Filter) string {
-	if f.After == 0 && !f.Since.IsZero() {
-		return f.Since.UTC().Format(time.RFC3339)
-	}
-	return fmt.Sprint(f.After)
 }
 
 type tailRun struct {

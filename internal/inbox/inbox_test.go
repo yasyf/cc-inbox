@@ -120,7 +120,7 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 	if res, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if want := fmt.Sprintf("... CUT %d older records past the budget; --oldest --since 0 reads them\n", 40-res.Printed); notes.String() != want {
+	if want := fmt.Sprintf("... CUT %d older records before #%d; --oldest reads them first\n", 40-res.Printed, 41-res.Printed); notes.String() != want {
 		t.Errorf("JSON tail notes = %q, want %q", notes.String(), want)
 	}
 	if !strings.Contains(out.String(), "step 39") || strings.Contains(out.String(), "...") {
@@ -153,7 +153,7 @@ func TestWindowTailKeepsTheNewestRecordsItsBudgetHolds(t *testing.T) {
 		if !strings.Contains(lines[len(lines)-2], "step 1199") || strings.Contains(out.String(), fmt.Sprintf("step %04d", 1200-tc.older)) {
 			t.Fatalf("limit %d: budget kept the oldest records instead of the newest:\n%s", tc.limit, out.String())
 		}
-		want := fmt.Sprintf("... CUT %d older records past the budget; --oldest --since %s reads them", tc.older-res.Printed, start.UTC().Format(time.RFC3339))
+		want := fmt.Sprintf("... CUT %d older records before #%d; --oldest reads them first", tc.older-res.Printed, 1201-res.Printed)
 		if lines[len(lines)-1] != want {
 			t.Fatalf("limit %d: trailer = %q, want %q", tc.limit, lines[len(lines)-1], want)
 		}

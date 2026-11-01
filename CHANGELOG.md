@@ -24,8 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - `cci tail --since` and `cci tail -n` keep the newest records when the
-  budget cuts the window, and end with `... CUT <n> older records past the
-  budget; --oldest --since <start> reads them`. Before, a window wider than
+  budget cuts the window, and end with `... CUT <n> older records before
+  #<seq>; --oldest reads them first`. Before, a window wider than
   its budget printed only its oldest records, so a watch for a new record in
   a fixed window never matched. `--oldest` keeps the oldest records, as
   before. Cursor reads, `cci watch`, and the hooks are unchanged.
