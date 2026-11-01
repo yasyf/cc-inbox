@@ -65,27 +65,27 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		f.Limit = opts.Limit
 		f.Descending = true
 	}
-	records, err := st.Query(ctx, f)
+	v := view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold}
+	records, rendered, folded, paged, err := tailPages(ctx, st, f, v, opts.Budget)
 	if err != nil {
 		return TailResult{}, err
-	}
-	if f.Descending {
-		slices.Reverse(records)
 	}
 	ahead, err := addressedAhead(ctx, st, f, opts)
 	if err != nil {
 		return TailResult{}, err
 	}
 	all := slices.Clone(records)
+	var later []store.Record
 	for _, r := range ahead.pending {
 		if len(records) == 0 || r.Seq > records[len(records)-1].Seq {
-			all = append(all, r)
+			later = append(later, r)
 		}
 	}
-	rendered, folded, err := lines(ctx, st, all, view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold})
+	laterLines, laterFolded, err := lines(ctx, st, later, v)
 	if err != nil {
 		return TailResult{}, err
 	}
+	all, rendered, folded = append(all, later...), append(rendered, laterLines...), append(folded, laterFolded...)
 	skipped, err := skippedOf(ctx, st, records, opts.Open)
 	if err != nil {
 		return TailResult{}, err
@@ -126,7 +126,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		return &out, b, t
 	}
 	out, b, t := run(nil)
-	if len(ahead.pending) > 0 && (!t.done || len(records) == f.Limit) {
+	if len(ahead.pending) > 0 && (!t.done || paged) {
 		out, b, t = run(ahead.pending)
 	}
 	res, shortened := t.res, t.shortened
@@ -190,6 +190,35 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		}
 	}
 	return res, nil
+}
+
+func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, budget int) ([]store.Record, []string, []bool, bool, error) {
+	left := cmp.Or(max(budget, 0), render.DefaultBudget)
+	var records []store.Record
+	var rendered []string
+	var folded []bool
+	for {
+		page, err := st.Query(ctx, f)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+		if f.Descending {
+			slices.Reverse(page)
+		}
+		out, fold, err := lines(ctx, st, page, v)
+		if err != nil {
+			return nil, nil, nil, false, err
+		}
+		records, rendered, folded = append(records, page...), append(rendered, out...), append(folded, fold...)
+		for _, line := range out {
+			left -= len(line) + 1
+		}
+		full := len(page) == f.Limit
+		if f.Descending || !full || left < 0 {
+			return records, rendered, folded, full, nil
+		}
+		f.After = page[len(page)-1].Seq
+	}
 }
 
 type tailRun struct {

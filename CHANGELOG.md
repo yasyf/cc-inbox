@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci tail` reads past its 500-record page within one call: it keeps reading
+  pages until its byte budget fills or the range ends, so a `--json` read with
+  a large `--budget` returns every record in the range instead of stopping at
+  500 and naming the rest only on stderr.
+
 - `cci post --to <lane>` accepts a lane that has not started yet without
   `--force`, and that lane reads the record when it first binds. Only a
   never-seen name that looks like a slip for a live lane, one or two edits
