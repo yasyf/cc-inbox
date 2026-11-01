@@ -86,11 +86,11 @@ VALUES('foreign','worker','note',1,'pending','["desk@d"]',?,'post','pending')`, 
 						t.Fatalf("done record #%d omitted", seq)
 					}
 				}
-				wantBytes := len(large) + (population-1)*len(tiny) + len(pendingBody)
-				if reads.Load() != int64(population+1) || transferred.Load() != int64(wantBytes) {
-					t.Fatalf("addressed Body baseline reads/bytes=%d/%d want=%d/%d", reads.Load(), transferred.Load(), population+1, wantBytes)
+				wantBytes := len(pendingBody)
+				if reads.Load() != 1 || transferred.Load() != int64(wantBytes) {
+					t.Fatalf("ADDRESSED_DONE_BODY_BOUND_EXCEEDED rows=%d json=%t reads=%d want=1 bytes=%d want_bytes=%d", population, asJSON, reads.Load(), transferred.Load(), wantBytes)
 				}
-				t.Logf("ADDRESSED_DONE_BODY_BASELINE rows=%d json=%t actual_body_reads=%d done_body_reads=%d pending_body_reads=1 actual_body_bytes=%d CPU_gain=UNKNOWN", population, asJSON, reads.Load(), reads.Load()-1, transferred.Load())
+				t.Logf("ADDRESSED_DONE_BODY_BOUND rows=%d json=%t actual_body_reads=%d done_body_reads=0 pending_body_reads=1 actual_body_bytes=%d CPU_gain=UNKNOWN", population, asJSON, reads.Load(), transferred.Load())
 			})
 		}
 	}

@@ -245,12 +245,25 @@ jobs:
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
           (cd .ci-tail-body-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
           CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli
-      - name: Reader cursor addressed done Body private work baseline
-        run: go test -count=1 -run '^TestAddressedDoneBodyTransferDiagnostic$' -v ./internal/inbox
       - uses: actions/checkout@v7
         with:
           ref: 02f12d7c20079a9e0a67c19bdec1a61dac0182d8
           path: .ci-addressed-body-baseline
+      - name: Reader cursor addressed done Body transfer bound and immutable work control
+        run: |
+          test "$(git -C .ci-addressed-body-baseline rev-parse HEAD)" = 02f12d7c20079a9e0a67c19bdec1a61dac0182d8
+          cp internal/inbox/addressed_body_diagnostic_test.go .ci-addressed-body-baseline/internal/inbox/
+          if (cd .ci-addressed-body-baseline && go test -count=1 -run '^TestAddressedDoneBodyTransferDiagnostic$' -v ./internal/inbox) > "$RUNNER_TEMP/addressed-body-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/addressed-body-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/addressed-body-negative.log"
+          for rows in 32 10000; do
+            for json in false true; do
+              grep -F "ADDRESSED_DONE_BODY_BOUND_EXCEEDED rows=$rows json=$json reads=$((rows+1)) want=1" "$RUNNER_TEMP/addressed-body-negative.log"
+            done
+          done
+          go test -count=1 -race -run '^TestAddressedDoneBodyTransferDiagnostic$' -v ./internal/inbox
       - name: Reader cursor addressed done Body immutable contract
         run: |
           test "$(git -C .ci-addressed-body-baseline rev-parse HEAD)" = 02f12d7c20079a9e0a67c19bdec1a61dac0182d8
