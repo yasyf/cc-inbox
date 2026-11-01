@@ -80,13 +80,14 @@ func rest(r store.Record, brief, elide bool) string {
 	}
 	b.WriteString(" ")
 	text := strings.TrimSpace(r.Text)
-	if !strings.Contains(text, "  ") && strings.IndexFunc(text, func(c rune) bool { return c != ' ' && unicode.IsSpace(c) }) < 0 {
-		if strings.Contains(text, " ") {
+	hasSpace := strings.Contains(text, " ")
+	if text == "" || hasSpace && !strings.Contains(text, "  ") && strings.IndexFunc(text, func(c rune) bool { return c != ' ' && unicode.IsSpace(c) }) < 0 {
+		if hasSpace {
 			b.Grow(len(text))
 		}
 		b.WriteString(text)
 	} else {
-		textWords := strings.Fields(r.Text)
+		textWords := strings.Fields(text)
 		if len(textWords) < 2 {
 			b.WriteString(strings.Join(textWords, " "))
 		} else {

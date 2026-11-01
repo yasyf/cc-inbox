@@ -18,6 +18,8 @@ func TestRenderedTextWhitespace(t *testing.T) {
 	}{
 		{"empty", "", ""},
 		{"one word", "ready", "ready"},
+		{"padded single word", strings.Repeat(" \t", 50) + "ready" + strings.Repeat("\u3000\r\n", 50), "ready"},
+		{"padded invalid single word", "\u3000\t\xffword \r\n", "\xffword"},
 		{"large one word", strings.Repeat("x", store.MaxText), strings.Repeat("x", store.MaxText)},
 		{"already normalized", "only, no non-test", "only, no non-test"},
 		{"trimmed normalized", " \tonly, no non-test\r\n", "only, no non-test"},
