@@ -523,3 +523,55 @@ func TestReaderTailDeliversAddressedRecordsBeforeABacklogOfBroadcasts(t *testing
 		t.Fatalf("a backlog that fits is not in seq order:\n%s", small.String())
 	}
 }
+
+func TestLaneMailDeliversRootRecordsBeforeABacklogFromOtherLanes(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	ask := func(i int) {
+		testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.Ask, To: []string{"landing"}, Text: fmt.Sprintf("merge ask %03d %s", i, strings.Repeat("x", 80))})
+		c.Advance(time.Second)
+	}
+	for i := range 40 {
+		ask(i)
+	}
+	order := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"landing"}, Text: "retire enq.py now"})
+	for i := range 20 {
+		ask(40 + i)
+	}
+	opts := inbox.TailOptions{Filter: store.LaneMail(store.PeerKey{Session: "s1"}, store.Binding{Drive: "d", Lane: "landing"}), Cursor: "landing", Budget: 1200}
+	var first bytes.Buffer
+	res, err := inbox.Tail(ctx, st, opts, &first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(first.String(), fmt.Sprintf("#%d ", order.Seq)) || !strings.Contains(first.String(), "... 1 from root first") {
+		t.Fatalf("root's order does not lead a capped page of lane mail:\n%s", first.String())
+	}
+	seen := map[string]int{}
+	count := func(page string) {
+		for _, line := range strings.Split(page, "\n") {
+			if m := regexp.MustCompile(`^#\d+ .*?(merge ask \d{3}|retire enq.py now)`).FindStringSubmatch(line); m != nil {
+				seen[m[1]]++
+			}
+		}
+	}
+	count(first.String())
+	for res.More > 0 {
+		var page bytes.Buffer
+		if res, err = inbox.Tail(ctx, st, opts, &page); err != nil {
+			t.Fatal(err)
+		}
+		if res.Printed == 0 {
+			t.Fatalf("a tail with %d more printed nothing:\n%s", res.More, page.String())
+		}
+		count(page.String())
+	}
+	if seen["retire enq.py now"] != 1 {
+		t.Fatalf("root's order delivered %d times, want once: %v", seen["retire enq.py now"], seen)
+	}
+	for i := range 60 {
+		if key := fmt.Sprintf("merge ask %03d", i); seen[key] != 1 {
+			t.Fatalf("%s delivered %d times, want once", key, seen[key])
+		}
+	}
+}
