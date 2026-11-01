@@ -33,6 +33,7 @@ type TailOptions struct {
 	JSON   bool
 	Resume string
 	Open   bool
+	Oldest bool
 	Fold   int
 	Notes  io.Writer
 }
@@ -60,15 +61,39 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			}
 		}
 	}
+	newest := opts.Cursor == "" && !opts.Oldest
 	f.Limit = pageRows
 	if opts.Limit > 0 {
 		f.Limit = opts.Limit
-		f.Descending = true
 	}
+	f.Descending = newest || opts.Limit > 0
 	v := view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold}
-	records, rendered, folded, paged, err := tailPages(ctx, st, f, v, opts.Budget)
+	records, rendered, folded, paged, err := tailPages(ctx, st, f, v, opts.Budget, opts.Limit > 0)
 	if err != nil {
 		return TailResult{}, err
+	}
+	skipped, err := skippedOf(ctx, st, records, opts.Open)
+	if err != nil {
+		return TailResult{}, err
+	}
+	if skipped == nil {
+		skipped = map[int64]bool{}
+	}
+	cut := 0
+	if newest && len(records) > 0 {
+		fits := render.NewBudget(io.Discard, opts.Budget)
+		first := len(records)
+		for first > 0 && (skipped[records[first-1].Seq] || fits.Line(rendered[first-1])) {
+			first--
+		}
+		records, rendered, folded, cut = records[first:], rendered[first:], folded[first:], first
+		if opts.Limit == 0 {
+			older := f
+			older.Limit, older.Descending, older.Before = 0, false, records[0].Seq
+			if cut, err = st.Count(ctx, older); err != nil {
+				return TailResult{}, err
+			}
+		}
 	}
 	ahead, err := addressedAhead(ctx, st, f, opts)
 	if err != nil {
@@ -86,13 +111,6 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		return TailResult{}, err
 	}
 	all, rendered, folded = append(all, later...), append(rendered, laterLines...), append(folded, laterFolded...)
-	skipped, err := skippedOf(ctx, st, records, opts.Open)
-	if err != nil {
-		return TailResult{}, err
-	}
-	if skipped == nil {
-		skipped = map[int64]bool{}
-	}
 	maps.Copy(skipped, ahead.delivered)
 	index := make(map[int64]int, len(all))
 	for i, r := range all {
@@ -140,6 +158,9 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	if t.first > 0 && !opts.JSON {
 		trailer(fmt.Sprintf("... %d to %s first", t.first, f.For))
+	}
+	if cut > 0 {
+		trailer(fmt.Sprintf("... CUT %d older records past the budget; --oldest --since %s reads them", cut, windowStart(f)))
 	}
 	if shortened > 0 {
 		trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
@@ -192,7 +213,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	return res, nil
 }
 
-func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, budget int) ([]store.Record, []string, []bool, bool, error) {
+func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, budget int, limited bool) ([]store.Record, []string, []bool, bool, error) {
 	left := cmp.Or(max(budget, 0), render.DefaultBudget)
 	var records []store.Record
 	var rendered []string
@@ -213,16 +234,31 @@ func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, bud
 		if err != nil {
 			return nil, nil, nil, false, err
 		}
-		records, rendered, folded = append(records, page...), append(rendered, out...), append(folded, fold...)
 		for _, line := range out {
 			left -= len(line) + 1
 		}
 		full := len(page) == f.Limit
-		if f.Descending || !full || left < 0 {
+		if f.Descending {
+			records, rendered, folded = append(page, records...), append(out, rendered...), append(fold, folded...)
+		} else {
+			records, rendered, folded = append(records, page...), append(rendered, out...), append(folded, fold...)
+		}
+		if limited || !full || left < 0 {
 			return records, rendered, folded, full, nil
+		}
+		if f.Descending {
+			f.Before = page[0].Seq
+			continue
 		}
 		f.After = page[len(page)-1].Seq
 	}
+}
+
+func windowStart(f store.Filter) string {
+	if f.After == 0 && !f.Since.IsZero() {
+		return f.Since.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprint(f.After)
 }
 
 type tailRun struct {
