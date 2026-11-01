@@ -77,6 +77,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A root reader hears `release`, `done` and `blocked` records addressed to it.
+  Run `cci subscribe --reader root` again, since a subscription keeps the
+  addressed kinds it was made with.
+- `cci tail --to <lane>` and a lane's hook mail include records addressed to
+  `all` from other lanes.
+- A bare record number that two nodes share in a drive is refused with both
+  tagged spellings, never resolved to the local record.
+- Root's records lead a lane's hook mail when a backlog from other lanes
+  would push them past the budget.
 - `cci post` refuses a go withdrawal written `Withdrawn: go #N on #PR` as well,
   and the `cci post --kind withdraw` command it names carries only the go seqs,
   never a pull request number that follows `on`, `for` or `of`.
