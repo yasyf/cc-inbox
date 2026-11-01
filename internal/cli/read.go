@@ -47,7 +47,7 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	f.rf.registerWidth(cmd)
 	f.rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
 	cmd.Flags().StringVar(&f.cursor, "cursor", peer, "cursor name, read and advanced when --since is absent")
-	cmd.Flags().BoolVar(&f.oldest, "oldest", false, "when the budget cuts a --since window, keep its oldest records instead of its newest")
+	cmd.Flags().BoolVar(&f.oldest, "oldest", false, "when the budget cuts a text --since window, keep its oldest records instead of its newest, as --json reads always do")
 	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")
 	_ = cmd.Flags().MarkHidden("seqs")
 	return cmd, f
