@@ -383,7 +383,7 @@ func nativeTailAssertRawFixture(t *testing.T, fixture nativeTailFixture, expecte
 }
 
 func nativeTailIndependentFiles(image nativeTailEmptyImage, homes ...string) (err error) {
-	var files []nativeTailImageFile
+	files := make([]nativeTailImageFile, 0, 1)
 	if err := json.Unmarshal([]byte(image.files), &files); err != nil {
 		return err
 	}
