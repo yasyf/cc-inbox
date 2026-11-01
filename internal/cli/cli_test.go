@@ -535,7 +535,7 @@ func TestPostRefusesAGoWithdrawalWrittenAsProse(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err := post("--kind", "correction", "--text", "9:23 PM WITHDRAW gos #1 #2 (#46823 52dbea3, #46906 7ac70d2) this minute: the runner misread their bracket")
+	_, err := post("--kind", "correction", "--stamp", "--text", "9:23 PM WITHDRAW gos #1 #2 (#46823 52dbea3, #46906 7ac70d2) this minute: the runner misread their bracket")
 	if err == nil || !strings.Contains(err.Error(), "cci post --kind withdraw --re 1 --re 2 --text") {
 		t.Fatalf("prose withdrawal = %v, want a refusal naming cci post --kind withdraw --re 1 --re 2", err)
 	}
