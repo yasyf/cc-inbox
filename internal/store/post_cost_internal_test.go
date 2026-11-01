@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"fmt"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -91,8 +92,82 @@ func seedLaneHistory(t testing.TB, st *Store, rows int) {
 	if _, err := st.db.ExecContext(context.Background(), `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
-INSERT INTO records (drive, lane, kind, at, text, source, hash)
-SELECT 'drive', 'old-lane', 'note', n, 'history', 'post', 'history-' || n FROM history`, rows); err != nil {
+INSERT INTO records (drive, lane, kind, at, text, source, hash, origin_seq)
+SELECT 'drive', 'old-lane', 'note', n, 'history', 'post', 'history-' || n, n FROM history`, rows); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestLaneHistorySeedPreservesIdentityTriggerRows(t *testing.T) {
+	ctx := t.Context()
+	stores := make([]*Store, 0, 2)
+	for range 2 {
+		st, err := Open(ctx, t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = st.Close() })
+		if _, err := st.db.ExecContext(ctx, `CREATE TABLE seed_identity_updates (n INTEGER NOT NULL);
+INSERT INTO seed_identity_updates VALUES (0);
+CREATE TRIGGER seed_identity_updates_count AFTER UPDATE OF origin_seq ON records
+BEGIN UPDATE seed_identity_updates SET n=n+1; END`); err != nil {
+			t.Fatal(err)
+		}
+		stores = append(stores, st)
+	}
+	if _, err := stores[0].db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
+	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
+)
+INSERT INTO records (drive, lane, kind, at, text, source, hash)
+SELECT 'drive', 'old-lane', 'note', n, 'history', 'post', 'history-' || n FROM history`, 32); err != nil {
+		t.Fatal(err)
+	}
+	seedLaneHistory(t, stores[1], 32)
+	for i, want := range []int{32, 0} {
+		var got int
+		if err := stores[i].db.QueryRowContext(ctx, "SELECT n FROM seed_identity_updates").Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Fatalf("seed %d identity updates = %d, want %d", i, got, want)
+		}
+	}
+	snapshot := func(st *Store, query string) [][]any {
+		rows, err := st.db.QueryContext(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		columns, err := rows.Columns()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var result [][]any
+		for rows.Next() {
+			values := make([]any, len(columns))
+			targets := make([]any, len(columns))
+			for i := range values {
+				targets[i] = &values[i]
+			}
+			if err := rows.Scan(targets...); err != nil {
+				t.Fatal(err)
+			}
+			result = append(result, values)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	for _, query := range []string{
+		"SELECT * FROM records ORDER BY seq",
+		"SELECT * FROM record_recipients ORDER BY address, source_seq",
+		"SELECT * FROM record_also_resolves ORDER BY target, source_seq",
+		"SELECT * FROM record_json_errors ORDER BY field, source_seq",
+	} {
+		want, got := snapshot(stores[0], query), snapshot(stores[1], query)
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("seed changed %s: got %v, want %v", query, got, want)
+		}
 	}
 }

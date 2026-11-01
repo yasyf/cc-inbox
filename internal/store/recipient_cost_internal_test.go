@@ -15,6 +15,7 @@ func TestRecipientLaneQueryUsesTargetedIndex(t *testing.T) {
 	for _, population := range []int{64, 4096, 65536} {
 		for _, indexed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("rows=%d/indexed=%t", population, indexed), func(t *testing.T) {
+				phase := indexFixturePhases(t)
 				var comparisons atomic.Int64
 				collation := fmt.Sprintf("cci_recipients_%d", laneCollationID.Add(1))
 				if err := sqlite.RegisterCollationUtf8(collation, func(a, b string) int {
@@ -30,6 +31,7 @@ func TestRecipientLaneQueryUsesTargetedIndex(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				phase("seed")
 				if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
@@ -47,6 +49,7 @@ SELECT 'unrelated-' || n, '', '', 'unrelated-drive-' || n, 0, 'unrelated-lane' F
 						t.Fatal(err)
 					}
 				}
+				phase("query")
 				comparisons.Store(0)
 				rows, err := st.LanePeers(ctx, []string{"api", "missing"})
 				if err != nil {
@@ -62,6 +65,7 @@ SELECT 'unrelated-' || n, '', '', 'unrelated-drive-' || n, 0, 'unrelated-lane' F
 				if !indexed && got < int64(population) {
 					t.Fatalf("unindexed lane comparisons = %d for %d unrelated rows, want at least %d", got, population, population)
 				}
+				phase("oracle")
 				all, err := st.Peers(ctx)
 				if err != nil {
 					t.Fatal(err)
@@ -72,17 +76,20 @@ SELECT 'unrelated-' || n, '', '', 'unrelated-drive-' || n, 0, 'unrelated-lane' F
 				if !slices.EqualFunc(rows, want, func(a, b Peer) bool { return a.Key() == b.Key() }) {
 					t.Fatalf("targeted rows = %+v, baseline rows = %+v", rows, want)
 				}
+				phase("candidate_allocs")
 				candidateAllocs := testing.AllocsPerRun(1, func() {
 					if _, err := st.LanePeers(ctx, []string{"api", "missing"}); err != nil {
 						t.Fatal(err)
 					}
 				})
+				phase("baseline_allocs")
 				baselineAllocs := testing.AllocsPerRun(1, func() {
 					if _, err := st.Peers(ctx); err != nil {
 						t.Fatal(err)
 					}
 				})
 				t.Logf("unrelated_sessions=%d fixed_lanes=2 indexed=%t actual_lane_comparisons=%d actual_materialized_rows=%d baseline_materialized_rows=%d actual_candidate_allocs=%.0f actual_baseline_allocs=%.0f", population, indexed, got, len(rows), len(all), candidateAllocs, baselineAllocs)
+				phase("cleanup")
 			})
 		}
 	}
