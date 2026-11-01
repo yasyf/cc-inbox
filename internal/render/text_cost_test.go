@@ -1,0 +1,78 @@
+package render_test
+
+import (
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/render"
+	"github.com/yasyf/cc-inbox/internal/store"
+)
+
+func TestRenderedTextWhitespace(t *testing.T) {
+	at := time.Date(2026, 11, 1, 6, 22, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name, text, want string
+	}{
+		{"empty", "", ""},
+		{"one word", "ready", "ready"},
+		{"large one word", strings.Repeat("x", store.MaxText), strings.Repeat("x", store.MaxText)},
+		{"already normalized", "only, no non-test", "only, no non-test"},
+		{"ASCII whitespace", " \t only,\r\n no\v\f non-test\t ", "only, no non-test"},
+		{"Unicode whitespace", "\u0085only,\u00a0\u1680no\u2000\u2001\u2028non-test\u2029\u3000", "only, no non-test"},
+		{"mixed Unicode", " \tα\u00a0β \u3000γ\r\nδ ", "α β γ δ"},
+		{"non-whitespace Unicode", "a\u200bb\ufeffc", "a\u200bb\ufeffc"},
+		{"invalid UTF8", " \xffa\t\xc0b \x80 ", "\xffa \xc0b \x80"},
+		{"NUL", " a\x00b\t c ", "a\x00b c"},
+		{"only whitespace", strings.Repeat(" \t\n\u3000", 1024), ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			r := store.Record{Seq: 7, At: at, Kind: kinds.Report, Lane: "desk", Text: tt.text}
+			stamp := render.Stamp(at, at)
+			want := "#7 " + stamp + " REPORT desk " + tt.want
+			if got := render.Line(r, at); got != want {
+				t.Fatalf("Line = %q, want %q", got, want)
+			}
+			if got := render.Brief(r, at, 0); got != want {
+				t.Fatalf("Brief = %q, want %q", got, want)
+			}
+			if got, want := render.Untagged(r, at, 0), stamp+" "+tt.want; got != want {
+				t.Fatalf("Untagged = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+var renderedTextCost string
+
+func BenchmarkRenderedText(b *testing.B) {
+	at := time.Date(2026, 11, 1, 6, 22, 0, 0, time.UTC)
+	for _, tt := range []struct {
+		name, text string
+	}{
+		{"Empty", ""},
+		{"SingleWord", "ready"},
+		{"LongWord", strings.Repeat("x", store.MaxText)},
+		{"ASCII", strings.Repeat("only, no non-test ", 32)},
+		{"Unicode", strings.Repeat("only,\u00a0no\u3000non-test\u0085", 32)},
+		{"Whitespace", strings.Repeat(" \t\n\u3000", 1024)},
+	} {
+		for _, n := range []int{32, 10000} {
+			b.Run(fmt.Sprintf("%s/N%d", tt.name, n), func(b *testing.B) {
+				records := make([]store.Record, n)
+				for i := range records {
+					records[i] = store.Record{Seq: int64(i + 1), At: at, Kind: kinds.Report, Lane: "desk", Text: tt.text}
+				}
+				b.ReportAllocs()
+				b.SetBytes(int64(n * len(tt.text)))
+				for b.Loop() {
+					for _, r := range records {
+						renderedTextCost = render.Line(r, at)
+					}
+				}
+			})
+		}
+	}
+}

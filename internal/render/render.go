@@ -79,7 +79,19 @@ func rest(r store.Record, brief, elide bool) string {
 		fmt.Fprintf(&b, " [%s]", r.Topic)
 	}
 	b.WriteString(" ")
-	b.WriteString(strings.Join(strings.Fields(r.Text), " "))
+	textWords := strings.FieldsSeq(r.Text)
+	textSize, separatorSize := 0, 0
+	for word := range textWords {
+		textSize += len(word) + separatorSize
+		separatorSize = 1
+	}
+	b.Grow(textSize)
+	separator := ""
+	for word := range textWords {
+		b.WriteString(separator)
+		b.WriteString(word)
+		separator = " "
+	}
 	for _, pr := range r.Refs.PRs {
 		if slices.Contains(words, "#"+pr.String()) || pr.Repo != "" && slices.Contains(words, pr.String()) || r.Fields.Attrs[store.HeadAttr+pr.String()] != "" {
 			continue
