@@ -154,7 +154,7 @@ cci subscribe --drive release-demo --reader root --kind incident,decide,ask --mu
 ```
 
 ```text
-window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,blocker,urgent,answer,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,blocker,blocked,urgent,answer,done,release,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
 ```
 
 What arrives:
@@ -163,7 +163,7 @@ What arrives:
   `--to-kind`;
 - other lanes' broadcasts of each `--kind`.
 
-`--to-kind` defaults to `incident,mechanism,fix-live,decide,ask,blocker,urgent,answer,correction,defect,owner`
+`--to-kind` defaults to `incident,mechanism,fix-live,decide,ask,blocker,blocked,urgent,answer,done,release,correction,defect,owner`
 for `root`, the kinds a root acts on, and to every kind for any other reader.
 
 What never arrives:
@@ -452,9 +452,10 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--target <name>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.targets`. |
 | `--pr <PR>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.prs`, written as a number, `owner/repo#N`, or a URL. A bare number matches only bare numbers. |
 | `--origin <node>` | `tail`, `watch`, `grep`, `state` | Keep only records written on that node; `cci node` prints this machine's id. |
-| `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane. |
+| `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane, or contains `all` and another lane wrote them. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts, including the root's own prompts for `root` and `main`. |
 | `--since <point>` | `tail` | Read from a sequence number, duration, local clock time such as `9:00 AM`, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
+| `--oldest` | `tail` | When the budget cuts a `--since` window, keep its oldest records and end with a resume trailer. By default the window keeps its newest records and ends with `... CUT <n> older records before #<seq>; --oldest reads them first`. |
 | `-n`, `--limit <count>` | `tail`, `grep` | Print only the newest `count` matching records, oldest first for `tail` and newest first for `grep`, as `tail -n` does. `tail` advances its cursor to the newest record printed. |
 | `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. |
 | `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width. Records print whole by default. JSON ignores it. |

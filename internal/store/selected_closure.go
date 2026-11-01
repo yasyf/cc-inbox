@@ -31,8 +31,9 @@ UNION ALL SELECT j.value, r.seq FROM candidates c JOIN records r ON r.seq = c.se
 WHERE r.drive = ? OR EXISTS (SELECT 1 FROM records target WHERE target.seq = j.value AND target.drive = ?)`
 
 func (s *Store) unclosedAmong(ctx context.Context, drive string, openers []Record) ([]Record, error) {
-	if len(openers) == 0 {
-		return nil, nil
+	openers, err := s.withoutIncidentUpdates(ctx, drive, openers)
+	if err != nil || len(openers) == 0 {
+		return nil, err
 	}
 	closers, err := s.closersAmong(ctx, drive, openers)
 	if err != nil {

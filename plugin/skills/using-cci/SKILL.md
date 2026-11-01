@@ -229,6 +229,9 @@ only the newest N matching records, as `tail -n` does. It searches all matching 
 records. A text grep with no match prints `no records on <drive> match; store
 head #<seq>`. Tail, grep, and state default to 6,144 bytes, and text digest
 to 32,000 bytes so every section prints whole; `--budget` sets any other size.
+When the budget cuts a `tail --since` window, the newest records print and a
+`... CUT <n> older records before #<seq>; --oldest reads them first` trailer
+names what it dropped.
 
 Tail, watch, and digest print whole records by default. Use `--width N` to
 clip each rendered record line to N characters, including a final `…`. The
@@ -462,7 +465,7 @@ subscribing; records in the overlap arrive twice.
 
 A record addressed to the reader arrives only when its kind is a
 `--to-kind`. For `--reader root` (or `main`) that defaults to
-`incident,mechanism,fix-live,decide,ask,blocker,urgent,answer,correction,defect,owner`, the kinds a root
+`incident,mechanism,fix-live,decide,ask,blocker,blocked,urgent,answer,done,release,correction,defect,owner`, the kinds a root
 acts on; the state, head, red, report, review, note and evidence records lanes
 copy to root stay in `cci tail` and `cci digest`, and the root's `PostToolUse`
 hook holds them back too. Other readers get every addressed kind unless they
