@@ -104,7 +104,7 @@ jobs:
           path: .ci-tail-baseline
       - uses: actions/checkout@v7
         with:
-          ref: da0e0b69f8fef4ef774c6d03256880de43dc894a
+          ref: 9e4bb76c830bf73c7304ae57ec8e5270a5a32f83
           path: .ci-native-tail-baseline
       - uses: actions/checkout@v7
         with:
@@ -240,7 +240,7 @@ jobs:
           go test -count=1 -race -run '^TestTailTextBodyTransferDiagnostic$' -v ./internal/cli
       - name: Text Tail Body immutable output error and cursor contract
         run: |
-          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = da0e0b69f8fef4ef774c6d03256880de43dc894a
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 9e4bb76c830bf73c7304ae57ec8e5270a5a32f83
           cp internal/cli/tail_body_contract_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
           (cd .ci-native-tail-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
@@ -560,7 +560,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = da0e0b69f8fef4ef774c6d03256880de43dc894a
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 9e4bb76c830bf73c7304ae57ec8e5270a5a32f83
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
