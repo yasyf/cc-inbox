@@ -174,7 +174,7 @@ jobs:
             grep -F "URGENT_REPEAT_BOUND_EXCEEDED history=$history index=stock " "$RUNNER_TEMP/urgent-repeat-old.log"
           done
           go test -count=1 -race -run '^TestUrgentRepeatIndex' -v ./internal/store
-          CCI_URGENT_INDEX_ROWS=250000 go test -count=1 -run '^TestUrgentRepeatIndexProvisioningWithinWriterBudget$' -v ./internal/store
+          CCI_URGENT_INDEX_ROWS=300000 go test -count=1 -run '^TestUrgentRepeatIndexProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Audience kind candidates and immutable491 work control
         run: |
           cp internal/cli/audience_query_cost_test.go .ci-audience-current491/internal/cli/
