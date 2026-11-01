@@ -34,8 +34,8 @@ func TestRegisteredLaneComparisonsStayBounded(t *testing.T) {
 				query := `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
-INSERT INTO records (drive, lane, kind, at, text, source, hash)
-SELECT 'drive', 'old-lane', 'note', n, 'history', 'post', 'history-' || n FROM history`
+INSERT INTO records (drive, lane, kind, at, text, source, hash, origin_seq)
+SELECT 'drive', 'old-lane', 'note', n, 'history', 'post', 'history-' || n, n FROM history`
 				if table == "sessions" {
 					query = `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
