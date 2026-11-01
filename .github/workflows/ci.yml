@@ -358,8 +358,10 @@ jobs:
           set -euo pipefail
           test "$(git -C .ci-render-text-baseline rev-parse HEAD)" = 69637a6ba3370ec3a3ba11a59bb6b1d80d367dbb
           cp internal/render/text_cost_test.go .ci-render-text-baseline/internal/render/text_cost_test.go
-          (cd .ci-render-text-baseline && go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$' -benchmem -benchtime=100ms -cpu=2 ./internal/render) | tee "$RUNNER_TEMP/render-text-old.log"
-          go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$' -benchmem -benchtime=100ms -cpu=2 ./internal/render | tee "$RUNNER_TEMP/render-text-current.log"
+          (cd .ci-render-text-baseline && go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Record$' -benchmem -benchtime=20000x -cpu=2 ./internal/render) | tee "$RUNNER_TEMP/render-text-old.log"
+          (cd .ci-render-text-baseline && go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Aggregate$' -benchmem -benchtime=100ms -cpu=2 ./internal/render) | tee -a "$RUNNER_TEMP/render-text-old.log"
+          go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Record$' -benchmem -benchtime=20000x -cpu=2 ./internal/render | tee "$RUNNER_TEMP/render-text-current.log"
+          go test -count=3 -run '^TestRenderedTextWhitespace$' -bench '^BenchmarkRenderedText$/././Aggregate$' -benchmem -benchtime=100ms -cpu=2 ./internal/render | tee -a "$RUNNER_TEMP/render-text-current.log"
           python3 - "$RUNNER_TEMP/render-text-old.log" "$RUNNER_TEMP/render-text-current.log" <<'PY' | tee "$RUNNER_TEMP/render-text-summary.log"
           import json
           import re
