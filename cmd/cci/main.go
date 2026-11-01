@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"syscall"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 	applog "github.com/yasyf/cc-inbox/internal/log"
@@ -16,7 +19,12 @@ const handoffEnv = "CCI_HANDED_OFF_FROM"
 
 func main() {
 	applog.Setup()
-	handOff()
+	roots, err := version.DefaultRoots()
+	if err != nil {
+		fail(err)
+	}
+	handOff(roots)
+	markStarted(roots)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
@@ -30,16 +38,12 @@ func main() {
 	}
 }
 
-func handOff() {
+func handOff(roots version.Roots) {
 	if os.Getenv(handoffEnv) != "" {
 		if err := os.Unsetenv(handoffEnv); err != nil {
 			fail(err)
 		}
 		return
-	}
-	roots, err := version.DefaultRoots()
-	if err != nil {
-		fail(err)
 	}
 	newer, ok, err := roots.NewerThan(version.String())
 	if err != nil {
@@ -48,8 +52,49 @@ func handOff() {
 	if !ok {
 		return
 	}
+	if !version.Started(newer.Path) {
+		warm(newer.Path)
+		return
+	}
 	env := append(os.Environ(), handoffEnv+"="+version.String())
 	fail(syscall.Exec(newer.Path, append([]string{newer.Path}, os.Args[1:]...), env)) //nolint:gosec // G204: the newest cci install this machine holds.
+}
+
+func warm(path string) {
+	claimed, err := version.ClaimWarm(path, time.Now())
+	if err != nil {
+		fail(err)
+	}
+	if !claimed {
+		return
+	}
+	c := exec.Command(path, "--version") //nolint:gosec // G204: the newest cci install this machine holds.
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := c.Start(); err != nil {
+		fail(err)
+	}
+	if err := c.Process.Release(); err != nil {
+		fail(err)
+	}
+}
+
+func markStarted(roots version.Roots) {
+	if !version.IsRelease(version.String()) {
+		return
+	}
+	path := filepath.Join(os.Getenv("BINRUN_PLUGIN_ROOT"), "bin", "cci")
+	if os.Getenv("BINRUN_PLUGIN_ROOT") == "" {
+		exe, err := os.Executable()
+		if err != nil {
+			fail(err)
+		}
+		if path, err = filepath.EvalSymlinks(exe); err != nil {
+			fail(err)
+		}
+	}
+	if err := roots.MarkStarted(path); err != nil {
+		fail(err)
+	}
 }
 
 func fail(err error) {

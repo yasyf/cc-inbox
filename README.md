@@ -58,6 +58,10 @@ replaces each standalone `cci` on `PATH`, such as `~/.local/bin/cci`, from the
 release asset. Then it runs `serve` from the newest install, standalone copies
 included, which moves the daemon onto it.
 
+An older `cci` hands each call to the newest plugin or cask install only once
+that install has run on this machine. Until then it starts the new install
+once in the background to warm it, and serves the call itself.
+
 The plugin includes the [using-cci skill](plugin/skills/using-cci/SKILL.md) and
 [hooks](#plugin-hooks). Drive coordination goes to `cci`. Durable rulings,
 runbooks, and design docs stay in `cc-notes`. Use `decision` for a call a lane
