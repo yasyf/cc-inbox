@@ -217,11 +217,37 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	return res, nil
 }
 
+type tailPage struct {
+	records  []store.Record
+	rendered []string
+	folded   []bool
+}
+
+func joinTailPages(pages []tailPage) ([]store.Record, []string, []bool) {
+	if len(pages) == 1 {
+		return pages[0].records, pages[0].rendered, pages[0].folded
+	}
+	rows := 0
+	for _, page := range pages {
+		rows += len(page.records)
+	}
+	records := make([]store.Record, 0, rows)
+	rendered := make([]string, 0, rows)
+	folded := make([]bool, 0, rows)
+	for i := len(pages) - 1; i >= 0; i-- {
+		records = append(records, pages[i].records...)
+		rendered = append(rendered, pages[i].rendered...)
+		folded = append(folded, pages[i].folded...)
+	}
+	return records, rendered, folded
+}
+
 func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, budget int, limited bool) ([]store.Record, []string, []bool, bool, error) {
 	left := cmp.Or(max(budget, 0), render.DefaultBudget)
 	var records []store.Record
 	var rendered []string
 	var folded []bool
+	var pages []tailPage
 	query := st.Query
 	if !v.JSON {
 		query = st.QueryText
@@ -243,11 +269,14 @@ func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, bud
 		}
 		full := len(page) == f.Limit
 		if f.Descending {
-			records, rendered, folded = append(page, records...), append(out, rendered...), append(fold, folded...)
+			pages = append(pages, tailPage{records: page, rendered: out, folded: fold})
 		} else {
 			records, rendered, folded = append(records, page...), append(rendered, out...), append(folded, fold...)
 		}
 		if limited || !full || left < 0 {
+			if f.Descending {
+				records, rendered, folded = joinTailPages(pages)
+			}
 			return records, rendered, folded, full, nil
 		}
 		if f.Descending {
