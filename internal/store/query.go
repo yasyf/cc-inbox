@@ -146,13 +146,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		clauses = append(clauses, "seq < ?")
 		params = append(params, f.Before)
 	}
-	if !f.Since.IsZero() {
-		clauses = append(clauses, "at >= ?")
-		params = append(params, f.Since.UnixMilli())
-	}
-	if !f.Until.IsZero() {
-		clauses = append(clauses, "at < ?")
-		params = append(params, f.Until.UnixMilli())
+	if window, timestamps := f.timeWhere(); window != "" {
+		clauses = append(clauses, window)
+		params = append(params, timestamps...)
 	}
 	if !f.IncludeExpired {
 		clauses = append(clauses, "(expires_at IS NULL OR expires_at > ?)")
@@ -162,8 +158,31 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 }
 
 func (f Filter) bounded(self string, now time.Time) (string, []any) {
+	return f.boundedWithin(self, now, "", nil)
+}
+
+func (f Filter) countWhere(self string, now time.Time) (string, []any) {
+	window, timestamps := f.timeWhere()
+	return f.boundedWithin(self, now, window, timestamps)
+}
+
+func (f Filter) timeWhere() (string, []any) {
+	var clauses []string
+	var timestamps []any
+	if !f.Since.IsZero() {
+		clauses = append(clauses, "at >= ?")
+		timestamps = append(timestamps, f.Since.UnixMilli())
+	}
+	if !f.Until.IsZero() {
+		clauses = append(clauses, "at < ?")
+		timestamps = append(timestamps, f.Until.UnixMilli())
+	}
+	return strings.Join(clauses, " AND "), timestamps
+}
+
+func (f Filter) boundedWithin(self string, now time.Time, window string, timestamps []any) (string, []any) {
 	where, params := f.where(self, now)
-	arms, candidates := f.candidateArms(self)
+	arms, candidates := f.candidateArmsWithin(self, window, timestamps)
 	if len(arms) == 0 {
 		return where, params
 	}
@@ -176,6 +195,10 @@ func (f Filter) bounded(self string, now time.Time) (string, []any) {
 }
 
 func (f Filter) candidateArms(self string) ([]string, []any) {
+	return f.candidateArmsWithin(self, "", nil)
+}
+
+func (f Filter) candidateArmsWithin(self, window string, timestamps []any) ([]string, []any) {
 	peers, readers := f.peerAddresses(self), f.readerAddresses()
 	if len(peers) == 0 && len(readers) == 0 {
 		return nil, nil
@@ -191,7 +214,17 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 			clauses += " AND " + column + " < ?"
 			params = append(params, f.Before)
 		}
+		if window != "" {
+			clauses += " AND " + window
+			params = append(params, timestamps...)
+		}
 		return clauses
+	}
+	memberships := func(table string) string {
+		if window == "" {
+			return table
+		}
+		return table + " JOIN records ON records.seq = source_seq"
 	}
 	var arms []string
 	appendDrive := func(selector string, selected ...any) {
@@ -217,10 +250,10 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 	}{{peers, max(f.After, f.PeerAfter)}, {readers, f.After}} {
 		for _, address := range addresses.values {
 			params = append(params, address)
-			arms = append(arms, "SELECT source_seq FROM record_recipients WHERE address = ?"+bounds("source_seq", addresses.after))
+			arms = append(arms, "SELECT source_seq FROM "+memberships("record_recipients")+" WHERE address = ?"+bounds("source_seq", addresses.after))
 		}
 	}
-	arms = append(arms, "SELECT source_seq FROM record_json_errors WHERE field = 'recipients'"+bounds("source_seq", f.After))
+	arms = append(arms, "SELECT source_seq FROM "+memberships("record_json_errors")+" WHERE field = 'recipients'"+bounds("source_seq", f.After))
 	return arms, params
 }
 
@@ -393,7 +426,7 @@ func (s *Store) selectionColumns(f Filter, projection string) (string, []any) {
 }
 
 func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
-	where, params := f.bounded(s.Self(), s.Now())
+	where, params := f.countWhere(s.Self(), s.Now())
 	var n int
 	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE "+where, params...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count records: %w", err)
