@@ -31,6 +31,7 @@ func TestUrgentRepeatIndexRequiresExplicitMaintenance(t *testing.T) {
 }
 
 func TestUrgentRepeatIndexProvisioningWithinWriterBudget(t *testing.T) {
+	phase := indexFixturePhases(t)
 	population := 32
 	if value := os.Getenv("CCI_URGENT_INDEX_ROWS"); value != "" {
 		var err error
@@ -41,10 +42,13 @@ func TestUrgentRepeatIndexProvisioningWithinWriterBudget(t *testing.T) {
 	}
 	ctx := t.Context()
 	home := t.TempDir()
+	phase("open")
 	st := openMembershipStore(ctx, t, home)
+	phase("prepare")
 	if _, err := st.db.ExecContext(ctx, "DROP INDEX records_urgent_repeat"); err != nil {
 		t.Fatal(err)
 	}
+	phase("seed")
 	if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
 VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<?
 )
@@ -54,7 +58,9 @@ printf('t%0255d',n),n,'history','post','urgent-build-'||n FROM history`, populat
 		t.Fatal(err)
 	}
 	fingerprint := st.SchemaFingerprint()
+	phase("maintenance")
 	report, err := MaintainIndexes(ctx, home)
+	phase("verification")
 	if err != nil || !slices.Equal(report.Created, []string{"records_urgent_repeat"}) || report.Elapsed >= 5*time.Second {
 		t.Fatalf("repeat index provisioning exceeds writer budget: rows=%d report=%+v error=%v", population, report, err)
 	}
@@ -68,4 +74,5 @@ MAX(length(CAST(drive AS BLOB))),MAX(length(CAST(lane AS BLOB))),MAX(length(CAST
 		t.Fatalf("repeat index changed logical state or seed widths: rows=%d text_key_bytes=%d max=%v", records, textKeyBytes, []int64{maxDrive, maxLane, maxKind, maxTopic})
 	}
 	t.Logf("urgent_repeat_index_rows=%d text_key_bytes=%d max_text_key_bytes=%v elapsed=%s writer_budget=%s created=%v", records, textKeyBytes, []int64{maxDrive, maxLane, maxKind, maxTopic}, report.Elapsed, 5*time.Second, report.Created)
+	phase("cleanup")
 }
