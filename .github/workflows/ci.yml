@@ -245,6 +245,35 @@ jobs:
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
           (cd .ci-native-tail-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
           CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli
+      - uses: actions/checkout@v7
+        with:
+          ref: 4c0bb3dd0873b2e978c6d12933f3db7a8206fd72
+          path: .ci-addressed-body-baseline
+      - name: Shared addressed done Body transfer bound and immutable current route controls
+        run: |
+          test "$(git -C .ci-addressed-body-baseline rev-parse HEAD)" = 4c0bb3dd0873b2e978c6d12933f3db7a8206fd72
+          cp internal/inbox/addressed_body_diagnostic_test.go .ci-addressed-body-baseline/internal/inbox/
+          if (cd .ci-addressed-body-baseline && go test -count=1 -run '^TestAddressedDoneBodyTransferDiagnostic$' -v ./internal/inbox) > "$RUNNER_TEMP/addressed-body-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/addressed-body-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/addressed-body-negative.log"
+          for rows in 32 10000; do
+            for json in false true; do
+              for mode in readerFor laneMailBacklog; do
+                grep -F "ADDRESSED_DONE_BODY_BOUND_EXCEEDED rows=$rows json=$json mode=$mode reads=$((rows+1)) want=1" "$RUNNER_TEMP/addressed-body-negative.log"
+              done
+              grep -F "ADDRESSED_PAGE_DERIVED_BOUND rows=$rows json=$json additional_record_queries=0 additional_body_reads=0 additional_body_bytes=0" "$RUNNER_TEMP/addressed-body-negative.log"
+            done
+          done
+          go test -count=1 -race -run '^TestAddressedDoneBodyTransferDiagnostic$' -v ./internal/inbox
+      - name: Reader and mailbox addressed done Body immutable current contract
+        run: |
+          test "$(git -C .ci-addressed-body-baseline rev-parse HEAD)" = 4c0bb3dd0873b2e978c6d12933f3db7a8206fd72
+          cp internal/cli/addressed_body_contract_test.go .ci-addressed-body-baseline/internal/cli/
+          mkdir -p "$RUNNER_TEMP/cci-addressed-body-contract"
+          (cd .ci-addressed-body-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
+          CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli
       - name: Channel watch unchanged work and immutable 0.49.9 control
         run: |
           test "$(git -C .ci-channel-watch-baseline rev-parse HEAD)" = 696cde4efcdb47697901bebb2d6b1aa12a3496c9

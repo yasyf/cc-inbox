@@ -321,7 +321,7 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 	if a.sent > f.After {
 		done := a.filter
 		done.Before = a.sent + 1
-		records, err := st.Query(ctx, done)
+		records, err := st.QueryText(ctx, done)
 		if err != nil {
 			return ahead{}, err
 		}
