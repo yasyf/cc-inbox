@@ -95,7 +95,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			}
 		}
 	}
-	ahead, err := addressedAhead(ctx, st, f, opts)
+	ahead, err := addressedAhead(ctx, st, f, opts, records, paged)
 	if err != nil {
 		return TailResult{}, err
 	}
@@ -286,7 +286,7 @@ type ahead struct {
 	delivered map[int64]bool
 }
 
-func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts TailOptions) (ahead, error) {
+func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts TailOptions, page []store.Record, paged bool) (ahead, error) {
 	laneMail := f.For == "" && f.To != "" && !store.RootName(f.To)
 	if f.For == "" && !laneMail || f.Descending || opts.Cursor == "" {
 		return ahead{}, nil
@@ -305,6 +305,19 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 		return ahead{}, err
 	}
 	a.sent = sent
+	if laneMail && !paged {
+		for _, r := range page {
+			if !slices.Contains(a.filter.Lanes, r.Lane) {
+				continue
+			}
+			if r.Seq <= a.sent {
+				a.delivered[r.Seq] = true
+			} else {
+				a.pending = append(a.pending, r)
+			}
+		}
+		return a, nil
+	}
 	if a.sent > f.After {
 		done := a.filter
 		done.Before = a.sent + 1
