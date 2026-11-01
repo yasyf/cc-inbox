@@ -434,6 +434,7 @@ func postJSON(t *testing.T, args ...string) posted {
 func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	ahead := time.Now().Add(7 * time.Minute)
+	began, planned := time.Now().Add(-time.Hour).Format("3:04 PM"), time.Now().Add(-70*time.Minute).Format("3:04 PM")
 	for _, tt := range []struct {
 		name, text, want string
 	}{
@@ -445,9 +446,9 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 		{"lettered key", "R88a (" + ahead.Format("3:04 PM") + ") orca-desk: relay to api: hold", "R88a ({at}) orca-desk: relay to api: hold"},
 		{"token in prose", "api landed {at}, live since {at}", "api landed {at}, live since {at}"},
 		{"neither", "ship it", "ship it"},
-		{"clock in prose", "R89 said the deploy began at 10:52 AM (not 10:45 AM)", "R89 said the deploy began at 10:52 AM (not 10:45 AM)"},
-		{"stamp past the start", "relay R90 (10:52 AM) was late", "relay R90 (10:52 AM) was late"},
-		{"parenthesis without a clock", "R91 (orca-desk, 10:52 AM) relay to api", "R91 (orca-desk, 10:52 AM) relay to api"},
+		{"clock in prose", "R89 said the deploy began at " + began + " (not " + planned + ")", "R89 said the deploy began at " + began + " (not " + planned + ")"},
+		{"stamp past the start", "relay R90 (" + began + ") was late", "relay R90 (" + began + ") was late"},
+		{"parenthesis without a clock", "R91 (orca-desk, " + began + ") relay to api", "R91 (orca-desk, " + began + ") relay to api"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := postJSON(t, tt.text)
