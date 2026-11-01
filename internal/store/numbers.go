@@ -150,6 +150,11 @@ func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
 		return 0, fmt.Errorf("%q is not a record number (#N or #N@node)", ref)
 	}
 	if tagged && strings.HasPrefix(s.Self(), tag) || !tagged && (s.owner || n == 0) {
+		if !tagged && n != 0 {
+			if err := s.unambiguous(ctx, ref, n); err != nil {
+				return 0, err
+			}
+		}
 		return n, nil
 	}
 	match, args, err := s.origins(ctx, tag, tagged)
@@ -169,4 +174,17 @@ func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
 		return 0, fmt.Errorf("resolve %s: %w", ref, err)
 	}
 	return seq, nil
+}
+
+func (s *Store) unambiguous(ctx context.Context, ref string, n int64) error {
+	var lane, kind, origin string
+	err := s.db.QueryRowContext(ctx, `SELECT other.lane, other.kind, other.origin FROM records own, (SELECT DISTINCT origin FROM records) known JOIN records other INDEXED BY records_origin ON other.origin = known.origin AND other.origin_seq = ? WHERE own.seq = ? AND other.drive = own.drive AND other.origin != own.origin LIMIT 1`, n, n).Scan(&lane, &kind, &origin)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("resolve %s: %w", ref, err)
+	}
+	other := origin[:min(tagLen, len(origin))]
+	return fmt.Errorf("%s names two records in its drive, this node's #%d and %s's %s #%d@%s; pass #%d@%s for this node's or #%d@%s for %s's", ref, n, lane, kind, n, other, n, s.Self()[:min(tagLen, len(s.Self()))], n, other, lane)
 }
