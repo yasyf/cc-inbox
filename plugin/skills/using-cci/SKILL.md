@@ -47,9 +47,12 @@ in the form readers print, such as `10:52 AM`. A clock typed in a leading
 `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way. A
 leading `H:MM AM/PM` label more than a minute off the post's own clock refuses
 the post; `cci post --stamp` writes that label from the clock, replacing a
-typed one or opening the text with it. A clock anywhere else
-is stored as typed, and `cci post` warns on stderr when it is later than the
-post. A post that takes its
+typed one or opening the text with it. A clock anywhere else that is more
+than 3 minutes and under 3 hours after the post refuses it, since it names
+something that has not happened yet, unless a date follows it or by, until,
+till, before, next, ETA, due, expected or since sits in the four words before
+it, as in `next state by 9:30 AM`. A clock 3 hours or more ahead, which reads as
+yesterday's, is stored as typed with a warning on stderr. A post that takes its
 text from a `--path` file stores the file's first line exactly as written, so
 the record's text equals that line. Leave clocks and `{at}` out of that line;
 the record's own time already dates it.
