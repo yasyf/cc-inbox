@@ -104,7 +104,7 @@ jobs:
           path: .ci-tail-baseline
       - uses: actions/checkout@v7
         with:
-          ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          ref: 9e4bb76c830bf73c7304ae57ec8e5270a5a32f83
           path: .ci-native-tail-baseline
       - uses: actions/checkout@v7
         with:
@@ -240,10 +240,10 @@ jobs:
           go test -count=1 -race -run '^TestTailTextBodyTransferDiagnostic$' -v ./internal/cli
       - name: Text Tail Body immutable output error and cursor contract
         run: |
-          test "$(git -C .ci-tail-body-baseline rev-parse HEAD)" = eefa897af4e7bfb33d319c2f8c8840b2f9eb22ce
-          cp internal/cli/tail_body_contract_test.go .ci-tail-body-baseline/internal/cli/
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 9e4bb76c830bf73c7304ae57ec8e5270a5a32f83
+          cp internal/cli/tail_body_contract_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
-          (cd .ci-tail-body-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
+          (cd .ci-native-tail-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
           CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli
       - name: Channel watch unchanged work and immutable 0.49.9 control
         run: |
@@ -582,7 +582,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 9e4bb76c830bf73c7304ae57ec8e5270a5a32f83
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)

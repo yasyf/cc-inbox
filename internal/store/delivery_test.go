@@ -118,3 +118,19 @@ func TestAddressedKindsNarrowOnlyRecordsAddressedToTheReader(t *testing.T) {
 		t.Fatalf("DefaultToKinds(ship-lane) = %v, want every kind", got)
 	}
 }
+
+func TestALaneHearsRecordsAddressedToAllButNotItsOwn(t *testing.T) {
+	corpus := []timed{
+		{0, store.Record{Lane: "root", Kind: kinds.Correction, To: []string{"all"}, Text: "withdraw go 1"}},
+		{0, store.Record{Lane: "api", Kind: kinds.Decide, To: []string{"all"}, Text: "api ruling"}},
+		{0, store.Record{Lane: "root", Kind: kinds.Go, To: []string{"api"}, Text: "api go"}},
+		{0, store.Record{Lane: "root", Kind: kinds.Go, To: []string{"web"}, Text: "web go"}},
+	}
+	want := []string{"withdraw go 1", "api go"}
+	if got := delivered(t, store.Filter{Drive: "d", To: "api"}, corpus); !slices.Equal(got, want) {
+		t.Fatalf("delivered %q, want %q", got, want)
+	}
+	if got := delivered(t, store.LaneMail(store.PeerKey{Session: "s1"}, store.Binding{Drive: "d", Lane: "api"}), corpus); !slices.Equal(got, want) {
+		t.Fatalf("lane mail delivered %q, want %q", got, want)
+	}
+}

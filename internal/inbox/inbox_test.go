@@ -102,7 +102,7 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 		c.Advance(time.Second)
 	}
 	var out, notes bytes.Buffer
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Oldest: true, Notes: &notes}, &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,6 +114,57 @@ func TestJSONTailNamesWhatItsBudgetCut(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "...") {
 		t.Errorf("JSON tail put its trailer among the records:\n%s", out.String())
+	}
+	out.Reset()
+	notes.Reset()
+	if res, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Budget: 1000, JSON: true, Notes: &notes}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("... CUT %d older records before #%d; --oldest reads them first\n", 40-res.Printed, 41-res.Printed); notes.String() != want {
+		t.Errorf("JSON tail notes = %q, want %q", notes.String(), want)
+	}
+	if !strings.Contains(out.String(), "step 39") || strings.Contains(out.String(), "...") {
+		t.Errorf("JSON window tail lost its newest record or put its trailer among the records:\n%s", out.String())
+	}
+}
+
+func TestWindowTailKeepsTheNewestRecordsItsBudgetHolds(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	start := c.Now()
+	for i := range 1200 {
+		testutil.Post(t, st, store.Record{Kind: kinds.State, Text: fmt.Sprintf("step %04d %s", i, strings.Repeat("x", 80))})
+		c.Advance(time.Second)
+	}
+	window := store.Filter{Drive: "d", Since: start}
+	for _, tc := range []struct {
+		limit int
+		older int
+	}{{0, 1200}, {900, 900}} {
+		var out bytes.Buffer
+		res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: window, Limit: tc.limit, Budget: 6000}, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.Printed == 0 || res.Printed >= tc.older || res.More != 0 || out.Len() > 6000 {
+			t.Fatalf("limit %d: tail = %+v in %d bytes, want a budget-cut read with nothing after it", tc.limit, res, out.Len())
+		}
+		lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+		if !strings.Contains(lines[len(lines)-2], "step 1199") || strings.Contains(out.String(), fmt.Sprintf("step %04d", 1200-tc.older)) {
+			t.Fatalf("limit %d: budget kept the oldest records instead of the newest:\n%s", tc.limit, out.String())
+		}
+		want := fmt.Sprintf("... CUT %d older records before #%d; --oldest reads them first", tc.older-res.Printed, 1201-res.Printed)
+		if lines[len(lines)-1] != want {
+			t.Fatalf("limit %d: trailer = %q, want %q", tc.limit, lines[len(lines)-1], want)
+		}
+	}
+	var oldest bytes.Buffer
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: window, Budget: 6000, Oldest: true}, &oldest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(oldest.String(), "step 0000") || strings.Contains(oldest.String(), "step 1199") || res.More != 1200-res.Printed {
+		t.Fatalf("--oldest tail = %+v, want the window's first records and a resume trailer:\n%s", res, oldest.String())
 	}
 }
 
@@ -470,5 +521,57 @@ func TestReaderTailDeliversAddressedRecordsBeforeABacklogOfBroadcasts(t *testing
 	}
 	if got := strings.Split(small.String(), "\n"); !strings.Contains(got[0], "a broadcast before the order") || !strings.HasPrefix(got[1], fmt.Sprintf("#%d ", late.Seq)) {
 		t.Fatalf("a backlog that fits is not in seq order:\n%s", small.String())
+	}
+}
+
+func TestLaneMailDeliversRootRecordsBeforeABacklogFromOtherLanes(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	ask := func(i int) {
+		testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.Ask, To: []string{"landing"}, Text: fmt.Sprintf("merge ask %03d %s", i, strings.Repeat("x", 80))})
+		c.Advance(time.Second)
+	}
+	for i := range 40 {
+		ask(i)
+	}
+	order := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"landing"}, Text: "retire enq.py now"})
+	for i := range 20 {
+		ask(40 + i)
+	}
+	opts := inbox.TailOptions{Filter: store.LaneMail(store.PeerKey{Session: "s1"}, store.Binding{Drive: "d", Lane: "landing"}), Cursor: "landing", Budget: 1200}
+	var first bytes.Buffer
+	res, err := inbox.Tail(ctx, st, opts, &first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(first.String(), fmt.Sprintf("#%d ", order.Seq)) || !strings.Contains(first.String(), "... 1 from root first") {
+		t.Fatalf("root's order does not lead a capped page of lane mail:\n%s", first.String())
+	}
+	seen := map[string]int{}
+	count := func(page string) {
+		for _, line := range strings.Split(page, "\n") {
+			if m := regexp.MustCompile(`^#\d+ .*?(merge ask \d{3}|retire enq.py now)`).FindStringSubmatch(line); m != nil {
+				seen[m[1]]++
+			}
+		}
+	}
+	count(first.String())
+	for res.More > 0 {
+		var page bytes.Buffer
+		if res, err = inbox.Tail(ctx, st, opts, &page); err != nil {
+			t.Fatal(err)
+		}
+		if res.Printed == 0 {
+			t.Fatalf("a tail with %d more printed nothing:\n%s", res.More, page.String())
+		}
+		count(page.String())
+	}
+	if seen["retire enq.py now"] != 1 {
+		t.Fatalf("root's order delivered %d times, want once: %v", seen["retire enq.py now"], seen)
+	}
+	for i := range 60 {
+		if key := fmt.Sprintf("merge ask %03d", i); seen[key] != 1 {
+			t.Fatalf("%s delivered %d times, want once", key, seen[key])
+		}
 	}
 }

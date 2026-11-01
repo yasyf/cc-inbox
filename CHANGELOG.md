@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci claim --for <lane>@<drive>` falls back to the newest ended session
+  bound as that lane when none is live, so the runner can record the codex
+  lane that started a release build; a codex lane's session never announces a
+  process and so never reads as live.
+- An `incident` record that replies to or resolves an incident record is an
+  update to that incident, never a new one: an evidence lane's progress line
+  and root's closing line no longer each open an incident, so the digest's
+  open incidents and every hook reading them count real incidents only.
+- `cci tail --since` and `cci tail -n` keep the newest records when the
+  budget cuts the window, and end with `... CUT <n> older records before
+  #<seq>; --oldest reads them first`. Before, a window wider than
+  its budget printed only its oldest records, so a watch for a new record in
+  a fixed window never matched. `--oldest` keeps the oldest records, as
+  before. Cursor reads, `cci watch`, and the hooks are unchanged.
 - `cci tail` reads past its 500-record page within one call: it keeps reading
   pages until its byte budget fills or the range ends, so a `--json` read with
   a large `--budget` returns every record in the range instead of stopping at
