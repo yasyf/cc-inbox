@@ -107,7 +107,7 @@ func TestNativeTailHTTPParity(t *testing.T) {
 	for _, variant := range nativeTailVariants {
 		for _, call := range nativeTailCalls() {
 			t.Run(variant.name+"/"+call.name, func(t *testing.T) {
-				fixture := newNativeTailFixture(t, call, variant.sets)
+				fixture := newNativeTailMatrixFixture(t, call, variant.name, variant.sets)
 				body := nativeTailBody(t, fixture, call)
 				t.Setenv("CLAUDE_CODE_SESSION_ID", "daemon-must-not-supply-peer")
 				t.Setenv("CODEX_THREAD_ID", "daemon-codex-must-not-supply-peer")
@@ -135,32 +135,7 @@ func TestNativeTailHTTPParity(t *testing.T) {
 
 func forbidNativeTailWrites(t *testing.T, fixture nativeTailFixture) {
 	t.Helper()
-	rows, err := fixture.db.QueryContext(t.Context(), "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var names []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			t.Fatal(err)
-		}
-		names = append(names, name)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	if err := rows.Close(); err != nil {
-		t.Fatal(err)
-	}
-	for i, name := range names {
-		for _, operation := range []string{"INSERT", "UPDATE", "DELETE"} {
-			query := fmt.Sprintf("CREATE TRIGGER native_write_%d_%s BEFORE %s ON %q BEGIN SELECT RAISE(FAIL,'native tail attempted a state write'); END", i, operation, operation, name)
-			if _, err := fixture.db.ExecContext(t.Context(), query); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
+	nativeTailForbidWrites(t, fixture)
 }
 
 func TestNativeTailRejectsUnsafeModesWithoutWrites(t *testing.T) {

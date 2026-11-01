@@ -99,7 +99,11 @@ func nativeTailCalls() []nativeTailCall {
 
 func newNativeTailFixture(t *testing.T, call nativeTailCall, sets []nativeTailSet) nativeTailFixture {
 	t.Helper()
-	home := t.TempDir()
+	return nativeTailFixtureAt(t, call, sets, t.TempDir())
+}
+
+func nativeTailFixtureAt(t *testing.T, call nativeTailCall, sets []nativeTailSet, home string) nativeTailFixture {
+	t.Helper()
 	t.Setenv("CCI_HOME", home)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", call.claude)
 	t.Setenv("CODEX_THREAD_ID", call.codex)
@@ -206,7 +210,7 @@ func TestNativeTailCLIReference(t *testing.T) {
 	for _, variant := range nativeTailVariants {
 		for _, call := range nativeTailCalls() {
 			t.Run(variant.name+"/"+call.name, func(t *testing.T) {
-				fixture := newNativeTailFixture(t, call, variant.sets)
+				fixture := newNativeTailMatrixFixture(t, call, variant.name, variant.sets)
 				got := normalizeNativeTail(runNativeTailReference(t, call.args), fixture.node)
 				if variant.name == "clean" && call.name == "mute" && (got.Code != 0 || len(got.Out) == 0 || bytes.Contains(got.Out, []byte(`"kind":"note"`))) {
 					t.Fatalf("--mute-kinds did not exclude notes: code=%d output=%q error=%q", got.Code, got.Out, got.Err)
