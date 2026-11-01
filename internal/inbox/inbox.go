@@ -95,7 +95,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			}
 		}
 	}
-	ahead, err := addressedAhead(ctx, st, f, opts)
+	ahead, err := addressedAhead(ctx, st, f, opts, records, paged)
 	if err != nil {
 		return TailResult{}, err
 	}
@@ -157,7 +157,11 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		b.Trailer(s)
 	}
 	if t.first > 0 && !opts.JSON {
-		trailer(fmt.Sprintf("... %d to %s first", t.first, f.For))
+		first := "to " + f.For
+		if f.For == "" {
+			first = "from root"
+		}
+		trailer(fmt.Sprintf("... %d %s first", t.first, first))
 	}
 	if cut > 0 {
 		trailer(fmt.Sprintf("... CUT %d older records before %s; --oldest reads them first", cut, records[0].Name()))
@@ -282,13 +286,18 @@ type ahead struct {
 	delivered map[int64]bool
 }
 
-func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts TailOptions) (ahead, error) {
-	if f.For == "" || f.Descending || opts.Cursor == "" {
+func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts TailOptions, page []store.Record, paged bool) (ahead, error) {
+	laneMail := f.For == "" && f.To != "" && !store.RootName(f.To)
+	if f.For == "" && !laneMail || f.Descending || opts.Cursor == "" {
 		return ahead{}, nil
 	}
 	a := ahead{filter: f, delivered: map[int64]bool{}}
-	a.filter.For, a.filter.Addressed = "", f.For
-	a.filter.Kinds, a.filter.Lanes, a.filter.Topics = nil, nil, nil
+	if laneMail {
+		a.filter.Lanes = []string{"root", "main"}
+	} else {
+		a.filter.For, a.filter.Addressed = "", f.For
+		a.filter.Kinds, a.filter.Lanes, a.filter.Topics = nil, nil, nil
+	}
 	a.filter.Peer, a.filter.PeerAfter = "", 0
 	a.filter.Limit = 0
 	sent, _, err := st.Cursor(ctx, addressedCursor(opts.Cursor), f.Drive)
@@ -296,6 +305,19 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 		return ahead{}, err
 	}
 	a.sent = sent
+	if laneMail && !paged {
+		for _, r := range page {
+			if !slices.Contains(a.filter.Lanes, r.Lane) {
+				continue
+			}
+			if r.Seq <= a.sent {
+				a.delivered[r.Seq] = true
+			} else {
+				a.pending = append(a.pending, r)
+			}
+		}
+		return a, nil
+	}
 	if a.sent > f.After {
 		done := a.filter
 		done.Before = a.sent + 1
