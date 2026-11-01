@@ -67,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci post` refuses a go withdrawal written `Withdrawn: go #N on #PR` as well,
+  and the `cci post --kind withdraw` command it names carries only the go seqs,
+  never a pull request number that follows `on`, `for` or `of`.
+
 - **A cci hands off only to an install that has already started once.** An
   older cci that finds a newer plugin or cask install starts it once in the
   background with `--version` and keeps running the call itself; the newer

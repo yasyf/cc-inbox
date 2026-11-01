@@ -547,6 +547,14 @@ func TestPostRefusesAGoWithdrawalWrittenAsProse(t *testing.T) {
 	}
 }
 
+func TestPostRefusesAColonWithdrawalAndNamesOnlyTheGoSeqs(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	_, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "correction", "--text", "Withdrawn: go #281022 on #46488 and go #281023 on #46503; the runner misread both")
+	if err == nil || !strings.Contains(err.Error(), "cci post --kind withdraw --re 281022 --re 281023 --text") {
+		t.Fatalf("colon withdrawal = %v, want a refusal naming --re 281022 --re 281023 only", err)
+	}
+}
+
 func TestPostHeadAndOpenedTakeTheirPullRequestOrRefuse(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	for _, kind := range []string{"head", "opened"} {
