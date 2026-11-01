@@ -216,6 +216,8 @@ jobs:
           (cd .ci-audience-current491 && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-old" ./cmd/cci)
           go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-current" ./cmd/cci
           CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
+      - name: Channel watch unchanged poll work diagnostic
+        run: go test -count=1 -race -run '^TestWatchUnchangedPollWork$' -v ./internal/inbox
       - name: SSE idle queries, immutable history control, and commit freshness
         run: |
           test "$(git -C .ci-stream-idle-baseline rev-parse HEAD)" = 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
