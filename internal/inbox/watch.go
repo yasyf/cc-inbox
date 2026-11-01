@@ -34,39 +34,59 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 	if opts.For > 0 {
 		deadline = time.Now().Add(opts.For)
 	}
+	changes, err := st.OpenChangeVersion(ctx)
+	if err != nil {
+		if ctx.Err() != nil {
+			return nil
+		}
+		return err
+	}
+	defer func() { _ = changes.Close() }()
+	var previous int64
+	idle := false
 	for {
-		f.Limit = pageRows
-		records, err := st.Query(ctx, f)
+		version, err := changes.Read(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		rendered, _, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Untagged: opts.Untagged})
-		if ctx.Err() != nil {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		from := f.After
-		for i, r := range records {
-			if err = emit(r, rendered[i]); err != nil {
-				break
+		if !idle || version != previous {
+			f.Limit = pageRows
+			records, err := st.Query(ctx, f)
+			if ctx.Err() != nil {
+				return nil
 			}
-			f.After = r.Seq
-		}
-		if f.After > from && opts.Cursor != "" {
-			if cerr := st.SetCursor(context.WithoutCancel(ctx), opts.Cursor, f.Drive, f.After); cerr != nil {
-				return errors.Join(err, cerr)
+			if err != nil {
+				return err
 			}
-		}
-		if err != nil {
-			return err
-		}
-		if len(records) == pageRows {
-			continue
+			rendered, _, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Untagged: opts.Untagged})
+			if ctx.Err() != nil {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			from := f.After
+			for i, r := range records {
+				if err = emit(r, rendered[i]); err != nil {
+					break
+				}
+				f.After = r.Seq
+			}
+			if f.After > from && opts.Cursor != "" {
+				if cerr := st.SetCursor(context.WithoutCancel(ctx), opts.Cursor, f.Drive, f.After); cerr != nil {
+					return errors.Join(err, cerr)
+				}
+			}
+			if err != nil {
+				return err
+			}
+			previous, idle = version, len(records) < pageRows
+			if len(records) == pageRows {
+				continue
+			}
 		}
 		if !deadline.IsZero() && time.Now().After(deadline) {
 			return nil
