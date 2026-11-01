@@ -238,6 +238,8 @@ jobs:
             grep -F "TAIL_BODY_TRANSFER_BOUND_EXCEEDED rows=$rows json=false reads=$rows want=0" "$RUNNER_TEMP/tail-body-old.log"
           done
           go test -count=1 -race -run '^TestTailTextBodyTransferDiagnostic$' -v ./internal/cli
+      - name: Text Tail retained private fixture native query plans
+        run: go test -count=1 -run '^TestTailProjectionPrivateFixturePlan$' -v ./internal/store
       - name: Text Tail Body immutable output error and cursor contract
         run: |
           test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 7f5c374e7cd07911aa432b3434036a27b9007de9
