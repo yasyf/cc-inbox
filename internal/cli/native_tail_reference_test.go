@@ -140,7 +140,12 @@ func newNativeTailFixture(t *testing.T, call nativeTailCall, sets []nativeTailSe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(t.Context(), `INSERT INTO records(drive,lane,kind,at,text,recipients,source,hash)
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(t.Context(), `INSERT INTO records(drive,lane,kind,at,text,recipients,source,hash)
 VALUES('f','worker','note',4102444800000,'worker mail',?,'post','native-mail')`, string(address)); err != nil {
 		t.Fatal(err)
 	}
@@ -148,14 +153,17 @@ VALUES('f','worker','note',4102444800000,'worker mail',?,'post','native-mail')`,
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.ExecContext(t.Context(), `INSERT INTO records(drive,lane,kind,at,text,topic,refs,source,hash)
+	if _, err := tx.ExecContext(t.Context(), `INSERT INTO records(drive,lane,kind,at,text,topic,refs,source,hash)
 VALUES('d','held','hold',4102444800000,'hold #29020','#29020',?,'post','native-hold')`, string(refs)); err != nil {
 		t.Fatal(err)
 	}
 	for _, set := range sets {
-		if _, err := db.ExecContext(t.Context(), "UPDATE records SET "+set.set+" WHERE seq = ?", set.seq); err != nil {
+		if _, err := tx.ExecContext(t.Context(), "UPDATE records SET "+set.set+" WHERE seq = ?", set.seq); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 	if os.Getenv("CCI_NATIVE_TAIL_FIXTURE_TIMINGS") == "1" {
 		t.Logf("fresh_store_open=%s seed_15_rows_and_origin=%s remaining_setup=%s", opened.Sub(started), seeded.Sub(opened), time.Since(seeded))
