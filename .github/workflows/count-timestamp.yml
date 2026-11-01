@@ -1,0 +1,113 @@
+name: Count timestamp
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: Exact source commit to validate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  count-timestamp:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/checkout@v7
+        with:
+          ref: 68f07acf99b85e7495d7fc88723bbb305b87f74b
+          path: .ci-count-timestamp-baseline
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Prepare exact main public baseline
+        id: baseline
+        run: |
+          test "$(git -C .ci-count-timestamp-baseline rev-parse HEAD)" = 68f07acf99b85e7495d7fc88723bbb305b87f74b
+          git rev-parse HEAD
+          cp internal/store/timestamp_index_diagnostic_internal_test.go internal/store/timestamp_range_internal_test.go internal/store/count_timestamp_*test.go .ci-count-timestamp-baseline/internal/store/
+          python3 - <<'PY'
+          from pathlib import Path
+          target = Path('.ci-count-timestamp-baseline/internal/store/count_timestamp_sql_test.go')
+          source = target.read_text()
+          assert source.count('f.countWhere(self, now)') == 1
+          target.write_text(source.replace('f.countWhere(self, now)', 'f.bounded(self, now)'))
+          PY
+          git -C .ci-count-timestamp-baseline diff --exit-code -- . ':!internal/store/*_test.go'
+      - name: Require real main Count negative at both populations
+        run: |
+          set -o pipefail
+          if (cd .ci-count-timestamp-baseline && CCI_COUNT_TIMESTAMP_GATES=1 CCI_TIMESTAMP_REQUIRE_RANGE_BOUND=1 go test -p 2 -count=1 -run '^TestTimestampIndexDiagnosticWork$' -v ./internal/store) > "$RUNNER_TEMP/count-timestamp-old-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/count-timestamp-old-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/count-timestamp-old-negative.log"
+          for population in 32 10000; do
+            grep -F "TIMESTAMP_RANGE_UNBOUNDED operation=count history=$population index=drive-at peer=true " "$RUNNER_TEMP/count-timestamp-old-negative.log"
+          done
+      - name: Record main public error oracle
+        run: |
+          set -o pipefail
+          (cd .ci-count-timestamp-baseline && CCI_TIMESTAMP_NATIVE_ORACLE=1 CCI_TIMESTAMP_ORACLE_RECORD=1 go test -p 2 -count=1 -race -run '^TestTimestampIndexNativeParity$' -v ./internal/store) 2>&1 | tee "$RUNNER_TEMP/count-timestamp-old-oracle.log"
+      - name: Record main dense Query Tail controls
+        if: ${{ always() && steps.baseline.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          (cd .ci-count-timestamp-baseline && CCI_COUNT_TIMESTAMP_DENSE=1 CCI_COUNT_TIMESTAMP_RECORD=1 go test -p 2 -count=1 -race -run '^TestCountTimestampDenseQueryTail$' -v ./internal/store) 2>&1 | tee "$RUNNER_TEMP/count-timestamp-old-dense.log"
+          test -O .ci-count-timestamp-dense/results-read-old.json
+      - name: Require current Count work and semantic parity
+        run: |
+          set -o pipefail
+          CCI_COUNT_TIMESTAMP_GATES=1 CCI_TIMESTAMP_NATIVE_ORACLE=1 CCI_TIMESTAMP_REQUIRE_RANGE_BOUND=1 go test -p 2 -count=1 -race -run '^TestTimestamp(IndexDiagnosticWork|IndexNativeParity|RangePlanAndNativeCacheWork|RangeWindowBoundaries|RangeForeignRecentWork)$|^TestCountTimestampIndexLifecycle$' -v ./internal/store 2>&1 | tee "$RUNNER_TEMP/count-timestamp-current.log"
+      - name: Validate owned complete native oracle readback
+        if: ${{ always() && steps.baseline.outcome == 'success' }}
+        run: |
+          python3 .github/scripts/validate-count-timestamp-oracle.py old
+          python3 .github/scripts/validate-count-timestamp-oracle.py current
+      - name: Require dense Query Tail SQL identity and index nonregression
+        if: ${{ always() && steps.baseline.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          CCI_COUNT_TIMESTAMP_DENSE=1 go test -p 2 -count=1 -race -run '^TestCountTimestampDenseQueryTail$' -v ./internal/store 2>&1 | tee "$RUNNER_TEMP/count-timestamp-current-dense.log"
+          test -O .ci-count-timestamp-dense/results-read-current.json
+          for operation in query tail; do
+            for peer in false true; do
+              for indexed in false true; do
+                for population in 32 10000; do
+                  for limit in 1 800 80000; do
+                    grep -F "DENSE_READ_WORK operation=$operation peer=$peer indexed=$indexed N=$population limit=$limit " "$RUNNER_TEMP/count-timestamp-current-dense.log"
+                    grep -F "DENSE_READ_PAIR operation=$operation peer=$peer indexed=$indexed N=$population limit=$limit " "$RUNNER_TEMP/count-timestamp-current-dense.log"
+                  done
+                done
+              done
+            done
+          done
+      - name: Require native CLI exact errors and output
+        if: ${{ always() && steps.baseline.outcome == 'success' }}
+        run: |
+          set -o pipefail
+          (cd .ci-count-timestamp-baseline && go build -p 2 -o "$RUNNER_TEMP/count-timestamp-old" ./cmd/cci)
+          go build -p 2 -o "$RUNNER_TEMP/count-timestamp-current" ./cmd/cci
+          CCI_TIMESTAMP_OLD_CLI="$RUNNER_TEMP/count-timestamp-old" CCI_TIMESTAMP_CURRENT_CLI="$RUNNER_TEMP/count-timestamp-current" go test -p 2 -count=1 -race -run '^TestTimestampRangePublicParity$|^TestCountTimestampTailPublicParity$' -v ./internal/cli 2>&1 | tee "$RUNNER_TEMP/count-timestamp-cli.log"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: count-timestamp-${{ matrix.os }}-${{ inputs.commit || github.event.pull_request.head.sha || github.sha }}
+          include-hidden-files: true
+          path: |
+            ${{ runner.temp }}/count-timestamp-*.log
+            .ci-count-timestamp-dense/results-*.json
+            .ci-timestamp-range-native-oracle/**/results-*.json
+          if-no-files-found: error
