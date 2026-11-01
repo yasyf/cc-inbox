@@ -61,7 +61,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			}
 		}
 	}
-	newest := opts.Cursor == "" && !opts.Oldest
+	newest := opts.Cursor == "" && !opts.Oldest && !opts.JSON
 	f.Limit = pageRows
 	if opts.Limit > 0 {
 		f.Limit = opts.Limit
