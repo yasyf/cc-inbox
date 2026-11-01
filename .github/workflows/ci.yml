@@ -63,6 +63,16 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v7
         with:
+          ref: 80a23237731d154e73b2ab9c908809316407ea80
+          path: .ci-urgent-repeat-baseline
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: ab018eb917f569717b4c67a3cd14cb9be660b41c
+          path: .ci-urgent-repeat-old
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
           ref: 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
           path: .ci-stream-idle-baseline
           persist-credentials: false
@@ -147,6 +157,24 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Urgent repeat existing-query index diagnostic
+        run: |
+          cp internal/store/testdata/urgent-repeat-old/compat_test.go .ci-urgent-repeat-old/internal/store/urgent_repeat_legacy_internal_test.go
+          test "$(git -C .ci-urgent-repeat-old rev-parse HEAD)" = ab018eb917f569717b4c67a3cd14cb9be660b41c
+          (cd .ci-urgent-repeat-old && go test -count=1 -race -run '^TestUrgentRepeatLegacyQueryCompatibility$' -v ./internal/store)
+          cp internal/store/urgent_repeat_cost_internal_test.go .ci-urgent-repeat-baseline/internal/store/
+          cp internal/store/index_cost_internal_test.go .ci-urgent-repeat-baseline/internal/store/
+          test "$(git -C .ci-urgent-repeat-baseline rev-parse HEAD)" = 80a23237731d154e73b2ab9c908809316407ea80
+          if (cd .ci-urgent-repeat-baseline && CCI_URGENT_REPEAT_REQUIRE_STOCK_BOUND=1 go test -count=1 -run '^TestUrgentRepeatIndexDiagnostic$' -v ./internal/store) > "$RUNNER_TEMP/urgent-repeat-old.log" 2>&1; then
+            cat "$RUNNER_TEMP/urgent-repeat-old.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/urgent-repeat-old.log"
+          for history in 32 10000; do
+            grep -F "URGENT_REPEAT_BOUND_EXCEEDED history=$history index=stock " "$RUNNER_TEMP/urgent-repeat-old.log"
+          done
+          go test -count=1 -race -run '^TestUrgentRepeatIndex' -v ./internal/store
+          CCI_URGENT_INDEX_ROWS=250000 go test -count=1 -run '^TestUrgentRepeatIndexProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Audience kind candidates and immutable491 work control
         run: |
           cp internal/cli/audience_query_cost_test.go .ci-audience-current491/internal/cli/
@@ -307,7 +335,7 @@ jobs:
           go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
-        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident" ./...
+        run: go test -race -skip "$TAIL_COST_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./...
       - name: Post operation counts and scaling
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store

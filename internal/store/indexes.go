@@ -18,6 +18,7 @@ type namedIndex struct {
 
 var physicalIndexes = [...]namedIndex{
 	{"records_drive_lane", "CREATE INDEX records_drive_lane ON records(drive, lane)"},
+	{"records_urgent_repeat", "CREATE INDEX records_urgent_repeat ON records(drive, lane, kind, topic, seq, at)"},
 	{"records_drive_lane_score", "CREATE INDEX records_drive_lane_score ON records(drive, lane, (at * 1000000 + seq) DESC, seq ASC) WHERE kind != 'digest'"},
 	{"sessions_drive_lane", "CREATE INDEX sessions_drive_lane ON sessions(drive, lane)"},
 	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
