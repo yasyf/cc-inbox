@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- An `incident` record that replies to or resolves an incident record is an
+  update to that incident, never a new one: an evidence lane's progress line
+  and root's closing line no longer each open an incident, so the digest's
+  open incidents and every hook reading them count real incidents only.
 - `cci tail --since` and `cci tail -n` keep the newest records when the
   budget cuts the window, and end with `... CUT <n> older records before
   #<seq>; --oldest reads them first`. Before, a window wider than

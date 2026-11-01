@@ -101,6 +101,10 @@ func (s *Store) openersAmong(ctx context.Context, drive string, seqs []int64) ([
 }
 
 func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([]Record, error) {
+	openers, err := s.withoutIncidentUpdates(ctx, drive, openers)
+	if err != nil {
+		return nil, err
+	}
 	closers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Closers(), IncludeExpired: true})
 	if err != nil {
 		return nil, err
@@ -120,6 +124,33 @@ func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([
 		}
 	}
 	return open, nil
+}
+
+func (s *Store) withoutIncidentUpdates(ctx context.Context, drive string, openers []Record) ([]Record, error) {
+	var targets []int64
+	for _, o := range openers {
+		if o.Kind == kinds.Incident {
+			targets = append(targets, incidentTargets(o)...)
+		}
+	}
+	if len(targets) == 0 {
+		return openers, nil
+	}
+	named, err := s.openersAmong(ctx, drive, targets)
+	if err != nil {
+		return nil, err
+	}
+	incidents := map[int64]bool{}
+	for _, r := range named {
+		incidents[r.Seq] = r.Kind == kinds.Incident
+	}
+	return slices.DeleteFunc(openers, func(o Record) bool {
+		return o.Kind == kinds.Incident && slices.ContainsFunc(incidentTargets(o), func(seq int64) bool { return incidents[seq] })
+	}), nil
+}
+
+func incidentTargets(r Record) []int64 {
+	return slices.DeleteFunc(append([]int64{r.Re, r.Resolves}, r.AlsoResolves...), func(seq int64) bool { return seq == 0 })
 }
 
 func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
