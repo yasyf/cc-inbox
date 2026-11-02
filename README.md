@@ -556,7 +556,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `blocker` | None | Open until `withdraw`, `answer`, or `done` with `--re` or the same `--topic`. |
 | `blocked` | None | A stack or target cannot deploy. Open until `unblock` with `--re` or the same `--topic`, or an explicit resolver. |
 | `unblock` | None | Closes a matching `blocked`; requires `--re`, `--topic`, or `--resolves`. |
-| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`. |
+| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`, which must name a record of the withdrawal's own drive. |
 | `go` | None | Closes a matching `ask` or `decide`. |
 | `hold` | None | Open until `lift`. Each `#<number>` in its text or topic needs `--pr <number>`, so guards that read pull request refs see the hold. |
 | `lift` | None | Closes `hold`; requires `--re`, `--topic`, or `--resolves`. |
