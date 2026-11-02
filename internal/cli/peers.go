@@ -357,7 +357,7 @@ func (c *claimFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
 	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive, else the one live teammate named that lane with no lane yet, which it binds, else the newest ended session bound as that lane, such as a codex lane's")
 	fl.StringVar(&c.rel, "rel", relOwns, "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
-	fl.Var(&prsFlag{&c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
+	fl.Var(&prsFlag{prs: &c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
 	fl.StringSliceVar(&c.branches, "branch", nil, "branch names (repeatable)")
 	fl.StringSliceVar(&c.worktrees, "worktree", nil, "worktree paths (repeatable)")
