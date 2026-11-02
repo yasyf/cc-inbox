@@ -477,7 +477,7 @@ func (s *Store) initialize(ctx context.Context) error {
 }
 
 func lockInit(ctx context.Context, home string, how int) (*os.File, error) {
-	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: init.lock is the fixed lock in the caller-selected CCI home.
 	if err != nil {
 		return nil, fmt.Errorf("open init lock: %w", err)
 	}
