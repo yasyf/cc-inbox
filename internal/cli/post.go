@@ -226,23 +226,22 @@ func newPostCmd() *cobra.Command {
 					return selfAddressed(cmd.Context(), st, records[i], lane)
 				}
 			}
+			var bind *store.LaneBinding
 			if self, window, err := peerIdentity(); os.Getenv(unsentEnv) == "" && err == nil && window.PID != 0 {
 				if err := refuseSecondBinder(cmd.Context(), st, self, r.Drive, lane, at); err != nil {
 					return err
 				}
-				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
-					return err
-				}
+				bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
 			}
-			for _, rec := range records {
-				got, dup, err := st.PostAt(cmd.Context(), rec, ttl, at)
-				if err != nil {
+			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
+			if err != nil {
+				return err
+			}
+			for _, p := range posted {
+				if p.Record.Num, err = st.Number(cmd.Context(), p.Record); err != nil {
 					return err
 				}
-				if got.Num, err = st.Number(cmd.Context(), got); err != nil {
-					return err
-				}
-				if err := printPosted(cmd.OutOrStdout(), got, dup, asJSON); err != nil {
+				if err := printPosted(cmd.OutOrStdout(), p.Record, p.Duplicate, asJSON); err != nil {
 					return err
 				}
 			}

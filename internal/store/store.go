@@ -752,15 +752,67 @@ func (s *Store) Post(ctx context.Context, r Record, ttl time.Duration) (Record, 
 // PostAt posts r as written at the given time, for a caller that already
 // read the clock to put that same time in the record's text.
 func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time.Time) (Record, bool, error) {
-	if r.Kind.Spec().Internal {
-		return Record{}, false, fmt.Errorf("kind %s is written only by cci itself", r.Kind)
-	}
-	if err := Validate(r); err != nil {
+	posted, err := s.PostAll(ctx, nil, []Record{r}, ttl, at)
+	if err != nil {
 		return Record{}, false, err
 	}
+	return posted[0].Record, posted[0].Duplicate, nil
+}
+
+// LaneBinding is the lane a post binds its thread to before its records land,
+// as BindLane binds it.
+type LaneBinding struct {
+	Key     PeerKey
+	Drive   string
+	Lane    string
+	Started time.Time
+}
+
+// Posted is one record a post stored, or the stored record it duplicated.
+type Posted struct {
+	Record    Record
+	Duplicate bool
+}
+
+// PostAll makes bind, when it is not nil, then posts records in order as
+// written at the given time, all in one commit. Each record is checked and
+// deduplicated as PostAt checks it: a duplicate returns the stored record and
+// the others still land, while any error stores nothing, the binding included.
+func (s *Store) PostAll(ctx context.Context, bind *LaneBinding, records []Record, ttl time.Duration, at time.Time) ([]Posted, error) {
+	for _, r := range records {
+		if r.Kind.Spec().Internal {
+			return nil, fmt.Errorf("kind %s is written only by cci itself", r.Kind)
+		}
+		if err := Validate(r); err != nil {
+			return nil, err
+		}
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin post: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if bind != nil {
+		if err := s.bindLane(ctx, tx, bind.Key, bind.Drive, bind.Lane, bind.Started); err != nil {
+			return nil, err
+		}
+	}
+	posted := make([]Posted, len(records))
+	for i, r := range records {
+		if posted[i].Record, posted[i].Duplicate, err = s.post(ctx, tx, r, ttl, at); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit post: %w", err)
+	}
+	return posted, nil
+}
+
+func (s *Store) post(ctx context.Context, tx *sql.Tx, r Record, ttl time.Duration, at time.Time) (Record, bool, error) {
 	r.alsoOrigins = nil
 	for i, seq := range r.Closes() {
-		target, err := s.Get(ctx, seq)
+		target, err := s.get(ctx, tx, seq)
 		if errors.Is(err, sql.ErrNoRows) || err == nil && target.Drive != r.Drive && !CrossDrive(target.To) {
 			return Record{}, false, fmt.Errorf("--resolves #%d names no record in drive %s", seq, r.Drive)
 		}
@@ -772,7 +824,7 @@ func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time
 		}
 	}
 	if r.Kind == kinds.Withdraw && r.Re != 0 {
-		target, err := s.Get(ctx, r.Re)
+		target, err := s.get(ctx, tx, r.Re)
 		if errors.Is(err, sql.ErrNoRows) || err == nil && target.Drive != r.Drive && !CrossDrive(target.To) {
 			return Record{}, false, fmt.Errorf("withdraw --re #%d names no record in drive %s: a withdraw takes back one of its drive's records by that record's seq, never by a PR number", r.Re, r.Drive)
 		}
@@ -784,12 +836,10 @@ func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time
 	r.At = at.UTC()
 	r.ExpiresAt = expiry(r, ttl)
 	hash := Hash(r)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Record{}, false, fmt.Errorf("begin post: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	var existing int64
+	var (
+		existing int64
+		err      error
+	)
 	if r.ID != "" {
 		err = tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE drive = ? AND id = ?", r.Drive, r.ID).Scan(&existing)
 	} else {
@@ -809,9 +859,6 @@ func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time
 	seq, err := s.insert(ctx, tx, r, hash, nil)
 	if err != nil {
 		return Record{}, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Record{}, false, fmt.Errorf("commit post: %w", err)
 	}
 	r.Seq = seq
 	return r, false, nil

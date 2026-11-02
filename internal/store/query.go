@@ -528,6 +528,16 @@ func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, sta
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.bindLane(ctx, tx, k, drive, lane, started); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("bind lane: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string, started time.Time) error {
 	if err := s.claimSession(ctx, tx, k.Session); err != nil {
 		return err
 	}
@@ -559,9 +569,6 @@ ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, waiting, k.Session,
 WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
 ON CONFLICT (name, drive) DO NOTHING`, BroadcastCursor(k), drive, k.Session, k.Agent, s.Self(), spawned, BroadcastCursor(k), drive); err != nil {
 		return fmt.Errorf("start lane broadcast floor: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("bind lane: %w", err)
 	}
 	return nil
 }
