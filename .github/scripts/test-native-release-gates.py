@@ -101,7 +101,7 @@ class NativeReleaseGateTest(unittest.TestCase):
                     profiles.append(os)
         self.assertEqual(len(profiles), EXPECTED_DYNAMIC_PROFILES)
         for profile in profiles:
-            self.assertIn("github.event_name == 'pull_request' || inputs.commit != ''", profile)
+            self.assertIn("github.event_name == 'schedule'", profile)
             self.assertNotIn("github.event_name == 'workflow_dispatch'", profile)
 
 
