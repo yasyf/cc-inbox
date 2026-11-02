@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/yasyf/cc-inbox/internal/daemon"
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/node"
@@ -116,6 +117,14 @@ func ownStore(st *store.Store, home string) (*store.Store, error) {
 	if err := configureStoreOwner(st, home); err != nil {
 		_ = st.Close()
 		return nil, err
+	}
+	if os.Getenv(homeEnv) == "" {
+		d, err := daemon.Definition()
+		if err != nil {
+			_ = st.Close()
+			return nil, err
+		}
+		st.WriteThrough(daemon.Writes(d, home, st.Self()))
 	}
 	return st, nil
 }

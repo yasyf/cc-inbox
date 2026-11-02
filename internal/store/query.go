@@ -477,12 +477,7 @@ func (s *Store) Cursor(ctx context.Context, name, drive string) (int64, bool, er
 }
 
 func (s *Store) SetCursor(ctx context.Context, name, drive string, seq int64) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) VALUES (?, ?, ?)
-ON CONFLICT (name, drive) DO UPDATE SET seq = MAX(seq, excluded.seq)`, name, drive, seq)
-	if err != nil {
-		return fmt.Errorf("write cursor %s: %w", name, err)
-	}
-	return nil
+	return s.MoveCursors(ctx, []CursorMove{{Name: name, Drive: drive, Seq: seq}})
 }
 
 // CursorPeak is the furthest seq cursor name reached in any drive: every
@@ -498,12 +493,7 @@ func (s *Store) CursorPeak(ctx context.Context, name string) (int64, error) {
 // MoveCursor sets a cursor to seq exactly, backwards included, so a reader
 // that restarts replays from the point it last committed.
 func (s *Store) MoveCursor(ctx context.Context, name, drive string, seq int64) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) VALUES (?, ?, ?)
-ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, name, drive, seq)
-	if err != nil {
-		return fmt.Errorf("move cursor %s: %w", name, err)
-	}
-	return nil
+	return s.MoveCursors(ctx, []CursorMove{{Name: name, Drive: drive, Seq: seq, Exact: true}})
 }
 
 // CursorMove is one cursor write a reader owes once its output reached the
@@ -522,25 +512,8 @@ func (s *Store) MoveCursors(ctx context.Context, moves []CursorMove) error {
 	if len(moves) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("move cursors: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, m := range moves {
-		set := "MAX(seq, excluded.seq)"
-		if m.Exact {
-			set = "excluded.seq"
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) VALUES (?, ?, ?)
-ON CONFLICT (name, drive) DO UPDATE SET seq = `+set, m.Name, m.Drive, m.Seq); err != nil {
-			return fmt.Errorf("move cursor %s: %w", m.Name, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("move cursors: %w", err)
-	}
-	return nil
+	_, err := s.Commit(ctx, Write{Cursors: moves})
+	return err
 }
 
 const inferredRoles = "('', 'root', 'lane', 'agent', 'session')"
@@ -598,18 +571,8 @@ func LaneMail(k PeerKey, b Binding) Filter {
 // starts its cursor before the first record addressed to that lane, so the
 // lane reads what was posted to it before it started.
 func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, started time.Time) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("bind lane: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := s.bindLane(ctx, tx, k, drive, lane, started); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("bind lane: %w", err)
-	}
-	return nil
+	_, err := s.Commit(ctx, Write{Bind: &LaneBinding{Key: k, Drive: drive, Lane: lane, Started: started}})
+	return err
 }
 
 func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string, started time.Time) error {

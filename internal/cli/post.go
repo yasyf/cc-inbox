@@ -234,6 +234,12 @@ func newPostCmd() *cobra.Command {
 				bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
 			}
 			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
+			if errors.Is(err, store.ErrUnconfirmed) {
+				if os.Getenv(unsentEnv) != "" {
+					return &BusDown{Cause: err}
+				}
+				return keepWrite(store.Write{Bind: bind, Records: records, TTL: ttl, At: at}, err)
+			}
 			if err != nil {
 				return err
 			}

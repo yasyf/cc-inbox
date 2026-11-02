@@ -22,7 +22,9 @@ const (
 	unsentEnv   = "CCI_UNSENT"
 	unsentDir   = "unsent"
 	refusedExt  = ".refused"
+	writeExt    = ".write"
 	drainBound  = 30 * time.Second
+	stallGrace  = 2 * time.Second
 	BusDownExit = 75
 )
 
@@ -36,8 +38,11 @@ type BusDown struct {
 }
 
 func (e *BusDown) Error() string {
-	if e.Path == "" {
+	switch {
+	case e.Path == "":
 		return fmt.Sprintf("the bus is down, this post was NOT stored: %v", e.Cause)
+	case errors.Is(e.Cause, store.ErrUnconfirmed):
+		return fmt.Sprintf("the daemon did not confirm this post, which may or may not be stored: %v; it is kept at %s and the next cci post that reaches the bus stores it unless it already landed", e.Cause, e.Path)
 	}
 	return fmt.Sprintf("the bus is down, this post was NOT stored yet: %v; it is kept at %s and the next cci post that reaches the bus stores it", e.Cause, e.Path)
 }
@@ -54,7 +59,7 @@ type unsent struct {
 
 func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithCancel(cmd.Context())
+		ctx, cancel := context.WithTimeout(cmd.Context(), postPatience)
 		defer cancel()
 		cmd.SetContext(ctx)
 		done := make(chan error, 1)
@@ -69,7 +74,7 @@ func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, 
 				return err
 			}
 			cause = err
-		case <-time.After(postPatience):
+		case <-time.After(postPatience + stallGrace):
 			cancel()
 			cause = fmt.Errorf("the store did not answer within %s", postPatience)
 		}
@@ -116,6 +121,28 @@ func keepUnsent(cmd *cobra.Command, args []string, cause error) error {
 	return &BusDown{Cause: cause, Path: path}
 }
 
+func keepWrite(w store.Write, cause error) error {
+	home, err := store.Home()
+	if err != nil {
+		return errors.Join(&BusDown{Cause: cause}, err)
+	}
+	body, err := json.Marshal(w)
+	if err != nil {
+		return errors.Join(&BusDown{Cause: cause}, err)
+	}
+	path := filepath.Join(home, unsentDir, fmt.Sprintf("%d%s", time.Now().UnixNano(), writeExt))
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return errors.Join(&BusDown{Cause: cause}, err)
+	}
+	if err := os.WriteFile(path+".tmp", body, 0o600); err != nil {
+		return errors.Join(&BusDown{Cause: cause}, err)
+	}
+	if err := os.Rename(path+".tmp", path); err != nil {
+		return errors.Join(&BusDown{Cause: cause}, err)
+	}
+	return &BusDown{Cause: cause, Path: path}
+}
+
 func rebuiltArgs(cmd *cobra.Command, args []string) []string {
 	out := []string{cmd.Name()}
 	cmd.Flags().Visit(func(f *pflag.Flag) {
@@ -146,6 +173,10 @@ func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
+	stored, err := drainWrites(ctx, cmd, home)
+	if err != nil {
+		return err
+	}
 	kept, err := filepath.Glob(filepath.Join(home, unsentDir, "*.json"))
 	if err != nil {
 		return err
@@ -155,7 +186,6 @@ func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	stored := 0
 drain:
 	for _, path := range kept {
 		raw, err := os.ReadFile(path) //nolint:gosec // G304: a post this cci home kept while its bus was down.
@@ -199,4 +229,48 @@ drain:
 	}
 	_, err = fmt.Fprintf(cmd.ErrOrStderr(), "cci: stored %d post(s) kept while the bus was down\n", stored)
 	return err
+}
+
+func drainWrites(ctx context.Context, cmd *cobra.Command, home string) (int, error) {
+	kept, err := filepath.Glob(filepath.Join(home, unsentDir, "*"+writeExt))
+	if err != nil || len(kept) == 0 {
+		return 0, err
+	}
+	slices.Sort(kept)
+	ctx, cancel := context.WithTimeout(ctx, drainBound)
+	defer cancel()
+	st, err := connectStore(ctx)
+	if err != nil {
+		return 0, nil
+	}
+	defer func() { _ = st.Close() }()
+	stored := 0
+	for _, path := range kept {
+		raw, err := os.ReadFile(path) //nolint:gosec // G304: a post this cci home kept when the daemon did not confirm it.
+		if err != nil {
+			return stored, err
+		}
+		var w store.Write
+		if err := json.Unmarshal(raw, &w); err != nil {
+			return stored, fmt.Errorf("read the kept post %s: %w", path, err)
+		}
+		_, refused := st.Commit(ctx, w)
+		switch {
+		case refused == nil:
+			stored++
+		case store.Busy(refused), errors.Is(refused, store.ErrUnconfirmed):
+			return stored, nil
+		default:
+			if err := os.WriteFile(path+refusedExt, append(raw, "\n"+refused.Error()+"\n"...), 0o600); err != nil { //nolint:gosec // G703: path is a kept post this cci home globbed under its own unsent directory.
+				return stored, err
+			}
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: the bus refused a kept post: %v; it is at %s\n", refused, path+refusedExt); err != nil {
+				return stored, err
+			}
+		}
+		if err := os.Remove(path); err != nil {
+			return stored, err
+		}
+	}
+	return stored, nil
 }

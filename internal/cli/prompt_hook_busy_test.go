@@ -3,9 +3,11 @@ package cli_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -35,35 +37,47 @@ func TestPromptHookAnswersWithinItsBudgetWhileTheStoreIsHeld(t *testing.T) {
 			}
 			release := tt.hold(t, home)
 			t.Cleanup(release)
-			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
-			defer cancel()
-			hook := exec.CommandContext(ctx, os.Args[0], "hook", "prompt")
-			hook.Env = append(os.Environ(), "CCI_HOME="+home)
-			hook.Stdin = strings.NewReader(`{"session_id":"root","hook_event_name":"UserPromptSubmit","prompt":"ship the fix while the store is busy"}`)
-			start := time.Now()
-			out, err := hook.CombinedOutput()
-			elapsed := time.Since(start)
+			prompt := func(text string) (time.Duration, error) {
+				ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+				defer cancel()
+				hook := exec.CommandContext(ctx, os.Args[0], "hook", "prompt")
+				hook.Env = append(os.Environ(), "CCI_HOME="+home)
+				hook.Stdin = strings.NewReader(`{"session_id":"root","hook_event_name":"UserPromptSubmit","prompt":"` + text + `"}`)
+				start := time.Now()
+				out, err := hook.CombinedOutput()
+				if err != nil {
+					return time.Since(start), fmt.Errorf("%w; output %q", err, out)
+				}
+				return time.Since(start), nil
+			}
+			elapsed, err := prompt("ship the fix while the store is busy")
 			if err != nil {
-				t.Fatalf("prompt hook after %v = %v; output %q", elapsed, err, out)
+				t.Fatalf("prompt hook after %v = %v", elapsed, err)
 			}
 			if elapsed > 5*time.Second {
 				t.Fatalf("prompt hook took %v behind the held store", elapsed)
 			}
-			t.Logf("prompt hook answered in %v while the store was held", elapsed)
+			if kept, _ := filepath.Glob(filepath.Join(home, "prompts", "*.json")); len(kept) != 1 {
+				t.Fatalf("kept prompts = %v, want the one the held store could not take", kept)
+			}
 			release()
-			deadline := time.Now().Add(30 * time.Second)
-			for {
-				records, err := st.Query(t.Context(), store.Filter{Drive: "busy-drive", Kinds: []kinds.Kind{kinds.Owner}})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if len(records) == 1 && records[0].Text == "ship the fix while the store is busy" {
-					return
-				}
-				if len(records) > 1 || time.Now().After(deadline) {
-					t.Fatalf("owner records after the store freed = %+v, want the deferred prompt once", records)
-				}
-				time.Sleep(50 * time.Millisecond)
+			if _, err := prompt("and the next one"); err != nil {
+				t.Fatalf("prompt hook after the store freed = %v", err)
+			}
+			records, err := st.Query(t.Context(), store.Filter{Drive: "busy-drive", Kinds: []kinds.Kind{kinds.Owner}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []string
+			for _, r := range records {
+				got = append(got, r.Text)
+			}
+			slices.Sort(got)
+			if !slices.Equal(got, []string{"and the next one", "ship the fix while the store is busy"}) {
+				t.Fatalf("owner records after the store freed = %q, want the kept prompt and the next one once each", got)
+			}
+			if kept, _ := filepath.Glob(filepath.Join(home, "prompts", "*")); len(kept) != 0 {
+				t.Fatalf("kept prompts after the next prompt = %v, want none", kept)
 			}
 		})
 	}

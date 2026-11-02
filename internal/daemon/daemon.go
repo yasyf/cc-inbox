@@ -16,8 +16,10 @@ import (
 	"github.com/yasyf/daemonkit"
 	daemonversion "github.com/yasyf/daemonkit/version"
 
+	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/mesh"
 	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/pairing"
@@ -32,6 +34,9 @@ const (
 	Schema         daemonkit.Schema = "cci.v1"
 	Addr                            = "127.0.0.1:7377"
 	ImportInterval                  = time.Second
+	// MaintenanceDrive holds the records the daemon writes about the store
+	// itself, such as a migration that held every client open.
+	MaintenanceDrive = "cci"
 )
 
 func Definition() (daemonkit.Daemon, error) {
@@ -51,7 +56,9 @@ func Definition() (daemonkit.Daemon, error) {
 }
 
 type Product struct {
+	home     string
 	st       *store.Store
+	writes   *queue
 	reads    ReadAPI
 	http     *http.Server
 	done     chan struct{}
@@ -103,6 +110,9 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	if err != nil {
 		return nil, err
 	}
+	if m, ok := st.Migrated(); ok {
+		recordMigration(c.Context, st, m)
+	}
 	if err := r.refreshRegistration(c.Context, r.home, st.SchemaFingerprint()); err != nil {
 		slog.Warn("cci daemon cannot refresh mesh registration", "err", err)
 	}
@@ -120,6 +130,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	handler.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	handler.Handle("/", server.New(st, time.Second).Handler())
 	p := &Product{
+		home:   r.home,
 		st:     st,
 		reads:  reads,
 		http:   &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second},
@@ -130,6 +141,8 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	if err != nil {
 		return nil, errors.Join(err, reads.Close(), st.Close())
 	}
+	p.writes = newQueue(st)
+	st.WriteThrough(p.writes)
 	var syncCtx context.Context
 	syncCtx, p.stopSync = context.WithCancel(context.Background())
 	var loops sync.WaitGroup
@@ -169,6 +182,9 @@ func (p *Product) syncImports(ctx context.Context) error {
 	for {
 		if _, err := importer.Refresh(ctx, p.st); err != nil && ctx.Err() == nil {
 			return fmt.Errorf("refresh imports: %w", err)
+		}
+		if err := hook.DrainPrompts(ctx, p.st); err != nil && ctx.Err() == nil {
+			slog.Warn("cci daemon could not record a kept prompt yet", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -234,6 +250,8 @@ func (p *Product) Handle(ctx context.Context, req daemonkit.Request) (daemonkit.
 		return daemonkit.Reply{Body: body}, nil
 	case "addr":
 		return daemonkit.Reply{Body: []byte(Addr)}, nil
+	case OpWrite:
+		return p.write(ctx, req.Body)
 	}
 	return daemonkit.Reply{}, fmt.Errorf("unknown op %q", req.Op)
 }
@@ -254,9 +272,20 @@ func (p *Product) Drain(b daemonkit.Budget) error {
 	defer cancel()
 	select {
 	case <-p.synced:
-		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("drain imports: %w", ctx.Err())
+	}
+	return p.writes.close(ctx)
+}
+
+func recordMigration(ctx context.Context, st *store.Store, m store.Migration) {
+	text := fmt.Sprintf("migrated the store from schema %d to %d in %s, holding every client open behind init.lock meanwhile", m.From, m.To, m.Took.Round(time.Millisecond))
+	if m.From == m.To {
+		text = fmt.Sprintf("built the store's query indexes in %s, holding every client open behind init.lock meanwhile", m.Took.Round(time.Millisecond))
+	}
+	slog.Info("cci daemon migrated the store", "from", m.From, "to", m.To, "took", m.Took)
+	if _, _, err := st.Post(ctx, store.Record{Drive: MaintenanceDrive, Lane: "daemon", Kind: kinds.Note, Text: text, Source: "daemon"}, 0); err != nil {
+		slog.Warn("cci daemon could not record its migration", "err", err)
 	}
 }
 

@@ -263,13 +263,12 @@ const (
 	hookBudget         = 2 * time.Second
 	hookRunBudget      = 6 * time.Second
 	sessionStartBudget = 11 * time.Second
-	deferredBudget     = 10 * time.Minute
 )
 
 func withHookStore(budget time.Duration, fn func(cmd *cobra.Command, st *store.Store, args []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
 		err := runHook(cmd, args, budget, fn)
-		if errors.Is(err, store.ErrNeedsInit) || store.Busy(err) {
+		if errors.Is(err, store.ErrNeedsInit) || store.Busy(err) || errors.Is(err, store.ErrUnconfirmed) {
 			slog.Debug("cci hook skipped a store it could not reach in time", "hook", cmd.Name(), "err", err)
 			return nil
 		}
@@ -298,8 +297,7 @@ func runHook(cmd *cobra.Command, args []string, budget time.Duration, fn func(cm
 }
 
 func newPromptHookCmd() *cobra.Command {
-	var deferred bool
-	cmd := &cobra.Command{
+	return &cobra.Command{
 		Use:  "prompt",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -311,64 +309,43 @@ func newPromptHookCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if deferred {
-				ctx, cancel := context.WithTimeout(cmd.Context(), deferredBudget)
-				defer cancel()
-				return prompt(ctx, p, openStore)
-			}
 			done := make(chan error, 1)
-			go func() { done <- prompt(cmd.Context(), p, connectStore) }()
+			go func() { done <- prompt(cmd.Context(), p) }()
 			select {
 			case err := <-done:
-				if errors.Is(err, store.ErrNeedsInit) || store.Busy(err) {
-					return deferPrompt(payload)
+				if !errors.Is(err, store.ErrNeedsInit) && !store.Busy(err) && !errors.Is(err, store.ErrUnconfirmed) {
+					return err
 				}
-				return err
 			case <-time.After(hookBudget):
 				// The abandoned prompt dies with this process: SQLite rolls back its
-				// open write, and a post it committed first dedups against the retry's.
-				return deferPrompt(payload)
+				// open write, and an owner record the daemon committed first dedups
+				// against the kept prompt's.
 			}
+			home, err := store.Home()
+			if err != nil {
+				return err
+			}
+			return hook.KeepPrompt(home, payload)
 		},
 	}
-	cmd.Flags().BoolVar(&deferred, "deferred", false, "finish a prompt hook that ran past its budget, waiting up to ten minutes for the store")
-	_ = cmd.Flags().MarkHidden("deferred")
-	return cmd
 }
 
-func prompt(ctx context.Context, p hook.Payload, open func(context.Context) (*store.Store, error)) error {
-	st, err := open(ctx)
+func prompt(ctx context.Context, p hook.Payload) error {
+	ctx, cancel := context.WithTimeout(ctx, hookBudget)
+	defer cancel()
+	st, err := connectStore(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	return hook.Prompt(ctx, st, p)
-}
-
-func deferPrompt(payload []byte) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("find cci to defer the prompt: %w", err)
+	if err := hook.Prompt(ctx, st, p); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("%w: %w", store.ErrBusy, err)
+		}
+		return err
 	}
-	in, err := os.CreateTemp("", "cci-prompt-*.json")
-	if err != nil {
-		return fmt.Errorf("stage deferred prompt: %w", err)
+	if err := hook.DrainPrompts(ctx, st); err != nil {
+		slog.Debug("cci prompt hook left kept prompts for the daemon", "err", err)
 	}
-	defer func() { _ = in.Close() }()
-	if err := os.Remove(in.Name()); err != nil {
-		return fmt.Errorf("stage deferred prompt: %w", err)
-	}
-	if _, err := in.Write(payload); err != nil {
-		return fmt.Errorf("stage deferred prompt: %w", err)
-	}
-	if _, err := in.Seek(0, io.SeekStart); err != nil {
-		return fmt.Errorf("stage deferred prompt: %w", err)
-	}
-	c := exec.Command(exe, "hook", "prompt", "--deferred") //nolint:gosec // G204: this cci binary, rerun off the prompt path.
-	c.Stdin = in
-	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	if err := c.Start(); err != nil {
-		return fmt.Errorf("defer prompt: %w", err)
-	}
-	return c.Process.Release()
+	return nil
 }
