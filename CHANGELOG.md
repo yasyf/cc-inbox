@@ -89,6 +89,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cci hook prompt --deferred`, which records the root's owner ruling once
   the store frees, so a prompt no longer waits out the hook's 10-second
   timeout.
+- A `stand-down` record stands down only its first `--to` lane. The lanes it
+  copies, a successor it hands work to included, stay live in `cci who` and
+  `cci who --successor-of`, which now names the stand-down's seq as `record`.
+  Root copies most stand-downs to the lanes that act on them, so every copied
+  lane read as stood down (board-refresher-6 and mq-health-9 on Nov 1).
 - A new lane's hook mail delivers records addressed to `all` only from the
   lane's spawn on. Its direct records still start at the oldest one waiting
   for it, so a lane spawned onto an old order no longer replays every

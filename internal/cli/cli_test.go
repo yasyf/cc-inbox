@@ -1640,9 +1640,11 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if err != nil || !strings.Contains(out, `"to":["desk-1","desk-2","desk-3"]`) {
 		t.Fatalf("go to a stood-down lane = %q, %v; want it addressed to every successor", out, err)
 	}
-	if out, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json"); err != nil || !strings.Contains(out, `"to":["desk-1"]`) {
+	out, err = run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json")
+	if err != nil || !strings.Contains(out, `"to":["desk-1"]`) {
 		t.Fatalf("a stand-down is forwarded = %q, %v", out, err)
 	}
+	again := seqOf(t, out)
 	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
 	if err != nil {
 		t.Fatal(err)
@@ -1663,12 +1665,56 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if out, err := run(t, "who", "--successor-of", "desk-2"); err != nil || out != "desk-3\n" {
 		t.Fatalf("who --successor-of desk-2 = %q, %v", out, err)
 	}
-	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"successor":"","chain":[]}`+"\n" {
+	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"record":`+again+`,"successor":"","chain":[]}`+"\n" {
 		t.Fatalf("who --successor-of desk-1 after a stand-down naming none = %q, %v", out, err)
 	}
 	if out, err := run(t, "who", "--successor-of", "desk-3", "--json"); err != nil || out != `{"drive":"d","lane":"desk-3","stood_down":false,"successor":"","chain":[]}`+"\n" {
 		t.Fatalf("who --successor-of desk-3 = %q, %v", out, err)
 	}
+}
+
+func TestAStandDownStandsDownOnlyItsFirstToLane(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	var posted []string
+	for _, args := range [][]string{
+		{"--to", "board-refresher-5", "--successor", "board-refresher-6"},
+		{"--to", "options-1", "--to", "board-refresher-6", "--to", "drive-watchdog"},
+	} {
+		out, err := run(t, append([]string{"post", "--lane", "root", "--kind", "stand-down", "--text", "stand down", "--json"}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		posted = append(posted, out)
+	}
+	handed, copied := seqOf(t, posted[0]), seqOf(t, posted[1])
+	for lane, want := range map[string]string{
+		"board-refresher-5": `{"drive":"d","lane":"board-refresher-5","stood_down":true,"record":` + handed + `,"successor":"board-refresher-6","chain":["board-refresher-6"]}`,
+		"board-refresher-6": `{"drive":"d","lane":"board-refresher-6","stood_down":false,"successor":"","chain":[]}`,
+		"options-1":         `{"drive":"d","lane":"options-1","stood_down":true,"record":` + copied + `,"successor":"","chain":[]}`,
+		"drive-watchdog":    `{"drive":"d","lane":"drive-watchdog","stood_down":false,"successor":"","chain":[]}`,
+	} {
+		if out, err := run(t, "who", "--successor-of", lane, "--json"); err != nil || out != want+"\n" {
+			t.Errorf("who --successor-of %s = %q, %v; want %s", lane, out, err, want)
+		}
+	}
+}
+
+func seqOf(t *testing.T, posted string) string {
+	t.Helper()
+	var r struct{ Seq int64 }
+	if err := json.Unmarshal([]byte(posted), &r); err != nil || r.Seq == 0 {
+		t.Fatalf("posted %q: %v", posted, err)
+	}
+	return strconv.FormatInt(r.Seq, 10)
 }
 
 func TestALaneThatRegistersByPostingReadsMailSentBeforeItStarted(t *testing.T) {
