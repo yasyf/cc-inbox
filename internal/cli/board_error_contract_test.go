@@ -64,7 +64,8 @@ func boardOriginalErrorControl(t *testing.T, twoDrives bool) {
 		budget = value
 	}
 	argv := func(kinds ...string) []string {
-		args := []string{"cci", "tail", "--drive", "a", "--since-seq", "0", "--json", "--budget", budget}
+		args := make([]string, 0, 9+len(kinds))
+		args = append(args, "cci", "tail", "--drive", "a", "--since-seq", "0", "--json", "--budget", budget)
 		for _, kind := range kinds {
 			args = append(args, "--kind="+kind)
 		}

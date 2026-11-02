@@ -86,14 +86,14 @@ func BoardRecordsHandler(st *store.Store, home string) (*BoardHTTP, error) {
 			selection := store.BoardSelection{PRs: boardStrings(request.PRs), RowIDs: boardStrings(request.RowIDs)}
 			var encoded []byte
 			err = index.Read(r.Context(), &requestView, spec, selection, func(snapshot *store.BoardSnapshot, result *store.BoardResult) error {
-				annotate := func(category *store.BoardCategory) {
+				annotate := func(ctx context.Context, category *store.BoardCategory) {
 					if category.Error == nil {
-						category.Error = inbox.Annotate(r.Context(), snapshot, category.Records)
+						category.Error = inbox.Annotate(ctx, snapshot, category.Records)
 					}
 				}
-				annotate(&result.Rulings)
-				annotate(&result.Withdrawals)
-				annotate(&result.Reviews)
+				annotate(r.Context(), &result.Rulings)
+				annotate(r.Context(), &result.Withdrawals)
+				annotate(r.Context(), &result.Reviews)
 				var rulingError error
 				if result.Rulings.Error != nil || result.Withdrawals.Error != nil {
 					result.ErrorReplay = true
