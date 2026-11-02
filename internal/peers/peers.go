@@ -292,7 +292,7 @@ func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]
 			}
 			return 1
 		}
-		return strings.Compare(b.lastSeen().Format(time.RFC3339Nano), a.lastSeen().Format(time.RFC3339Nano))
+		return strings.Compare(b.LastSeen().Format(time.RFC3339Nano), a.LastSeen().Format(time.RFC3339Nano))
 	})
 	return views, nil
 }
@@ -342,7 +342,8 @@ func (f Filter) matches(v View) bool {
 		(q == "" || strings.Contains(strings.ToLower(strings.Join(append([]string{v.Name, v.Description, v.Branch, v.Lane, v.Drive, v.Cwd}, v.Tags...), " ")), q))
 }
 
-func (v View) lastSeen() time.Time {
+// LastSeen is the newer of the peer's last sighting and its last status.
+func (v View) LastSeen() time.Time {
 	if v.StatusAt.After(v.SeenAt) {
 		return v.StatusAt
 	}
@@ -381,11 +382,11 @@ func (v View) Line(now time.Time) string {
 	}
 	switch {
 	case !v.Live:
-		fmt.Fprintf(&b, " gone, last seen %s", render.Stamp(v.lastSeen(), now))
+		fmt.Fprintf(&b, " gone, last seen %s", render.Stamp(v.LastSeen(), now))
 	case v.Status != "":
-		fmt.Fprintf(&b, " %s %s", v.Status, age(now.Sub(v.lastSeen())))
+		fmt.Fprintf(&b, " %s %s", v.Status, age(now.Sub(v.LastSeen())))
 	default:
-		fmt.Fprintf(&b, " seen %s", age(now.Sub(v.lastSeen())))
+		fmt.Fprintf(&b, " seen %s", age(now.Sub(v.LastSeen())))
 	}
 	if v.Description != "" {
 		fmt.Fprintf(&b, " %q", v.Description)
