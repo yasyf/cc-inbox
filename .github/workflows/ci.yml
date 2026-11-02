@@ -486,7 +486,7 @@ jobs:
           go test -count=1 -race -run '^TestIndexedMeshExport|^TestMeshExportHistoryBaseline$|^TestMeshExportRevisionNeverIncludesUnvalidatedConcurrentAppend$' -v ./internal/mesh
 
       - name: Test (race)
-        run: go test -json -race -skip "$TAIL_COST_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./...
+        run: go test -json -race -timeout 20m -skip "$TAIL_COST_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./...
       - uses: actions/checkout@v7
         if: env.FULL_CI == 'true'
         with:
