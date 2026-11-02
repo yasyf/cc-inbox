@@ -876,6 +876,7 @@ func TestAnnounceMeWho(t *testing.T) {
 		{[]string{"who", "--all", "--session", "bbbb"}, []string{"sole-51 session"}},
 		{[]string{"who", "--all", "-q", "discovery"}, []string{"- root drive=release-v3"}},
 		{[]string{"who", "--all", "--role", "watcher"}, []string{"no matching peers"}},
+		{[]string{"who", "--since", "1h"}, []string{"- root drive=release-v3"}},
 	}
 	for _, tt := range tests {
 		out, err := run(t, tt.args...)
@@ -889,8 +890,17 @@ func TestAnnounceMeWho(t *testing.T) {
 		}
 	}
 	out, err = run(t, "who", "--all", "--json", "--session", "aaaa")
-	if err != nil || !strings.Contains(out, `"env":{"ORCA_LAUNCH_RUN":"run_7"}`) || !strings.Contains(out, `"tags":["mesh","cci"]`) {
-		t.Fatalf("who --json = %q, %v", out, err)
+	if err != nil || strings.Contains(out, `"env"`) || !strings.Contains(out, `"tags":["mesh","cci"]`) {
+		t.Fatalf("who --json = %q, %v; want the tags and no env", out, err)
+	}
+	if out, err := run(t, "who", "--all", "--json", "--session", "aaaa", "--fields", "env,tags"); err != nil || out != `{"env":{"ORCA_LAUNCH_RUN":"run_7"},"tags":["mesh","cci"]}`+"\n" {
+		t.Fatalf("who --json --fields env,tags = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--json", "--fields", "lane,nope"); err == nil || !strings.Contains(err.Error(), "no peer key nope") {
+		t.Fatalf("who --fields lane,nope = %q, %v; want the unknown key named", out, err)
+	}
+	if out, err := run(t, "who", "--since", "#1"); err == nil || !strings.Contains(err.Error(), "sessions have no seq") {
+		t.Fatalf("who --since #1 = %q, %v; want a seq refused", out, err)
 	}
 }
 

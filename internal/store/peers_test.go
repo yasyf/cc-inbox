@@ -55,7 +55,7 @@ func TestAnnounceWithoutDriveIsNotABinding(t *testing.T) {
 	if _, ok, err := st.Binding(ctx, store.PeerKey{Session: "s2"}); err != nil || ok {
 		t.Fatalf("Binding(announced only) = %v %v, want unbound", ok, err)
 	}
-	peers, err := st.Peers(ctx)
+	peers, err := st.Peers(ctx, store.PeerQuery{All: true})
 	if err != nil || len(peers) != 1 || peers[0].Session != "s2" || peers[0].Drive != "" {
 		t.Fatalf("Peers() = %+v, %v", peers, err)
 	}
@@ -154,7 +154,7 @@ func TestAgentsAreDistinctPeers(t *testing.T) {
 	if err := st.BindLane(ctx, web, "d", "web", clock.Now()); err != nil {
 		t.Fatal(err)
 	}
-	all, err := st.Peers(ctx)
+	all, err := st.Peers(ctx, store.PeerQuery{All: true})
 	if err != nil || len(all) != 3 {
 		t.Fatalf("Peers() = %+v, %v; want root and two agents", all, err)
 	}
