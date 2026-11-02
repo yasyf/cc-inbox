@@ -56,7 +56,7 @@ func TestGrepMatchesPagedOutput(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/json=%t", tt.name, asJSON), func(t *testing.T) {
 				pattern := regexp.MustCompile(tt.pattern)
 				var got, want bytes.Buffer
-				if err := Grep(ctx, st, tt.filter, pattern, tt.limit, tt.budget, asJSON, &got); err != nil {
+				if err := Grep(ctx, st, tt.filter, pattern, tt.limit, tt.budget, asJSON, &got, nil); err != nil {
 					t.Fatal(err)
 				}
 				if err := pagedGrep(ctx, st, tt.filter, pattern, tt.limit, tt.budget, asJSON, &want); err != nil {
@@ -155,7 +155,7 @@ func TestGrepPreservesReadErrorOutput(t *testing.T) {
 				for _, budget := range []int{1, 6144, 1 << 20} {
 					var got, want bytes.Buffer
 					pattern := regexp.MustCompile("REVIEW")
-					gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, budget, asJSON, &got)
+					gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, budget, asJSON, &got, nil)
 					wantErr := pagedGrep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, budget, asJSON, &want)
 					if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() || !strings.Contains(gotErr.Error(), wantError) {
 						t.Fatalf("budget=%d errors got %v, want %v with %q", budget, gotErr, wantErr, wantError)
@@ -190,7 +190,7 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 	}
 	var got, want bytes.Buffer
 	pattern := regexp.MustCompile("REVIEW")
-	gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, 1<<20, false, &got)
+	gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, 1<<20, false, &got, nil)
 	wantErr := pagedGrep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, 1<<20, false, &want)
 	if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() || !strings.Contains(gotErr.Error(), fmt.Sprintf("decode refs of #%d:", reply.Seq)) {
 		t.Fatalf("selected annotation errors got %v, want %v", gotErr, wantErr)
@@ -242,7 +242,7 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 				t.Fatal(err)
 			}
 			var out bytes.Buffer
-			err = Grep(ctx, st, store.Filter{Drive: "d"}, regexp.MustCompile("REVIEW"), 0, 1<<20, false, &out)
+			err = Grep(ctx, st, store.Filter{Drive: "d"}, regexp.MustCompile("REVIEW"), 0, 1<<20, false, &out, nil)
 			if err == nil {
 				t.Fatal("corrupt selected reply did not return an error")
 			}

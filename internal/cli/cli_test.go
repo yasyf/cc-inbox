@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1740,5 +1741,51 @@ func TestPostReplyAddressesTheLaneThatWroteTheRecordItAnswers(t *testing.T) {
 	}
 	if got := post("--lane", "lane-a", "--kind", "note", "--to", "desk-runner,lane-a", "--text", "pushed a new head"); !reflect.DeepEqual(got.To, []string{"desk-runner", "lane-a"}) {
 		t.Errorf("a record to another lane and itself is addressed to %v", got.To)
+	}
+}
+
+func TestAPipedReadStillShowsWhatItsBudgetCutOnStderr(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "piped", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 40 {
+		if _, err := run(t, "post", "--lane", "api", "--kind", "state", "--text", fmt.Sprintf("ASK step %02d %s", i, strings.Repeat("x", 120))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	piped := func(args ...string) (string, string) {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stderr bytes.Buffer
+		root := cli.NewRootCmd()
+		root.SetOut(w)
+		root.SetErr(&stderr)
+		root.SetArgs(args)
+		runErr := root.Execute()
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		out, err := io.ReadAll(r)
+		if err != nil || runErr != nil {
+			t.Fatal(err, runErr)
+		}
+		return string(out), stderr.String()
+	}
+	out, stderr := piped("tail", "--drive", "piped", "--since-seq", "0", "--oldest", "--budget", "1000")
+	if !strings.Contains(out, "more; resume with --since") || !strings.Contains(stderr, "more; resume with --since") {
+		t.Fatalf("a piped tail cut by its budget left stderr %q; stdout:\n%s", stderr, out)
+	}
+	out, stderr = piped("grep", "--drive", "piped", "-n", "1", "ASK step")
+	if !strings.Contains(out, "... 39 more matches") || stderr != "... 39 more matches; narrow with --kind, --lane or --since\n" {
+		t.Fatalf("a piped grep cut by its limit left stderr %q; stdout:\n%s", stderr, out)
+	}
+	whole, quiet := piped("tail", "--drive", "piped", "--since-seq", "0", "--budget", "4000000")
+	if quiet != "" || !strings.Contains(whole, "ASK step 39") {
+		t.Fatalf("a piped tail that fits wrote stderr %q", quiet)
 	}
 }

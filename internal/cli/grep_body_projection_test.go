@@ -133,7 +133,7 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 			if wantCode != test.code {
 				t.Fatalf("immutable CLI exit=%d, want=%d; stderr=%s", wantCode, test.code, wantErr)
 			}
-			if !bytes.Equal(gotOut, wantOut) || !bytes.Equal(gotErr, wantErr) || gotCode != wantCode {
+			if !bytes.Equal(gotOut, wantOut) || !pipedStderrMatches(gotOut, gotErr, wantErr) || gotCode != wantCode {
 				t.Fatalf("CLI parity code=%d/%d stdout=%q/%q stderr=%q/%q", gotCode, wantCode, gotOut, wantOut, gotErr, wantErr)
 			}
 		})
@@ -176,4 +176,8 @@ CASE WHEN n=1 THEN ? ELSE '{"payload":"tiny"}' END,'post','body-history-'||n FRO
 		t.Fatal(err)
 	}
 	return db, body
+}
+
+func pipedStderrMatches(out, got, want []byte) bool {
+	return bytes.Equal(got, want) || len(want) == 0 && bytes.HasSuffix(out, got)
 }

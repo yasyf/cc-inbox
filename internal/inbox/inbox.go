@@ -149,25 +149,26 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	res, shortened := t.res, t.shortened
 	var notes []string
-	trailer := func(s string) {
-		if opts.JSON {
+	trailer := func(s string, cut bool) {
+		if opts.JSON || cut && opts.Notes != nil {
 			notes = append(notes, s)
-			return
 		}
-		b.Trailer(s)
+		if !opts.JSON {
+			b.Trailer(s)
+		}
 	}
 	if t.first > 0 && !opts.JSON {
 		first := "to " + f.For
 		if f.For == "" {
 			first = "from root"
 		}
-		trailer(fmt.Sprintf("... %d %s first", t.first, first))
+		trailer(fmt.Sprintf("... %d %s first", t.first, first), false)
 	}
 	if cut > 0 {
-		trailer(fmt.Sprintf("... CUT %d older records before %s; --oldest reads them first", cut, records[0].Name()))
+		trailer(fmt.Sprintf("... CUT %d older records before %s; --oldest reads them first", cut, records[0].Name()), true)
 	}
 	if shortened > 0 {
-		trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold))
+		trailer(fmt.Sprintf("... %d resolved records cut to %d characters; cci show <seq> prints one whole, --all prints them whole", shortened, opts.Fold), false)
 	}
 	rest := f
 	rest.Limit = 0
@@ -194,7 +195,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		if opts.Open {
 			upTo = "up to "
 		}
-		trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume))
+		trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume), true)
 	}
 	if opts.Cursor != "" && res.Last != f.After {
 		if err := st.SetCursor(ctx, opts.Cursor, f.Drive, res.Last); err != nil {
@@ -369,7 +370,7 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 	return a, nil
 }
 
-func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w io.Writer) error {
+func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w, notes io.Writer) error {
 	query := st.QueryText
 	if asJSON {
 		query = st.Query
@@ -442,7 +443,13 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		b.Trailer(fmt.Sprintf("no records on %s match; store head #%d", f.Drive, head))
 	}
 	if matched > printed {
-		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
+		more := fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed)
+		b.Trailer(more)
+		if notes != nil {
+			if _, err := fmt.Fprintln(notes, more); err != nil {
+				return fmt.Errorf("write grep: %w", err)
+			}
+		}
 	}
 	return nil
 }
