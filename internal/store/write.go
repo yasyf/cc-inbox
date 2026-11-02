@@ -55,6 +55,17 @@ func (s *Store) WriteThrough(w Writer) {
 	s.writer = w
 }
 
+// Dedicated opens another handle on s's database for one writer, whose lock
+// waits give up after busy so that CommitAll retries them under the caller's
+// context instead of SQLite's busy timeout.
+func (s *Store) Dedicated(busy time.Duration) (*Store, error) {
+	db, err := sql.Open("sqlite", storeDSN(s.home, int(busy.Milliseconds())))
+	if err != nil {
+		return nil, fmt.Errorf("open writer: %w", err)
+	}
+	return &Store{db: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now}, nil
+}
+
 // Commit applies w in one transaction, through the store's Writer when it
 // has one.
 func (s *Store) Commit(ctx context.Context, w Write) (Written, error) {
@@ -86,7 +97,13 @@ func (s *Store) CommitAll(ctx context.Context, ws []Write) ([]Written, []error) 
 		return make([]Written, len(ws)), errs
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
+	for Busy(err) && ctx.Err() == nil {
+		tx, err = s.db.BeginTx(ctx, nil)
+	}
 	if err != nil {
+		if ctx.Err() != nil {
+			return failAll(fmt.Errorf("%w: begin write: %w", ErrBusy, err))
+		}
 		return failAll(fmt.Errorf("begin write: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()

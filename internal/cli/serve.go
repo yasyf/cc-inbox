@@ -309,8 +309,9 @@ func newPromptHookCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			at := time.Now()
 			done := make(chan error, 1)
-			go func() { done <- prompt(cmd.Context(), p) }()
+			go func() { done <- prompt(cmd.Context(), p, at) }()
 			select {
 			case err := <-done:
 				if !errors.Is(err, store.ErrNeedsInit) && !store.Busy(err) && !errors.Is(err, store.ErrUnconfirmed) {
@@ -325,12 +326,12 @@ func newPromptHookCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return hook.KeepPrompt(home, payload)
+			return hook.KeepPrompt(home, payload, at)
 		},
 	}
 }
 
-func prompt(ctx context.Context, p hook.Payload) error {
+func prompt(ctx context.Context, p hook.Payload, at time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, hookBudget)
 	defer cancel()
 	st, err := connectStore(ctx)
@@ -338,7 +339,7 @@ func prompt(ctx context.Context, p hook.Payload) error {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	if err := hook.Prompt(ctx, st, p); err != nil {
+	if err := hook.Prompt(ctx, st, p, at); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("%w: %w", store.ErrBusy, err)
 		}

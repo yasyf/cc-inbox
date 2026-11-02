@@ -47,7 +47,10 @@ func TestQueueCommitsWhatWasQueuedBeforeItCloses(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	q := newQueue(st)
+	q, err := newQueue(st)
+	if err != nil {
+		t.Fatal(err)
+	}
 	release := holdWriter(t, home)
 	done := make(chan committed, 1)
 	q.jobs <- job{ctx: ctx, w: store.Write{Records: []store.Record{{Drive: "d", Lane: "lane-a", Kind: kinds.Note, Text: "queued before the drain"}}, At: time.Now()}, done: done}

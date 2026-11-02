@@ -3,6 +3,7 @@ package hook
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -12,6 +13,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -21,16 +23,30 @@ const (
 	promptsGlob = "*.json"
 )
 
-// KeepPrompt keeps a prompt hook's payload under home for DrainPrompts to
-// record once the store answers, so a prompt the store could not take in the
-// hook's budget is recorded late instead of lost.
-func KeepPrompt(home string, payload []byte) error {
+type keptPrompt struct {
+	Origin  string          `json:"origin"`
+	At      time.Time       `json:"at"`
+	Payload json.RawMessage `json:"payload"`
+}
+
+// KeepPrompt keeps a prompt hook's payload, received at at, under home for
+// DrainPrompts to record once the store answers, so a prompt the store could
+// not take in the hook's budget is recorded late instead of lost.
+func KeepPrompt(home string, payload []byte, at time.Time) error {
+	n, err := node.Load(home)
+	if err != nil {
+		return fmt.Errorf("keep prompt: %w", err)
+	}
+	body, err := json.Marshal(keptPrompt{Origin: n.ID(), At: at, Payload: payload})
+	if err != nil {
+		return fmt.Errorf("keep prompt: %w", err)
+	}
 	dir := filepath.Join(home, promptsDir)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("keep prompt: %w", err)
 	}
-	path := filepath.Join(dir, fmt.Sprintf("%d-%d.json", time.Now().UnixNano(), os.Getpid()))
-	if err := os.WriteFile(path+".tmp", payload, 0o600); err != nil {
+	path := filepath.Join(dir, fmt.Sprintf("%d-%d.json", at.UnixNano(), os.Getpid()))
+	if err := os.WriteFile(path+".tmp", body, 0o600); err != nil {
 		return fmt.Errorf("keep prompt: %w", err)
 	}
 	if err := os.Rename(path+".tmp", path); err != nil {
@@ -39,11 +55,12 @@ func KeepPrompt(home string, payload []byte) error {
 	return nil
 }
 
-// DrainPrompts records every prompt KeepPrompt kept for st's home, oldest
-// first, and stops at the first one the store cannot take yet. A prompt
-// recorded twice, by two drains or by a drain after a write the daemon did
-// not confirm, deduplicates against the first; a payload Prompt refuses is
-// set aside as .refused.
+// DrainPrompts records every prompt KeepPrompt kept for st's home and node,
+// oldest first, at the time its hook received it, and stops at the first one
+// the store cannot take yet. A prompt recorded twice, by two drains or after a
+// write the daemon did not confirm, deduplicates against the first; one Prompt
+// refuses is set aside as .refused, and one another node kept waits for that
+// node.
 func DrainPrompts(ctx context.Context, st *store.Store) error {
 	kept, err := filepath.Glob(filepath.Join(st.HomeDir(), promptsDir, promptsGlob))
 	if err != nil {
@@ -51,16 +68,23 @@ func DrainPrompts(ctx context.Context, st *store.Store) error {
 	}
 	slices.Sort(kept)
 	for _, path := range kept {
-		raw, err := os.ReadFile(path) //nolint:gosec // G304: a payload KeepPrompt wrote under this store's home.
+		raw, err := os.ReadFile(path) //nolint:gosec // G304: a prompt KeepPrompt kept under this store's home.
 		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		p, err := Read(bytes.NewReader(raw))
+		var k keptPrompt
+		err = json.Unmarshal(raw, &k)
+		if err == nil && k.Origin != st.Self() {
+			continue
+		}
 		if err == nil {
-			err = Prompt(ctx, st, p)
+			var p Payload
+			if p, err = Read(bytes.NewReader(k.Payload)); err == nil {
+				err = Prompt(ctx, st, p, k.At)
+			}
 		}
 		switch {
 		case err == nil:

@@ -360,7 +360,10 @@ func additionalContext(w io.Writer, event, text string) error {
 	})
 }
 
-func Prompt(ctx context.Context, st *store.Store, p Payload) error {
+// Prompt records the root's prompt p as the owner record of its drive,
+// written at at, so a prompt recorded again later at the same time
+// deduplicates against the first.
+func Prompt(ctx context.Context, st *store.Store, p Payload, at time.Time) error {
 	if err := st.Touch(ctx, p.Key()); err != nil {
 		return err
 	}
@@ -376,13 +379,13 @@ func Prompt(ctx context.Context, st *store.Store, p Payload) error {
 	if err != nil {
 		return err
 	}
-	_, _, err = st.Post(ctx, store.Record{
+	_, _, err = st.PostAt(ctx, store.Record{
 		Drive:  b.Drive,
 		Lane:   "owner",
 		Kind:   kinds.Owner,
 		Text:   text,
 		Refs:   store.Refs{Path: path},
 		Source: store.HookSource("root"),
-	}, 0)
+	}, 0, at)
 	return err
 }

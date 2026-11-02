@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -247,6 +248,9 @@ func drainWrites(ctx context.Context, cmd *cobra.Command, home string) (int, err
 	stored := 0
 	for _, path := range kept {
 		raw, err := os.ReadFile(path) //nolint:gosec // G304: a post this cci home kept when the daemon did not confirm it.
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return stored, err
 		}
@@ -268,7 +272,7 @@ func drainWrites(ctx context.Context, cmd *cobra.Command, home string) (int, err
 				return stored, err
 			}
 		}
-		if err := os.Remove(path); err != nil {
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return stored, err
 		}
 	}

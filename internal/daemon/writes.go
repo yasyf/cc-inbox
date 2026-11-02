@@ -27,6 +27,7 @@ const (
 	queueDepth  = 256
 	batchLimit  = 64
 	commitGrace = 2 * time.Second
+	lockWait    = 250 * time.Millisecond
 )
 
 // WriteRequest is one client's Write for the store at Home, written as the
@@ -53,13 +54,20 @@ type queue struct {
 	jobs    chan job
 	mu      sync.RWMutex
 	closed  bool
+	ctx     context.Context
+	cancel  context.CancelFunc
 	stopped chan struct{}
 }
 
-func newQueue(st *store.Store) *queue {
-	q := &queue{st: st, jobs: make(chan job, queueDepth), stopped: make(chan struct{})}
+func newQueue(st *store.Store) (*queue, error) {
+	writer, err := st.Dedicated(lockWait)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	q := &queue{st: writer, jobs: make(chan job, queueDepth), ctx: ctx, cancel: cancel, stopped: make(chan struct{})}
 	go q.run()
-	return q
+	return q, nil
 }
 
 func (q *queue) Commit(ctx context.Context, w store.Write) (store.Written, error) {
@@ -120,12 +128,25 @@ func (q *queue) commit(batch []job) {
 	if len(live) == 0 {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), store.ClientBudget)
+	ctx, cancel := context.WithDeadline(q.ctx, lastTurn(live))
 	defer cancel()
 	written, errs := q.st.CommitAll(ctx, writes)
 	for i, j := range live {
 		j.done <- committed{written: written[i], err: errs[i]}
 	}
+}
+
+func lastTurn(jobs []job) time.Time {
+	var last time.Time
+	for _, j := range jobs {
+		if j.w.StartBy.IsZero() {
+			return time.Now().Add(store.ClientBudget)
+		}
+		if j.w.StartBy.After(last) {
+			last = j.w.StartBy
+		}
+	}
+	return last
 }
 
 func (q *queue) close(ctx context.Context) error {
@@ -135,12 +156,16 @@ func (q *queue) close(ctx context.Context) error {
 		close(q.jobs)
 	}
 	q.mu.Unlock()
+	var late error
 	select {
 	case <-q.stopped:
-		return nil
 	case <-ctx.Done():
-		return fmt.Errorf("drain writes: %w", ctx.Err())
+		late = fmt.Errorf("drain writes: %w", ctx.Err())
+		q.cancel()
+		<-q.stopped
 	}
+	q.cancel()
+	return errors.Join(late, q.st.Close())
 }
 
 func (p *Product) write(ctx context.Context, body []byte) (daemonkit.Reply, error) {

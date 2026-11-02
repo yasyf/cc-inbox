@@ -49,7 +49,7 @@ func texts(t *testing.T, st *store.Store, drive string) []string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var out []string
+	out := make([]string, 0, len(records))
 	for _, r := range records {
 		out = append(out, r.Text)
 	}
@@ -137,7 +137,7 @@ func TestDaemonRecordsAPromptTheHookKept(t *testing.T) {
 	if err := st.Bind(context.Background(), store.PeerKey{Session: "root"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := hook.KeepPrompt(home, []byte(`{"session_id":"root","hook_event_name":"UserPromptSubmit","prompt":"record me once the store answers"}`)); err != nil {
+	if err := hook.KeepPrompt(home, []byte(`{"session_id":"root","hook_event_name":"UserPromptSubmit","prompt":"record me once the store answers"}`), time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	serve(t, home)

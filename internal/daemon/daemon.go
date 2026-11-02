@@ -141,7 +141,9 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	if err != nil {
 		return nil, errors.Join(err, reads.Close(), st.Close())
 	}
-	p.writes = newQueue(st)
+	if p.writes, err = newQueue(st); err != nil {
+		return nil, errors.Join(err, reads.Close(), st.Close())
+	}
 	st.WriteThrough(p.writes)
 	var syncCtx context.Context
 	syncCtx, p.stopSync = context.WithCancel(context.Background())

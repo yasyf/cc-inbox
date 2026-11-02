@@ -59,7 +59,7 @@ func TestCommitAllRollsBackOnlyTheWritesThatFail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var texts []string
+	texts := make([]string, 0, len(records))
 	for _, r := range records {
 		texts = append(texts, r.Text)
 	}
@@ -101,9 +101,9 @@ func TestCommitAppliesHereOnlyWhatItsWriterDidNotTake(t *testing.T) {
 			}))
 			_, _, err := st.Post(ctx, note, 0)
 			switch {
-			case tt.answer == store.ErrUnrouted && err != nil:
+			case errors.Is(tt.answer, store.ErrUnrouted) && err != nil:
 				t.Fatalf("Post() through an unrouted writer = %v, want it applied here", err)
-			case tt.answer != store.ErrUnrouted && err == nil:
+			case !errors.Is(tt.answer, store.ErrUnrouted) && err == nil:
 				t.Fatalf("Post() through a writer that answered %v succeeded", tt.answer)
 			case tt.want != nil && !errors.Is(err, tt.want):
 				t.Fatalf("Post() = %v, want %v", err, tt.want)

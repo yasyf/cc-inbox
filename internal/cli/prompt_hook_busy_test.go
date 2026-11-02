@@ -68,7 +68,7 @@ func TestPromptHookAnswersWithinItsBudgetWhileTheStoreIsHeld(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var got []string
+			got := make([]string, 0, len(records))
 			for _, r := range records {
 				got = append(got, r.Text)
 			}
