@@ -457,7 +457,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--since <point>` | `tail` | Read from a sequence number, duration, local clock time such as `9:00 AM`, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
 | `--oldest` | `tail` | When the budget cuts a text `--since` window, keep its oldest records and end with a resume trailer, as `--json` reads always do so a pager can follow the trailer. By default the window keeps its newest records and ends with `... CUT <n> older records before #<seq>; --oldest reads them first`. |
 | `-n`, `--limit <count>` | `tail`, `grep` | Print only the newest `count` matching records, oldest first for `tail` and newest first for `grep`, as `tail -n` does. `tail` advances its cursor to the newest record printed. |
-| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. |
+| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. When stdout is a pipe or a file, a text `tail` or `grep` that the budget or `-n` cuts also prints its `... more` or `... CUT` trailer on stderr, so `cci tail \| grep ASK` still shows the cut. |
 | `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width. Records print whole by default. JSON ignores it. |
 
 Broadcasts have an empty `to` list or one that names `all`. With `--reader`, kind,

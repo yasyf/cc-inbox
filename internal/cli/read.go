@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -73,7 +75,7 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 	if err != nil {
 		return err
 	}
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: cmd.ErrOrStderr()}, cmd.OutOrStdout())
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(cmd, f.rf.json)}, cmd.OutOrStdout())
 	if err != nil || name == "" || !resumed || f.rf.limit > 0 {
 		return err
 	}
@@ -231,7 +233,7 @@ func newGrepCmd() *cobra.Command {
 				return err
 			}
 			f.IncludeExpired = true
-			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.json, cmd.OutOrStdout())
+			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.json, cmd.OutOrStdout(), tailNotes(cmd, false))
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
@@ -288,4 +290,19 @@ func newStateCmd() *cobra.Command {
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
 	return cmd
+}
+
+func tailNotes(cmd *cobra.Command, asJSON bool) io.Writer {
+	if asJSON {
+		return cmd.ErrOrStderr()
+	}
+	out, ok := cmd.OutOrStdout().(*os.File)
+	if !ok {
+		return nil
+	}
+	info, err := out.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice != 0 {
+		return nil
+	}
+	return cmd.ErrOrStderr()
 }

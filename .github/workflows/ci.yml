@@ -714,9 +714,34 @@ jobs:
           test -L plugin/bin/cci
           tail -n +2 plugin/descriptor/cci.binrun.tmpl | sed -E 's/__SIZE_[A-Z0-9_]+__/1/g' | jq -e '.platforms | length == 4'
 
+  pack-readers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+      - uses: actions/checkout@v7
+        with:
+          repository: yasyf/cc-skills
+          ref: main
+          path: .ci-pack
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: astral-sh/setup-uv@v8.2.0
+      - name: Build this commit's cci
+        run: go build -o "$RUNNER_TEMP/cci" ./cmd/cci
+      - name: The long-running pack's cci readers read every record from this cci
+        env:
+          CCI_BIN: ${{ runner.temp }}/cci
+          PACK_SCRIPTS: ${{ github.workspace }}/.ci-pack/plugins/long-running/skills/long-running/scripts
+        run: uv run --no-project --python 3.14 python .github/scripts/test-pack-readers.py -v
+
   provisioning-candidate:
     name: Prepublication Darwin arm64 provisioning candidate
-    needs: [test, lint, vuln, plugin]
+    needs: [test, lint, vuln, plugin, pack-readers]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

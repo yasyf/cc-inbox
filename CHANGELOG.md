@@ -83,6 +83,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A text `cci tail` or `cci grep` whose stdout is a pipe or a file also prints
+  its `... more` or `... CUT` trailer on stderr, so a cut read piped into
+  `grep` no longer looks complete.
 - A root reader hears `release`, `done` and `blocked` records addressed to it.
   Run `cci subscribe --reader root` again, since a subscription keeps the
   addressed kinds it was made with.
