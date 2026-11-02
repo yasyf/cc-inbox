@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- The cci channel MCP server has a `post` tool that runs `cci post` with the
+  arguments it is given, inside the server, so an agent posts without a Bash
+  call and its shell and hooks. It writes as the window's thread, as a Bash
+  `cci post` does, and resolves relative `--path` and `--body-file` values
+  against an optional `cwd`.
 - A `cci post` the store does not take within 15 seconds, or refuses as
   locked, tells its sender the bus is down and that the post was not stored,
   and exits 75. A post naming `--lane` and `--drive` is kept under

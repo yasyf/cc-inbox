@@ -60,7 +60,8 @@ type unsent struct {
 
 func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		ctx, cancel := context.WithTimeout(cmd.Context(), postPatience)
+		parent := cmd.Context()
+		ctx, cancel := context.WithTimeout(parent, postPatience)
 		defer cancel()
 		cmd.SetContext(ctx)
 		done := make(chan error, 1)
@@ -69,7 +70,7 @@ func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, 
 		select {
 		case err := <-done:
 			if err == nil {
-				return drainUnsent(context.WithoutCancel(ctx), cmd)
+				return drainUnsent(parent, cmd)
 			}
 			if !store.Busy(err) {
 				return err

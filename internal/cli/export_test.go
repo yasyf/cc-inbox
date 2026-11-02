@@ -7,3 +7,5 @@ func SetPostPatience(d time.Duration) func() {
 	postPatience = d
 	return func() { postPatience = was }
 }
+
+var PostTool = postTool

@@ -135,7 +135,7 @@ func newChannelCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return channel.Serve(cmd.Context(), st, window, channelsOn(window.PID), resumed, cmd.InOrStdin(), cmd.OutOrStdout())
+			return channel.Serve(cmd.Context(), st, window, channelsOn(window.PID), resumed, cmd.InOrStdin(), cmd.OutOrStdout(), postTool())
 		}),
 	}
 	cmd.Flags().BoolVar(&resumed, channel.Resumed, false, "stream at once: the cci this replaced already finished the MCP handshake")
