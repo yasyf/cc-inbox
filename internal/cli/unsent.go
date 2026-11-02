@@ -183,17 +183,20 @@ drain:
 		case timedOut, errors.As(err, &exit) && exit.ExitCode() == BusDownExit:
 			break drain
 		default:
-			if err := os.WriteFile(path+refusedExt, append(raw, "\n"+strings.TrimSpace(string(out))+"\n"...), 0o600); err != nil {
+			if err := os.WriteFile(path+refusedExt, append(raw, "\n"+strings.TrimSpace(string(out))+"\n"...), 0o600); err != nil { //nolint:gosec // G703: path is a kept post this cci home globbed under its own unsent directory.
 				return err
 			}
 			if err := os.Remove(path); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "cci: the bus refused a post kept since %s: %s; it is at %s\n", post.At.Local().Format(time.Kitchen), strings.TrimSpace(string(out)), path+refusedExt)
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: the bus refused a post kept since %s: %s; it is at %s\n", post.At.Local().Format(time.Kitchen), strings.TrimSpace(string(out)), path+refusedExt); err != nil {
+				return err
+			}
 		}
 	}
-	if stored > 0 {
-		fmt.Fprintf(cmd.ErrOrStderr(), "cci: stored %d post(s) kept while the bus was down\n", stored)
+	if stored == 0 {
+		return nil
 	}
-	return nil
+	_, err = fmt.Fprintf(cmd.ErrOrStderr(), "cci: stored %d post(s) kept while the bus was down\n", stored)
+	return err
 }
