@@ -40,6 +40,9 @@ lane is replaced, record it once with
 later records addressed to `<old>` reach `<new>` too, `cci who` marks `<old>`
 stood down, and `cci who --successor-of <old> --json` names who stands in.
 A stand-down stands down its first `--to` lane only; the lanes it copies stay live.
+A thread cannot bind a lane another live thread holds until that lane stands
+down: its `cci post` is refused and root hears a `defect`. A numbered successor
+binding beside its live predecessor binds, and root hears the same `defect`.
 
 Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose

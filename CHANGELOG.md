@@ -89,6 +89,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cci hook prompt --deferred`, which records the root's owner ruling once
   the store frees, so a prompt no longer waits out the hook's 10-second
   timeout.
+- `cci post` refuses to bind a thread to a lane another live thread holds,
+  unless that thread is the one it answers to or the lane stood down. It posts
+  nothing, names the holder, and posts root one `defect`. A numbered successor
+  that binds beside its live, never-stood-down predecessor still binds, and
+  root hears the same `defect`. Two sessions ran p8a-step7's work on Oct 31
+  and Nov 1.
 - A `stand-down` record stands down only its first `--to` lane. The lanes it
   copies, a successor it hands work to included, stay live in `cci who` and
   `cci who --successor-of`, which now names the stand-down's seq as `record`.

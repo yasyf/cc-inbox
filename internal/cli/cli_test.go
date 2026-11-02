@@ -1841,3 +1841,76 @@ func TestAPipedReadStillShowsWhatItsBudgetCutOnStderr(t *testing.T) {
 		t.Fatalf("a piped tail that fits wrote stderr %q", quiet)
 	}
 }
+
+func TestASecondThreadCannotBindALiveLane(t *testing.T) {
+	if lane := os.Getenv("CCI_TEST_SECOND_BINDER"); lane != "" {
+		out, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", lane+" up")
+		fmt.Printf("posted=%q err=%v\n", out, err)
+		return
+	}
+	home, config := t.TempDir(), t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := store.PeerKey{Session: "48c3b7bf-holder", Agent: "ap8a-step7"}
+	if _, err := st.Announce(ctx, store.Peer{Session: holder.Session, Agent: holder.Agent, AgentName: "p8a-step7"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, holder, "d", "p8a-step7", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second := func(lane, thread string) string {
+		t.Helper()
+		cmd := exec.Command(os.Args[0], "-test.run=^TestASecondThreadCannotBindALiveLane$", "codex")
+		cmd.Env = append(os.Environ(), "CCI_TEST_SECOND_BINDER="+lane, "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+config, "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CODEX_THREAD_ID="+thread)
+		for _, name := range peers.IdentityEnv {
+			if name != "CODEX_THREAD_ID" {
+				cmd.Env = append(cmd.Env, name+"=")
+			}
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", thread, err, out)
+		}
+		return string(out)
+	}
+	if out := second("p8a-step7", "019a3c3e-duplicate"); !strings.Contains(out, "lane p8a-step7 is held by live thread p8a-step7 48c3b7bf-holder/ap8a-step7") || !strings.Contains(out, `posted=""`) {
+		t.Fatalf("a second thread binding p8a-step7 = %s; want it refused", out)
+	}
+	if out := second("p8a-step7", "019a3c3e-duplicate"); !strings.Contains(out, "is held by live thread") {
+		t.Fatalf("the duplicate's next post = %s; want it refused again", out)
+	}
+	if out := second("p8a-step7-2", "019a3c3e-successor"); !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("p8a-step7-2 beside a live p8a-step7 = %s; want it bound", out)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	for _, name := range peers.IdentityEnv {
+		if name != "CLAUDE_CODE_SESSION_ID" {
+			t.Setenv(name, "")
+		}
+	}
+	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--kind", "defect", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out, `"kind":"defect"`); n != 2 || !strings.Contains(out, "second binder of p8a-step7 refused") || !strings.Contains(out, "p8a-step7-2 bound while its predecessor p8a-step7") || !strings.Contains(out, `"to":["root"]`) {
+		t.Fatalf("defects to root = %s; want one refusal and one successor bounce", out)
+	}
+	if out, err := run(t, "who", "--all", "--lane", "p8a-step7", "--json"); err != nil || strings.Contains(out, "019a3c3e-duplicate") {
+		t.Fatalf("who --lane p8a-step7 = %s, %v; want the refused thread unbound", out, err)
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", "p8a-step7", "--text", "p8a-step7 stands down"); err != nil {
+		t.Fatal(err)
+	}
+	if out := second("p8a-step7", "019a3c3e-duplicate"); !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("a thread binding p8a-step7 after it stood down = %s; want it bound", out)
+	}
+}
