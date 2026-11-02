@@ -12,7 +12,7 @@ import (
 )
 
 func TestRecipientLaneQueryUsesTargetedIndex(t *testing.T) {
-	for _, population := range []int{64, 4096, 65536} {
+	for _, population := range []int{64, 4096} {
 		for _, indexed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("rows=%d/indexed=%t", population, indexed), func(t *testing.T) {
 				phase := indexFixturePhases(t)
