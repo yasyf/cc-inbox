@@ -69,10 +69,12 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			if first == "old" {
 				assertLaneIndexCount(t, st, 0)
 				assertMembershipsInstalled(ctx, t, st, false)
+				assertRootAudienceInstalled(ctx, t, st, false)
 				assertOldFixtureRecord(t, st, initial)
 			} else {
 				assertLaneIndexCount(t, st, len(physicalIndexes))
 				assertMembershipsInstalled(ctx, t, st, true)
+				assertRootAudienceInstalled(ctx, t, st, true)
 			}
 			report, err := MaintainIndexes(ctx, home)
 			if err != nil {
@@ -80,7 +82,7 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			}
 			wantCreated, wantMemberships := 0, 0
 			if first == "old" {
-				wantCreated, wantMemberships = len(physicalIndexes), len(recordMemberships)+len(closerMemberships)
+				wantCreated, wantMemberships = len(physicalIndexes), len(recordMemberships)+len(closerMemberships)+len(rootAudienceObjects)
 			}
 			if len(report.Created) != wantCreated || len(report.Memberships) != wantMemberships {
 				t.Fatalf("maintenance report = %+v, want %d indexes and %d membership objects", report, wantCreated, wantMemberships)
@@ -88,6 +90,8 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			assertLaneIndexCount(t, st, len(physicalIndexes))
 			assertMembershipsInstalled(ctx, t, st, true)
 			assertMembershipsDerived(ctx, t, st)
+			assertRootAudienceInstalled(ctx, t, st, true)
+			assertRootAudienceDerived(ctx, t, st)
 			candidate, _, err := st.Post(ctx, Record{
 				Drive:  "compat",
 				Lane:   "new",

@@ -71,7 +71,7 @@ func TestRootAudienceParentAndWriterTransitions(t *testing.T) {
 				}
 				assertRootAudienceDerived(ctx, t, st)
 			}
-			for _, row := range []struct {
+			for i, row := range []struct {
 				seq, re                 int64
 				drive, lane, recipients string
 			}{
@@ -82,7 +82,7 @@ func TestRootAudienceParentAndWriterTransitions(t *testing.T) {
 				{-2, -1, "d", "worker", `["root", "all"]`},
 				{-1, -1, "foreign", "main", `[]`},
 			} {
-				exec(`INSERT INTO records(seq,drive,lane,kind,at,text,recipients,re,source,hash) VALUES(?,?,?,'note',1,'fixture',?,?,'post',?)`, row.seq, row.drive, row.lane, row.recipients, row.re, fmt.Sprint(row.seq))
+				exec(`INSERT INTO records(seq,drive,lane,kind,at,text,recipients,re,source,hash,origin,origin_seq) VALUES(?,?,?,'note',1,'fixture',?,?,'post',?,'root-audience-fixture',?)`, row.seq, row.drive, row.lane, row.recipients, row.re, fmt.Sprint(row.seq), i+1)
 			}
 			for _, query := range []string{
 				`UPDATE records SET seq=101 WHERE seq=100`,

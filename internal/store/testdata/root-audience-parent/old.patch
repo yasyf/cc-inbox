@@ -1,0 +1,4 @@
+--- a/internal/store/root_audience.go
++++ b/internal/store/root_audience.go
+@@ -35 +34,0 @@
+-	{"index", "record_root_audience_parent", "CREATE INDEX record_root_audience_parent ON records(re)", ""},

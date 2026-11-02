@@ -576,6 +576,20 @@ jobs:
         run: |
           set -euo pipefail
           go test -count=1 -run '^TestRootAudienceNativePlan$' -v ./internal/store
+          root_parent_source="$RUNNER_TEMP/root-parent-source.go"
+          root_parent_old_log="$RUNNER_TEMP/root-parent-old.log"
+          cp internal/store/root_audience.go "$root_parent_source"
+          git apply --unidiff-zero internal/store/testdata/root-audience-parent/old.patch
+          trap 'cp "$root_parent_source" internal/store/root_audience.go' EXIT
+          if go test -count=1 -run '^TestRootAudienceOwnedParentDependency$' -v ./internal/store >"$root_parent_old_log" 2>&1; then
+            cat "$root_parent_old_log"
+            exit 1
+          fi
+          cat "$root_parent_old_log"
+          grep -F 'ROOT_PARENT_DEPENDENCY_REQUIRED' "$root_parent_old_log"
+          cp "$root_parent_source" internal/store/root_audience.go
+          trap - EXIT
+          CCI_ROOT_PARENT_COST=1 go test -count=1 -run '^TestRootAudienceOwnedParent' -v ./internal/store
           old_log="$RUNNER_TEMP/root-audience-old.log"
           current_log="$RUNNER_TEMP/root-audience-current.log"
           test "$(git -C .ci-root-audience-old rev-parse HEAD)" = a7b222539b6b0bf9c24477c597df3e13eed7ec5f

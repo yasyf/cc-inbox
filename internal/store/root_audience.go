@@ -32,6 +32,7 @@ var rootAudienceObjects = [...]physicalObject{
 		"CREATE TABLE record_root_audience (source_seq INTEGER PRIMARY KEY, drive TEXT NOT NULL, kind TEXT NOT NULL, audience INTEGER NOT NULL)",
 		"INSERT INTO record_root_audience (source_seq, drive, kind, audience) " + rootAudienceRows("1"),
 	},
+	{"index", "record_root_audience_parent", "CREATE INDEX record_root_audience_parent ON records(re)", ""},
 	{"index", "record_root_audience_stream", "CREATE INDEX record_root_audience_stream ON record_root_audience(drive, audience, source_seq)", ""},
 	{"index", "record_root_audience_kind_stream", "CREATE INDEX record_root_audience_kind_stream ON record_root_audience(drive, audience, kind, source_seq)", ""},
 	{
