@@ -83,6 +83,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A new lane's hook mail delivers records addressed to `all` only from the
+  lane's spawn on. Its direct records still start at the oldest one waiting
+  for it, so a lane spawned onto an old order no longer replays every
+  broadcast since that order. A teammate whose first `cci post` binds its
+  lane before its hook announces it starts at that post, never at its parent
+  session's process start.
 - A text `cci tail` or `cci grep` whose stdout is a pipe or a file also prints
   its `... more` or `... CUT` trailer on stderr, so a cut read piped into
   `grep` no longer looks complete.

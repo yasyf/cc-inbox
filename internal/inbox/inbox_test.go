@@ -578,3 +578,26 @@ func TestLaneMailDeliversRootRecordsBeforeABacklogFromOtherLanes(t *testing.T) {
 		}
 	}
 }
+
+func TestATeammateBoundBeforeItsAnnounceHearsRecordsToAllOnlyFromItsBind(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	processStarted := c.Now()
+	c.Advance(time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Go, To: []string{"landing"}, Text: "order waiting for the lane"})
+	c.Advance(time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Correction, To: []string{"all"}, Text: "correction before the teammate"})
+	c.Advance(time.Hour)
+	k := store.PeerKey{Session: "s1", Agent: "alanding-2"}
+	if err := st.BindLane(ctx, k, "d", "landing", processStarted); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Correction, To: []string{"all"}, Text: "correction after the bind"})
+	var out bytes.Buffer
+	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.LaneMail(k, store.Binding{Drive: "d", Lane: "landing"}), Cursor: store.LaneCursor(k)}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "order waiting for the lane") || !strings.Contains(got, "correction after the bind") || strings.Contains(got, "correction before the teammate") {
+		t.Fatalf("a teammate bound on its first post replays records to all from its parent's process start, or drops its waiting order:\n%s", got)
+	}
+}
