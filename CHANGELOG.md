@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A `cci post` the store does not take within 15 seconds, or refuses as
+  locked, tells its sender the bus is down and that the post was not stored,
+  and exits 75. A post naming `--lane` and `--drive` is kept under
+  `$CCI_HOME/unsent`, and the next `cci post` that reaches the store stores
+  every kept post, oldest first, and says how many it stored. A kept post the
+  store refuses moves to a `.refused` file beside it, and the post that found
+  it says so. A post that names no `--lane` or `--drive`, or reads stdin, is
+  not kept, and the error says to repost it.
+- A `spawn` kind records a lane's start: the lane as `--lane-ref`, its brief
+  and model as `--attr brief=` and `--attr model=`, and its effort and task id
+  when known. It never expires, unlike the `state` record that carried
+  `SPAWNED <lane>` before, and `cci who` lists the lane as spawned, naming the
+  record, its brief and model, until a thread binds it. `--json` stays peer
+  rows only.
 - A `queue` kind for a pull request's merge-queue state change. It requires
   `--pr` and carries the state in `--outcome`.
 - `service.Writer` posts records to a relay mesh as a scoped service member
@@ -20,9 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lands in `fields.attrs` as `head:<pr>` = `[<was>..]<sha>[ <note>]`, every PR
   joins `refs.prs`, and the text opens with `HEAD <n> PRs: #<pr> <short sha>, ...`.
   The wire format is unchanged, so nodes on older releases keep replicating.
+- `cci who --fields lane,live,seen_at` prints only those keys of each peer
+  with `--json`, and `cci who --since 24h` includes the ended sessions last
+  seen since then, so a supervisor that reads a drive's roster every pass
+  reads only what it needs.
 
 ### Changed
 
+- `cci who --json` leaves out each peer's `env` unless `--fields` names it.
 - `cci claim --for <lane>@<drive>` falls back to the newest ended session
   bound as that lane when none is live, so the runner can record the codex
   lane that started a release build; a codex lane's session never announces a
@@ -83,6 +102,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci who` reads only the registry rows its flags select, checks each
+  process once however many rows name it, and reads a drive's stand-downs in
+  one query, so `cci who --drive <d> --all --json` on a registry of 19,000
+  threads no longer takes over a second of CPU. Every store read also stops
+  re-deriving this node's id from its key on each row.
+- A text `cci tail` or `cci show` numbers each reply once and joins it only to
+  the records it read. A record that resolves 2,084 others had cost 2,084
+  squared name lookups on every page showing any of them, so a 4 MB tail of a
+  lane's blockers took 50 seconds and `cci show` of one such record 9.
+- The `UserPromptSubmit` hook (`cci hook prompt`) answers within two seconds even
+  when another process holds the store's writer or init lock, or a read
+  stalls on disk. Past that budget it hands the prompt to a detached
+  `cci hook prompt --deferred`, which records the root's owner ruling once
+  the store frees, so a prompt no longer waits out the hook's 10-second
+  timeout.
+- The upgrade command for a standalone `cci` runs the new binary once before
+  moving it over the old one, so macOS's first-launch hold, which hung every
+  drive `cci` call for up to 22 minutes on Oct 31, lands on the copy no
+  caller runs yet.
+- `cci post` refuses to bind a thread to a lane another live thread holds,
+  unless that thread is the one it answers to or the lane stood down. It posts
+  nothing, names the holder, and posts root one `defect`. A numbered successor
+  that binds beside its live, never-stood-down predecessor still binds, and
+  root hears the same `defect`. Two sessions ran p8a-step7's work on Oct 31
+  and Nov 1.
+- A `stand-down` record stands down only its first `--to` lane. The lanes it
+  copies, a successor it hands work to included, stay live in `cci who` and
+  `cci who --successor-of`, which now names the stand-down's seq as `record`.
+  Root copies most stand-downs to the lanes that act on them, so every copied
+  lane read as stood down (board-refresher-6 and mq-health-9 on Nov 1).
+- `cci post --kind withdraw --re <seq>` refuses a seq that names no record of
+  the withdrawal's drive, such as a pull request number passed as the seq.
 - A new lane's hook mail delivers records addressed to `all` only from the
   lane's spawn on. Its direct records still start at the oldest one waiting
   for it, so a lane spawned onto an old order no longer replays every

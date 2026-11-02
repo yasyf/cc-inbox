@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"sync"
 	"time"
 
@@ -112,6 +113,11 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	handler := http.NewServeMux()
 	handler.Handle("/v1/tail", reads)
 	handler.Handle("/v1/incident-holds", reads)
+	handler.HandleFunc("/debug/pprof/", pprof.Index)
+	handler.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	handler.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	handler.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	handler.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	handler.Handle("/", server.New(st, time.Second).Handler())
 	p := &Product{
 		st:     st,

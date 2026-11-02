@@ -556,7 +556,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `blocker` | None | Open until `withdraw`, `answer`, or `done` with `--re` or the same `--topic`. |
 | `blocked` | None | A stack or target cannot deploy. Open until `unblock` with `--re` or the same `--topic`, or an explicit resolver. |
 | `unblock` | None | Closes a matching `blocked`; requires `--re`, `--topic`, or `--resolves`. |
-| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`. |
+| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`, which must name a record of the withdrawal's own drive. |
 | `go` | None | Closes a matching `ask` or `decide`. |
 | `hold` | None | Open until `lift`. Each `#<number>` in its text or topic needs `--pr <number>`, so guards that read pull request refs see the hold. |
 | `lift` | None | Closes `hold`; requires `--re`, `--topic`, or `--resolves`. |
@@ -566,6 +566,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
+| `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |

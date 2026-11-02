@@ -562,6 +562,28 @@ func TestPostRefusesAColonWithdrawalAndNamesOnlyTheGoSeqs(t *testing.T) {
 	}
 }
 
+func TestPostRefusesAWithdrawWhoseReNamesNoRecordOfItsDrive(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--text", "go #47568 at f60fd32 on green"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "cci-mesh", "--lane", "p1-data-model", "--kind", "head", "--pr", "12", "--text", "HEAD #12 at abc1234"); err != nil {
+		t.Fatal(err)
+	}
+	withdraw := func(re string) error {
+		_, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "withdraw", "--re", re, "--text", "withdraw go 1 on 47568 at f60fd32: finder majors are real")
+		return err
+	}
+	for _, re := range []string{"2", "47568"} {
+		if err := withdraw(re); err == nil || !strings.Contains(err.Error(), "withdraw --re #"+re+" names no record in drive release-v3") {
+			t.Fatalf("withdraw --re %s = %v, want a refusal naming the drive", re, err)
+		}
+	}
+	if err := withdraw("1"); err != nil {
+		t.Fatalf("withdraw --re 1 = %v, want it posted", err)
+	}
+}
+
 func TestPostHeadAndOpenedTakeTheirPullRequestOrRefuse(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	for _, kind := range []string{"head", "opened"} {
@@ -854,6 +876,7 @@ func TestAnnounceMeWho(t *testing.T) {
 		{[]string{"who", "--all", "--session", "bbbb"}, []string{"sole-51 session"}},
 		{[]string{"who", "--all", "-q", "discovery"}, []string{"- root drive=release-v3"}},
 		{[]string{"who", "--all", "--role", "watcher"}, []string{"no matching peers"}},
+		{[]string{"who", "--since", "1h"}, []string{"- root drive=release-v3"}},
 	}
 	for _, tt := range tests {
 		out, err := run(t, tt.args...)
@@ -867,8 +890,17 @@ func TestAnnounceMeWho(t *testing.T) {
 		}
 	}
 	out, err = run(t, "who", "--all", "--json", "--session", "aaaa")
-	if err != nil || !strings.Contains(out, `"env":{"ORCA_LAUNCH_RUN":"run_7"}`) || !strings.Contains(out, `"tags":["mesh","cci"]`) {
-		t.Fatalf("who --json = %q, %v", out, err)
+	if err != nil || strings.Contains(out, `"env"`) || !strings.Contains(out, `"tags":["mesh","cci"]`) {
+		t.Fatalf("who --json = %q, %v; want the tags and no env", out, err)
+	}
+	if out, err := run(t, "who", "--all", "--json", "--session", "aaaa", "--fields", "env,tags"); err != nil || out != `{"env":{"ORCA_LAUNCH_RUN":"run_7"},"tags":["mesh","cci"]}`+"\n" {
+		t.Fatalf("who --json --fields env,tags = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--json", "--fields", "lane,nope"); err == nil || !strings.Contains(err.Error(), "no peer key nope") {
+		t.Fatalf("who --fields lane,nope = %q, %v; want the unknown key named", out, err)
+	}
+	if out, err := run(t, "who", "--since", "#1"); err == nil || !strings.Contains(err.Error(), "sessions have no seq") {
+		t.Fatalf("who --since #1 = %q, %v; want a seq refused", out, err)
 	}
 }
 
@@ -1625,6 +1657,23 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
 		t.Fatal(err)
 	}
+	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "cccc3333-desk", Agent: "adesk-1"}, "d", "desk-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	desk := store.PeerKey{Session: "bbbb2222-desk", Agent: "adesk-2"}
+	if err := st.BindLane(context.Background(), desk, "d", "desk-2", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(context.Background(), store.Peer{Session: desk.Session, Agent: desk.Agent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--successor", "desk-2", "--to", "desk-1", "--text", "x"); err == nil || !strings.Contains(err.Error(), "--kind stand-down") {
 		t.Fatalf("--successor on a go: %v", err)
 	}
@@ -1640,15 +1689,16 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if err != nil || !strings.Contains(out, `"to":["desk-1","desk-2","desk-3"]`) {
 		t.Fatalf("go to a stood-down lane = %q, %v; want it addressed to every successor", out, err)
 	}
-	if out, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json"); err != nil || !strings.Contains(out, `"to":["desk-1"]`) {
+	out, err = run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json")
+	if err != nil || !strings.Contains(out, `"to":["desk-1"]`) {
 		t.Fatalf("a stand-down is forwarded = %q, %v", out, err)
 	}
-	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
-	if err != nil {
-		t.Fatal(err)
+	again := seqOf(t, out)
+	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || !strings.Contains(out, " lane=desk-2 stood-down successor=desk-3 ") {
+		t.Fatalf("who --lane desk-2 = %q, %v; want it marked stood down", out, err)
 	}
-	desk := store.PeerKey{Session: "bbbb2222-desk", Agent: "adesk-2"}
-	if err := st.BindLane(context.Background(), desk, "d", "desk-2", time.Now()); err != nil {
+	time.Sleep(10 * time.Millisecond)
+	if st, err = store.Open(context.Background(), os.Getenv("CCI_HOME")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Announce(context.Background(), store.Peer{Session: desk.Session, Agent: desk.Agent}); err != nil {
@@ -1657,18 +1707,62 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || !strings.Contains(out, " lane=desk-2 stood-down successor=desk-3 ") {
-		t.Fatalf("who --lane desk-2 = %q, %v; want it marked stood down", out, err)
+	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || strings.Contains(out, "stood-down") || !strings.Contains(out, " lane=desk-2 successor=desk-3 ") {
+		t.Fatalf("who --lane desk-2 seen after its stand-down = %q, %v; want it live, not stood down", out, err)
 	}
 	if out, err := run(t, "who", "--successor-of", "desk-2"); err != nil || out != "desk-3\n" {
 		t.Fatalf("who --successor-of desk-2 = %q, %v", out, err)
 	}
-	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"successor":"","chain":[]}`+"\n" {
+	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"record":`+again+`,"successor":"","chain":[]}`+"\n" {
 		t.Fatalf("who --successor-of desk-1 after a stand-down naming none = %q, %v", out, err)
 	}
 	if out, err := run(t, "who", "--successor-of", "desk-3", "--json"); err != nil || out != `{"drive":"d","lane":"desk-3","stood_down":false,"successor":"","chain":[]}`+"\n" {
 		t.Fatalf("who --successor-of desk-3 = %q, %v", out, err)
 	}
+}
+
+func TestAStandDownStandsDownOnlyItsFirstToLane(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	posted := make([]string, 0, 2)
+	for _, args := range [][]string{
+		{"--to", "board-refresher-5", "--successor", "board-refresher-6"},
+		{"--to", "options-1", "--to", "board-refresher-6", "--to", "drive-watchdog"},
+	} {
+		out, err := run(t, append([]string{"post", "--lane", "root", "--kind", "stand-down", "--text", "stand down", "--json"}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		posted = append(posted, out)
+	}
+	handed, copied := seqOf(t, posted[0]), seqOf(t, posted[1])
+	for lane, want := range map[string]string{
+		"board-refresher-5": `{"drive":"d","lane":"board-refresher-5","stood_down":true,"record":` + handed + `,"successor":"board-refresher-6","chain":["board-refresher-6"]}`,
+		"board-refresher-6": `{"drive":"d","lane":"board-refresher-6","stood_down":false,"successor":"","chain":[]}`,
+		"options-1":         `{"drive":"d","lane":"options-1","stood_down":true,"record":` + copied + `,"successor":"","chain":[]}`,
+		"drive-watchdog":    `{"drive":"d","lane":"drive-watchdog","stood_down":false,"successor":"","chain":[]}`,
+	} {
+		if out, err := run(t, "who", "--successor-of", lane, "--json"); err != nil || out != want+"\n" {
+			t.Errorf("who --successor-of %s = %q, %v; want %s", lane, out, err, want)
+		}
+	}
+}
+
+func seqOf(t *testing.T, posted string) string {
+	t.Helper()
+	var r struct{ Seq int64 }
+	if err := json.Unmarshal([]byte(posted), &r); err != nil || r.Seq == 0 {
+		t.Fatalf("posted %q: %v", posted, err)
+	}
+	return strconv.FormatInt(r.Seq, 10)
 }
 
 func TestALaneThatRegistersByPostingReadsMailSentBeforeItStarted(t *testing.T) {
@@ -1793,5 +1887,121 @@ func TestAPipedReadStillShowsWhatItsBudgetCutOnStderr(t *testing.T) {
 	whole, quiet := piped("tail", "--drive", "piped", "--since-seq", "0", "--budget", "4000000")
 	if quiet != "" || !strings.Contains(whole, "ASK step 39") {
 		t.Fatalf("a piped tail that fits wrote stderr %q", quiet)
+	}
+}
+
+func TestASecondThreadCannotBindALiveLane(t *testing.T) {
+	if lane := os.Getenv("CCI_TEST_SECOND_BINDER"); lane != "" {
+		out, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", lane+" up")
+		fmt.Printf("posted=%q err=%v\n", out, err)
+		return
+	}
+	home, config := t.TempDir(), t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", config)
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	holder := store.PeerKey{Session: "48c3b7bf-holder", Agent: "ap8a-step7"}
+	if _, err := st.Announce(ctx, store.Peer{Session: holder.Session, Agent: holder.Agent, AgentName: "p8a-step7"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, holder, "d", "p8a-step7", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	second := func(lane, thread string) string {
+		t.Helper()
+		cmd := exec.Command(os.Args[0], "-test.run=^TestASecondThreadCannotBindALiveLane$", "codex")
+		cmd.Env = append(os.Environ(), "CCI_TEST_SECOND_BINDER="+lane, "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+config, "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CODEX_THREAD_ID="+thread)
+		for _, name := range peers.IdentityEnv {
+			if name != "CODEX_THREAD_ID" {
+				cmd.Env = append(cmd.Env, name+"=")
+			}
+		}
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v\n%s", thread, err, out)
+		}
+		return string(out)
+	}
+	if out := second("p8a-step7", "019a3c3e-duplicate"); !strings.Contains(out, "lane p8a-step7 is held by live thread p8a-step7 48c3b7bf-holder/ap8a-step7") || !strings.Contains(out, `posted=""`) {
+		t.Fatalf("a second thread binding p8a-step7 = %s; want it refused", out)
+	}
+	if out := second("p8a-step7", "019a3c3e-duplicate"); !strings.Contains(out, "is held by live thread") {
+		t.Fatalf("the duplicate's next post = %s; want it refused again", out)
+	}
+	if out := second("p8a-step7-2", "019a3c3e-successor"); !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("p8a-step7-2 beside a live p8a-step7 = %s; want it bound", out)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	for _, name := range peers.IdentityEnv {
+		if name != "CLAUDE_CODE_SESSION_ID" {
+			t.Setenv(name, "")
+		}
+	}
+	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--kind", "defect", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out, `"kind":"defect"`); n != 2 || !strings.Contains(out, "second binder of p8a-step7 refused") || !strings.Contains(out, "p8a-step7-2 bound while its predecessor p8a-step7") || !strings.Contains(out, `"to":["root"]`) {
+		t.Fatalf("defects to root = %s; want one refusal and one successor bounce", out)
+	}
+	if out, err := run(t, "who", "--all", "--lane", "p8a-step7", "--json"); err != nil || strings.Contains(out, "019a3c3e-duplicate") {
+		t.Fatalf("who --lane p8a-step7 = %s, %v; want the refused thread unbound", out, err)
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", "p8a-step7", "--text", "p8a-step7 stands down"); err != nil {
+		t.Fatal(err)
+	}
+	if out := second("p8a-step7", "019a3c3e-duplicate"); !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("a thread binding p8a-step7 after it stood down = %s; want it bound", out)
+	}
+}
+
+func TestASpawnRecordNamesTheLaneCciWhoListsUntilItBinds(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "spawn", "--text", "SPAWNED p8a-step7-3"); err == nil || !strings.Contains(err.Error(), "kind spawn names one lane, its brief and its model") {
+		t.Fatalf("a spawn naming no lane, brief or model: %v", err)
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "spawn", "--lane-ref", "p8a-step7-3", "--attr", "brief=/briefs/p8a-step7-3.md", "--attr", "model=opus", "--attr", "task=1977", "--text", "SPAWNED p8a-step7-3 /briefs/p8a-step7-3.md", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawn := seqOf(t, out)
+	if strings.Contains(out, `"expires_at"`) {
+		t.Fatalf("spawn record = %s; want it kept, since the registry reads it as the lane's birth", out)
+	}
+	if out, err := run(t, "who", "--lane", "p8a-step7-3"); err != nil || !strings.Contains(out, "p8a-step7-3 spawned drive=d lane=p8a-step7-3 by #"+spawn+" ") || !strings.HasSuffix(out, "brief=/briefs/p8a-step7-3.md model=opus task=1977, not bound yet\n") {
+		t.Fatalf("who --lane p8a-step7-3 after its spawn = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--lane", "p8a-step7-3", "--json"); err != nil || out != "" {
+		t.Fatalf("who --json after a spawn = %q, %v; want peer rows only", out, err)
+	}
+	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "bbbb2222-lane", Agent: "ap8a-step7-3"}, "d", "p8a-step7-3", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "who", "--all", "--lane", "p8a-step7-3"); err != nil || strings.Contains(out, "not bound yet") {
+		t.Fatalf("who --all --lane p8a-step7-3 once bound = %q, %v", out, err)
 	}
 }

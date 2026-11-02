@@ -31,6 +31,9 @@ file's path, and `cci post` prints that path. Read the file for the rest. Use `s
 status, `ask` for a question, `hold` for a stop, `go` for permission, and `opened`
 or `landed` for a PR event. Use `review` with `--outcome` for a rules-review verdict.
 Address lanes with `--to`; when an action needs the owner, use `--to owner`.
+A post that exits 75 was not stored: the bus is down. With `--lane` and
+`--drive` it is kept, and the next `cci post` that reaches the store stores it;
+without them, repost it once the bus answers. Never treat exit 75 as sent.
 A lane that has not started yet is addressed like any other and reads the
 record once it binds. `cci post` refuses only a never-seen bare `--to` lane
 that looks like a slip for a live one, one or two edits from it or an older
@@ -39,6 +42,10 @@ lane is replaced, record it once with
 `cci post --lane root --kind stand-down --to <old> --successor <new> "<why>"`:
 later records addressed to `<old>` reach `<new>` too, `cci who` marks `<old>`
 stood down, and `cci who --successor-of <old> --json` names who stands in.
+A stand-down stands down its first `--to` lane only; the lanes it copies stay live.
+A thread cannot bind a lane another live thread holds until that lane stands
+down: its `cci post` is refused and root hears a `defect`. A numbered successor
+binding beside its live predecessor binds, and root hears the same `defect`.
 
 Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose
@@ -506,6 +513,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
+| `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |

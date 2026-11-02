@@ -71,7 +71,7 @@ SELECT 'unrelated-' || n, '', '', 'unrelated-drive-' || n, 0, 'unrelated-lane' F
 					t.Fatalf("unindexed lane comparisons = %d for %d unrelated rows, want at least %d", got, population, population)
 				}
 				phase("oracle")
-				all, err := st.Peers(ctx)
+				all, err := st.Peers(ctx, PeerQuery{All: true})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -91,7 +91,7 @@ SELECT 'unrelated-' || n, '', '', 'unrelated-drive-' || n, 0, 'unrelated-lane' F
 					})
 					phase("baseline_allocs")
 					baselineAllocs := testing.AllocsPerRun(1, func() {
-						if _, err := st.Peers(ctx); err != nil {
+						if _, err := st.Peers(ctx, PeerQuery{All: true}); err != nil {
 							t.Fatal(err)
 						}
 					})

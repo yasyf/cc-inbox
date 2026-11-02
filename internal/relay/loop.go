@@ -85,7 +85,7 @@ func (l *Loop) start(ctx context.Context, mesh string) worker {
 	w := worker{stop: stop, done: make(chan struct{})}
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go func() { defer wg.Done(); l.every(mctx, mesh, "push", l.push) }()
+	go func() { defer wg.Done(); l.pushing(mctx, mesh) }()
 	go func() { defer wg.Done(); l.every(mctx, mesh, "pull", l.pull) }()
 	go func() { wg.Wait(); stop(); close(w.done) }()
 	return w
@@ -105,12 +105,31 @@ func (l *Loop) node(mesh string) (*Node, []Config, bool, error) {
 	return nil, nil, false, nil
 }
 
-func (l *Loop) push(ctx context.Context, n *Node, configs []Config) error {
-	_, err := n.Push(ctx, configs)
-	if err == nil {
-		return sleep(ctx, PushInterval)
-	}
-	return err
+func (l *Loop) pushing(ctx context.Context, mesh string) {
+	var changes *store.ChangeVersion
+	defer func() {
+		if changes != nil {
+			_ = changes.Close()
+		}
+	}()
+	l.every(ctx, mesh, "push", func(ctx context.Context, n *Node, configs []Config) error {
+		if changes == nil {
+			observer, err := l.st.OpenChangeVersion(ctx)
+			if err != nil {
+				return err
+			}
+			changes = observer
+		}
+		version, err := changes.Read(ctx)
+		if err != nil {
+			return err
+		}
+		if _, err := n.Push(ctx, configs); err != nil {
+			return err
+		}
+		_, err = changes.Await(ctx, version, PushInterval)
+		return err
+	})
 }
 
 func (l *Loop) pull(ctx context.Context, n *Node, _ []Config) error {

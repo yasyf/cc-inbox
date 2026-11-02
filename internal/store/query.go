@@ -566,6 +566,16 @@ func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, sta
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := s.bindLane(ctx, tx, k, drive, lane, started); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("bind lane: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string, started time.Time) error {
 	if err := s.claimSession(ctx, tx, k.Session); err != nil {
 		return err
 	}
@@ -598,9 +608,6 @@ WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
 ON CONFLICT (name, drive) DO NOTHING`, BroadcastCursor(k), drive, k.Session, k.Agent, s.Self(), spawned, BroadcastCursor(k), drive); err != nil {
 		return fmt.Errorf("start lane broadcast floor: %w", err)
 	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("bind lane: %w", err)
-	}
 	return nil
 }
 
@@ -628,27 +635,97 @@ func (s *Store) Registered(ctx context.Context, drive, lane string) (bool, error
 }
 
 // Successors follows the stand-down records of drive from lane, each naming the
-// lane that took the last one over; stoodDown reports whether lane itself stood down.
-func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []string, stoodDown bool, err error) {
-	successor, stoodDown, err := s.successor(ctx, drive, lane)
-	for err == nil && successor != "" && successor != lane && !slices.Contains(chain, successor) {
-		chain = append(chain, successor)
-		successor, _, err = s.successor(ctx, drive, successor)
+// lane that took the last one over; standDown is the seq of lane's own newest
+// stand-down, 0 when it never stood down. A stand-down is its first --to lane's
+// own: the lanes it copies, a successor it names included, did not stand down.
+func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []string, standDown int64, err error) {
+	downs, err := s.StandDowns(ctx, drive)
+	if err != nil {
+		return nil, 0, err
 	}
-	return chain, stoodDown, err
+	return downs.Chain(lane), downs[lane].Seq, nil
 }
 
-func (s *Store) successor(ctx context.Context, drive, lane string) (string, bool, error) {
-	var successor string
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(json_extract(fields, '$.attrs.successor'), '') FROM records
-WHERE drive = ? AND kind = ? AND seq IN (SELECT source_seq FROM record_recipients WHERE address = ?) ORDER BY seq DESC LIMIT 1`, drive, string(kinds.StandDown), lane).Scan(&successor)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+// StandDown is a lane's own newest stand-down: its seq, when it was posted,
+// and the successor it names, "" for none.
+type StandDown struct {
+	Seq       int64
+	At        time.Time
+	Successor string
+}
+
+// StandDowns holds each lane of a drive that stood down, keyed by lane.
+type StandDowns map[string]StandDown
+
+// Chain follows the successors from lane, each the lane that took the last one over.
+func (d StandDowns) Chain(lane string) []string {
+	var chain []string
+	for successor := d[lane].Successor; successor != "" && successor != lane && !slices.Contains(chain, successor); successor = d[successor].Successor {
+		chain = append(chain, successor)
 	}
+	return chain
+}
+
+// StandDowns reads every stand-down of drive in one query, each its first --to lane's own.
+func (s *Store) StandDowns(ctx context.Context, drive string) (StandDowns, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT seq, at, CASE WHEN json_valid(recipients) THEN COALESCE(json_extract(recipients, '$[0]'), '') ELSE '' END, COALESCE(json_extract(fields, '$.attrs.successor'), '') FROM records
+WHERE drive = ? AND kind = ? ORDER BY seq DESC`, drive, string(kinds.StandDown))
 	if err != nil {
-		return "", false, fmt.Errorf("read the stand-down of %s on %s: %w", lane, drive, err)
+		return nil, fmt.Errorf("read the stand-downs on %s: %w", drive, err)
 	}
-	return successor, true, nil
+	defer func() { _ = rows.Close() }()
+	out := StandDowns{}
+	for rows.Next() {
+		var (
+			lane string
+			at   int64
+			down StandDown
+		)
+		if err := rows.Scan(&down.Seq, &at, &lane, &down.Successor); err != nil {
+			return nil, fmt.Errorf("scan a stand-down on %s: %w", drive, err)
+		}
+		down.At = time.UnixMilli(at).UTC()
+		if _, newer := out[lane]; lane != "" && !newer {
+			out[lane] = down
+		}
+	}
+	return out, rows.Err()
+}
+
+// Spawn is a lane a spawn record started on a drive that no thread has bound yet.
+type Spawn struct {
+	Seq   int64     `json:"spawned"`
+	At    time.Time `json:"at"`
+	Drive string    `json:"drive"`
+	Lane  string    `json:"lane"`
+	Brief string    `json:"brief"`
+	Model string    `json:"model"`
+	Task  string    `json:"task,omitempty"`
+}
+
+// UnboundSpawns lists the newest spawn of each lane on drive posted since
+// since that no thread on drive is bound as yet.
+func (s *Store) UnboundSpawns(ctx context.Context, drive string, since time.Time) ([]Spawn, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT r.seq, r.at, json_extract(r.refs, '$.lanes[0]') AS lane, COALESCE(json_extract(r.fields, '$.attrs.brief'), ''), COALESCE(json_extract(r.fields, '$.attrs.model'), ''), COALESCE(json_extract(r.fields, '$.attrs.task'), '')
+FROM records r WHERE r.drive = ? AND r.kind = ? AND r.at >= ?
+AND NOT EXISTS (SELECT 1 FROM sessions WHERE drive = r.drive AND lane = json_extract(r.refs, '$.lanes[0]'))
+AND NOT EXISTS (SELECT 1 FROM records later WHERE later.drive = r.drive AND later.kind = r.kind AND later.seq > r.seq AND json_extract(later.refs, '$.lanes[0]') = json_extract(r.refs, '$.lanes[0]'))
+ORDER BY r.seq`, drive, string(kinds.Spawn), since.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("read spawns on %s: %w", drive, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Spawn
+	for rows.Next() {
+		sp := Spawn{Drive: drive}
+		var at int64
+		if err := rows.Scan(&sp.Seq, &at, &sp.Lane, &sp.Brief, &sp.Model, &sp.Task); err != nil {
+			return nil, fmt.Errorf("read spawns on %s: %w", drive, err)
+		}
+		sp.At = time.UnixMilli(at).UTC()
+		out = append(out, sp)
+	}
+	return out, rows.Err()
 }
 
 // NamedSuccessor reports whether a stand-down record in drive hands a lane over to lane.
@@ -906,6 +983,7 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 		err      error
 	}
 	var failures []failure
+	var replies []Record
 	for rows.Next() {
 		metadata := replyScanner{row: rows}
 		r, decodeErr := s.scan(&metadata)
@@ -913,30 +991,36 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 			failures = append(failures, failure{metadata: metadata, err: decodeErr})
 			continue
 		}
-		targets := append([]int64{r.Re, r.Resolves}, r.AlsoResolves...)
-		affected := map[int]bool{}
-		for _, target := range targets {
-			for _, page := range owners[target] {
-				affected[page] = true
-			}
-		}
-		for page := range affected {
-			if firstReply[page] == 0 {
-				firstReply[page] = r.Seq
-			}
-			if r.Re != 0 {
-				pages[page].Replies[r.Re] = append(pages[page].Replies[r.Re], r)
-			}
-			for _, target := range r.Closes() {
-				if target != r.Re {
-					pages[page].Replies[target] = append(pages[page].Replies[target], r)
-				}
-			}
-		}
+		replies = append(replies, r)
 	}
 	queryErr := rows.Err()
 	if err := rows.Close(); err != nil && queryErr == nil {
 		queryErr = err
+	}
+	if err := s.numbered(ctx, replies); err != nil {
+		return nil, err
+	}
+	for _, r := range replies {
+		for _, target := range append([]int64{r.Re, r.Resolves}, r.AlsoResolves...) {
+			for _, page := range owners[target] {
+				if firstReply[page] == 0 {
+					firstReply[page] = r.Seq
+				}
+			}
+		}
+		if r.Re != 0 {
+			for _, page := range owners[r.Re] {
+				pages[page].Replies[r.Re] = append(pages[page].Replies[r.Re], r)
+			}
+		}
+		for _, target := range r.Closes() {
+			if target == r.Re {
+				continue
+			}
+			for _, page := range owners[target] {
+				pages[page].Replies[target] = append(pages[page].Replies[target], r)
+			}
+		}
 	}
 	for _, failed := range failures {
 		direct, err := s.replyErrorTargets(ctx, "SELECT value FROM json_each(?) WHERE value = ? OR value = ?", string(ids), failed.metadata.re, failed.metadata.resolves)
@@ -981,13 +1065,6 @@ func (s *Store) ReplyPages(ctx context.Context, selected [][]int64) ([]ReplyPage
 				if firstReply[page] == 0 {
 					pages[page].Err = fmt.Errorf("read replies: %w", queryErr)
 				}
-			}
-		}
-	}
-	for _, page := range pages {
-		for _, replies := range page.Replies {
-			if err := s.numbered(ctx, replies); err != nil {
-				return nil, err
 			}
 		}
 	}

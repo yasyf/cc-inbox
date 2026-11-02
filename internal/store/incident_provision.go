@@ -5,9 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -28,15 +25,11 @@ func (s *Store) ProvisionIncidentScope(ctx context.Context, drive string) (Incid
 	if drive == "" {
 		return report, ErrNoDrive
 	}
-	lock, err := os.OpenFile(filepath.Join(s.home, "init.lock"), os.O_RDWR, 0) //nolint:gosec // G304: explicit provisioning holds the fixed existing init lock in the selected CCI home.
+	lock, err := lockMaintenance(s.home)
 	if err != nil {
 		return report, err
 	}
 	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		return report, err
-	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
 	installed, err := incidentProjectionInstalled(ctx, s.db)
 	if err != nil {
 		return report, err

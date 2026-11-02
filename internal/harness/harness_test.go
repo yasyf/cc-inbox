@@ -56,13 +56,14 @@ func TestAlive(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.s.Alive(); got != tt.want {
+			if got := tt.s.Alive(harness.Procs{}); got != tt.want {
 				t.Errorf("Alive() = %v, want %v", got, tt.want)
 			}
 		})
 	}
-	if !harness.ProcessAlive(os.Getpid(), created) || harness.ProcessAlive(os.Getpid(), created+1) || harness.ProcessAlive(0, 0) {
-		t.Fatal("ProcessAlive() does not match on the exact create time")
+	procs := harness.Procs{}
+	if !procs.Alive(os.Getpid(), created) || procs.Alive(os.Getpid(), created+1) || procs.Alive(0, 0) {
+		t.Fatal("Procs.Alive() does not match on the exact create time")
 	}
 }
 

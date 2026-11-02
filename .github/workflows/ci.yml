@@ -46,47 +46,56 @@ jobs:
 
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 165
     strategy:
       fail-fast: false
       matrix:
         os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
     env:
+      FULL_CI: ${{ matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
       TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.commit || github.sha }}
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: fe73b8c28964aa004782c8f0c7dd1fcca2ee082b
           path: .ci-tail-page-baseline
           persist-credentials: false
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 69637a6ba3370ec3a3ba11a59bb6b1d80d367dbb
           path: .ci-render-text-baseline
           persist-credentials: false
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
           path: .ci-audience-current491
           persist-credentials: false
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 80a23237731d154e73b2ab9c908809316407ea80
           path: .ci-urgent-repeat-baseline
           persist-credentials: false
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: ab018eb917f569717b4c67a3cd14cb9be660b41c
           path: .ci-urgent-repeat-old
           persist-credentials: false
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 696cde4efcdb47697901bebb2d6b1aa12a3496c9
           path: .ci-channel-watch-baseline
           persist-credentials: false
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
           path: .ci-stream-idle-baseline
@@ -96,74 +105,92 @@ jobs:
           ref: 0b83dbc7fc55f29e552ecafb6cd2a6206d1f57b2
           path: .ci-old
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 722f03bcbaadf335f6ee9cb7d2c4b57e274f942e
           path: .ci-recipients-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: e08497bf9ce5880788f6103a949e034c9ed13fc4
           path: .ci-grep-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: c148e0dc6970d4d5f446d77ba62d8a4060e0156c
           path: .ci-tail-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 7f5c374e7cd07911aa432b3434036a27b9007de9
           path: .ci-native-tail-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
           path: .ci-native-tail-null-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
           path: .ci-lane-score-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: b7da336975a6651226912c5c129a38bec9c0e3da
           path: .ci-incident-negative
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: e65cf4da214ea889e729c7cfdae79a8eb4f6cec0
           path: .ci-incident-registration-negative
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 23dcba01c1512bf876f6caf6e431cdc0f3731ec7
           path: .ci-incident-registration-window-negative
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: e9610dc3fc29a2d3aa8fb342363adacf130c4ed5
           path: .ci-incident-shared-node-negative
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
           path: .ci-grep-selected-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 5e61c5bc11d417c601889cac1393b346d17a44cb
           path: .ci-mesh-export-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: e2ef260846d7afb2850cc503dc6cde57baa78487
           path: .ci-mesh-frontier-negative
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 2bd181b53ad0384b284e8440d02b2db0a5c75fcc
           path: .ci-mesh-body-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
           path: .ci-openamong-oracle
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 53c067b27a53ac3798753309221a6b4f4190e5b7
           path: .ci-openamong-negative
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 838d6a6ad8ec051bd9ec09070785d3b838f8398a
           path: .ci-hook-owed-baseline
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 67a9ba0415a718dd7ed61773695da93a8061e7ef
           path: .ci-selected-seqs-baseline
@@ -173,6 +200,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Urgent repeat existing-query index diagnostic
+        if: env.FULL_CI == 'true'
         run: |
           cp internal/store/testdata/urgent-repeat-old/compat_test.go .ci-urgent-repeat-old/internal/store/urgent_repeat_legacy_internal_test.go
           test "$(git -C .ci-urgent-repeat-old rev-parse HEAD)" = ab018eb917f569717b4c67a3cd14cb9be660b41c
@@ -191,6 +219,7 @@ jobs:
           go test -count=1 -race -run '^TestUrgentRepeatIndex' -v ./internal/store
           CCI_URGENT_INDEX_ROWS=250000 go test -count=1 -run '^TestUrgentRepeatIndexProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Audience kind candidates and immutable491 work control
+        if: env.FULL_CI == 'true'
         run: |
           cp internal/cli/audience_query_cost_test.go .ci-audience-current491/internal/cli/
           cp internal/store/audience_plan_internal_test.go .ci-audience-current491/internal/store/
@@ -212,6 +241,7 @@ jobs:
           done
           CCI_AUDIENCE_REQUIRE_BOUNDED_KIND=1 go test -count=1 -race -run '^TestAudience' -v ./internal/cli ./internal/store
       - name: Text Grep body projection, immutable work control, and public parity
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-audience-current491 rev-parse HEAD)" = cc7485ab2ca7cda03f7790b38bdb0312b26fbcae
           cp internal/cli/grep_body_projection_test.go .ci-audience-current491/internal/cli/
@@ -227,10 +257,12 @@ jobs:
           go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-current" ./cmd/cci
           CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: eefa897af4e7bfb33d319c2f8c8840b2f9eb22ce
           path: .ci-tail-body-baseline
       - name: Text Tail body projection and immutable work control
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-tail-body-baseline rev-parse HEAD)" = eefa897af4e7bfb33d319c2f8c8840b2f9eb22ce
           cp internal/cli/tail_body_diagnostic_test.go .ci-tail-body-baseline/internal/cli/
@@ -244,8 +276,10 @@ jobs:
           done
           go test -count=1 -race -run '^TestTailTextBodyTransferDiagnostic$' -v ./internal/cli
       - name: Text Tail retained private fixture native query plans
+        if: env.FULL_CI == 'true'
         run: go test -count=1 -run '^TestTailProjectionPrivateFixturePlan$' -v ./internal/store
       - name: Text Tail Body immutable output error and cursor contract
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 7f5c374e7cd07911aa432b3434036a27b9007de9
           cp internal/cli/tail_body_contract_test.go .ci-native-tail-baseline/internal/cli/
@@ -253,10 +287,12 @@ jobs:
           (cd .ci-native-tail-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
           CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 4c0bb3dd0873b2e978c6d12933f3db7a8206fd72
           path: .ci-addressed-body-baseline
       - name: Shared addressed done Body transfer bound and immutable current route controls
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-addressed-body-baseline rev-parse HEAD)" = 4c0bb3dd0873b2e978c6d12933f3db7a8206fd72
           cp internal/inbox/addressed_body_diagnostic_test.go .ci-addressed-body-baseline/internal/inbox/
@@ -275,6 +311,7 @@ jobs:
           done
           go test -count=1 -race -run '^TestAddressedDoneBodyTransferDiagnostic$' -v ./internal/inbox
       - name: Reader and mailbox addressed done Body immutable current contract
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-addressed-body-baseline rev-parse HEAD)" = 4c0bb3dd0873b2e978c6d12933f3db7a8206fd72
           cp internal/cli/addressed_body_contract_test.go .ci-addressed-body-baseline/internal/cli/
@@ -282,6 +319,7 @@ jobs:
           (cd .ci-addressed-body-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
           CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli
       - name: Tail page assembly current-head parity and allocation scaling
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-tail-page-baseline rev-parse HEAD)" = fe73b8c28964aa004782c8f0c7dd1fcca2ee082b
           cp internal/inbox/tail_page_assembly_test.go .ci-tail-page-baseline/internal/inbox/
@@ -301,6 +339,7 @@ jobs:
           (cd .ci-tail-page-baseline && go test -run '^$' -bench '^BenchmarkTailPageAssembly$' -benchmem -benchtime=1x ./internal/inbox)
           go test -run '^$' -bench '^BenchmarkTailPageAssembly$' -benchmem -benchtime=1x ./internal/inbox
       - name: Channel watch unchanged work and immutable 0.49.9 control
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-channel-watch-baseline rev-parse HEAD)" = 696cde4efcdb47697901bebb2d6b1aa12a3496c9
           cp internal/inbox/watch_work_test.go .ci-channel-watch-baseline/internal/inbox/
@@ -316,6 +355,7 @@ jobs:
           done
           go test -count=1 -race -run '^TestWatch' -v ./internal/inbox
       - name: SSE idle queries, immutable history control, and commit freshness
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-stream-idle-baseline rev-parse HEAD)" = 4e6e169dee4f18963df7fd3e00f4d5b89ee40891
           cp internal/server/stream_idle_cost_test.go .ci-stream-idle-baseline/internal/server/
@@ -341,6 +381,7 @@ jobs:
           test -x "$cci_old_store_probe"
           printf 'CCI_OLD_STORE_PROBE=%s\n' "$cci_old_store_probe" >> "$GITHUB_ENV"
       - name: Cask handoff waits for committed installation
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
           cp internal/version/cask_readiness_test.go .ci-mesh-export-baseline/internal/version/
@@ -352,8 +393,10 @@ jobs:
           grep -F 'staged cask selected before committed receipt' "$RUNNER_TEMP/cci-cask-readiness-negative.log"
           go test -count=1 -race -v ./internal/version
       - name: Incident old-writer native provisioning budget
+        if: env.FULL_CI == 'true'
         run: CCI_INCIDENT_NATIVE_BUDGET=1 go test -count=1 -run '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store
       - name: Incident native lifecycle, immutable failure controls, and writer budget
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-incident-negative rev-parse HEAD)" = b7da336975a6651226912c5c129a38bec9c0e3da
           cp internal/store/incident_alias_internal_test.go internal/store/incident_owner_internal_test.go .ci-incident-negative/internal/store/
@@ -392,6 +435,7 @@ jobs:
           grep -F 'shared changed registration did not refresh' "$RUNNER_TEMP/cci-incident-shared-node-negative.log"
           go test -count=1 -race -run '^TestIncident' -skip '^TestIncidentProvisioningSerializesPreopenedOldWriter$' -v ./internal/store ./internal/cli
       - name: Hook owed indexed closure and immutable output
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-hook-owed-baseline rev-parse HEAD)" = 838d6a6ad8ec051bd9ec09070785d3b838f8398a
           cp internal/hook/owed_cost_test.go .ci-hook-owed-baseline/internal/hook/
@@ -406,6 +450,7 @@ jobs:
           CCI_HOOK_OWED_SNAPSHOTS="$RUNNER_TEMP/cci-hook-owed-snapshots" go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
           go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
       - name: Mesh exported body prefix and immutable allocation control
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-mesh-body-baseline rev-parse HEAD)" = 2bd181b53ad0384b284e8440d02b2db0a5c75fcc
           cp internal/store/replicate_body_cost_test.go .ci-mesh-body-baseline/internal/store/
@@ -418,6 +463,7 @@ jobs:
           grep -F 'selected body allocation follows the unread file tail: body_bytes=33554432' "$RUNNER_TEMP/cci-mesh-body-negative.log"
           go test -count=1 -race -run '^TestNewestExportBoundsSelectedBodyAllocation$|^TestExportBodyPrefixKeepsLineAndUTF8Contract$|^TestARecordsBodyFileTravelsWithItIntoTheReceiversBlobs$' -v ./internal/store
       - name: Mesh export indexed prefix and immutable contract
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-mesh-export-baseline rev-parse HEAD)" = 5e61c5bc11d417c601889cac1393b346d17a44cb
           cp internal/mesh/export_cost_test.go .ci-mesh-export-baseline/internal/mesh/
@@ -441,10 +487,12 @@ jobs:
       - name: Test (race)
         run: go test -json -race -skip "$TAIL_COST_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./...
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 02f12d7c20079a9e0a67c19bdec1a61dac0182d8
           path: .ci-brief-elision-baseline
       - name: Brief unused elision immutable bytes and actual allocation work
+        if: env.FULL_CI == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -463,6 +511,7 @@ jobs:
           (cd .ci-brief-elision-baseline && go test -count=3 -run '^$' -bench '^BenchmarkBriefElision$' -benchmem -benchtime=100ms -cpu=2 ./internal/render) | tee "$RUNNER_TEMP/brief-elision-old.log"
           go test -count=3 -run '^$' -bench '^BenchmarkBriefElision$' -benchmem -benchtime=100ms -cpu=2 ./internal/render | tee "$RUNNER_TEMP/brief-elision-current.log"
       - name: Direct native grep whole-query bytes and process CPU against official494 source
+        if: env.FULL_CI == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -474,6 +523,7 @@ jobs:
           go version -m "$RUNNER_TEMP/cci-grep-body-current" >> "$RUNNER_TEMP/render-text-query-buildinfo.log"
           CCI_RENDER_GREP_OLD_CLI="$RUNNER_TEMP/cci-render-query-old" CCI_RENDER_GREP_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -run '^TestGrepRenderedTextQueryCost$' -v ./internal/cli | tee "$RUNNER_TEMP/render-text-query.log"
       - name: Numbered rendered text per-record costs and aggregate diagnostics against official494 source
+        if: env.FULL_CI == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -521,20 +571,23 @@ jobs:
                   assert after[name]["allocs/op"] < before[name]["allocs/op"], (name, before[name], after[name])
           PY
       - name: Retain rendered text cost samples
-        if: always()
+        if: (always()) && env.FULL_CI == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: rendered-text-cost-${{ matrix.os }}
           path: ${{ runner.temp }}/render-text-*.log
       - name: Post operation counts and scaling
+        if: env.FULL_CI == 'true'
         run: |
           go test -run 'TestBindLaneExistingCursorDoesNotReadRecordHistory|TestOpenCurrentSchemaDoesNotWaitForLocks|TestOpenWaitsForConcurrentSchemaUpgrade|TestConcurrentColdOpenKeepsMigrationSerialized' -v ./internal/store
           go test -run '^$' -bench '^BenchmarkBindLaneExistingCursor$' -benchtime=100x -benchmem ./internal/store
       - name: Physical index comparisons, compatibility, and build cost
+        if: env.FULL_CI == 'true'
         run: |
           test -x "$CCI_OLD_STORE_PROBE"
           go test -run 'TestRegisteredLaneComparisonsStayBounded|TestExistingStoreOpenDoesNotBuildPhysicalIndexes|TestMaintainIndexes|TestPhysicalIndexes' -v ./internal/store
       - name: Changed-generation Watch query diagnostics
+        if: env.FULL_CI == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -567,11 +620,13 @@ jobs:
           test "$(grep -c 'WATCH_CHANGED_GENERATION_UNENROLLED_PLAN root_audience_objects=0 route=general unbounded_reference=true' "$RUNNER_TEMP/watch-changed-generation.log")" -eq 4
 
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: a7b222539b6b0bf9c24477c597df3e13eed7ec5f
           path: .ci-root-audience-old
           persist-credentials: false
       - name: Root audience native plans and actual candidate emissions
+        if: env.FULL_CI == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -623,6 +678,7 @@ jobs:
           git apply --reverse --unidiff-zero internal/store/testdata/root-audience-cost/current.patch
           trap - EXIT
       - name: Recipient identity and targeted session query costs
+        if: env.FULL_CI == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -642,6 +698,7 @@ jobs:
             done
           done
       - name: Grep actual caller operation counts and paged output equivalence
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-grep-baseline rev-parse HEAD)" = e08497bf9ce5880788f6103a949e034c9ed13fc4
           cp internal/cli/grep_cost_test.go .ci-grep-baseline/internal/cli/grep_cost_test.go
@@ -651,6 +708,7 @@ jobs:
           go test -run '^TestRepliesSelectionExceedsVariableLimit$' -v ./internal/store
           go test -run '^TestGrepMatchesPagedOutput$|^TestGrepPreserves|^TestGrepReplyMetadataErrorAttribution$' -v ./internal/inbox
       - name: Indexed selected reply counts, current public CLI oracle, and required index lifecycle
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-grep-selected-baseline rev-parse HEAD)" = 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
           cp internal/cli/grep_cost_test.go internal/cli/grep_selected_cost_test.go .ci-grep-selected-baseline/internal/cli/
@@ -663,6 +721,7 @@ jobs:
       - name: Build
         run: go build ./...
       - name: Selected internal sequences, immutable history cost, and current status
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-selected-seqs-baseline rev-parse HEAD)" = 67a9ba0415a718dd7ed61773695da93a8061e7ef
           cp internal/store/selected_history_internal_test.go .ci-selected-seqs-baseline/internal/store/
@@ -679,23 +738,28 @@ jobs:
           go test -count=1 -race -run '^TestSelectedRecords' -v ./internal/store
           CCI_SELECTED_OLD_CLI="$RUNNER_TEMP/cci-selected-old" CCI_SELECTED_CURRENT_CLI="$RUNNER_TEMP/cci-selected-current" go test -count=1 -race -run '^TestTailSelected|^TestNativeTailSelected' -v ./internal/cli
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: af644830c49d339afe038477762152bc80c7650f
           path: .ci-native-tail-fixture-baseline
           persist-credentials: false
       - name: Native HTTP fixture setup phase baseline
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-native-tail-fixture-baseline rev-parse HEAD)" = af644830c49d339afe038477762152bc80c7650f
           (cd .ci-native-tail-fixture-baseline && CCI_NATIVE_TAIL_FIXTURE_TIMINGS=1 go test -count=1 -race -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli)
       - name: Native HTTP fixture setup phase attribution
+        if: env.FULL_CI == 'true'
         run: CCI_NATIVE_TAIL_FIXTURE_TIMINGS=1 go test -count=1 -race -run '^TestNativeTailRejectsNullArgumentBeforeCore$' -v ./internal/cli
       - name: Tail operation counts and full requested output
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-tail-baseline rev-parse HEAD)" = c148e0dc6970d4d5f446d77ba62d8a4060e0156c
           cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
           (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$TAIL_COST_TESTS" -v ./internal/cli)
           go test -run "$TAIL_COST_TESTS" -v ./internal/cli
       - name: Selected opener closure work and error scope
+        if: env.FULL_CI == 'true'
         run: |
           cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/
           cp internal/server/openamong_refutation_test.go .ci-openamong-negative/internal/server/
@@ -712,10 +776,12 @@ jobs:
           go test -run '^TestOpenAmongHTTPHistoryBaseline$|^TestOpenAmongUnrelatedCorruptionBaseline$|^TestOpenAmongResolverCandidateErrors$|^TestSelectedClosure' -v ./internal/server ./internal/store
           CCI_CLOSER_PROVISION_ROWS=250000 go test -run '^TestSelectedClosureProvisioningWithinWriterBudget$' -v ./internal/store
       - name: Record membership maintenance, bounded plans, and unbounded predicate equivalence
+        if: env.FULL_CI == 'true'
         run: |
           go test -run '^TestRecordMembershipsFollowEveryWriter$|^TestRecordMembershipProvisioningSerializesOldWriter$|^TestInitializationInstallsMembershipsOnlyWhileMigrating$|^TestMaintainIndexesRefusesForeignMembershipObjects$|^TestBoundedReadPlansStayIndexed$|^TestBoundedReadsMatchUnboundedPredicates$' -v ./internal/store
           CCI_MEMBERSHIP_PROVISION_ROWS=200000 go test -run '^TestMaintainIndexesProvisionsMembershipsWithinWriterBudget$' -v ./internal/store
       - name: Indexed lane tips, immutable output and errors, and writer lifecycle
+        if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-lane-score-baseline rev-parse HEAD)" = a578e6f0ffcf53b3f888ba7b262d740ac5c6cd64
           cp internal/cli/daemon_lanes_equivalence_test.go .ci-lane-score-baseline/internal/cli/
@@ -726,11 +792,13 @@ jobs:
           CCI_LANE_INDEX_ROWS=250000 go test -run '^TestLaneScoreIndexProvisioningWithinWriterBudget$' -v ./internal/store
 
       - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
         with:
           ref: 9a71632b1cea6246dd05c267a28809f232695f53
           path: .ci-native-tail-seed-calls-baseline
           persist-credentials: false
       - name: Native Tail successful seed API calls and immutable control
+        if: env.FULL_CI == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -856,6 +924,7 @@ jobs:
           done
           python3 .github/scripts/grade-board-cli-work.py "$RUNNER_TEMP"
       - name: Native HTTP Tail immutable CLI bytes, errors, identity, freshness, and zero writes
+        if: env.FULL_CI == 'true'
         env:
           CCI_NATIVE_TAIL_FIXTURE_TIMINGS: "1"
         run: |
@@ -878,6 +947,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -893,6 +963,7 @@ jobs:
 
   vuln:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -908,6 +979,7 @@ jobs:
 
   plugin:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -921,6 +993,7 @@ jobs:
 
   pack-readers:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:
@@ -948,6 +1021,7 @@ jobs:
     name: Prepublication Darwin arm64 provisioning candidate
     needs: [test, lint, vuln, plugin, pack-readers]
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
         with:

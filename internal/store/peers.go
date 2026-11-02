@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -134,10 +135,87 @@ func (s *Store) Peer(ctx context.Context, k PeerKey) (Peer, error) {
 	return p, nil
 }
 
-// Peers lists every known session thread, most recently seen first.
-func (s *Store) Peers(ctx context.Context) ([]Peer, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+peerColumns+" FROM sessions ORDER BY seen_at DESC, session, agent")
+// PeerQuery narrows Peers in SQL. Every set field must match: Session is a
+// prefix, Agent an agent id or name, Root keeps root threads only, Local this
+// node's own threads, and Role the role a thread announced or, without one,
+// the role its binding implies. Without All, superseded threads, which are
+// never live, are left out; with All and Since, only those seen at or after
+// Since stay.
+type PeerQuery struct {
+	Session string
+	Agent   string
+	Root    bool
+	Local   bool
+	Drive   string
+	Lane    string
+	Role    string
+	All     bool
+	Since   time.Time
+}
+
+// Peers lists the session threads q selects, most recently seen first.
+func (s *Store) Peers(ctx context.Context, q PeerQuery) ([]Peer, error) {
+	var where []string
+	var args []any
+	add := func(clause string, values ...any) {
+		where = append(where, clause)
+		args = append(args, values...)
+	}
+	if q.Session != "" {
+		add("session >= ? AND session < ? || char(1114111)", q.Session, q.Session)
+	}
+	if q.Agent != "" {
+		add("(agent = ? OR agent_name = ?)", q.Agent, q.Agent)
+	}
+	if q.Root {
+		add("agent = ''")
+	}
+	if q.Local {
+		add("origin IN ('', ?)", s.Self())
+	}
+	if q.Drive != "" {
+		add("drive = ?", q.Drive)
+	}
+	if q.Lane != "" {
+		add("lane = ?", q.Lane)
+	}
+	if q.Role != "" {
+		add("(CASE WHEN role != '' THEN role WHEN root THEN 'root' WHEN lane != '' THEN 'lane' WHEN agent != '' THEN 'agent' ELSE 'session' END) = ?", q.Role)
+	}
+	switch {
+	case !q.All:
+		add("superseded = 0")
+	case !q.Since.IsZero():
+		add("(superseded = 0 OR seen_at >= ?)", q.Since.UnixMilli())
+	}
+	query := "SELECT " + peerColumns + " FROM sessions"
+	if len(where) > 0 {
+		query += " WHERE " + strings.Join(where, " AND ")
+	}
+	rows, err := s.db.QueryContext(ctx, query+" ORDER BY seen_at DESC, session, agent", args...)
 	return s.readPeers(rows, err)
+}
+
+// RegisteredRoots reports which of sessions have a root thread in this node's registry.
+func (s *Store) RegisteredRoots(ctx context.Context, sessions []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(sessions) == 0 {
+		return out, nil
+	}
+	encoded, _ := json.Marshal(sessions)
+	rows, err := s.db.QueryContext(ctx, "SELECT session FROM sessions WHERE agent = '' AND origin IN ('', ?) AND session IN (SELECT value FROM json_each(?))", s.Self(), string(encoded))
+	if err != nil {
+		return nil, fmt.Errorf("read registered sessions: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var session string
+		if err := rows.Scan(&session); err != nil {
+			return nil, fmt.Errorf("scan registered session: %w", err)
+		}
+		out[session] = true
+	}
+	return out, rows.Err()
 }
 
 // LanePeers reads local threads bound to the named lanes across all drives.

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -99,5 +100,8 @@ func markStarted(roots version.Roots) {
 
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "cci:", err)
+	if down := (*cli.BusDown)(nil); errors.As(err, &down) {
+		os.Exit(cli.BusDownExit)
+	}
 	os.Exit(1)
 }
