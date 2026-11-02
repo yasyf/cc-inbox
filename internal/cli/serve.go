@@ -190,7 +190,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "session-start",
 			Args: cobra.NoArgs,
-			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(sessionStartBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -199,13 +199,16 @@ func newHookCmd() *cobra.Command {
 				if err := hook.SessionStart(cmd.Context(), st, p, window, cmd.OutOrStdout()); err != nil {
 					return err
 				}
-				return errors.Join(windowErr, ensureNewestDaemon(cmd.Context()))
+				if err := errors.Join(windowErr, ensureNewestDaemon(cmd.Context())); err != nil {
+					slog.Warn("cci session-start delivered its records but could not refresh the daemon", "err", err)
+				}
+				return nil
 			}),
 		},
 		&cobra.Command{
 			Use:  "announce",
 			Args: cobra.NoArgs,
-			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(hookRunBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -221,7 +224,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "post-tool-use",
 			Args: cobra.NoArgs,
-			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(hookRunBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -232,7 +235,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "stop",
 			Args: cobra.NoArgs,
-			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(hookRunBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -243,7 +246,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "subagent-stop",
 			Args: cobra.NoArgs,
-			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(hookRunBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -257,13 +260,15 @@ func newHookCmd() *cobra.Command {
 }
 
 const (
-	hookBudget     = 2 * time.Second
-	deferredBudget = 10 * time.Minute
+	hookBudget         = 2 * time.Second
+	hookRunBudget      = 6 * time.Second
+	sessionStartBudget = 11 * time.Second
+	deferredBudget     = 10 * time.Minute
 )
 
-func withHookStore(fn func(cmd *cobra.Command, st *store.Store, args []string) error) func(*cobra.Command, []string) error {
+func withHookStore(budget time.Duration, fn func(cmd *cobra.Command, st *store.Store, args []string) error) func(*cobra.Command, []string) error {
 	return func(cmd *cobra.Command, args []string) error {
-		err := runHook(cmd, args, fn)
+		err := runHook(cmd, args, budget, fn)
 		if errors.Is(err, store.ErrNeedsInit) || store.Busy(err) {
 			slog.Debug("cci hook skipped a store it could not reach in time", "hook", cmd.Name(), "err", err)
 			return nil
@@ -272,15 +277,24 @@ func withHookStore(fn func(cmd *cobra.Command, st *store.Store, args []string) e
 	}
 }
 
-func runHook(cmd *cobra.Command, args []string, fn func(cmd *cobra.Command, st *store.Store, args []string) error) error {
-	ctx, cancel := context.WithTimeout(cmd.Context(), hookBudget)
-	st, err := connectStore(ctx)
-	cancel()
+func runHook(cmd *cobra.Command, args []string, budget time.Duration, fn func(cmd *cobra.Command, st *store.Store, args []string) error) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), budget)
+	defer cancel()
+	connectCtx, cancelConnect := context.WithTimeout(ctx, hookBudget)
+	st, err := connectStore(connectCtx)
+	cancelConnect()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = st.Close() }()
-	return fn(cmd, st, args)
+	cmd.SetContext(ctx)
+	if err := fn(cmd, st, args); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("%w: %w", store.ErrBusy, err)
+		}
+		return err
+	}
+	return nil
 }
 
 func newPromptHookCmd() *cobra.Command {

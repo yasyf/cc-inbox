@@ -506,6 +506,43 @@ ON CONFLICT (name, drive) DO UPDATE SET seq = excluded.seq`, name, drive, seq)
 	return nil
 }
 
+// CursorMove is one cursor write a reader owes once its output reached the
+// reader: an Exact move sets the cursor to Seq, backwards included, as
+// MoveCursor does; any other only advances it, as SetCursor does.
+type CursorMove struct {
+	Name  string
+	Drive string
+	Seq   int64
+	Exact bool
+}
+
+// MoveCursors applies moves in one transaction, so a reader acknowledging
+// what it printed moves every cursor or none.
+func (s *Store) MoveCursors(ctx context.Context, moves []CursorMove) error {
+	if len(moves) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("move cursors: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, m := range moves {
+		set := "MAX(seq, excluded.seq)"
+		if m.Exact {
+			set = "excluded.seq"
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) VALUES (?, ?, ?)
+ON CONFLICT (name, drive) DO UPDATE SET seq = `+set, m.Name, m.Drive, m.Seq); err != nil {
+			return fmt.Errorf("move cursor %s: %w", m.Name, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("move cursors: %w", err)
+	}
+	return nil
+}
+
 const inferredRoles = "('', 'root', 'lane', 'agent', 'session')"
 
 type Binding struct {
