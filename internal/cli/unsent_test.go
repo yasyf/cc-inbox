@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,26 +12,9 @@ import (
 	"github.com/yasyf/cc-inbox/internal/cli"
 )
 
-func TestMain(m *testing.M) {
-	if os.Getenv("CCI_TEST_AS_CLI") == "" {
-		os.Exit(m.Run())
-	}
-	root := cli.NewRootCmd()
-	root.SetArgs(os.Args[1:])
-	if err := root.Execute(); err != nil {
-		fmt.Fprintln(os.Stderr, "cci:", err)
-		if down := (*cli.BusDown)(nil); errors.As(err, &down) {
-			os.Exit(cli.BusDownExit)
-		}
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
 func TestAPostTheBusCannotStoreTellsItsSenderAndTheNextPostStoresIt(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
-	t.Setenv("CCI_TEST_AS_CLI", "1")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
 	if _, err := run(t, "post", "--drive", "d1", "--lane", "root", "--kind", "note", "--text", "before the outage"); err != nil {
 		t.Fatal(err)
