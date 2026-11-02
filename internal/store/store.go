@@ -502,6 +502,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		if err := createPhysicalIndexes(ctx, tx, indexes); err != nil {
 			return err
 		}
+		if err := installProjection(ctx, tx, rootAudienceObjects[:], "root audience"); err != nil {
+			return err
+		}
 	}
 	installed, err := membershipsInstalled(ctx, tx)
 	if err != nil {

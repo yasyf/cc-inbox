@@ -185,6 +185,7 @@ func TestInitializationInstallsMembershipsOnlyWhileMigrating(t *testing.T) {
 		}
 		st := openMembershipStore(ctx, t, dir)
 		assertMembershipsInstalled(ctx, t, st, true)
+		assertRootAudienceInstalled(ctx, t, st, false)
 		assertMembership(ctx, t, st, "record_recipients", "'peer:old'", 1, 1)
 		assertMembership(ctx, t, st, "record_json_errors", "'recipients'", 2, 1)
 		assertMembershipsDerived(ctx, t, st)
@@ -594,6 +595,7 @@ func TestMaintainIndexesProvisionsMembershipsWithinWriterBudget(t *testing.T) {
 	home := t.TempDir()
 	st := openMembershipStore(ctx, t, home)
 	dropMemberships(ctx, t, st)
+	dropRootAudience(ctx, t, st)
 	if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
 	VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
@@ -610,7 +612,7 @@ SELECT 'drive-' || (n % 64), 'lane-' || (n % 16), 'note', n, 'history ' || n,
 		t.Fatal(err)
 	}
 	assertMembershipsInstalled(ctx, t, st, true)
-	if len(report.Memberships) != len(recordMemberships) || report.Elapsed >= budget {
+	if len(report.Memberships) != len(recordMemberships)+len(rootAudienceObjects) || report.Elapsed >= budget {
 		t.Fatalf("provisioning %d records = %+v, want every membership object within %s of the 10s writer busy timeout", population, report, budget)
 	}
 	if _, _, err := st.Post(ctx, Record{Drive: "drive-1", Lane: "after", Kind: kinds.Note, Text: "after provisioning", To: []string{"peer:session-1"}}, 0); err != nil {
@@ -673,6 +675,7 @@ func assertMembership(ctx context.Context, t *testing.T, st *Store, table, key s
 
 func assertMembershipsDerived(ctx context.Context, t *testing.T, st *Store) {
 	t.Helper()
+	assertRootAudienceDerived(ctx, t, st)
 	conn, err := st.db.Conn(ctx)
 	if err != nil {
 		t.Fatal(err)

@@ -563,6 +563,51 @@ jobs:
           assert not re.search(r"--- SKIP: TestWatchChangedGeneration(?:RecipientWork|QueryPlan)(?:/|\s)", text), text
           print("WATCH_CHANGED_GENERATION_LOG_GRADE watch_cases=4 plan_cases=4 numeric_once_each=true")
           PY
+          test "$(grep -c 'WATCH_CHANGED_GENERATION_UNENROLLED_SCOPE root_audience_objects=0 route=general unbounded_reference=true' "$RUNNER_TEMP/watch-changed-generation.log")" -eq 12
+          test "$(grep -c 'WATCH_CHANGED_GENERATION_UNENROLLED_PLAN root_audience_objects=0 route=general unbounded_reference=true' "$RUNNER_TEMP/watch-changed-generation.log")" -eq 4
+
+      - uses: actions/checkout@v7
+        with:
+          ref: a7b222539b6b0bf9c24477c597df3e13eed7ec5f
+          path: .ci-root-audience-old
+          persist-credentials: false
+      - name: Root audience native plans and actual candidate emissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -count=1 -run '^TestRootAudienceNativePlan$' -v ./internal/store
+          old_log="$RUNNER_TEMP/root-audience-old.log"
+          current_log="$RUNNER_TEMP/root-audience-current.log"
+          test "$(git -C .ci-root-audience-old rev-parse HEAD)" = a7b222539b6b0bf9c24477c597df3e13eed7ec5f
+          cp internal/store/root_audience_cost_internal_test.go .ci-root-audience-old/internal/store/root_audience_cost_internal_test.go
+          git -C .ci-root-audience-old apply --unidiff-zero "$GITHUB_WORKSPACE/internal/store/testdata/root-audience-cost/old.patch"
+          if (cd .ci-root-audience-old && CCI_ROOT_AUDIENCE_COST=1 CCI_ROOT_AUDIENCE_OPTIMIZED=0 go test -count=1 -run '^TestRootAudienceCandidateEmissions$' -v ./internal/store) >"$old_log" 2>&1; then
+            cat "$old_log"
+            exit 1
+          fi
+          cat "$old_log"
+          test "$(grep -c 'ROOT_AUDIENCE_CANDIDATE_BOUND_EXCEEDED' "$old_log")" -eq 2
+          git apply --unidiff-zero internal/store/testdata/root-audience-cost/current.patch
+          trap 'git apply --reverse --unidiff-zero internal/store/testdata/root-audience-cost/current.patch' EXIT
+          CCI_ROOT_AUDIENCE_COST=1 CCI_ROOT_AUDIENCE_OPTIMIZED=1 go test -count=1 -run '^TestRootAudienceCandidateEmissions$' -v ./internal/store | tee "$current_log"
+          python3 - "$old_log" "$current_log" <<'PY'
+          import re, sys
+          pattern = r'ROOT_AUDIENCE_CANDIDATE_WORK population=(\d+) placement=(same-drive|foreign-drive) query_epochs=3 emitted=0 cursor=1 actual_candidate_emissions=(\d+) selected_positive_emissions=(\d+) optimized=(true|false)'
+          cases = {(n, p) for n in (32, 10000) for p in ('same-drive', 'foreign-drive')}
+          observed = []
+          for path, optimized in zip(sys.argv[1:], ('false', 'true')):
+              text = open(path).read()
+              rows = re.findall(pattern, text)
+              assert len(rows) == 4 and {(int(n), p) for n, p, *_ in rows} == cases, rows
+              assert all(int(positive) > 0 and mode == optimized for _, _, _, positive, mode in rows), rows
+              observed.append({(int(n), p): int(work) for n, p, work, _, _ in rows})
+          old, current = observed
+          assert old[(10000, 'same-drive')] > old[(32, 'same-drive')] > 3, old
+          assert all(old[(n, 'foreign-drive')] == 0 for n in (32, 10000)), old
+          assert all(value <= 3 for value in current.values()), current
+          PY
+          git apply --reverse --unidiff-zero internal/store/testdata/root-audience-cost/current.patch
+          trap - EXIT
       - name: Recipient identity and targeted session query costs
         shell: bash
         run: |

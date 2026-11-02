@@ -25,11 +25,15 @@ func TestRecordMembershipProvisioningSerializesOldWriter(t *testing.T) {
 			home := t.TempDir()
 			st := openMembershipStore(ctx, t, home)
 			dropMemberships(ctx, t, st)
+			dropRootAudience(ctx, t, st)
 			if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE history(n) AS (
 VALUES(1) UNION ALL SELECT n + 1 FROM history WHERE n < ?
 )
 INSERT INTO records (drive,lane,kind,at,text,recipients,source,hash)
 SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' || n FROM history`, population); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := st.db.ExecContext(ctx, `INSERT INTO records(seq,drive,lane,kind,at,text,recipients,source,hash) VALUES(0,'foreign','root','note',1,'zero parent','["other"]','post','root-zero-parent')`); err != nil {
 				t.Fatal(err)
 			}
 			cmd := exec.CommandContext(ctx, binary, "wait-write", home)
@@ -96,6 +100,9 @@ SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' ||
 			if err := installMemberships(ctx, tx); err != nil {
 				t.Fatal(err)
 			}
+			if err := installProjection(ctx, tx, rootAudienceObjects[:], "root audience"); err != nil {
+				t.Fatal(err)
+			}
 			if err := tx.Commit(); err != nil {
 				t.Fatal(err)
 			}
@@ -113,6 +120,11 @@ SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' ||
 			assertMembershipsInstalled(ctx, t, st, true)
 			assertMembership(ctx, t, st, "record_recipients", "'peer:concurrent-old'", result.Seq, 1)
 			assertMembershipsDerived(ctx, t, st)
+			var audience int
+			if err := st.db.QueryRowContext(ctx, "SELECT audience FROM record_root_audience WHERE source_seq = ?", result.Seq).Scan(&audience); err != nil || audience != 1 {
+				t.Fatalf("old writer root audience = %d, %v", audience, err)
+			}
+
 			t.Logf("old_writer_preopened=true rows=%d waited_across_atomic_backfill=true posted_seq=%d held_for=%s fingerprint=%s", population, result.Seq, elapsed, result.Fingerprint)
 		})
 	}

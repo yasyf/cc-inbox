@@ -141,6 +141,10 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	rootInstalled, err := projectionInstalled(ctx, s.db, rootAudienceObjects[:], "root audience")
+	if err != nil {
+		return report, err
+	}
 	incidents, err := incidentProjectionInstalled(ctx, s.db)
 	if err != nil {
 		return report, err
@@ -150,7 +154,7 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if len(missing) > 0 || !installed || !closersInstalled || !incidents {
+	if len(missing) > 0 || !installed || !closersInstalled || !rootInstalled || !incidents {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {
 			return report, fmt.Errorf("begin index maintenance: %w", err)
@@ -163,6 +167,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !closersInstalled {
 			if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+				return report, err
+			}
+		}
+		if !rootInstalled {
+			if err := installProjection(ctx, tx, rootAudienceObjects[:], "root audience"); err != nil {
 				return report, err
 			}
 		}
@@ -187,6 +196,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !closersInstalled {
 			for _, object := range closerMemberships {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !rootInstalled {
+			for _, object := range rootAudienceObjects {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}

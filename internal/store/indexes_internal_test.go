@@ -25,6 +25,7 @@ func TestExistingStoreOpenDoesNotBuildPhysicalIndexes(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
 	dropMemberships(ctx, t, st)
+	dropRootAudience(ctx, t, st)
 	seedLaneHistory(t, st, 64)
 	fingerprint := st.SchemaFingerprint()
 	tx, err := st.db.BeginTx(ctx, nil)
@@ -42,6 +43,7 @@ func TestExistingStoreOpenDoesNotBuildPhysicalIndexes(t *testing.T) {
 	}
 	assertLaneIndexCount(t, other, 0)
 	assertMembershipsInstalled(ctx, t, other, false)
+	assertRootAudienceInstalled(ctx, t, other, false)
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
 	}
@@ -146,6 +148,7 @@ func TestMaintainIndexesRejectsNewerLogicalSchema(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
 	dropMemberships(ctx, t, st)
+	dropRootAudience(ctx, t, st)
 	if _, err := st.db.ExecContext(ctx, "PRAGMA user_version = 15"); err != nil {
 		t.Fatal(err)
 	}
@@ -154,6 +157,7 @@ func TestMaintainIndexesRejectsNewerLogicalSchema(t *testing.T) {
 	}
 	assertLaneIndexCount(t, st, 0)
 	assertMembershipsInstalled(ctx, t, st, false)
+	assertRootAudienceInstalled(ctx, t, st, false)
 }
 
 func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
@@ -165,6 +169,7 @@ func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
 	dropMemberships(ctx, t, st)
+	dropRootAudience(ctx, t, st)
 	lock, err := os.OpenFile(filepath.Join(st.home, "init.lock"), os.O_RDWR, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +184,7 @@ func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
 	}
 	assertLaneIndexCount(t, st, 0)
 	assertMembershipsInstalled(ctx, t, st, false)
+	assertRootAudienceInstalled(ctx, t, st, false)
 }
 
 func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
@@ -190,6 +196,7 @@ func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	dropLaneIndexes(t, st)
 	dropMemberships(ctx, t, st)
+	dropRootAudience(ctx, t, st)
 	tx, err := st.db.BeginTx(ctx, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -212,6 +219,7 @@ func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
 	}
 	assertLaneIndexCount(t, st, 0)
 	assertMembershipsInstalled(ctx, t, st, false)
+	assertRootAudienceInstalled(ctx, t, st, false)
 }
 
 func TestMaintainIndexesRollsBackCancelledBuild(t *testing.T) {
@@ -247,6 +255,7 @@ func TestMaintainIndexesRollsBackCancelledBuild(t *testing.T) {
 			}
 			dropLaneIndexes(t, st)
 			dropMemberships(cleanupCtx, t, st)
+			dropRootAudience(cleanupCtx, t, st)
 			seedLaneHistory(t, st, 4096)
 			for _, query := range []string{
 				"UPDATE records SET lane = 'record-lane', recipients = '[\"peer:rolled-back\"]'",
@@ -269,6 +278,7 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'session-lane' FROM history`,
 			}
 			assertLaneIndexCount(t, st, 0)
 			assertMembershipsInstalled(cleanupCtx, t, st, false)
+			assertRootAudienceInstalled(cleanupCtx, t, st, false)
 		})
 	}
 }
