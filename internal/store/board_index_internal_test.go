@@ -38,7 +38,7 @@ func TestBoardProjectionBodyAndCrossDriveWithdrawal(t *testing.T) {
 	if err := os.WriteFile(path, []byte("close #123\r\nmerge-row-1234"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ruling, _, err := st.Post(t.Context(), Record{Drive: "d", Lane: "root", Kind: kinds.Go, Text: "short #123", Refs: Refs{Path: path}}, 0)
+	ruling, _, err := st.Post(t.Context(), Record{Drive: "d", Lane: "root", Kind: kinds.Go, Text: "short #123", Refs: Refs{Path: path}, To: []string{PeerAddress(peer)}}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestBoardReviewLaneExpiryAndClockReversal(t *testing.T) {
 	now := st.Now()
 	st.Now = func() time.Time { return now }
 	expiry := now.Add(time.Minute)
-	if _, _, err := st.Post(t.Context(), Record{Drive: "d", Lane: "reviewer-2", Kind: kinds.Head, Text: "head #123", ExpiresAt: &expiry}, 0); err != nil {
+	if _, _, err := st.Post(t.Context(), Record{Drive: "d", Lane: "reviewer-2", Kind: kinds.Head, Text: "head #123"}, time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := index.Provision(t.Context(), spec); err != nil {
