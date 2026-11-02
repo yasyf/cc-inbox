@@ -10,8 +10,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/yasyf/cc-inbox/e2e"
@@ -311,6 +313,17 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 	res := PushResult{Rejected: []Rejection{}}
 	if n.Config.Tier == e2e.TierPaired {
 		return res, nil
+	}
+	if err := os.MkdirAll(dir(n.Home, n.Config.Mesh), 0o700); err != nil {
+		return res, err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir(n.Home, n.Config.Mesh), "push.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return res, err
+	}
+	defer func() { _ = lock.Close() }()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return res, fmt.Errorf("lock push: %w", err)
 	}
 	marks, err := n.Store.Watermarks(ctx)
 	if err != nil {
