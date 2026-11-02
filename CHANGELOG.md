@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A `spawn` kind records a lane's start: the lane as `--lane-ref`, its brief
+  and model as `--attr brief=` and `--attr model=`, and its effort and task id
+  when known. It never expires, unlike the `state` record that carried
+  `SPAWNED <lane>` before, and `cci who` lists the lane as spawned, naming the
+  record, its brief and model, until a thread binds it. `--json` stays peer
+  rows only.
 - A `queue` kind for a pull request's merge-queue state change. It requires
   `--pr` and carries the state in `--outcome`.
 - `service.Writer` posts records to a relay mesh as a scoped service member
