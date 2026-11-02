@@ -198,10 +198,6 @@ func (f Filter) boundedAudience(self string, now time.Time, rootAudience bool) (
 	return where + " AND " + candidate + " IN (" + strings.Join(arms, " UNION ALL ") + ")", append(params, candidates...)
 }
 
-func (f Filter) candidateArms(self string) ([]string, []any) {
-	return f.candidateArmsAudience(self, false)
-}
-
 func (f Filter) candidateArmsAudience(self string, rootAudience bool) ([]string, []any) {
 	peers, readers := f.peerAddresses(self), f.readerAddresses()
 	if len(peers) == 0 && len(readers) == 0 {
