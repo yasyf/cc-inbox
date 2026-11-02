@@ -535,25 +535,29 @@ func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, sta
 	if err != nil {
 		return err
 	}
+	spawned := started.UnixMilli()
+	if k.Agent != "" {
+		spawned = s.Now().UnixMilli()
+	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, origin, drive, root, lane, role) VALUES (?, ?, ?, ?, 0, ?, 'lane')
 ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, lane = excluded.lane,
 	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND sessions.lane = ''`, k.Session, k.Agent, s.Self(), drive, lane); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, MIN(?, COALESCE(
-	(SELECT MIN(seq) - 1 FROM records WHERE at >= MAX(?, COALESCE((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0))),
+	(SELECT MIN(seq) - 1 FROM records WHERE at >= COALESCE(NULLIF((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0), ?)),
 	(SELECT MAX(seq) FROM records),
 	0))
 WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
-ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, waiting, started.UnixMilli(), k.Session, k.Agent, s.Self(), LaneCursor(k), drive); err != nil {
+ON CONFLICT (name, drive) DO NOTHING`, LaneCursor(k), drive, waiting, k.Session, k.Agent, s.Self(), spawned, LaneCursor(k), drive); err != nil {
 		return fmt.Errorf("start lane cursor: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, COALESCE(
-	(SELECT MIN(seq) - 1 FROM records WHERE at >= MAX(?, COALESCE((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0))),
+	(SELECT MIN(seq) - 1 FROM records WHERE at >= COALESCE(NULLIF((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0), ?)),
 	(SELECT MAX(seq) FROM records),
 	0)
 WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
-ON CONFLICT (name, drive) DO NOTHING`, BroadcastCursor(k), drive, started.UnixMilli(), k.Session, k.Agent, s.Self(), BroadcastCursor(k), drive); err != nil {
+ON CONFLICT (name, drive) DO NOTHING`, BroadcastCursor(k), drive, k.Session, k.Agent, s.Self(), spawned, BroadcastCursor(k), drive); err != nil {
 		return fmt.Errorf("start lane broadcast floor: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
