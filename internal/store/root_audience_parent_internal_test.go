@@ -22,6 +22,9 @@ func openRootParentFixture(t *testing.T, manual bool) *Store {
 		if err != nil || !slices.Contains(report.Memberships, "record_root_audience_parent") {
 			t.Fatalf("owned parent maintenance = %+v, %v", report, err)
 		}
+		if _, err := st.db.ExecContext(ctx, "DROP INDEX records_re"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	assertRootAudienceInstalled(ctx, t, st, true)
 	var optional bool
