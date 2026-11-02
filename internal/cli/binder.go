@@ -1,0 +1,81 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"regexp"
+	"strconv"
+	"time"
+
+	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/store"
+)
+
+var numberedLane = regexp.MustCompile(`^(.+)-([1-9]\d*)$`)
+
+// refuseSecondBinder refuses self binding lane on drive while another live
+// thread holds it, and tells root once by a defect record. A numbered
+// successor binding beside its live predecessor binds, and root hears it too.
+func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey, drive, lane string, at time.Time) error {
+	if b, ok, err := st.Binding(ctx, self); err != nil || ok && (b.Root || b.Lane != "" || b.Drive != drive) {
+		return err
+	}
+	owner, _, _, err := st.Owner(ctx, self)
+	if err != nil {
+		return err
+	}
+	for _, held := range append([]string{lane}, predecessors(lane)...) {
+		holder, ok, err := liveHolder(ctx, st, self, owner, drive, held)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			continue
+		}
+		seen := st.Now().Sub(holder.SeenAt).Round(time.Minute)
+		text := fmt.Sprintf("%s bound while its predecessor %s, thread %s %s, is live, seen %s ago, and never stood down: stand %s down if %s replaces it", lane, held, holder.Name, holder.Key(), seen, held, lane)
+		if held == lane {
+			text = fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, holder.Name, holder.Key(), seen, lane)
+		}
+		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
+		if err != nil {
+			return err
+		}
+		if held == lane {
+			return fmt.Errorf("lane %s is held by live thread %s %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d", lane, holder.Name, holder.Key(), seen, defect.Seq)
+		}
+	}
+	return nil
+}
+
+func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey, drive, lane string) (peers.View, bool, error) {
+	if _, standDown, err := st.Successors(ctx, drive, lane); err != nil || standDown != 0 {
+		return peers.View{}, false, err
+	}
+	views, err := peers.ResolveLanes(ctx, st, []string{lane})
+	if err != nil {
+		return peers.View{}, false, err
+	}
+	for _, v := range views {
+		if v.Drive == drive && v.Lane == lane && v.Key() != self && v.Key() != owner && st.Now().Sub(v.SeenAt) < peers.StaleAfter {
+			return v, true, nil
+		}
+	}
+	return peers.View{}, false, nil
+}
+
+func predecessors(lane string) []string {
+	m := numberedLane.FindStringSubmatch(lane)
+	if m == nil {
+		return nil
+	}
+	n, _ := strconv.Atoi(m[2])
+	switch n {
+	case 1:
+		return nil
+	case 2:
+		return []string{m[1] + "-1", m[1]}
+	}
+	return []string{m[1] + "-" + strconv.Itoa(n-1)}
+}

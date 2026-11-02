@@ -90,7 +90,7 @@ func newPostCmd() *cobra.Command {
 			}
 			return validateTargets(len(re)+len(reSeqs), len(resolves)+len(resolvesSeqs), pairwise)
 		},
-		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+		RunE: untilStored(withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
 			var (
 				err      error
@@ -226,25 +226,27 @@ func newPostCmd() *cobra.Command {
 					return selfAddressed(cmd.Context(), st, records[i], lane)
 				}
 			}
-			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
-				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
+			var bind *store.LaneBinding
+			if self, window, err := peerIdentity(); os.Getenv(unsentEnv) == "" && err == nil && window.PID != 0 {
+				if err := refuseSecondBinder(cmd.Context(), st, self, r.Drive, lane, at); err != nil {
 					return err
 				}
+				bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
 			}
-			for _, rec := range records {
-				got, dup, err := st.PostAt(cmd.Context(), rec, ttl, at)
-				if err != nil {
+			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
+			if err != nil {
+				return err
+			}
+			for _, p := range posted {
+				if p.Record.Num, err = st.Number(cmd.Context(), p.Record); err != nil {
 					return err
 				}
-				if got.Num, err = st.Number(cmd.Context(), got); err != nil {
-					return err
-				}
-				if err := printPosted(cmd.OutOrStdout(), got, dup, asJSON); err != nil {
+				if err := printPosted(cmd.OutOrStdout(), p.Record, p.Duplicate, asJSON); err != nil {
 					return err
 				}
 			}
 			return nil
-		}),
+		})),
 	}
 	f := cmd.Flags()
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
@@ -266,7 +268,7 @@ func newPostCmd() *cobra.Command {
 	f.BoolVar(&pairwise, "pairwise", false, "pair equal non-empty --re and --resolves lists in order, posting one record per pair")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
-	f.Var(&prsFlag{&r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
+	f.Var(&prsFlag{prs: &r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")
 	f.StringSliceVar(&r.Refs.Stacks, "stack", nil, "deploy stacks as <project>/<env> (repeatable)")
 	f.StringSliceVar(&r.Refs.Targets, "target", nil, "release targets (repeatable)")
@@ -277,7 +279,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Fields.Mode, "mode", "", "how a release or apply started: platy, cli, manual, walker")
 	f.StringVar(&r.Fields.Outcome, "outcome", "", "passed, failed, pending, cancelled")
 	f.StringVar(&r.Fields.Commit, "commit", "", "full commit sha")
-	f.Var(&headsFlag{&heads}, "head", "on a head record, one pull request's new head as <pr>=<sha> or <pr>=<was>..<sha>, then an optional note after a space, such as \"45001=4423264..c3b44a3 patch-identical\"; repeated, one record carries every head of a restack: each lands in fields.attrs as head:<pr> = [<was>..]<sha>[ <note>], each PR joins its refs, and its text opens with HEAD <n> PRs: #<pr> <short sha>, ...")
+	f.Var(&headsFlag{heads: &heads}, "head", "on a head record, one pull request's new head as <pr>=<sha> or <pr>=<was>..<sha>, then an optional note after a space, such as \"45001=4423264..c3b44a3 patch-identical\"; repeated, one record carries every head of a restack: each lands in fields.attrs as head:<pr> = [<was>..]<sha>[ <note>], each PR joins its refs, and its text opens with HEAD <n> PRs: #<pr> <short sha>, ...")
 	f.StringVar(&census, "census", "", `census JSON: {"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["<project>/<env>"]}`)
 	f.StringToStringVar(&counts, "count", nil, "named counts, e.g. --count deletes=0")
 	f.StringToStringVar(&r.Fields.Attrs, "attr", nil, "named string attributes (repeatable), e.g. --attr actor=platy")

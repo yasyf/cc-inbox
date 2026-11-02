@@ -25,6 +25,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -175,7 +176,20 @@ func newWhoCmd() *cobra.Command {
 				}
 				return nil
 			}
-			if len(views) == 0 {
+			spawns, err := unboundSpawns(cmd.Context(), st, f)
+			if err != nil {
+				return err
+			}
+			for _, sp := range spawns {
+				task := ""
+				if sp.Task != "" {
+					task = " task=" + sp.Task
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s spawned drive=%s lane=%s by #%d %s brief=%s model=%s%s, not bound yet\n", sp.Lane, sp.Drive, sp.Lane, sp.Seq, render.Stamp(sp.At, st.Now()), sp.Brief, sp.Model, task); err != nil {
+					return err
+				}
+			}
+			if len(views) == 0 && len(spawns) == 0 {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), "no matching peers; cci who --all includes sessions that have ended")
 				return err
 			}
@@ -215,16 +229,41 @@ func newWhoCmd() *cobra.Command {
 	return cmd
 }
 
+// unboundSpawns lists the lanes spawn records started on the filter's drive
+// that no thread has bound yet, in the last hour or, with --all, ever, when
+// the filter narrows by nothing but drive, lane and the lane role.
+func unboundSpawns(ctx context.Context, st *store.Store, f peers.Filter) ([]store.Spawn, error) {
+	if f.Session != "" || f.Agent != "" || f.Origin != "" || f.Name != "" || f.Role != "" && f.Role != peers.RoleLane || f.Tag != "" || f.Repo != "" || f.Worktree != "" || f.Branch != "" || f.Query != "" || f.Root || f.Kind != "" || f.Key != "" || f.Rel != "" {
+		return nil, nil
+	}
+	drive, err := resolveDrive(ctx, st, f.Drive)
+	if err != nil {
+		return nil, nil
+	}
+	since := st.Now().Add(-time.Hour)
+	if f.All {
+		since = time.Time{}
+	}
+	spawns, err := st.UnboundSpawns(ctx, drive, since)
+	return slices.DeleteFunc(spawns, func(sp store.Spawn) bool { return f.Lane != "" && sp.Lane != f.Lane }), err
+}
+
 func markStoodDown(ctx context.Context, st *store.Store, views []peers.View) error {
 	for i, v := range views {
 		if v.Lane == "" || v.Drive == "" {
 			continue
 		}
-		chain, stoodDown, err := st.Successors(ctx, v.Drive, v.Lane)
+		chain, standDown, err := st.Successors(ctx, v.Drive, v.Lane)
 		if err != nil {
 			return err
 		}
-		views[i].StoodDown = stoodDown
+		if standDown != 0 {
+			down, err := st.Get(ctx, standDown)
+			if err != nil {
+				return err
+			}
+			views[i].StoodDown = !v.LastSeen().After(down.At)
+		}
 		if len(chain) > 0 {
 			views[i].Successor = chain[len(chain)-1]
 		}
@@ -237,7 +276,7 @@ func printSuccessor(cmd *cobra.Command, st *store.Store, drive, lane string, asJ
 	if err != nil {
 		return err
 	}
-	chain, stoodDown, err := st.Successors(cmd.Context(), drive, lane)
+	chain, standDown, err := st.Successors(cmd.Context(), drive, lane)
 	if err != nil {
 		return err
 	}
@@ -253,9 +292,10 @@ func printSuccessor(cmd *cobra.Command, st *store.Store, drive, lane string, asJ
 			Drive     string   `json:"drive"`
 			Lane      string   `json:"lane"`
 			StoodDown bool     `json:"stood_down"`
+			Record    int64    `json:"record,omitempty"`
 			Successor string   `json:"successor"`
 			Chain     []string `json:"chain"`
-		}{drive, lane, stoodDown, successor, chain})
+		}{drive, lane, standDown != 0, standDown, successor, chain})
 	}
 	if successor == "" {
 		return nil
@@ -323,7 +363,7 @@ func (c *claimFlags) register(cmd *cobra.Command) {
 	fl := cmd.Flags()
 	fl.StringVar(&c.forLane, "for", "", "the lane whose claims these are, as <lane>@<drive>, instead of this session's: the one live local session bound as that lane in that drive, else the one live teammate named that lane with no lane yet, which it binds, else the newest ended session bound as that lane, such as a codex lane's")
 	fl.StringVar(&c.rel, "rel", relOwns, "the relation: owns, opened, watches, reviews, started, holds, posted, or any verb")
-	fl.Var(&prsFlag{&c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
+	fl.Var(&prsFlag{prs: &c.prs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
 	fl.StringSliceVar(&c.builds, "build", nil, "build ids or URLs (repeatable)")
 	fl.StringSliceVar(&c.branches, "branch", nil, "branch names (repeatable)")
 	fl.StringSliceVar(&c.worktrees, "worktree", nil, "worktree paths (repeatable)")
