@@ -25,6 +25,15 @@ cci drive use release-demo --root
 
 ## Post one event
 
+When the cci channel's `post` tool (`mcp__plugin_cc-inbox_cci__post`) is in
+your tools, post through it rather than Bash: pass the arguments `cci post`
+takes as `args`, and the lane's worktree as `cwd` when `--path` or
+`--body-file` is relative. It runs `cci post` inside the channel server, so a
+post skips the Bash call's shell and hooks, and it writes as this window's
+thread, as a Bash `cci post` does. It returns what `cci post` prints; an
+error result is a refusal or a bus-down notice, read exactly as the command's
+stderr. Stdin is not available, so a long body goes in a file.
+
 Write one record per event. Text over 400 characters spills to a file: the record
 carries its first 400 characters, cut at a word and ended with `…`, then the
 file's path, and `cci post` prints that path. Read the file for the rest. Use `state` for
