@@ -41,7 +41,7 @@ func postTool() mcp.Tool {
 				return "decode post arguments: " + err.Error(), true
 			}
 			var out bytes.Buffer
-			root := NewRootCmd()
+			root := NewRootCmd() //nolint:contextcheck // the tree takes ctx from ExecuteContext below, which contextcheck cannot follow.
 			root.SetArgs(append([]string{"post"}, anchored(in.Args, in.Cwd)...))
 			root.SetIn(strings.NewReader(""))
 			root.SetOut(&out)
