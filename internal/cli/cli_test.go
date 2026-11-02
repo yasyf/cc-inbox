@@ -1651,6 +1651,9 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "cccc3333-desk", Agent: "adesk-1"}, "d", "desk-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	desk := store.PeerKey{Session: "bbbb2222-desk", Agent: "adesk-2"}
 	if err := st.BindLane(context.Background(), desk, "d", "desk-2", time.Now()); err != nil {
 		t.Fatal(err)
