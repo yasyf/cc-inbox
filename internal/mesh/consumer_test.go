@@ -340,7 +340,7 @@ func TestPresenceAloneAdvancesTheRevision(t *testing.T) {
 	if _, err := b.consumer.Apply(t.Context(), next); err != nil {
 		t.Fatal(err)
 	}
-	peers, err := b.st.Peers(t.Context())
+	peers, err := b.st.Peers(t.Context(), store.PeerQuery{All: true})
 	if err != nil || len(peers) != 1 || peers[0].Session != "s-1" || peers[0].Origin != a.st.Self() {
 		t.Fatalf("b sees %+v, %v", peers, err)
 	}
