@@ -83,6 +83,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `UserPromptSubmit` hook (`cci hook prompt`) answers within two seconds even
+  when another process holds the store's writer or init lock, or a read
+  stalls on disk. Past that budget it hands the prompt to a detached
+  `cci hook prompt --deferred`, which records the root's owner ruling once
+  the store frees, so a prompt no longer waits out the hook's 10-second
+  timeout.
 - A new lane's hook mail delivers records addressed to `all` only from the
   lane's spawn on. Its direct records still start at the oldest one waiting
   for it, so a lane spawned onto an old order no longer replays every

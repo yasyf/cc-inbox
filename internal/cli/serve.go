@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -248,17 +250,80 @@ func newHookCmd() *cobra.Command {
 				return hook.SubagentStop(cmd.Context(), st, p)
 			}),
 		},
-		&cobra.Command{
-			Use:  "prompt",
-			Args: cobra.NoArgs,
-			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-				p, err := hook.Read(cmd.InOrStdin())
-				if err != nil {
-					return err
-				}
-				return hook.Prompt(cmd.Context(), st, p)
-			}),
-		},
+		newPromptHookCmd(),
 	)
 	return cmd
+}
+
+const promptBudget = 2 * time.Second
+
+func newPromptHookCmd() *cobra.Command {
+	var deferred bool
+	cmd := &cobra.Command{
+		Use:  "prompt",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			payload, err := io.ReadAll(cmd.InOrStdin())
+			if err != nil {
+				return fmt.Errorf("read hook payload: %w", err)
+			}
+			p, err := hook.Read(bytes.NewReader(payload))
+			if err != nil {
+				return err
+			}
+			if deferred {
+				return prompt(cmd.Context(), p)
+			}
+			done := make(chan error, 1)
+			go func() { done <- prompt(cmd.Context(), p) }()
+			select {
+			case err := <-done:
+				return err
+			case <-time.After(promptBudget):
+				// The abandoned prompt dies with this process: SQLite rolls back its
+				// open write, and a post it committed first dedups against the retry's.
+				return deferPrompt(payload)
+			}
+		},
+	}
+	cmd.Flags().BoolVar(&deferred, "deferred", false, "finish a prompt hook that ran past its budget, however long the store takes")
+	_ = cmd.Flags().MarkHidden("deferred")
+	return cmd
+}
+
+func prompt(ctx context.Context, p hook.Payload) error {
+	st, err := openStore(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	return hook.Prompt(ctx, st, p)
+}
+
+func deferPrompt(payload []byte) error {
+	exe, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find cci to defer the prompt: %w", err)
+	}
+	in, err := os.CreateTemp("", "cci-prompt-*.json")
+	if err != nil {
+		return fmt.Errorf("stage deferred prompt: %w", err)
+	}
+	defer func() { _ = in.Close() }()
+	if err := os.Remove(in.Name()); err != nil {
+		return fmt.Errorf("stage deferred prompt: %w", err)
+	}
+	if _, err := in.Write(payload); err != nil {
+		return fmt.Errorf("stage deferred prompt: %w", err)
+	}
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		return fmt.Errorf("stage deferred prompt: %w", err)
+	}
+	c := exec.Command(exe, "hook", "prompt", "--deferred") //nolint:gosec // G204: this cci binary, rerun off the prompt path.
+	c.Stdin = in
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := c.Start(); err != nil {
+		return fmt.Errorf("defer prompt: %w", err)
+	}
+	return c.Process.Release()
 }
