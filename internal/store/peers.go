@@ -109,18 +109,14 @@ ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin,
 
 // Touch records that the thread is still active.
 func (s *Store) Touch(ctx context.Context, k PeerKey) error {
-	if _, err := s.db.ExecContext(ctx, "UPDATE sessions SET seen_at = ? WHERE session = ? AND agent = ?", s.Now().UTC().UnixMilli(), k.Session, k.Agent); err != nil {
-		return fmt.Errorf("touch %s: %w", k, err)
-	}
-	return nil
+	_, err := s.Commit(ctx, Write{Touch: []PeerKey{k}})
+	return err
 }
 
 // Retire marks a subagent or teammate whose harness reported it stopped as no longer live.
 func (s *Store) Retire(ctx context.Context, k PeerKey) error {
-	if _, err := s.db.ExecContext(ctx, "UPDATE sessions SET superseded = 1, seen_at = ? WHERE session = ? AND agent = ?", s.Now().UTC().UnixMilli(), k.Session, k.Agent); err != nil {
-		return fmt.Errorf("retire %s: %w", k, err)
-	}
-	return nil
+	_, err := s.Commit(ctx, Write{Retire: []PeerKey{k}})
+	return err
 }
 
 // Peer reads one thread's row; a thread that never bound or announced is sql.ErrNoRows.

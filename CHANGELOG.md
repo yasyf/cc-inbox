@@ -41,6 +41,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The cci daemon is the store's preferred writer. `cci post`, the hooks'
+  session touches and cursor moves, and every other client write go to the
+  daemon over its socket, and one writer commits every write already waiting
+  in one transaction, each under its own savepoint, so concurrent clients no
+  longer queue on SQLite's lock one commit at a time. A client whose daemon
+  is down, draining, older than this release, or serving another home or node
+  writes the store itself, as before. A write that misses its turn before
+  its caller's deadline applies nothing; a `cci post` whose reply the daemon
+  never confirmed is kept under `$CCI_HOME/unsent` as the exact write it
+  sent, so the replay dedups against the record if it already landed.
+- A migration the daemon runs at start on a store that holds data leaves a
+  `note` in drive `cci`, lane `daemon`, naming the schemas and how long every
+  client open waited behind `init.lock`.
+
 - `cci who --json` leaves out each peer's `env` unless `--fields` names it.
 - `cci claim --for <lane>@<drive>` falls back to the newest ended session
   bound as that lane when none is live, so the runner can record the codex
@@ -113,10 +127,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lane's blockers took 50 seconds and `cci show` of one such record 9.
 - The `UserPromptSubmit` hook (`cci hook prompt`) answers within two seconds even
   when another process holds the store's writer or init lock, or a read
-  stalls on disk. Past that budget it hands the prompt to a detached
-  `cci hook prompt --deferred`, which records the root's owner ruling once
-  the store frees, so a prompt no longer waits out the hook's 10-second
-  timeout.
+  stalls on disk. Past that budget it keeps the prompt under
+  `$CCI_HOME/prompts`, and the daemon, or the next prompt hook, records the
+  root's owner ruling once the store frees, so a prompt no longer waits out
+  the hook's 10-second timeout and no detached process outlives the hook.
 - The upgrade command for a standalone `cci` runs the new binary once before
   moving it over the old one, so macOS's first-launch hold, which hung every
   drive `cci` call for up to 22 minutes on Oct 31, lands on the copy no

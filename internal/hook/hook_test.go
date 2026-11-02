@@ -83,7 +83,7 @@ func TestPromptRecordsOwnerRulingsOnlyForRoot(t *testing.T) {
 		{SessionID: "root", Prompt: "/compact"},
 		{SessionID: "root", Prompt: "  ship the wave fix now  "},
 	} {
-		if err := hook.Prompt(ctx, st, p); err != nil {
+		if err := hook.Prompt(ctx, st, p, st.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -102,7 +102,7 @@ func TestRootReaderSkipsTheOwnerPromptsItRecorded(t *testing.T) {
 	if err := st.Bind(ctx, store.PeerKey{Session: "root"}, "d", true); err != nil {
 		t.Fatal(err)
 	}
-	if err := hook.Prompt(ctx, st, hook.Payload{SessionID: "root", Prompt: "fix cci so my own messages are not echoed"}); err != nil {
+	if err := hook.Prompt(ctx, st, hook.Payload{SessionID: "root", Prompt: "fix cci so my own messages are not echoed"}, st.Now()); err != nil {
 		t.Fatal(err)
 	}
 	relayed := testutil.Post(t, st, store.Record{Lane: "owner", Kind: kinds.Owner, Text: "relayed from slack"})

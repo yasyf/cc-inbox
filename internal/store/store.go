@@ -317,11 +317,21 @@ func (r Record) Tracked() bool {
 }
 
 type Store struct {
-	db    *sql.DB
-	home  string
-	node  node.Node
-	owner bool
-	Now   func() time.Time
+	db     *sql.DB
+	home   string
+	node   node.Node
+	owner  bool
+	writer Writer
+	moved  *Migration
+	Now    func() time.Time
+}
+
+// Migration is the schema upgrade an initializer ran on a store that already
+// held data, and how long it held every client open behind init.lock.
+type Migration struct {
+	From int
+	To   int
+	Took time.Duration
 }
 
 func Home() (string, error) {
@@ -467,13 +477,30 @@ func (s *Store) initialize(ctx context.Context) error {
 	if err := flock(ctx, lock, syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("take migration lock: %w", err)
 	}
-	if _, current, err := s.current(ctx); err != nil || current {
+	locked := time.Now()
+	schema, current, err := s.current(ctx)
+	if err != nil || current {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
 		return fmt.Errorf("set journal mode: %w", err)
 	}
-	return s.migrate(ctx)
+	if err := s.migrate(ctx); err != nil {
+		return err
+	}
+	if schema > 0 {
+		s.moved = &Migration{From: schema, To: len(migrations), Took: time.Since(locked)}
+	}
+	return nil
+}
+
+// Migrated reports the migration Open ran on this store, if it ran one on a
+// store that already held data.
+func (s *Store) Migrated() (Migration, bool) {
+	if s.moved == nil {
+		return Migration{}, false
+	}
+	return *s.moved, true
 }
 
 func lockInit(ctx context.Context, home string, how int) (*os.File, error) {
@@ -782,34 +809,8 @@ type Posted struct {
 // deduplicated as PostAt checks it: a duplicate returns the stored record and
 // the others still land, while any error stores nothing, the binding included.
 func (s *Store) PostAll(ctx context.Context, bind *LaneBinding, records []Record, ttl time.Duration, at time.Time) ([]Posted, error) {
-	for _, r := range records {
-		if r.Kind.Spec().Internal {
-			return nil, fmt.Errorf("kind %s is written only by cci itself", r.Kind)
-		}
-		if err := Validate(r); err != nil {
-			return nil, err
-		}
-	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin post: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if bind != nil {
-		if err := s.bindLane(ctx, tx, bind.Key, bind.Drive, bind.Lane, bind.Started); err != nil {
-			return nil, err
-		}
-	}
-	posted := make([]Posted, len(records))
-	for i, r := range records {
-		if posted[i].Record, posted[i].Duplicate, err = s.post(ctx, tx, r, ttl, at); err != nil {
-			return nil, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit post: %w", err)
-	}
-	return posted, nil
+	done, err := s.Commit(ctx, Write{Bind: bind, Records: records, TTL: ttl, At: at})
+	return done.Posted, err
 }
 
 func (s *Store) post(ctx context.Context, tx *sql.Tx, r Record, ttl time.Duration, at time.Time) (Record, bool, error) {
