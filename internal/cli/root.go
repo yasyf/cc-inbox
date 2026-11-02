@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"slices"
@@ -26,6 +27,7 @@ const (
 	codexSessionEnv = "CODEX_THREAD_ID"
 	agentEnv        = "CCI_AGENT_ID"
 	driveEnv        = "CLAUDE_LONG_RUNNING_DRIVE"
+	homeEnv         = "CCI_HOME"
 )
 
 var errNoPeerSession = errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
@@ -83,19 +85,54 @@ func rootCommand() *cobra.Command {
 var number = regexp.MustCompile(`^#?[0-9]+(@[0-9a-f]+)?$`)
 
 func openStore(ctx context.Context) (*store.Store, error) {
+	st, err := connectStore(ctx)
+	if !errors.Is(err, store.ErrNeedsInit) {
+		return st, err
+	}
 	home, err := store.Home()
 	if err != nil {
 		return nil, err
 	}
-	st, err := store.Open(ctx, home)
+	st, err = initializeStore(ctx, home)
 	if err != nil {
 		return nil, err
 	}
+	return ownStore(st, home)
+}
+
+func connectStore(ctx context.Context) (*store.Store, error) {
+	home, err := store.Home()
+	if err != nil {
+		return nil, err
+	}
+	st, err := store.Connect(ctx, home)
+	if err != nil {
+		return nil, err
+	}
+	return ownStore(st, home)
+}
+
+func ownStore(st *store.Store, home string) (*store.Store, error) {
 	if err := configureStoreOwner(st, home); err != nil {
 		_ = st.Close()
 		return nil, err
 	}
 	return st, nil
+}
+
+func initializeStore(ctx context.Context, home string) (*store.Store, error) {
+	if os.Getenv(homeEnv) == "" {
+		err := ensureNewestDaemon(ctx)
+		if err == nil {
+			var st *store.Store
+			st, err = store.Connect(ctx, home)
+			if !errors.Is(err, store.ErrNeedsInit) {
+				return st, err
+			}
+		}
+		slog.Debug("cci initializes the store itself: the daemon did not", "err", err)
+	}
+	return store.Open(ctx, home)
 }
 
 func configureStoreOwner(st *store.Store, home string) error {

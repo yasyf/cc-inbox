@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -189,7 +190,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "session-start",
 			Args: cobra.NoArgs,
-			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -204,7 +205,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "announce",
 			Args: cobra.NoArgs,
-			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -220,7 +221,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "post-tool-use",
 			Args: cobra.NoArgs,
-			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -231,7 +232,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "stop",
 			Args: cobra.NoArgs,
-			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -242,7 +243,7 @@ func newHookCmd() *cobra.Command {
 		&cobra.Command{
 			Use:  "subagent-stop",
 			Args: cobra.NoArgs,
-			RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			RunE: withHookStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 				p, err := hook.Read(cmd.InOrStdin())
 				if err != nil {
 					return err
@@ -255,7 +256,32 @@ func newHookCmd() *cobra.Command {
 	return cmd
 }
 
-const promptBudget = 2 * time.Second
+const (
+	hookBudget     = 2 * time.Second
+	deferredBudget = 10 * time.Minute
+)
+
+func withHookStore(fn func(cmd *cobra.Command, st *store.Store, args []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		err := runHook(cmd, args, fn)
+		if errors.Is(err, store.ErrNeedsInit) || store.Busy(err) {
+			slog.Debug("cci hook skipped a store it could not reach in time", "hook", cmd.Name(), "err", err)
+			return nil
+		}
+		return err
+	}
+}
+
+func runHook(cmd *cobra.Command, args []string, fn func(cmd *cobra.Command, st *store.Store, args []string) error) error {
+	ctx, cancel := context.WithTimeout(cmd.Context(), hookBudget)
+	st, err := connectStore(ctx)
+	cancel()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	return fn(cmd, st, args)
+}
 
 func newPromptHookCmd() *cobra.Command {
 	var deferred bool
@@ -272,27 +298,32 @@ func newPromptHookCmd() *cobra.Command {
 				return err
 			}
 			if deferred {
-				return prompt(cmd.Context(), p)
+				ctx, cancel := context.WithTimeout(cmd.Context(), deferredBudget)
+				defer cancel()
+				return prompt(ctx, p, openStore)
 			}
 			done := make(chan error, 1)
-			go func() { done <- prompt(cmd.Context(), p) }()
+			go func() { done <- prompt(cmd.Context(), p, connectStore) }()
 			select {
 			case err := <-done:
+				if errors.Is(err, store.ErrNeedsInit) || store.Busy(err) {
+					return deferPrompt(payload)
+				}
 				return err
-			case <-time.After(promptBudget):
+			case <-time.After(hookBudget):
 				// The abandoned prompt dies with this process: SQLite rolls back its
 				// open write, and a post it committed first dedups against the retry's.
 				return deferPrompt(payload)
 			}
 		},
 	}
-	cmd.Flags().BoolVar(&deferred, "deferred", false, "finish a prompt hook that ran past its budget, however long the store takes")
+	cmd.Flags().BoolVar(&deferred, "deferred", false, "finish a prompt hook that ran past its budget, waiting up to ten minutes for the store")
 	_ = cmd.Flags().MarkHidden("deferred")
 	return cmd
 }
 
-func prompt(ctx context.Context, p hook.Payload) error {
-	st, err := openStore(ctx)
+func prompt(ctx context.Context, p hook.Payload, open func(context.Context) (*store.Store, error)) error {
+	st, err := open(ctx)
 	if err != nil {
 		return err
 	}

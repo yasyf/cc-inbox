@@ -335,9 +335,68 @@ func Home() (string, error) {
 	return filepath.Join(dir, ".cc-inbox"), nil
 }
 
-const busyTimeout = time.Minute
+const (
+	busyTimeout = time.Minute
+	lockPoll    = 10 * time.Millisecond
+)
 
+// ClientBudget bounds how long Connect waits on a store whose caller set no deadline.
+const ClientBudget = 30 * time.Second
+
+var (
+	// ErrNeedsInit reports a store whose schema an initializer must bring
+	// current before a client can use it; Connect never migrates.
+	ErrNeedsInit = errors.New("cci store needs initialization")
+	// ErrBusy reports a store another process held past the caller's deadline.
+	ErrBusy = errors.New("cci store is busy")
+)
+
+// Open opens home as its initializer: it migrates a store that is not current,
+// serializing with every other initializer on the store's init lock.
 func Open(ctx context.Context, home string) (*Store, error) {
+	s, err := openDB(home, busyTimeout)
+	if err != nil {
+		return nil, err
+	}
+	err = s.initialize(ctx)
+	for _, pause := range openRetries {
+		if !Busy(err) {
+			break
+		}
+		if err = sleep(ctx, pause); err == nil {
+			err = s.initialize(ctx)
+		}
+	}
+	if err != nil {
+		_ = s.db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+// Connect opens home as a client: it waits for an in-flight schema upgrade
+// and for SQLite's writer only until ctx's deadline, or ClientBudget when ctx
+// has none, then fails with ErrBusy, and returns ErrNeedsInit for a store an
+// initializer has not brought current.
+func Connect(ctx context.Context, home string) (*Store, error) {
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, ClientBudget)
+		defer cancel()
+	}
+	deadline, _ := ctx.Deadline()
+	s, err := openDB(home, min(time.Until(deadline), busyTimeout))
+	if err != nil {
+		return nil, err
+	}
+	if err := s.connect(ctx); err != nil {
+		_ = s.db.Close()
+		return nil, err
+	}
+	return s, nil
+}
+
+func openDB(home string, busy time.Duration) (*Store, error) {
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", home, err)
 	}
@@ -345,57 +404,70 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	dsn := storeDSN(home, int(busyTimeout.Milliseconds()))
-	db, err := sql.Open("sqlite", dsn)
+	db, err := sql.Open("sqlite", storeDSN(home, int(busy.Milliseconds())))
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	s := &Store{db: db, home: home, node: n, owner: true, Now: time.Now}
-	err = s.initialize(ctx)
-	for _, pause := range openRetries {
-		if !Busy(err) {
-			break
-		}
-		time.Sleep(pause)
-		err = s.initialize(ctx)
+	return &Store{db: db, home: home, node: n, owner: true, Now: time.Now}, nil
+}
+
+func sleep(ctx context.Context, d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
-	if err != nil {
-		_ = db.Close()
-		return nil, err
-	}
-	return s, nil
 }
 
 var openRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 
-// Busy reports whether err is SQLite reporting the store locked by another
-// writer past its busy timeout.
+// Busy reports whether err is ErrBusy or SQLite's busy error: another process
+// held the store past the caller's wait.
 func Busy(err error) bool {
 	var locked *sqlite.Error
-	return errors.As(err, &locked) && locked.Code()&0xff == sqlite3.SQLITE_BUSY
+	return errors.Is(err, ErrBusy) || errors.As(err, &locked) && locked.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
 func storeDSN(home string, timeoutMS int) string {
 	return fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(268435456)&_pragma=cache_size(-65536)&_txlock=immediate", filepath.Join(home, DBFile), timeoutMS)
 }
 
-func (s *Store) initialize(ctx context.Context) error {
-	lock, err := os.OpenFile(filepath.Join(s.home, "init.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+func (s *Store) connect(ctx context.Context) error {
+	lock, err := lockInit(ctx, s.home, syscall.LOCK_SH)
 	if err != nil {
-		return fmt.Errorf("open init lock: %w", err)
-	}
-	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_SH); err != nil {
-		return fmt.Errorf("take init lock: %w", err)
-	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
-	if current, err := s.current(ctx); err != nil || current {
 		return err
 	}
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+	defer func() { _ = lock.Close() }()
+	schema, current, err := s.current(ctx)
+	switch {
+	case Busy(err) || err != nil && ctx.Err() != nil:
+		return fmt.Errorf("%w: %w", ErrBusy, err)
+	case err != nil:
+		return err
+	case current:
+		return nil
+	case schema > len(migrations):
+		return newerSchema(schema)
+	}
+	return ErrNeedsInit
+}
+
+func (s *Store) initialize(ctx context.Context) error {
+	lock, err := lockInit(ctx, s.home, syscall.LOCK_SH)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+	if _, current, err := s.current(ctx); err != nil || current {
+		return err
+	}
+	if err := flock(ctx, lock, syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("take migration lock: %w", err)
 	}
-	if current, err := s.current(ctx); err != nil || current {
+	if _, current, err := s.current(ctx); err != nil || current {
 		return err
 	}
 	if _, err := s.db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
@@ -404,19 +476,55 @@ func (s *Store) initialize(ctx context.Context) error {
 	return s.migrate(ctx)
 }
 
-func (s *Store) current(ctx context.Context) (bool, error) {
+func lockInit(ctx context.Context, home string, how int) (*os.File, error) {
+	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: init.lock is the fixed lock in the caller-selected CCI home.
+	if err != nil {
+		return nil, fmt.Errorf("open init lock: %w", err)
+	}
+	if err := flock(ctx, lock, how); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("take init lock: %w", err)
+	}
+	return lock, nil
+}
+
+func flock(ctx context.Context, lock *os.File, how int) error {
+	tick := time.NewTicker(lockPoll)
+	defer tick.Stop()
+	for {
+		err := syscall.Flock(int(lock.Fd()), how|syscall.LOCK_NB)
+		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				return fmt.Errorf("%w: %s is held past the deadline", ErrBusy, lock.Name())
+			}
+			return ctx.Err()
+		case <-tick.C:
+		}
+	}
+}
+
+func (s *Store) current(ctx context.Context) (int, bool, error) {
 	var schema int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
-		return false, fmt.Errorf("read schema version: %w", err)
+		return 0, false, fmt.Errorf("read schema version: %w", err)
 	}
 	var journal string
 	if err := s.db.QueryRowContext(ctx, "PRAGMA journal_mode").Scan(&journal); err != nil {
-		return false, fmt.Errorf("read journal mode: %w", err)
+		return schema, false, fmt.Errorf("read journal mode: %w", err)
 	}
 	if schema != len(migrations) || journal != "wal" {
-		return false, nil
+		return schema, false, nil
 	}
-	return queryIndexesPresent(ctx, s.db)
+	present, err := queryIndexesPresent(ctx, s.db)
+	return schema, present, err
+}
+
+func newerSchema(schema int) error {
+	return fmt.Errorf("store schema %d is newer than this cci %s (schema %d); upgrade it with: %s", schema, version.String(), len(migrations), version.UpgradeCommand())
 }
 
 func (s *Store) Close() error {
@@ -483,7 +591,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return nil
 	}
 	if schema > len(migrations) {
-		return fmt.Errorf("store schema %d is newer than this cci %s (schema %d); upgrade it with: %s", schema, version.String(), len(migrations), version.UpgradeCommand())
+		return newerSchema(schema)
 	}
 	var empty bool
 	if schema == 0 {
