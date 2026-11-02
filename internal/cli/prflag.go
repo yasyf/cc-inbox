@@ -23,7 +23,10 @@ func (f *prFlag) String() string {
 
 func (*prFlag) Type() string { return "pr" }
 
-type prsFlag struct{ prs *[]store.PR }
+type prsFlag struct {
+	prs   *[]store.PR
+	given []string
+}
 
 func (f *prsFlag) Set(s string) error {
 	for _, part := range strings.Split(s, ",") {
@@ -33,8 +36,11 @@ func (f *prsFlag) Set(s string) error {
 		}
 		*f.prs = append(*f.prs, pr)
 	}
+	f.given = append(f.given, s)
 	return nil
 }
+
+func (f *prsFlag) Given() []string { return f.given }
 
 func (f *prsFlag) String() string {
 	if len(*f.prs) == 0 {
@@ -49,7 +55,10 @@ func (f *prsFlag) String() string {
 
 func (*prsFlag) Type() string { return "prs" }
 
-type headsFlag struct{ heads *[]store.Head }
+type headsFlag struct {
+	heads *[]store.Head
+	given []string
+}
 
 func (f *headsFlag) Set(s string) error {
 	head, err := store.ParseHead(s)
@@ -57,8 +66,11 @@ func (f *headsFlag) Set(s string) error {
 		return err
 	}
 	*f.heads = append(*f.heads, head)
+	f.given = append(f.given, s)
 	return nil
 }
+
+func (f *headsFlag) Given() []string { return f.given }
 
 func (f *headsFlag) String() string {
 	if len(*f.heads) == 0 {
