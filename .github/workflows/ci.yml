@@ -416,6 +416,28 @@ jobs:
 
       - name: Test (race)
         run: go test -json -race -skip "$TAIL_COST_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./...
+      - uses: actions/checkout@v7
+        with:
+          ref: 02f12d7c20079a9e0a67c19bdec1a61dac0182d8
+          path: .ci-brief-elision-baseline
+      - name: Brief unused elision immutable bytes and actual allocation work
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci-brief-elision-baseline rev-parse HEAD)" = 02f12d7c20079a9e0a67c19bdec1a61dac0182d8
+          cp internal/render/brief_elision_cost_test.go .ci-brief-elision-baseline/internal/render/
+          mkdir -p "$RUNNER_TEMP/cci-brief-elision-contract"
+          (cd .ci-brief-elision-baseline && CCI_BRIEF_ELISION_SNAPSHOTS="$RUNNER_TEMP/cci-brief-elision-contract" CCI_BRIEF_ELISION_WRITE=1 go test -count=1 -run '^TestBriefElisionImmutableOutput$' -v ./internal/render)
+          CCI_BRIEF_ELISION_SNAPSHOTS="$RUNNER_TEMP/cci-brief-elision-contract" go test -count=1 -race -run '^TestBriefElisionImmutableOutput$' -v ./internal/render
+          if (cd .ci-brief-elision-baseline && go test -count=1 -run '^$' -bench '^BenchmarkBriefUnusedElisionAllocations$' -benchtime=1x -cpu=2 -v ./internal/render) > "$RUNNER_TEMP/brief-elision-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/brief-elision-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/brief-elision-negative.log"
+          grep -F 'BRIEF_UNUSED_ELISION_ALLOCATION_EXCEEDED' "$RUNNER_TEMP/brief-elision-negative.log"
+          go test -count=1 -run '^$' -bench '^BenchmarkBriefUnusedElisionAllocations$' -benchtime=1x -cpu=2 -v ./internal/render
+          (cd .ci-brief-elision-baseline && go test -count=3 -run '^$' -bench '^BenchmarkBriefElision$' -benchmem -benchtime=100ms -cpu=2 ./internal/render) | tee "$RUNNER_TEMP/brief-elision-old.log"
+          go test -count=3 -run '^$' -bench '^BenchmarkBriefElision$' -benchmem -benchtime=100ms -cpu=2 ./internal/render | tee "$RUNNER_TEMP/brief-elision-current.log"
       - name: Direct native grep whole-query bytes and process CPU against official494 source
         shell: bash
         run: |
