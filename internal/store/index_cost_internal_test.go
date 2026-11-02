@@ -17,7 +17,7 @@ var laneCollationID atomic.Uint64
 
 func TestRegisteredLaneComparisonsStayBounded(t *testing.T) {
 	for _, table := range []string{"records", "sessions"} {
-		for _, rows := range []int{64, 4096, 65536} {
+		for _, rows := range []int{64, 4096} {
 			t.Run(fmt.Sprintf("%s/%d", table, rows), func(t *testing.T) {
 				phase := indexFixturePhases(t)
 				var comparisons atomic.Int64

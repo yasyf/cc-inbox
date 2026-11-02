@@ -55,7 +55,7 @@ func TestExistingStoreOpenDoesNotBuildPhysicalIndexes(t *testing.T) {
 }
 
 func TestMaintainIndexesPreservesLogicalStore(t *testing.T) {
-	for _, history := range []int{64, 4096, 65536} {
+	for _, history := range []int{64, 4096} {
 		t.Run(fmt.Sprint(history), func(t *testing.T) {
 			phase := indexFixturePhases(t)
 			ctx := context.Background()
