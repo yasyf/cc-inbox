@@ -467,8 +467,12 @@ func TestConcurrentPushesFromOneHomeSendEachRecordOnce(t *testing.T) {
 	if pushed != records {
 		t.Fatalf("the two pushes sent %d records, want %d", pushed, records)
 	}
-	if got := pull(t, b); got.Inserted != records {
-		t.Fatalf("peer inserted %d records, want %d", got.Inserted, records)
+	inserted := 0
+	for range records {
+		inserted += pull(t, b).Inserted
+	}
+	if inserted != records {
+		t.Fatalf("peer inserted %d records, want %d", inserted, records)
 	}
 }
 
