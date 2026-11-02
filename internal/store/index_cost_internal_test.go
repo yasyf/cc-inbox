@@ -119,7 +119,7 @@ ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 		if err := definitions.Scan(&kind, &tableName, &definition); err != nil {
 			t.Fatal(err)
 		}
-		if kind == "table" && !strings.HasPrefix(tableName, "incident_") {
+		if kind == "table" && tableName != "record_root_audience" && !strings.HasPrefix(tableName, "incident_") {
 			for _, column := range columns {
 				definition = strings.Replace(definition, column+" TEXT", column+" TEXT COLLATE "+collation, 1)
 			}
