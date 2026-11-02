@@ -475,6 +475,7 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 		want, stderr string
 		refused      string
 		future       string
+		quoted       string
 	}{
 		{name: "leading label ahead of the clock", text: ahead + ": live on dev", refused: ahead},
 		{name: "leading label before the clock", text: before + ": live on dev", refused: before},
@@ -490,12 +491,17 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 		{name: "time hours ahead read as yesterday's", text: "per the owner's " + yesterday + " ask", want: "per the owner's " + yesterday + " ask", stderr: "cci: time " + yesterday + " in the text is later than the post time {at}; stored as typed"},
 		{name: "time inside the clock skew", text: "live on dev, read " + skewed, want: "live on dev, read " + skewed},
 		{name: "time a sentence names since", text: "lane-x: reconciling. Landed since " + before + ": 45899", want: "lane-x: reconciling. Landed since " + before + ": 45899"},
+		{name: "relayed words naming a time ahead", text: "PAGE from ai-oncall:", quoted: "it pages the on-call at " + ahead, want: "PAGE from ai-oncall: it pages the on-call at " + ahead},
+		{name: "own time ahead beside relayed words", text: "read " + ahead, quoted: "it pages the on-call", future: ahead},
 		{name: "stamped text whose sentence names a time since", text: "lane-x: reconciling. Landed since " + before + ": 45899", stamp: true, want: "{at} lane-x: reconciling. Landed since " + before + ": 45899"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			args := []string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", tt.text}
 			if tt.stamp {
 				args = append(args, "--stamp")
+			}
+			if tt.quoted != "" {
+				args = append(args, "--quoted", tt.quoted)
 			}
 			out, err := run(t, args...)
 			if tt.future != "" {
