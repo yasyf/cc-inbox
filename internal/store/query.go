@@ -507,7 +507,8 @@ func LaneMail(k PeerKey, b Binding) Filter {
 
 // BindLane names the lane k writes as in drive and starts its lane cursor. A
 // thread already bound to another drive, or already bound as a lane, keeps
-// that binding: only Bind moves it, so a post as another lane never rebinds it.
+// that binding: only Bind moves it, so a post as another lane never rebinds it,
+// except a post as the thread's own agent name, which is always its lane.
 // The first thread to bind a lane nobody has bound or posted as on drive
 // starts its cursor before the first record addressed to that lane, so the
 // lane reads what was posted to it before it started.
@@ -526,7 +527,7 @@ func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, sta
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, origin, drive, root, lane, role) VALUES (?, ?, ?, ?, 0, ?, 'lane')
 ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, lane = excluded.lane,
-	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND sessions.lane = ''`, k.Session, k.Agent, s.Self(), drive, lane); err != nil {
+	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND (sessions.lane = '' OR sessions.agent_name = excluded.lane)`, k.Session, k.Agent, s.Self(), drive, lane); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, MIN(?, COALESCE(

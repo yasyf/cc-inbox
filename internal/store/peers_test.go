@@ -96,6 +96,23 @@ func TestAnnounceKeepsExplicitAttributesAndSupersedes(t *testing.T) {
 	}
 }
 
+func TestAPostAsItsOwnAgentNameRebindsTheThreadsLane(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	k := store.PeerKey{Session: "s", Agent: "a1"}
+	if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent, AgentName: "board-refresher-6"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, lane := range []string{"board-refresher-5", "board-refresher-6", "root"} {
+		if err := st.BindLane(ctx, k, "d", lane, clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p, _ := st.Peer(ctx, k); p.Lane != "board-refresher-6" {
+		t.Fatalf("lane after posts as board-refresher-5, board-refresher-6 and root = %q; want its own name board-refresher-6", p.Lane)
+	}
+}
+
 func TestBindRefreshesInferredRoleOnly(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
