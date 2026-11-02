@@ -36,12 +36,17 @@ type TailOptions struct {
 	Oldest bool
 	Fold   int
 	Notes  io.Writer
+	Defer  bool
 }
 
+// TailResult reports what a Tail printed. Ack holds the cursor moves a
+// Tail with Defer set left for its caller to apply once the output reached the
+// reader; a Tail that does not defer applies them after it writes.
 type TailResult struct {
 	Printed int
 	Last    int64
 	More    int
+	Ack     []store.CursorMove
 }
 
 func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (TailResult, error) {
@@ -198,14 +203,10 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume), true)
 	}
 	if opts.Cursor != "" && res.Last != f.After {
-		if err := st.SetCursor(ctx, opts.Cursor, f.Drive, res.Last); err != nil {
-			return TailResult{}, err
-		}
+		res.Ack = append(res.Ack, store.CursorMove{Name: opts.Cursor, Drive: f.Drive, Seq: res.Last})
 	}
 	if t.sent > ahead.sent {
-		if err := st.SetCursor(ctx, addressedCursor(opts.Cursor), f.Drive, t.sent); err != nil {
-			return TailResult{}, err
-		}
+		res.Ack = append(res.Ack, store.CursorMove{Name: addressedCursor(opts.Cursor), Drive: f.Drive, Seq: t.sent})
 	}
 	if _, err := out.WriteTo(w); err != nil {
 		return TailResult{}, fmt.Errorf("write tail: %w", err)
@@ -215,6 +216,13 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			return TailResult{}, fmt.Errorf("write tail: %w", err)
 		}
 	}
+	if opts.Defer {
+		return res, nil
+	}
+	if err := st.MoveCursors(ctx, res.Ack); err != nil {
+		return TailResult{}, err
+	}
+	res.Ack = nil
 	return res, nil
 }
 

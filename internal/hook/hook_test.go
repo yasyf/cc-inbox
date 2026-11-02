@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -726,5 +729,112 @@ func TestPostToolUseDeliversOnlyTheNewestStatusOnATopic(t *testing.T) {
 	testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.State, Topic: "orca", To: []string{"root"}, Text: "orca alive pass 3"})
 	if got := deliver(); !strings.Contains(got, "orca alive pass 3") {
 		t.Fatalf("a status after a delivered one on its topic is missing: %q", got)
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("stdout closed") }
+
+type cancellingWriter struct {
+	bytes.Buffer
+	cancel context.CancelFunc
+}
+
+func (w *cancellingWriter) Write(b []byte) (int, error) {
+	w.cancel()
+	return w.Buffer.Write(b)
+}
+
+func TestDeliveryRedeliversWhatTheHookNeverAcknowledged(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		event string
+		bind  func(*testing.T, *store.Store) hook.Payload
+		want  []string
+	}{
+		{"post-tool-use", "PostToolUse", bindRoot, []string{"open asks addressed to root, newest first", "which branch?", "deploy it"}},
+		{"session-start lane", "SessionStart", bindRoot, []string{"open asks addressed to root, newest first", "which branch?", "deploy it"}},
+		{"session-start digest", "SessionStart", func(t *testing.T, st *store.Store) hook.Payload {
+			t.Helper()
+			if err := st.Bind(context.Background(), store.PeerKey{Session: "s1"}, "d", true); err != nil {
+				t.Fatal(err)
+			}
+			return hook.Payload{SessionID: "s1", Source: "compact"}
+		}, []string{"unseen since this session's cursor", "deploy it"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			p := tt.bind(t, st)
+			testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Ask, To: []string{"root"}, Text: "which branch?"})
+			testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Go, To: []string{"root"}, Text: "deploy it"})
+			run := func(ctx context.Context, w io.Writer) error {
+				if tt.event == "SessionStart" {
+					return hook.SessionStart(ctx, st, p, store.Window{}, w)
+				}
+				return hook.PostToolUse(ctx, st, p, noWindow, w)
+			}
+			cursors := func() map[string]int64 {
+				t.Helper()
+				got := map[string]int64{}
+				for _, name := range []string{store.LaneCursor(p.Key()), store.LaneCursor(p.Key()) + "#addressed", "open-asks-" + p.Key().String(), p.Key().String()} {
+					seq, _, err := st.Cursor(context.Background(), name, "d")
+					if err != nil {
+						t.Fatal(err)
+					}
+					got[name] = seq
+				}
+				return got
+			}
+			if tt.event == "SessionStart" {
+				var first bytes.Buffer
+				if err := run(context.Background(), &first); err != nil {
+					t.Fatal(err)
+				}
+				testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Go, To: []string{"root"}, Text: "deploy it"})
+			}
+			before := cursors()
+			if err := run(context.Background(), failingWriter{}); err == nil {
+				t.Fatal("a failed output write reported success")
+			}
+			if got := cursors(); !maps.Equal(got, before) {
+				t.Fatalf("a failed output write moved the cursors: %v, want %v", got, before)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			killed := &cancellingWriter{cancel: cancel}
+			if err := run(ctx, killed); err == nil {
+				t.Fatal("a hook cancelled before its acknowledgement reported success")
+			}
+			if got := cursors(); !maps.Equal(got, before) {
+				t.Fatalf("a hook cancelled before its acknowledgement moved the cursors: %v, want %v", got, before)
+			}
+			var out bytes.Buffer
+			if err := run(context.Background(), &out); err != nil {
+				t.Fatal(err)
+			}
+			tail := func(text string) string {
+				if _, after, ok := strings.Cut(text, "unseen since this session's cursor (cci tail for more):\n"); ok {
+					return after
+				}
+				return text
+			}
+			got := hookContext(t, &out, tt.event)
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("redelivery lacks %q: %q", want, got)
+				}
+			}
+			if got := cursors(); maps.Equal(got, before) {
+				t.Fatalf("a delivered hook left the cursors at %v", got)
+			}
+			out.Reset()
+			if err := run(context.Background(), &out); err != nil {
+				t.Fatal(err)
+			}
+			if got := tail(hookContext(t, &out, tt.event)); strings.Contains(got, "deploy it") || strings.Contains(got, "newest first") {
+				t.Fatalf("an acknowledged delivery came back: %q", got)
+			}
+		})
 	}
 }
