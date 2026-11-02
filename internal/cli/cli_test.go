@@ -1684,7 +1684,7 @@ func TestAStandDownStandsDownOnlyItsFirstToLane(t *testing.T) {
 	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
 		t.Fatal(err)
 	}
-	var posted []string
+	posted := make([]string, 0, 2)
 	for _, args := range [][]string{
 		{"--to", "board-refresher-5", "--successor", "board-refresher-6"},
 		{"--to", "options-1", "--to", "board-refresher-6", "--to", "drive-watchdog"},
