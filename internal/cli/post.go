@@ -394,7 +394,7 @@ func forwarded(ctx context.Context, st *store.Store, drive string, to []string) 
 		if err != nil {
 			return nil, err
 		}
-		owner, err := st.Owner(ctx, laneDrive, lane)
+		owner, err := st.LaneOwner(ctx, laneDrive, lane)
 		if err != nil {
 			return nil, err
 		}
