@@ -246,6 +246,15 @@ func (r *remote) Commit(ctx context.Context, w store.Write) (store.Written, erro
 	return written, nil
 }
 
+func (r *remote) Close() error {
+	if r.business == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	return r.business.Close(ctx)
+}
+
 func refusal(err error) error {
 	if daemonkit.Undispatched(err) {
 		return fmt.Errorf("%w: %w", store.ErrUnrouted, err)

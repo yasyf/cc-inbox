@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -555,6 +556,9 @@ func newerSchema(schema int) error {
 }
 
 func (s *Store) Close() error {
+	if w, ok := s.writer.(io.Closer); ok {
+		return errors.Join(w.Close(), s.db.Close())
+	}
 	return s.db.Close()
 }
 
