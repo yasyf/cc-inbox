@@ -64,7 +64,7 @@ func TestGrepRenderedTextQueryCost(t *testing.T) {
 						if readErr != nil {
 							t.Fatal(readErr)
 						}
-						if err != nil || len(errOut) != 0 && !bytes.HasSuffix(out, errOut) {
+						if err != nil || !pipedStderrMatches(out, errOut, nil) {
 							t.Fatalf("direct native %s: %v stderr=%q", version, err, errOut)
 						}
 						data, err := json.Marshal(map[string]any{

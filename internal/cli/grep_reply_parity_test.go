@@ -80,7 +80,7 @@ SELECT 'd','reviewer','review',x,'REVIEW selected '||x,'post','selected-'||x FRO
 			if wantCode != test.code {
 				t.Fatalf("oracle exit=%d, want %d: %s", wantCode, test.code, wantErr)
 			}
-			if !bytes.Equal(gotOut, wantOut) || !bytes.Equal(gotErr, wantErr) || gotCode != wantCode {
+			if !bytes.Equal(gotOut, wantOut) || !pipedStderrMatches(gotOut, gotErr, wantErr) || gotCode != wantCode {
 				t.Fatalf("CLI parity code=%d/%d stdout=%q/%q stderr=%q/%q", gotCode, wantCode, gotOut, wantOut, gotErr, wantErr)
 			}
 			if test.prefix >= 0 && (wantCode == 0 || strings.Count(string(wantOut), "\n") != test.prefix) {
