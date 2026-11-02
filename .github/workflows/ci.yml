@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  schedule:
+    - cron: "27 9 * * *"
   workflow_call:
     inputs:
       commit:
@@ -51,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON((github.event_name == 'pull_request' || inputs.commit != '') && '["ubuntu-latest"]' || '["ubuntu-latest", "macos-latest"]') }}
+        os: ${{ fromJSON(github.event_name == 'schedule' && '["ubuntu-latest", "macos-latest"]' || '["ubuntu-latest"]') }}
     env:
       FULL_CI: ${{ matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
       TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
