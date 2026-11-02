@@ -1656,11 +1656,34 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if out, err := run(t, "who", "--successor-of", "desk-2"); err != nil || out != "desk-3\n" {
 		t.Fatalf("who --successor-of desk-2 = %q, %v", out, err)
 	}
-	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"successor":"","chain":[]}`+"\n" {
+	if out, err := run(t, "who", "--successor-of", "desk-1", "--json"); err != nil || out != `{"drive":"d","lane":"desk-1","stood_down":true,"record":4,"successor":"","chain":[]}`+"\n" {
 		t.Fatalf("who --successor-of desk-1 after a stand-down naming none = %q, %v", out, err)
 	}
 	if out, err := run(t, "who", "--successor-of", "desk-3", "--json"); err != nil || out != `{"drive":"d","lane":"desk-3","stood_down":false,"successor":"","chain":[]}`+"\n" {
 		t.Fatalf("who --successor-of desk-3 = %q, %v", out, err)
+	}
+}
+
+func TestOnlyALanesOwnStandDownStandsItDown(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	for _, args := range [][]string{
+		{"--lane", "root", "--kind", "stand-down", "--to", "desk-5", "--to", "desk-6", "--successor", "desk-6", "--text", "desk-5 rotated to desk-6"},
+		{"--lane", "root", "--kind", "stand-down", "--to", "five-options-1", "--to", "desk-7", "--text", "five-options-1 stands down"},
+		{"--lane", "desk-7", "--kind", "state", "--text", "desk-7 answered"},
+		{"--lane", "root", "--kind", "stand-down", "--to", "desk-8", "--text", "desk-8 stands down"},
+	} {
+		if _, err := run(t, append([]string{"post", "--drive", "d"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for lane, want := range map[string]string{
+		"desk-6": `{"drive":"d","lane":"desk-6","stood_down":false,"successor":"","chain":[]}`,
+		"desk-7": `{"drive":"d","lane":"desk-7","stood_down":false,"successor":"","chain":[]}`,
+		"desk-8": `{"drive":"d","lane":"desk-8","stood_down":true,"record":4,"successor":"","chain":[]}`,
+	} {
+		if out, err := run(t, "who", "--drive", "d", "--successor-of", lane, "--json"); err != nil || out != want+"\n" {
+			t.Fatalf("who --successor-of %s = %q, %v; want %s", lane, out, err, want)
+		}
 	}
 }
 

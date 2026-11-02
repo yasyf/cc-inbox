@@ -83,6 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci who --successor-of` and `cci who` mark a lane stood down only by its own
+  stand-down. A stand-down handing another lane over to it, or a broadcast
+  stand-down naming no successor that the lane posted after, no longer counts.
+  `--successor-of --json` names the record it read.
 - A root reader hears `release`, `done` and `blocked` records addressed to it.
   Run `cci subscribe --reader root` again, since a subscription keeps the
   addressed kinds it was made with.
