@@ -48,6 +48,7 @@ var tenseWords = map[string]bool{"by": true, "until": true, "till": true, "befor
 func newPostCmd() *cobra.Command {
 	var (
 		drive, lane, kind, text string
+		quoted                  string
 		parsedKind              kinds.Kind
 		r                       store.Record
 		counts                  map[string]string
@@ -136,6 +137,9 @@ func newPostCmd() *cobra.Command {
 					re = append(re, "--re "+m[1])
 				}
 				return fmt.Errorf("a withdrawn go is one withdraw record every lane reads as gone, never a sentence in a %s record: post cci post --kind withdraw %s --text '<why>', then this record without the withdrawal", cmp.Or(string(k), "note"), cmp.Or(strings.Join(re, " "), "--re <go seq>"))
+			}
+			if quoted != "" {
+				text += " " + quoted
 			}
 			if len(heads) > 0 {
 				if text, err = withHeads(&r, k, heads, text); err != nil {
@@ -280,6 +284,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&bodyFile, "body-file", "", "JSON body of at most 64 KiB, from a file or - for stdin")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
+	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space; cci checks no time, {at} or withdrawal in them, and keeps checking the text's own words")
 	f.BoolVar(&label, "stamp", false, "cci writes the leading H:MM AM/PM label from the post's own clock: it replaces a typed leading label, or opens the text when it has none")
 	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
 	_ = cmd.MarkFlagRequired("kind")
