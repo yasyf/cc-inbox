@@ -94,25 +94,33 @@ type IndexStorageStats struct {
 	FreelistCount int64 `json:"freelist_count"`
 }
 
-// MaintainIndexes explicitly tunes an initialized store and installs its
-// record memberships in one transaction, failing immediately when its init
-// lock or database writer is busy.
+const maintenanceBusy = 500 * time.Millisecond
+
+// MaintainIndexes explicitly tunes an initialized store: it installs its
+// record memberships in one transaction and then builds each missing physical
+// index in a transaction of its own, so no client open waits on it. It fails
+// immediately when another maintainer runs or an initializer holds the init
+// lock, and when the database writer stays busy past half a second.
 func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, error) {
 	started := time.Now()
 	report := IndexMaintenanceReport{Created: []string{}, Memberships: []string{}, Incidents: []string{}}
 	if err := ctx.Err(); err != nil {
 		return report, err
 	}
-	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0) //nolint:gosec // G304: home is the caller-selected CCI store; init.lock is its fixed existing lock.
+	initLock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0) //nolint:gosec // G304: home is the caller-selected CCI store; init.lock is its fixed existing lock.
 	if err != nil {
 		return report, fmt.Errorf("open index maintenance lock: %w", err)
 	}
-	defer func() { _ = lock.Close() }()
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+	defer func() { _ = initLock.Close() }()
+	if err := syscall.Flock(int(initLock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
 		return report, fmt.Errorf("take index maintenance lock: %w", err)
 	}
-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
-	db, err := sql.Open("sqlite", storeDSN(home, 0)+"&mode=rw")
+	lock, err := lockMaintenance(home)
+	if err != nil {
+		return report, err
+	}
+	defer func() { _ = lock.Close() }()
+	db, err := sql.Open("sqlite", storeDSN(home, int(maintenanceBusy.Milliseconds()))+"&mode=rw")
 	if err != nil {
 		return report, fmt.Errorf("open index maintenance store: %w", err)
 	}
@@ -124,6 +132,9 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	}
 	if schema != len(migrations) {
 		return report, fmt.Errorf("index maintenance requires schema %d, got %d", len(migrations), schema)
+	}
+	if err := initLock.Close(); err != nil {
+		return report, fmt.Errorf("release index maintenance init lock: %w", err)
 	}
 	report.Before, err = s.indexStorageStats(ctx)
 	if err != nil {
@@ -150,35 +161,9 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if len(missing) > 0 || !installed || !closersInstalled || !incidents {
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return report, fmt.Errorf("begin index maintenance: %w", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if !installed {
-			if err := installMemberships(ctx, tx); err != nil {
-				return report, err
-			}
-		}
-		if !closersInstalled {
-			if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
-				return report, err
-			}
-		}
-		if err := createPhysicalIndexes(ctx, tx, missing); err != nil {
+	if !installed || !closersInstalled || !incidents {
+		if err := s.installProjections(ctx, installed, closersInstalled, incidents); err != nil {
 			return report, err
-		}
-		if !incidents {
-			if err := installIncidentProjection(ctx, tx); err != nil {
-				return report, err
-			}
-		}
-		if err := tx.Commit(); err != nil {
-			return report, fmt.Errorf("commit index maintenance: %w", err)
-		}
-		for _, index := range missing {
-			report.Created = append(report.Created, physicalIndexes[index].name)
 		}
 		if !installed {
 			for _, object := range recordMemberships {
@@ -196,12 +181,72 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			}
 		}
 	}
+	for _, index := range missing {
+		if err := s.buildPhysicalIndex(ctx, index); err != nil {
+			return report, err
+		}
+		report.Created = append(report.Created, physicalIndexes[index].name)
+	}
 	report.After, err = s.indexStorageStats(ctx)
 	if err != nil {
 		return report, err
 	}
 	report.Elapsed = time.Since(started)
 	return report, nil
+}
+
+func lockMaintenance(home string) (*os.File, error) {
+	lock, err := os.OpenFile(filepath.Join(home, "maintain.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: maintain.lock is the fixed maintenance lock in the caller-selected CCI home.
+	if err != nil {
+		return nil, fmt.Errorf("open maintenance lock: %w", err)
+	}
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = lock.Close()
+		return nil, fmt.Errorf("take maintenance lock: %w", err)
+	}
+	return lock, nil
+}
+
+func (s *Store) installProjections(ctx context.Context, memberships, closers, incidents bool) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin projection maintenance: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if !memberships {
+		if err := installMemberships(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if !closers {
+		if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+			return err
+		}
+	}
+	if !incidents {
+		if err := installIncidentProjection(ctx, tx); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit projection maintenance: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) buildPhysicalIndex(ctx context.Context, index int) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin physical index %s: %w", physicalIndexes[index].name, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := createPhysicalIndexes(ctx, tx, []int{index}); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit physical index %s: %w", physicalIndexes[index].name, err)
+	}
+	return nil
 }
 
 func missingPhysicalIndexes(ctx context.Context, db *sql.DB) ([]int, error) {

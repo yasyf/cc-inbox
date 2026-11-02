@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,7 +67,7 @@ func TestOpenCurrentSchemaDoesNotWaitForLocks(t *testing.T) {
 	}
 }
 
-func TestOpenWaitsForConcurrentSchemaUpgrade(t *testing.T) {
+func TestConnectWaitsForConcurrentSchemaUpgrade(t *testing.T) {
 	home := t.TempDir()
 	st, err := Open(context.Background(), home)
 	if err != nil {
@@ -91,7 +93,7 @@ func TestOpenWaitsForConcurrentSchemaUpgrade(t *testing.T) {
 	}
 	opened := make(chan error, 1)
 	go func() {
-		other, err := Open(context.Background(), home)
+		other, err := Connect(context.Background(), home)
 		if err == nil {
 			err = other.Close()
 		}
@@ -99,7 +101,7 @@ func TestOpenWaitsForConcurrentSchemaUpgrade(t *testing.T) {
 	}()
 	select {
 	case err := <-opened:
-		t.Fatalf("open crossed the active upgrade barrier: %v", err)
+		t.Fatalf("connect crossed the active upgrade barrier: %v", err)
 	case <-time.After(100 * time.Millisecond):
 	}
 	if err := tx.Commit(); err != nil {
@@ -109,8 +111,123 @@ func TestOpenWaitsForConcurrentSchemaUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := <-opened; err == nil || !strings.Contains(err.Error(), "is newer than this cci") {
-		t.Fatalf("open after newer schema commit = %v", err)
+		t.Fatalf("connect after newer schema commit = %v", err)
 	}
+}
+
+func TestConnectReturnsBusyWithinItsDeadlineWhileInitLockIsHeld(t *testing.T) {
+	home := t.TempDir()
+	st, err := Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	file, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = file.Close() })
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		t.Fatal(err)
+	}
+	const deadline = 300 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
+	defer cancel()
+	started := time.Now()
+	other, err := Connect(ctx, home)
+	elapsed := time.Since(started)
+	if err == nil {
+		_ = other.Close()
+	}
+	if !errors.Is(err, ErrBusy) || !Busy(err) || errors.Is(err, ErrNeedsInit) {
+		t.Fatalf("connect behind a held init lock = %v, want ErrBusy", err)
+	}
+	if elapsed < deadline || elapsed > deadline+time.Second {
+		t.Fatalf("connect behind a held init lock returned after %v, want about %v", elapsed, deadline)
+	}
+}
+
+func TestConnectNeverMigrates(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		setup func(t *testing.T, home string)
+	}{
+		{"cold", func(t *testing.T, home string) {
+			if _, err := node.Load(home); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{"behind", func(t *testing.T, home string) {
+			st, err := Open(context.Background(), home)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = st.Close() }()
+			if _, err := st.db.ExecContext(context.Background(), fmt.Sprintf("PRAGMA user_version = %d", len(migrations)-1)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			tt.setup(t, home)
+			var before int
+			if err := rawSchema(t, home, &before); err != nil {
+				t.Fatal(err)
+			}
+			st, err := Connect(context.Background(), home)
+			if err == nil {
+				_ = st.Close()
+			}
+			if !errors.Is(err, ErrNeedsInit) || Busy(err) {
+				t.Fatalf("connect to a %s store = %v, want ErrNeedsInit", tt.name, err)
+			}
+			var after int
+			if err := rawSchema(t, home, &after); err != nil || after != before {
+				t.Fatalf("connect moved schema %d to %d, %v", before, after, err)
+			}
+		})
+	}
+}
+
+func TestConnectDoesNotWaitForIndexMaintenance(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	st, err := Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	lock, err := lockMaintenance(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = lock.Close() })
+	tx, err := st.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	if _, err := MaintainIndexes(ctx, home); err == nil {
+		t.Fatal("a second maintainer ran beside the first")
+	}
+	connectCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	other, err := Connect(connectCtx, home)
+	if err != nil {
+		t.Fatalf("connect while maintenance held its lock and the writer = %v", err)
+	}
+	_ = other.Close()
+}
+
+func rawSchema(t *testing.T, home string, schema *int) error {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(home, DBFile))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	return db.QueryRowContext(context.Background(), "PRAGMA user_version").Scan(schema)
 }
 
 func TestConcurrentColdOpenKeepsMigrationSerialized(t *testing.T) {

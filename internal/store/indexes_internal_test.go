@@ -267,8 +267,16 @@ SELECT 'session-' || n, '', '', 'drive', 0, 'session-lane' FROM history`,
 			if !interrupted.Load() {
 				t.Fatal("test did not cancel an active index build")
 			}
-			assertLaneIndexCount(t, st, 0)
-			assertMembershipsInstalled(cleanupCtx, t, st, false)
+			var built bool
+			if err := st.db.QueryRowContext(cleanupCtx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'index' AND name = ?)", target+"s_drive_lane").Scan(&built); err != nil || built {
+				t.Fatalf("cancelled index %s_drive_lane committed = %v, %v", target, built, err)
+			}
+			building.Store(false)
+			if _, err := MaintainIndexes(cleanupCtx, st.home); err != nil {
+				t.Fatalf("maintenance after a cancelled build: %v", err)
+			}
+			assertLaneIndexCount(t, st, len(physicalIndexes))
+			assertMembershipsInstalled(cleanupCtx, t, st, true)
 		})
 	}
 }
