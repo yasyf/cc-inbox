@@ -152,6 +152,10 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	rootInstalled, err := projectionInstalled(ctx, s.db, rootAudienceObjects[:], "root audience")
+	if err != nil {
+		return report, err
+	}
 	incidents, err := incidentProjectionInstalled(ctx, s.db)
 	if err != nil {
 		return report, err
@@ -161,8 +165,8 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if !installed || !closersInstalled || !incidents {
-		if err := s.installProjections(ctx, installed, closersInstalled, incidents); err != nil {
+	if !installed || !closersInstalled || !rootInstalled || !incidents {
+		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, incidents); err != nil {
 			return report, err
 		}
 		if !installed {
@@ -172,6 +176,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !closersInstalled {
 			for _, object := range closerMemberships {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !rootInstalled {
+			for _, object := range rootAudienceObjects {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}
@@ -207,7 +216,7 @@ func lockMaintenance(home string) (*os.File, error) {
 	return lock, nil
 }
 
-func (s *Store) installProjections(ctx context.Context, memberships, closers, incidents bool) error {
+func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, incidents bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin projection maintenance: %w", err)
@@ -220,6 +229,11 @@ func (s *Store) installProjections(ctx context.Context, memberships, closers, in
 	}
 	if !closers {
 		if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+			return err
+		}
+	}
+	if !roots {
+		if err := installProjection(ctx, tx, rootAudienceObjects[:], "root audience"); err != nil {
 			return err
 		}
 	}

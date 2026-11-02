@@ -181,8 +181,12 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 }
 
 func (f Filter) bounded(self string, now time.Time) (string, []any) {
+	return f.boundedAudience(self, now, false)
+}
+
+func (f Filter) boundedAudience(self string, now time.Time, rootAudience bool) (string, []any) {
 	where, params := f.where(self, now)
-	arms, candidates := f.candidateArms(self)
+	arms, candidates := f.candidateArmsAudience(self, rootAudience)
 	if len(arms) == 0 {
 		return where, params
 	}
@@ -194,7 +198,7 @@ func (f Filter) bounded(self string, now time.Time) (string, []any) {
 	return where + " AND " + candidate + " IN (" + strings.Join(arms, " UNION ALL ") + ")", append(params, candidates...)
 }
 
-func (f Filter) candidateArms(self string) ([]string, []any) {
+func (f Filter) candidateArmsAudience(self string, rootAudience bool) ([]string, []any) {
 	peers, readers := f.peerAddresses(self), f.readerAddresses()
 	if len(peers) == 0 && len(readers) == 0 {
 		return nil, nil
@@ -218,7 +222,9 @@ func (f Filter) candidateArms(self string) ([]string, []any) {
 		params = append(params, selected...)
 		arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ?"+selector+bounds("seq", f.After))
 	}
-	if f.For == "" && f.Origin == "" && f.PeerAfter == 0 && len(f.Kinds) > 0 {
+	if rootAudience {
+		arms = append(arms, f.rootAudienceArms(bounds, &params)...)
+	} else if f.For == "" && f.Origin == "" && f.PeerAfter == 0 && len(f.Kinds) > 0 {
 		seen := map[kinds.Kind]bool{}
 		for _, kind := range f.Kinds {
 			if seen[kind] {
@@ -366,8 +372,18 @@ func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Recor
 	if f.Drive == "" && f.Peer == "" {
 		return nil, ErrNoDrive
 	}
-	q, params := s.selectionColumns(f, projection)
-	rows, err := s.db.QueryContext(ctx, q, params...)
+	now := s.Now()
+	conn, err := s.rootAudienceConnectionAt(ctx, f, now)
+	if err != nil {
+		return nil, err
+	}
+	reader := s.db.QueryContext
+	if conn != nil {
+		defer func() { _ = conn.Close() }()
+		reader = conn.QueryContext
+	}
+	q, params := s.selectionColumnsAudienceAt(f, projection, conn != nil, now)
+	rows, err := reader(ctx, q, params...)
 	if err != nil {
 		return nil, fmt.Errorf("query records: %w", err)
 	}
@@ -383,6 +399,10 @@ func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Recor
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
+	if conn != nil {
+		_ = rows.Close()
+		_ = conn.Close()
+	}
 	return out, s.numbered(ctx, out)
 }
 
@@ -391,6 +411,14 @@ func (s *Store) selection(f Filter) (string, []any) {
 }
 
 func (s *Store) selectionColumns(f Filter, projection string) (string, []any) {
+	return s.selectionColumnsAudience(f, projection, false)
+}
+
+func (s *Store) selectionColumnsAudience(f Filter, projection string, rootAudience bool) (string, []any) {
+	return s.selectionColumnsAudienceAt(f, projection, rootAudience, s.Now())
+}
+
+func (s *Store) selectionColumnsAudienceAt(f Filter, projection string, rootAudience bool, now time.Time) (string, []any) {
 	order := "ASC"
 	if f.Descending {
 		order = "DESC"
@@ -399,10 +427,10 @@ func (s *Store) selectionColumns(f Filter, projection string) (string, []any) {
 	var params []any
 	from, ordered := "records", "seq"
 	if f.Origin != "" {
-		where, params = f.bounded(s.Self(), s.Now())
+		where, params = f.bounded(s.Self(), now)
 	} else {
-		where, params = f.where(s.Self(), s.Now())
-		arms, candidates := f.candidateArms(s.Self())
+		where, params = f.where(s.Self(), now)
+		arms, candidates := f.candidateArmsAudience(s.Self(), rootAudience)
 		if len(arms) > 0 {
 			// LIMIT -1 prevents flattening from moving validation ahead of the ordered candidate stream.
 			from = "(" + strings.Join(arms, " UNION ") + " ORDER BY candidate_seq " + order + " LIMIT -1) c CROSS JOIN records ON records.seq = c.candidate_seq"
@@ -418,9 +446,19 @@ func (s *Store) selectionColumns(f Filter, projection string) (string, []any) {
 }
 
 func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
-	where, params := f.bounded(s.Self(), s.Now())
+	now := s.Now()
+	conn, err := s.rootAudienceConnectionAt(ctx, f, now)
+	if err != nil {
+		return 0, err
+	}
+	reader := s.db.QueryRowContext
+	if conn != nil {
+		defer func() { _ = conn.Close() }()
+		reader = conn.QueryRowContext
+	}
+	where, params := f.boundedAudience(s.Self(), now, conn != nil)
 	var n int
-	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE "+where, params...).Scan(&n); err != nil {
+	if err := reader(ctx, "SELECT COUNT(*) FROM records WHERE "+where, params...).Scan(&n); err != nil {
 		return 0, fmt.Errorf("count records: %w", err)
 	}
 	return n, nil

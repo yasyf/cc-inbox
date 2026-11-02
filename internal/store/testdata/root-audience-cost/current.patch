@@ -1,0 +1,5 @@
+--- a/internal/store/root_audience.go
++++ b/internal/store/root_audience.go
+@@ -125 +125 @@
+-				arms = append(arms, "SELECT source_seq AS candidate_seq FROM record_root_audience WHERE drive = ? AND audience = ?"+selector+bounds("source_seq", f.After))
++				arms = append(arms, "SELECT cci_root_candidate(source_seq) AS candidate_seq FROM record_root_audience WHERE drive = ? AND audience = ?"+selector+bounds("source_seq", f.After))
