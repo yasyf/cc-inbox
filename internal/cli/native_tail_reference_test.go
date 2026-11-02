@@ -29,11 +29,17 @@ type nativeTailResult struct {
 	Err  []byte `json:"stderr_b64"`
 }
 
+type nativeTailSeedCalls struct {
+	begins  int
+	commits int
+}
+
 type nativeTailFixture struct {
 	home string
 	node string
 	st   *store.Store
 	db   *sql.DB
+	seed nativeTailSeedCalls
 }
 
 func nativeTailCalls() []nativeTailCall {
@@ -133,7 +139,14 @@ func nativeTailFixtureAt(t *testing.T, call nativeTailCall, sets []nativeTailSet
 		}
 	})
 	node := st.Self()
-	seedNativeTailFixture(t, db, node)
+	var seedCalls nativeTailSeedCalls
+	tx, err := db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedCalls.begins++
+	defer func() { _ = tx.Rollback() }()
+	seedNativeTailFixture(t, tx, node)
 	seeded := time.Now()
 	if call.tier != "" {
 		if err := relay.SaveConfig(home, relay.Config{Mesh: "native", URL: "https://relay.invalid", Tier: call.tier}); err != nil {
@@ -144,11 +157,6 @@ func nativeTailFixtureAt(t *testing.T, call nativeTailCall, sets []nativeTailSet
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := db.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(t.Context(), `INSERT INTO records(drive,lane,kind,at,text,recipients,source,hash)
 VALUES('f','worker','note',4102444800000,'worker mail',?,'post','native-mail')`, string(address)); err != nil {
 		t.Fatal(err)
@@ -169,10 +177,11 @@ VALUES('d','held','hold',4102444800000,'hold #29020','#29020',?,'post','native-h
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
+	seedCalls.commits++
 	if os.Getenv("CCI_NATIVE_TAIL_FIXTURE_TIMINGS") == "1" {
 		t.Logf("fresh_store_open=%s seed_15_rows_and_origin=%s remaining_setup=%s", opened.Sub(started), seeded.Sub(opened), time.Since(seeded))
 	}
-	return nativeTailFixture{home: home, node: node, st: st, db: db}
+	return nativeTailFixture{home: home, node: node, st: st, db: db, seed: seedCalls}
 }
 
 func runNativeTailReference(t *testing.T, args []string) nativeTailResult {
