@@ -791,7 +791,7 @@ func TestDeliveryRedeliversWhatTheHookNeverAcknowledged(t *testing.T) {
 				if err := run(context.Background(), &first); err != nil {
 					t.Fatal(err)
 				}
-				testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Go, To: []string{"root"}, Text: "deploy it"})
+				testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.Go, To: []string{"root"}, Text: "deploy it again"})
 			}
 			before := cursors()
 			if err := run(context.Background(), failingWriter{}); err == nil {
