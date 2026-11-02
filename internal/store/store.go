@@ -658,6 +658,15 @@ func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time
 			r.alsoOrigins = append(r.alsoOrigins, Pointer{Origin: s.origin(target.Origin), Seq: originSeq(target)})
 		}
 	}
+	if r.Kind == kinds.Withdraw && r.Re != 0 {
+		target, err := s.Get(ctx, r.Re)
+		if errors.Is(err, sql.ErrNoRows) || err == nil && target.Drive != r.Drive && !CrossDrive(target.To) {
+			return Record{}, false, fmt.Errorf("withdraw --re #%d names no record in drive %s: a withdraw takes back one of its drive's records by that record's seq, never by a PR number", r.Re, r.Drive)
+		}
+		if err != nil {
+			return Record{}, false, err
+		}
+	}
 	r.Origin, r.OriginSeq = "", 0
 	r.At = at.UTC()
 	r.ExpiresAt = expiry(r, ttl)

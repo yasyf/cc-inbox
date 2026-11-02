@@ -94,6 +94,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cci who --successor-of`, which now names the stand-down's seq as `record`.
   Root copies most stand-downs to the lanes that act on them, so every copied
   lane read as stood down (board-refresher-6 and mq-health-9 on Nov 1).
+- `cci post --kind withdraw --re <seq>` refuses a seq that names no record of
+  the withdrawal's drive, such as a pull request number passed as the seq.
 - A new lane's hook mail delivers records addressed to `all` only from the
   lane's spawn on. Its direct records still start at the oldest one waiting
   for it, so a lane spawned onto an old order no longer replays every

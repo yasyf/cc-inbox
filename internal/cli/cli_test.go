@@ -562,6 +562,28 @@ func TestPostRefusesAColonWithdrawalAndNamesOnlyTheGoSeqs(t *testing.T) {
 	}
 }
 
+func TestPostRefusesAWithdrawWhoseReNamesNoRecordOfItsDrive(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--text", "go #47568 at f60fd32 on green"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "cci-mesh", "--lane", "p1-data-model", "--kind", "head", "--pr", "12", "--text", "HEAD #12 at abc1234"); err != nil {
+		t.Fatal(err)
+	}
+	withdraw := func(re string) error {
+		_, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "withdraw", "--re", re, "--text", "withdraw go 1 on 47568 at f60fd32: finder majors are real")
+		return err
+	}
+	for _, re := range []string{"2", "47568"} {
+		if err := withdraw(re); err == nil || !strings.Contains(err.Error(), "withdraw --re #"+re+" names no record in drive release-v3") {
+			t.Fatalf("withdraw --re %s = %v, want a refusal naming the drive", re, err)
+		}
+	}
+	if err := withdraw("1"); err != nil {
+		t.Fatalf("withdraw --re 1 = %v, want it posted", err)
+	}
+}
+
 func TestPostHeadAndOpenedTakeTheirPullRequestOrRefuse(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	for _, kind := range []string{"head", "opened"} {
