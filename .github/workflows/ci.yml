@@ -534,6 +534,35 @@ jobs:
         run: |
           test -x "$CCI_OLD_STORE_PROBE"
           go test -run 'TestRegisteredLaneComparisonsStayBounded|TestExistingStoreOpenDoesNotBuildPhysicalIndexes|TestMaintainIndexes|TestPhysicalIndexes' -v ./internal/store
+      - name: Changed-generation Watch query diagnostics
+        shell: bash
+        run: |
+          set -euo pipefail
+          CCI_WATCH_CHANGED_GENERATION_DIAGNOSTIC=1 go test -count=1 -run '^TestWatchChangedGeneration(RecipientWork|QueryPlan)$' -v ./internal/cli ./internal/store | tee "$RUNNER_TEMP/watch-changed-generation.log"
+          python3 - "$RUNNER_TEMP/watch-changed-generation.log" <<'PY'
+          import re
+          import sys
+          from pathlib import Path
+          text = Path(sys.argv[1]).read_text()
+          expected = {(n, p) for n in (32, 10000) for p in ("same-drive", "foreign-drive")}
+          watch = re.compile(r"WATCH_CHANGED_GENERATION_WORK population=(32|10000) placement=(same-drive|foreign-drive) polls=3 query_starts=3 emitted=0 cursor=1 poll1_recipient_materializations=([0-9]+) poll2_recipient_materializations=([0-9]+) poll3_recipient_materializations=([0-9]+) recipient_materializations=([0-9]+) native_query_starts=3 native_emitted=0 native_cursor=1 identity_query_starts=3 identity_emitted=0 identity_cursor=1$")
+          plan = re.compile(r"WATCH_CHANGED_GENERATION_PLAN population=(32|10000) placement=(same-drive|foreign-drive) rows=0 cursor=1 plan_nodes=([0-9]+)$")
+          for marker, pattern in (("WATCH_CHANGED_GENERATION_WORK ", watch), ("WATCH_CHANGED_GENERATION_PLAN ", plan)):
+              lines = [line for line in text.splitlines() if marker in line]
+              assert len(lines) == 4, (marker, lines)
+              seen = []
+              for line in lines:
+                  match = pattern.search(line)
+                  assert match is not None, line
+                  seen.append((int(match[1]), match[2]))
+                  if pattern is watch:
+                      assert sum(int(match[i]) for i in (3, 4, 5)) == int(match[6]), line
+                  else:
+                      assert int(match[3]) > 0, line
+              assert len(set(seen)) == 4 and set(seen) == expected, (marker, seen)
+          assert not re.search(r"--- SKIP: TestWatchChangedGeneration(?:RecipientWork|QueryPlan)(?:/|\s)", text), text
+          print("WATCH_CHANGED_GENERATION_LOG_GRADE watch_cases=4 plan_cases=4 numeric_once_each=true")
+          PY
       - name: Recipient identity and targeted session query costs
         shell: bash
         run: |

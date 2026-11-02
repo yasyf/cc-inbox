@@ -13,7 +13,11 @@ import (
 )
 
 func TestRecipientLaneQueryUsesTargetedIndex(t *testing.T) {
-	for _, population := range []int{64, 4096} {
+	populations := []int{64, 4096}
+	if os.Getenv("CCI_RECIPIENT_ALLOCATION_DIAGNOSTIC") == "1" {
+		populations = append(populations, 65536)
+	}
+	for _, population := range populations {
 		for _, indexed := range []bool{false, true} {
 			t.Run(fmt.Sprintf("rows=%d/indexed=%t", population, indexed), func(t *testing.T) {
 				phase := indexFixturePhases(t)
