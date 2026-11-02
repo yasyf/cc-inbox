@@ -227,6 +227,9 @@ func newPostCmd() *cobra.Command {
 				}
 			}
 			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
+				if err := refuseSecondBinder(cmd.Context(), st, self, r.Drive, lane, at); err != nil {
+					return err
+				}
 				if err := st.BindLane(cmd.Context(), self, r.Drive, lane, time.UnixMilli(window.Started)); err != nil {
 					return err
 				}
