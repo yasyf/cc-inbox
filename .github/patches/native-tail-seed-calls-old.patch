@@ -1,0 +1,35 @@
+diff --git a/internal/cli/native_tail_fixture_test.go b/internal/cli/native_tail_fixture_test.go
+--- a/internal/cli/native_tail_fixture_test.go
++++ b/internal/cli/native_tail_fixture_test.go
+@@ -76,2 +76,3 @@
+-func seedNativeTailFixture(t *testing.T, db *sql.DB, node string) {
+-	t.Helper()
++func seedNativeTailFixture(t *testing.T, db *sql.DB, node string) nativeTailSeedCalls {
++	t.Helper()
++	var seedCalls nativeTailSeedCalls
+@@ -81,0 +83 @@
++	seedCalls.begins++
+@@ -120,0 +123,2 @@
++	seedCalls.commits++
++	return seedCalls
+diff --git a/internal/cli/native_tail_reference_test.go b/internal/cli/native_tail_reference_test.go
+--- a/internal/cli/native_tail_reference_test.go
++++ b/internal/cli/native_tail_reference_test.go
+@@ -31,0 +32,5 @@
++type nativeTailSeedCalls struct {
++	begins  int
++	commits int
++}
++
+@@ -36,0 +42 @@
++	seed nativeTailSeedCalls
+@@ -136 +142 @@
+-	seedNativeTailFixture(t, db, node)
++	seedCalls := seedNativeTailFixture(t, db, node)
+@@ -150,0 +157 @@
++	seedCalls.begins++
+@@ -171,0 +179 @@
++	seedCalls.commits++
+@@ -175 +183 @@
+-	return nativeTailFixture{home: home, node: node, st: st, db: db}
++	return nativeTailFixture{home: home, node: node, st: st, db: db, seed: seedCalls}

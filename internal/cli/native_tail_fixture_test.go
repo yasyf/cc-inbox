@@ -73,13 +73,8 @@ var nativeTailBaseCalls = []struct {
 	{"json peer cursor", true, []string{"tail", "--drive", "d", "--json", "--budget", "300000000"}},
 }
 
-func seedNativeTailFixture(t *testing.T, db *sql.DB, node string) {
+func seedNativeTailFixture(t *testing.T, tx *sql.Tx, node string) {
 	t.Helper()
-	tx, err := db.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	const at = 4102444800000
 	for i, row := range []struct {
 		drive, lane, kind, recipients string
@@ -113,9 +108,6 @@ func seedNativeTailFixture(t *testing.T, db *sql.DB, node string) {
 		}
 	}
 	if _, err := tx.Exec("UPDATE records SET origin = 'feedfacefeedface', origin_seq = seq WHERE seq >= 12"); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
 }

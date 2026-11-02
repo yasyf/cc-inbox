@@ -637,6 +637,31 @@ jobs:
           go test -run '^TestLaneScore' -v ./internal/store
           CCI_LANE_INDEX_ROWS=250000 go test -run '^TestLaneScoreIndexProvisioningWithinWriterBudget$' -v ./internal/store
 
+      - uses: actions/checkout@v7
+        with:
+          ref: 9a71632b1cea6246dd05c267a28809f232695f53
+          path: .ci-native-tail-seed-calls-baseline
+          persist-credentials: false
+      - name: Native Tail successful seed API calls and immutable control
+        shell: bash
+        run: |
+          set -euo pipefail
+          seed_old_patch="$GITHUB_WORKSPACE/.github/patches/native-tail-seed-calls-old.patch"
+          seed_current_patch="$GITHUB_WORKSPACE/.github/patches/native-tail-seed-calls-current.patch"
+          test "$(git -C .ci-native-tail-seed-calls-baseline rev-parse HEAD)" = 9a71632b1cea6246dd05c267a28809f232695f53
+          git -C .ci-native-tail-seed-calls-baseline apply --unidiff-zero --check "$seed_old_patch"
+          git -C .ci-native-tail-seed-calls-baseline apply --unidiff-zero "$seed_old_patch"
+          cp internal/cli/native_tail_seed_calls_test.go .ci-native-tail-seed-calls-baseline/internal/cli/
+          if (cd .ci-native-tail-seed-calls-baseline && go test -count=1 -run '^TestNativeTailFixtureSeedTransactionCalls$' -v ./internal/cli) > "$RUNNER_TEMP/native-tail-seed-old.log" 2>&1; then
+            cat "$RUNNER_TEMP/native-tail-seed-old.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/native-tail-seed-old.log"
+          grep -F 'NATIVE_TAIL_SEED_CALL_BOUND_EXCEEDED begin_tx=2 commit=2 want=1' "$RUNNER_TEMP/native-tail-seed-old.log"
+          git -C .ci-native-tail-seed-calls-baseline apply --unidiff-zero --reverse --check "$seed_old_patch"
+          git apply --unidiff-zero --reverse --check "$seed_current_patch"
+          go test -count=1 -run '^TestNativeTailFixtureSeedTransactionCalls$' -v ./internal/cli | tee "$RUNNER_TEMP/native-tail-seed-current.log"
+          grep -F 'NATIVE_TAIL_SEED_SUCCESSFUL_CALLS begin_tx=1 commit=1 unit=successful_Go_seed_API_returns' "$RUNNER_TEMP/native-tail-seed-current.log"
       - name: Native HTTP Tail immutable CLI bytes, errors, identity, freshness, and zero writes
         env:
           CCI_NATIVE_TAIL_FIXTURE_TIMINGS: "1"
