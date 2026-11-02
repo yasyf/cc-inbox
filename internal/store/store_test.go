@@ -484,3 +484,75 @@ func TestPostRedactsTokens(t *testing.T) {
 		t.Fatalf("blob = %q, want both markers", blob)
 	}
 }
+
+func TestPostAllBindsBeforeItPostsInOneCommit(t *testing.T) {
+	st, clock := open(t)
+	ctx := context.Background()
+	waiting := post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "for api before it starts", To: []string{"api"}})
+	k := store.PeerKey{Session: "s-api"}
+	bind := &store.LaneBinding{Key: k, Drive: "d", Lane: "api", Started: clock.Now().Add(time.Hour)}
+	posted, err := st.PostAll(ctx, bind, []store.Record{
+		{Drive: "d", Lane: "api", Kind: kinds.Note, Text: "first"},
+		{Drive: "d", Lane: "api", Kind: kinds.Note, Text: "second"},
+	}, 0, clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posted) != 2 || posted[0].Duplicate || posted[1].Duplicate || posted[0].Record.Text != "first" || posted[1].Record.Text != "second" || posted[1].Record.Seq != posted[0].Record.Seq+1 {
+		t.Fatalf("PostAll() = %+v; want first then second, both new and consecutive", posted)
+	}
+	if b, ok, err := st.Binding(ctx, k); err != nil || !ok || b != (store.Binding{Drive: "d", Lane: "api"}) {
+		t.Fatalf("Binding() = %+v %v %v", b, ok, err)
+	}
+	if seq, ok, err := st.Cursor(ctx, store.LaneCursor(k), "d"); err != nil || !ok || seq != waiting.Seq-1 {
+		t.Fatalf("lane cursor = %d %v %v; want %d, before the record waiting for the lane", seq, ok, err, waiting.Seq-1)
+	}
+}
+
+func TestPostAllReturnsADuplicateAndStillPostsTheRest(t *testing.T) {
+	st, clock := open(t)
+	ctx := context.Background()
+	stored := post(t, st, store.Record{ID: "once", Kind: kinds.Note, Text: "stored"})
+	posted, err := st.PostAll(ctx, nil, []store.Record{
+		{Drive: "d", Lane: "lane-a", ID: "once", Kind: kinds.Note, Text: "stored"},
+		{Drive: "d", Lane: "lane-a", Kind: kinds.Note, Text: "fresh"},
+	}, 0, clock.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(posted) != 2 || !posted[0].Duplicate || posted[0].Record.Seq != stored.Seq || posted[1].Duplicate || posted[1].Record.Seq <= stored.Seq {
+		t.Fatalf("PostAll() = %+v; want the stored #%d as a duplicate, then a new record", posted, stored.Seq)
+	}
+	if got, err := st.Get(ctx, posted[1].Record.Seq); err != nil || got.Text != "fresh" {
+		t.Fatalf("Get(%d) = %+v %v", posted[1].Record.Seq, got, err)
+	}
+}
+
+func TestPostAllStoresNothingWhenARecordFails(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		failed store.Record
+		want   string
+	}{
+		{"invalid", store.Record{Drive: "d", Lane: "api", Kind: kinds.Note, Text: " "}, "text is required"},
+		{"missing target", store.Record{Drive: "d", Lane: "api", Kind: kinds.Answer, Text: "done", Resolves: 9999}, "names no record"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st, clock := open(t)
+			ctx := context.Background()
+			before := post(t, st, store.Record{Kind: kinds.Note, Text: "before"})
+			k := store.PeerKey{Session: "s-api"}
+			bind := &store.LaneBinding{Key: k, Drive: "d", Lane: "api", Started: clock.Now()}
+			_, err := st.PostAll(ctx, bind, []store.Record{{Drive: "d", Lane: "api", Kind: kinds.Note, Text: "lands only with the rest"}, tc.failed}, 0, clock.Now())
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("PostAll() error = %v; want %q", err, tc.want)
+			}
+			if seq, err := st.MaxSeq(ctx); err != nil || seq != before.Seq {
+				t.Fatalf("MaxSeq() = %d %v; want %d", seq, err, before.Seq)
+			}
+			if b, ok, err := st.Binding(ctx, k); err != nil || ok {
+				t.Fatalf("Binding() = %+v %v %v; want no binding", b, ok, err)
+			}
+		})
+	}
+}
