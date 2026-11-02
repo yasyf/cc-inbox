@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"strconv"
 	"testing"
 
 	"modernc.org/sqlite"
@@ -59,7 +60,7 @@ func TestAReplyResolvingManyRecordsJoinsOnlyTheSelectedOnes(t *testing.T) {
 	t.Cleanup(func() { _ = st.Close() })
 	blockers := make([]int64, 300)
 	for i := range blockers {
-		r, _, err := st.Post(ctx, Record{Drive: "d", Lane: "runner", Kind: kinds.Blocker, Text: "red"}, 0)
+		r, _, err := st.Post(ctx, Record{Drive: "d", Lane: "runner", Kind: kinds.Blocker, Text: "red build " + strconv.Itoa(i)}, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
