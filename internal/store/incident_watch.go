@@ -296,6 +296,42 @@ func (w *incidentFileWatch) mark(ctx context.Context, leaves map[string]bool, re
 	return nil
 }
 
+var errBoardWatchIncomplete = errors.New("board body watch is incomplete: unnamed parent event")
+
+func (w *incidentFileWatch) DrainBoard(ctx context.Context) (map[string]bool, error) {
+	dirty := map[string]bool{}
+	if err := w.collectBoard(ctx, dirty); err != nil {
+		return dirty, err
+	}
+	for path := range w.rebind {
+		if err := ctx.Err(); err != nil {
+			return dirty, err
+		}
+		dirty[path] = true
+	}
+	events, err := w.backend.Drain(ctx)
+	w.pending = events
+	if err != nil {
+		return dirty, err
+	}
+	return dirty, w.collectBoard(ctx, dirty)
+}
+
+func (w *incidentFileWatch) collectBoard(ctx context.Context, dirty map[string]bool) error {
+	for _, event := range w.pending {
+		for key := range event.Keys {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			node := w.nodes[key]
+			if node != nil && node.Directory && len(node.Missing) != 0 && event.Name == "" {
+				return errBoardWatchIncomplete
+			}
+		}
+	}
+	return w.collect(ctx, dirty)
+}
+
 func (w *incidentFileWatch) Close() error {
 	return w.backend.Close()
 }

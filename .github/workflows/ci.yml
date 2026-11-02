@@ -818,6 +818,111 @@ jobs:
           git apply --unidiff-zero --reverse --check "$seed_current_patch"
           go test -count=1 -run '^TestNativeTailFixtureSeedTransactionCalls$' -v ./internal/cli | tee "$RUNNER_TEMP/native-tail-seed-current.log"
           grep -F 'NATIVE_TAIL_SEED_SUCCESSFUL_CALLS begin_tx=1 commit=1 unit=successful_Go_seed_API_returns' "$RUNNER_TEMP/native-tail-seed-current.log"
+      - name: Board original error contract and same-kind SQL predicate work
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          CCI_BOARD_ERROR_CONTRACT=1 go test -count=1 -run '^TestBoardOriginalRuling(ErrorBytes|DriveOrder)$' -v ./internal/cli | tee "$RUNNER_TEMP/board-original-errors.log"
+          CCI_BOARD_SQL_WORK=1 go test -count=1 -run '^TestBoardSameKindSQLPredicateWork$' -v ./internal/store | tee "$RUNNER_TEMP/board-sql-work.log"
+          python3 - "$RUNNER_TEMP/board-original-errors.log" "$RUNNER_TEMP/board-sql-work.log" <<'PY'
+          import pathlib, re, sys
+          errors, work = [pathlib.Path(path).read_text() for path in sys.argv[1:]]
+          assert len(re.findall(r"^--- PASS: TestBoardOriginalRuling(?:ErrorBytes|DriveOrder) ", errors, re.M)) == 2
+          assert len(re.findall(r"BOARD_ORIGINAL_ERROR_PARITY two_drives=(?:true|false) ", errors)) == 2
+          assert not re.search(r"^--- (?:FAIL|SKIP):", errors + work, re.M)
+          assert len(re.findall(r"^--- PASS: TestBoardSameKindSQLPredicateWork ", work, re.M)) == 1
+          points = re.findall(r"BOARD_SAME_KIND_SQL_WORK population=(32|10000) record_predicate_evaluations=(\d+)", work)
+          assert len(points) == 2 and {int(n) for n, count in points} == {32, 10000}
+          values = {int(n): int(count) for n, count in points}
+          assert values[32] > 0 and values[32] == values[10000]
+          PY
+      - name: Immutable board row-rekey negative
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          negative="$HOME/repos/claude/worktrees/cc-inbox/board-row-negative"
+          mkdir -p "$HOME/repos/claude/worktrees/cc-inbox"
+          git worktree add --detach "${negative:?}" HEAD
+          python3 - internal/store/testdata/board_rekey_v2_keys.go.source "${negative:?}/internal/store/board_keys.go" <<'PY'
+          import hashlib, pathlib, sys
+          raw = pathlib.Path(sys.argv[1]).read_bytes()
+          assert hashlib.sha256(raw).hexdigest() == "81abe49079c07292323449032dcc814e4fb6061552c2ba5094de60275b4104b0"
+          pathlib.Path(sys.argv[2]).write_bytes(raw)
+          PY
+          if (cd "${negative:?}" && CCI_BOARD_REKEY_CONTRACT=1 go test -count=1 -run '^TestBoardOriginalRekeyNecessarySuperset$' -v ./internal/store) > "$RUNNER_TEMP/board-row-negative.log" 2>&1; then
+            echo 'immutable board row-rekey control unexpectedly passed' >&2
+            exit 1
+          fi
+          grep -q 'BOARD_ORIGINAL_REKEY_SUPERSET_MISSING' "$RUNNER_TEMP/board-row-negative.log"
+      - name: Board original rekey, old-writer and native watch contracts
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          CCI_BOARD_REKEY_CONTRACT=1 CCI_BOARD_WRITER_WATCH_CONTRACT=1 go test -count=1 -run '^TestBoard(OriginalRekeyNecessarySuperset|OldWriterMovesDeletesAndCurrentBodyRetention|BodyMovesDeletesNeverRetainStaleBytes|AtomicRenameRejectsMixedCutThenRebinds|MissingPathCreationIsFreshOrVisibleIncomplete|LostRegistrationNeverReturnsSuccess|NativeRegistrationFailureIsVisible|LinuxOverflowWireNeverReturnsSuccess|DarwinMissingParentRefusesBeforeFanout)$' -v ./internal/store | tee "$RUNNER_TEMP/board-writer-watch.log"
+          python3 - "$RUNNER_TEMP/board-writer-watch.log" <<'PY'
+          import pathlib, re, sys
+          raw = pathlib.Path(sys.argv[1]).read_text()
+          assert not re.search(r"^--- (?:FAIL|SKIP):", raw, re.M)
+          assert len(re.findall(r"^--- PASS: TestBoard", raw, re.M)) == 8
+          assert len(re.findall(r"BOARD_ORIGINAL_REKEY_PARITY case=", raw)) == 4
+          PY
+      - name: Board full-population native SQL work and cold backfill
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          set -euo pipefail
+          CCI_BOARD_FULL_SQL_WORK=1 go test -count=1 -run '^TestBoard(FullPopulation|ColdBackfill)SQLPredicateWork$' -v ./internal/store | tee "$RUNNER_TEMP/board-full-sql-work.log"
+          python3 - "$RUNNER_TEMP/board-full-sql-work.log" <<'PY'
+          import pathlib, re, sys
+          raw = pathlib.Path(sys.argv[1]).read_text()
+          assert not re.search(r"^--- (?:FAIL|SKIP):", raw, re.M)
+          assert len(re.findall(r"^--- PASS: TestBoard(?:FullPopulation|ColdBackfill)SQLPredicateWork ", raw, re.M)) == 2
+          for label in ("BOARD_FULL_POPULATION_SQL_WORK", "BOARD_COLD_BACKFILL_SQL_WORK"):
+              values = re.findall(label + r" population=(32|10000|100000) record_predicate_evaluations=(\d+)", raw)
+              assert len(values) == 3 and {int(n) for n, count in values} == {32, 10000, 100000}
+              assert all(int(count) > 0 for n, count in values)
+          PY
+      - uses: astral-sh/setup-uv@v8.2.0
+      - name: Actual LR retained845 and candidate helper parity
+        run: |
+          set -euo pipefail
+          base="$HOME/.vcache/scratch/cci-board-lr-parity"
+          mkdir -p "${base:?}"
+          parity="$(mktemp -d "${base:?}/case.XXXXXX")"
+          python3 .github/scripts/prepare-board-lr-parity.py "${parity:?}" internal/cli/testdata/board_real_cli_sources.json internal/cli/testdata/board_lr_parity_controls.json
+          PYTHONPATH="${parity:?}/scripts" uv run --no-project --python 3.14 --with pytest==9.1.1 python -m pytest -q -p no:cacheprovider "${parity:?}/tests/test_board_rows.py" "${parity:?}/tests/test_board_provider.py" | tee "$RUNNER_TEMP/board-lr-helper-parity.log"
+          if grep -Eq '[0-9]+ (failed|skipped|error)' "$RUNNER_TEMP/board-lr-helper-parity.log"; then
+            exit 1
+          fi
+      - name: Prepare reviewed board operation-counter fixture
+        env:
+          GOMAXPROCS: '2'
+        run: |
+          worktree="$HOME/repos/claude/worktrees/cc-inbox/board-work"
+          mkdir -p "$HOME/repos/claude/worktrees/cc-inbox"
+          git worktree add --detach "${worktree:?}" HEAD
+          python3 .github/scripts/prepare-board-work-source.py "${worktree:?}" internal/cli/testdata/board_ci_callsite_instrumentation.json
+          cp internal/cli/board_real_fresh_cli_test.go.source "${worktree:?}/internal/cli/board_real_fresh_cli_test.go"
+          (cd "${worktree:?}" && go build -p 2 -o "$RUNNER_TEMP/cci-board-work" ./cmd/cci)
+      - name: Board32 real fresh CLI warm and changed work
+        env:
+          GOMAXPROCS: '2'
+          CCI_BOARD_REAL_CLI: '1'
+          CCI_BOARD_INSTRUMENTED_CLI: ${{ runner.temp }}/cci-board-work
+        run: |
+          set -euo pipefail
+          CCI_BOARD_PYTHON="$(uv run --no-project --python 3.14 python -c 'import sys;print(sys.executable)')"
+          export CCI_BOARD_PYTHON
+          worktree="$HOME/repos/claude/worktrees/cc-inbox/board-work"
+          for population in 32 10000 100000; do
+            for phase in warm changed; do
+              (cd "${worktree:?}" && CCI_BOARD_CLI_POPULATION="$population" CCI_BOARD_CLI_PHASE="$phase" go test -p 2 -count=1 -run '^TestBoardRealFreshCLIWarmChanged$' -v ./internal/cli) | tee "$RUNNER_TEMP/board-real-cli-$population-$phase.log"
+            done
+          done
+          python3 .github/scripts/grade-board-cli-work.py "$RUNNER_TEMP"
       - name: Native HTTP Tail immutable CLI bytes, errors, identity, freshness, and zero writes
         if: env.FULL_CI == 'true'
         env:

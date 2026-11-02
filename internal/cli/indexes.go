@@ -11,6 +11,7 @@ import (
 
 func newMaintainIndexesCmd() *cobra.Command {
 	var drive string
+	var board bool
 	cmd := &cobra.Command{
 		Use:    "maintain-indexes",
 		Short:  "Build local lane-registration indexes and record memberships and report storage cost",
@@ -33,6 +34,16 @@ func newMaintainIndexesCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if board {
+				st, err := store.Open(cmd.Context(), home)
+				if err != nil {
+					return err
+				}
+				defer func() { _ = st.Close() }()
+				if err := st.InstallBoardProjection(cmd.Context()); err != nil {
+					return err
+				}
+			}
 			if drive != "" {
 				st, err := store.Open(cmd.Context(), home)
 				if err != nil {
@@ -52,5 +63,6 @@ func newMaintainIndexesCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&drive, "incident-drive", "", "explicitly provision native incident membership for one drive")
+	cmd.Flags().BoolVar(&board, "board-query", false, "explicitly install board query definitions before live scope provisioning")
 	return cmd
 }

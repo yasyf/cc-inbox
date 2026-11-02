@@ -23,7 +23,11 @@ var replyMarks = map[kinds.Kind]string{
 	kinds.FixLive:  "FIX-LIVE",
 }
 
-func Annotate(ctx context.Context, st *store.Store, records []store.Record) error {
+type openerReader interface {
+	OpenAmong(context.Context, string, []int64) ([]store.Record, error)
+}
+
+func Annotate(ctx context.Context, st openerReader, records []store.Record) error {
 	tracked := map[string][]int64{}
 	for _, r := range records {
 		if r.Kind.Opens() && r.Tracked() {

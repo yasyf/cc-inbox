@@ -1,0 +1,227 @@
+package cli
+
+import (
+ "bytes"
+ "crypto/sha256"
+ "database/sql"
+ "encoding/base64"
+ "encoding/hex"
+ "encoding/json"
+ "fmt"
+ "net"
+ "net/http"
+ "net/http/httptest"
+ "os"
+ "os/exec"
+ "path/filepath"
+ "strconv"
+ "strings"
+ "sync/atomic"
+ "testing"
+ "time"
+
+ "github.com/yasyf/cc-inbox/internal/kinds"
+ "github.com/yasyf/cc-inbox/internal/store"
+)
+
+type boardCLIImage struct {SHA string `json:"sha256"`; Data string `json:"source_b64"`}
+type boardCLIBundle struct {
+ Common map[string]boardCLIImage `json:"common"`
+ Old map[string]boardCLIImage `json:"retained845"`
+ Current map[string]boardCLIImage `json:"candidate"`
+}
+type boardCLIReceipt struct {
+ PID int `json:"pid"`
+ PPID int `json:"ppid"`
+ Args []string `json:"args"`
+ Counters store.BoardDiagnosticCounters `json:"counters"`
+}
+
+func boardCounterDelta(before,after store.BoardDiagnosticCounters) store.BoardDiagnosticCounters {
+ return store.BoardDiagnosticCounters{QueryContextSuccesses:after.QueryContextSuccesses-before.QueryContextSuccesses,ExecContextSuccesses:after.ExecContextSuccesses-before.ExecContextSuccesses,CommitSuccesses:after.CommitSuccesses-before.CommitSuccesses,BodyReadSuccesses:after.BodyReadSuccesses-before.BodyReadSuccesses,BodyReadBytes:after.BodyReadBytes-before.BodyReadBytes,BodyReadFailures:after.BodyReadFailures-before.BodyReadFailures}
+}
+
+func TestBoardRealFreshCLIWarmChanged(t *testing.T) {
+ if os.Getenv("CCI_BOARD_REAL_CLI")!="1"{t.Skip("CI supplies instrumented provider/CCI and exact real LR sources")}
+ population,err:=strconv.Atoi(os.Getenv("CCI_BOARD_CLI_POPULATION"))
+ if err!=nil||(population!=32&&population!=10000&&population!=100000){t.Fatal("actual population must be32/10000/100000")}
+ phase:=os.Getenv("CCI_BOARD_CLI_PHASE")
+ if phase!="warm"&&phase!="changed"{t.Fatal("actual phase must be warm/changed")}
+ python:=os.Getenv("CCI_BOARD_PYTHON")
+ if python==""{t.Fatal("CI must bind its actual Python3.14 interpreter")}
+ userHome,err:=os.UserHomeDir()
+ if err!=nil{t.Fatal(err)}
+ scratch:=filepath.Join(userHome,".vcache","scratch","cci-board-real-cli")
+ if err:=os.MkdirAll(scratch,0700);err!=nil{t.Fatal(err)}
+ t.Setenv("TMPDIR",scratch)
+ root:=t.TempDir()
+ home,scripts,bin,bodyDir:=filepath.Join(root,"home"),filepath.Join(root,"scripts"),filepath.Join(root,"bin"),filepath.Join(root,"bodies")
+ for _,folder:=range []string{home,scripts,bin,bodyDir,filepath.Join(root,"finders")}{if err:=os.MkdirAll(folder,0700);err!=nil{t.Fatal(err)}}
+ source,err:=os.ReadFile(filepath.Join("testdata","board_real_cli_sources.json"))
+ if err!=nil{t.Fatal(err)}
+ var bundle boardCLIBundle
+ if err:=json.Unmarshal(source,&bundle);err!=nil{t.Fatal(err)}
+ install:=func(modules map[string]boardCLIImage){
+  t.Helper()
+  for _,part:=range []map[string]boardCLIImage{bundle.Common,modules}{for name,image:=range part{
+   data,err:=base64.StdEncoding.DecodeString(image.Data)
+   if err!=nil{t.Fatal(err)}
+   sum:=sha256.Sum256(data)
+   if hex.EncodeToString(sum[:])!=image.SHA{t.Fatalf("actual source hash mismatch: %s",name)}
+   target:=filepath.Join(scripts,name)
+   if err:=os.MkdirAll(filepath.Dir(target),0700);err!=nil{t.Fatal(err)}
+   if err:=os.WriteFile(target,data,0600);err!=nil{t.Fatal(err)}
+  }}
+ }
+ install(bundle.Current)
+ executable,err:=os.ReadFile(os.Getenv("CCI_BOARD_INSTRUMENTED_CLI"))
+ if err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(filepath.Join(bin,"cci"),executable,0700);err!=nil{t.Fatal(err)}
+ head:="35aa930c1d2e3f405162738495a6b7c8d9e0f1a2"
+ gh:=map[string]any{"data":map[string]any{"repository":map[string]any{"p42590":map[string]any{"state":"OPEN","headRefOid":head,"baseRefName":"dev","headRefName":"fixture/42590","commits":map[string]any{"nodes":[]any{map[string]any{"commit":map[string]any{"committedDate":"2026-10-26T19:00:00Z"}}}}}}}}
+ ghData,err:=json.Marshal(gh)
+ if err!=nil{t.Fatal(err)}
+ ghPath:=filepath.Join(root,"github.json")
+ if err:=os.WriteFile(ghPath,ghData,0600);err!=nil{t.Fatal(err)}
+ writeScript:=func(path,body string){t.Helper();if err:=os.WriteFile(path,[]byte("#!"+python+"\n"+body),0700);err!=nil{t.Fatal(err)}}
+ writeScript(filepath.Join(bin,"ccx"),"import json, os, sys\nassert sys.argv[1:3] == ['vcs', 'gh']\nassert 'graphql' in sys.argv\nprint(open(os.environ['CCI_BOARD_GH_FIXTURE']).read())\n")
+ writeScript(filepath.Join(bin,"cc-present"),"import json, sys\nassert sys.argv[1] == 'outcomes'\nprint(json.dumps({'interactions': {'triage': {}}}))\n")
+ writeScript(filepath.Join(scripts,"ledger.py"),"import json, sys\nassert 'list' in sys.argv\nprint(json.dumps([{'pr':'42590','repo':'Forge-AI/monorepo','ours':True}]))\n")
+ environment:=append(os.Environ(),"HOME="+root,"CCI_HOME="+home,"CCI_HANDED_OFF_FROM=ci-board-private","BINRUN_PLUGIN_ROOT=","CLAUDE_CODE_SESSION_ID=board-real-cli","CODEX_THREAD_ID=","CCI_AGENT_ID=board-control","PYTHONDONTWRITEBYTECODE=1","PYTHONPATH="+scripts,"PATH="+bin+string(os.PathListSeparator)+os.Getenv("PATH"),"CCI_BOARD_GH_FIXTURE="+ghPath)
+ st,err:=store.Open(t.Context(),home)
+ if err!=nil{t.Fatal(err)}
+ defer func(){_ = st.Close()}()
+ st.Now=func()time.Time{return time.Date(2026,11,2,8,0,0,0,time.UTC)}
+ physicalBefore:=store.BoardDiagnosticSnapshot()
+ if err:=st.InstallBoardProjection(t.Context());err!=nil{t.Fatal(err)}
+ physical:=boardCounterDelta(physicalBefore,store.BoardDiagnosticSnapshot())
+ if physical.ExecContextSuccesses==0||physical.CommitSuccesses!=1{t.Fatalf("physical installation counter missing: %+v",physical)}
+ db,err:=sql.Open("sqlite","file:"+filepath.Join(home,store.DBFile))
+ if err!=nil{t.Fatal(err)}
+ defer func(){_ = db.Close()}()
+ if _,err:=db.ExecContext(t.Context(),`WITH RECURSIVE history(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<?)
+INSERT INTO records(seq,drive,lane,kind,at,text,source,hash,recipients,origin,origin_seq,id)
+SELECT n,'d1','root','decide',?,'background #99999','post','fresh-unrelated-'||n,'[]',?,n,'fresh-unrelated-'||n FROM history`,population,st.Now().UnixMilli(),st.Self());err!=nil{t.Fatal(err)}
+ rulingBody,reviewBody:=filepath.Join(bodyDir,"ruling"),filepath.Join(bodyDir,"review")
+ if err:=os.WriteFile(rulingBody,[]byte("background #42590 context\r\n"),0600);err!=nil{t.Fatal(err)}
+ if err:=os.WriteFile(reviewBody,[]byte("fidelity: ok "+head[:7]+" checked rule/1\r\n"),0600);err!=nil{t.Fatal(err)}
+ post:=func(record store.Record){t.Helper();if _,_,err:=st.Post(t.Context(),record,0);err!=nil{t.Fatal(err)}}
+ ref:=[]store.PR{{Repo:"Forge-AI/monorepo",Number:42590}}
+ post(store.Record{Drive:"d1",Lane:"root",Kind:kinds.Decide,Text:"background #42590…",Refs:store.Refs{Path:rulingBody}})
+ post(store.Record{Drive:"d1",Lane:"builder",Kind:kinds.Head,Text:head+" (was 7b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b9c) patch-identical",Refs:store.Refs{PRs:ref}})
+ post(store.Record{Drive:"d1",Lane:"fidelity-desk",Kind:kinds.Review,Text:"fidelity: ok "+head[:7]+"…",Refs:store.Refs{PRs:ref,Path:reviewBody}})
+ post(store.Record{Drive:"d1",Lane:"finder-desk",Kind:kinds.Review,Text:"finder: ok "+head[:7]+" no majors",Refs:store.Refs{PRs:ref}})
+ config:=map[string]any{"drive":"d1","landing":map[string]any{"repo":"Forge-AI/monorepo","fidelity_lane":[]string{"fidelity-desk","fidelity-desk-2"},"ledger":"fixture","checkout":root,"go_lanes":[]string{"merge-owner"}}}
+ facts:=[]map[string]string{}
+ for _,label:=range []string{"For users","Differs from plan","Risk","Finder","Build (CI)","Gate"}{facts=append(facts,map[string]string{"label":label,"value":strings.ToLower(label)+" in plain words"})}
+ block:=map[string]any{"id":"card-merge-triage","type":"card","children":[]any{map[string]any{"id":"merge-triage","type":"triage","items":[]any{map[string]any{"id":"merge-row-42590","label":"#42590: a change","hint":"commit "+head[:7]+", built on dev","md":"Keeps the existing native board inputs intact.","textAt":"2026-10-26T20:00:00Z","facts":facts}}}}}
+ writeJSON:=func(name string,value any)string{t.Helper();data,err:=json.Marshal(value);if err!=nil{t.Fatal(err)};path:=filepath.Join(root,name);if err:=os.WriteFile(path,data,0600);err!=nil{t.Fatal(err)};return path}
+ configPath,blockPath:=writeJSON("runner.json",config),writeJSON("block.json",block)
+ handler,err:=BoardRecordsHandler(st,home)
+ if err!=nil{t.Fatal(err)}
+ defer func(){_ = handler.Close()}()
+ var requests atomic.Uint64
+ server:=httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){if r.URL.Path=="/v1/board-records"{requests.Add(1)};handler.ServeHTTP(w,r)}))
+ listener,err:=net.Listen("tcp","127.0.0.1:7377")
+ if err!=nil{t.Fatal(err)}
+ server.Listener=listener
+ server.Start()
+ defer server.Close()
+ requestCommand:=exec.Command(python,"-B","-c","import json,sys;from long_running.cci import board_request;json.dump(board_request('d1','Forge-AI/monorepo',['merge-owner'],['42590'],['merge-row-42590']),sys.stdout)")
+ requestCommand.Dir=root;requestCommand.Env=environment
+ requestBody,err:=requestCommand.CombinedOutput()
+ if err!=nil{t.Fatalf("actual request builder failed: %v output=%s",err,requestBody)}
+ coldBefore:=store.BoardDiagnosticSnapshot()
+ response,err:=http.Post(server.URL+"/v1/board-provision","application/json",bytes.NewReader(requestBody))
+ if err!=nil{t.Fatal(err)}
+ var provision map[string]any
+ if err:=json.NewDecoder(response.Body).Decode(&provision);err!=nil{_ = response.Body.Close();t.Fatal(err)}
+ if err:=response.Body.Close();err!=nil{t.Fatal(err)}
+ if response.StatusCode!=http.StatusOK{t.Fatalf("explicit provision failed: %v",provision)}
+ cold:=boardCounterDelta(coldBefore,store.BoardDiagnosticSnapshot())
+ if cold.QueryContextSuccesses==0||cold.ExecContextSuccesses==0||cold.CommitSuccesses==0||cold.BodyReadSuccesses!=2{t.Fatalf("cold operation counters are vacuous: %+v",cold)}
+ rawBefore:=boardRealCLIRawState(t,db,phase=="changed")
+ var first store.BoardDiagnosticCounters
+ for iteration:=0;iteration<32;iteration++{
+  changedBody:=[]byte(fmt.Sprintf("background #42590 changed %d\r\n",iteration))
+  if phase=="changed"{
+   result,err:=db.ExecContext(t.Context(),"UPDATE records SET text=? WHERE seq=1",fmt.Sprintf("background #99999 change %d",iteration))
+   if err!=nil{t.Fatal(err)}
+   if count,err:=result.RowsAffected();err!=nil||count!=1{t.Fatalf("old writer rows=%d error=%v",count,err)}
+   if err:=os.WriteFile(rulingBody,changedBody,0600);err!=nil{t.Fatal(err)}
+  }
+  run:=func(mode string,modules map[string]boardCLIImage)([]byte,[]boardCLIReceipt){
+   t.Helper();install(modules)
+   directory:=filepath.Join(root,fmt.Sprintf("%s-%d",mode,iteration))
+   if err:=os.Mkdir(directory,0700);err!=nil{t.Fatal(err)}
+   args:=[]string{"-B",filepath.Join(scripts,"board_rows.py"),"--config",configPath,"--check","--json","--finders",filepath.Join(root,"finders"),blockPath}
+   if mode=="candidate"{args=append(args,"--board-provider=board-query-v1")}
+   command:=exec.Command(python,args...);command.Dir=root;command.Env=append(environment,"CCI_BOARD_DIAGNOSTIC_DIR="+directory)
+   var stdout,stderr bytes.Buffer;command.Stdout=&stdout;command.Stderr=&stderr
+   if err:=command.Start();err!=nil{t.Fatal(err)}
+   pid:=command.Process.Pid
+   if err:=command.Wait();err!=nil{t.Fatalf("actual CLI mode=%s pid=%d failed: %v stdout=%s stderr=%s",mode,pid,err,stdout.Bytes(),stderr.Bytes())}
+   if stderr.Len()!=0{t.Fatalf("actual CLI emitted stderr: %s",stderr.Bytes())}
+   var report struct{Rows []json.RawMessage `json:"rows"`;Warnings []string `json:"warnings"`}
+   if err:=json.Unmarshal(stdout.Bytes(),&report);err!=nil||len(report.Rows)!=1||len(report.Warnings)!=0{t.Fatalf("actual CLI output not healthy: error=%v body=%s",err,stdout.Bytes())}
+   entries,err:=os.ReadDir(directory);if err!=nil{t.Fatal(err)}
+   receipts:=make([]boardCLIReceipt,0,len(entries))
+   for _,entry:=range entries{data,err:=os.ReadFile(filepath.Join(directory,entry.Name()));if err!=nil{t.Fatal(err)};var receipt boardCLIReceipt;if err:=json.Unmarshal(data,&receipt);err!=nil{t.Fatal(err)};if receipt.PID<=0||receipt.PPID!=pid||entry.Name()!=strconv.Itoa(receipt.PID)+".json"{t.Fatalf("owned child receipt mismatch: %+v parent=%d",receipt,pid)};receipts=append(receipts,receipt)}
+   t.Logf("BOARD_REAL_CLI_EXIT population=%d phase=%s iteration=%d variant=%s pid=%d code=0 cci_receipts=%d",population,phase,iteration,mode,pid,len(receipts))
+   return stdout.Bytes(),receipts
+  }
+  legacy,oldChildren:=run("retained845",bundle.Old)
+  before,requestBefore:=store.BoardDiagnosticSnapshot(),requests.Load()
+  current,currentChildren:=run("candidate",bundle.Current)
+  work:=boardCounterDelta(before,store.BoardDiagnosticSnapshot())
+  if !bytes.Equal(legacy,current){t.Fatalf("full original CLI bytes differ: old=%s current=%s",legacy,current)}
+  if requests.Load()-requestBefore!=1||work.QueryContextSuccesses==0{t.Fatalf("native request/counters missing: requests=%d work=%+v",requests.Load()-requestBefore,work)}
+  classify:=func(receipts []boardCLIReceipt)(target,residual uint64){for _,receipt:=range receipts{matched:=false;for _,arg:=range receipt.Args{if arg=="--kind=answer"||arg=="--kind=withdraw"||arg=="--kind=review"{matched=true}};if matched{target+=receipt.Counters.QueryContextSuccesses}else{residual+=receipt.Counters.QueryContextSuccesses}};return}
+  oldTarget,oldResidual:=classify(oldChildren)
+  currentTarget,currentResidual:=classify(currentChildren)
+  if oldTarget==0||currentTarget!=0||oldResidual!=currentResidual{t.Fatalf("three-stream/residual accounting differs: old=%d/%d current=%d/%d",oldTarget,oldResidual,currentTarget,currentResidual)}
+  if phase=="warm"{if work.ExecContextSuccesses!=0||work.CommitSuccesses!=0||work.BodyReadSuccesses!=0{t.Fatalf("warm read wrote/reopened: %+v",work)}}else if work.BodyReadSuccesses!=1||work.BodyReadBytes!=uint64(len(changedBody))||work.CommitSuccesses==0{t.Fatalf("changed work did not use current body/writer delta: %+v",work)}
+  if iteration==0{first=work}else if work.QueryContextSuccesses!=first.QueryContextSuccesses||work.ExecContextSuccesses!=first.ExecContextSuccesses||work.CommitSuccesses!=first.CommitSuccesses||work.BodyReadSuccesses!=first.BodyReadSuccesses{t.Fatalf("32-fresh-process work drifted: first=%+v current=%+v",first,work)}
+  point:=map[string]any{"population":population,"phase":phase,"iteration":iteration,"server":work,"old_target_query_successes":oldTarget,"current_target_query_successes":currentTarget,"old_residual_query_successes":oldResidual,"current_residual_query_successes":currentResidual}
+  encoded,err:=json.Marshal(point);if err!=nil{t.Fatal(err)};t.Logf("BOARD_REAL_CLI_POINT %s",encoded)
+ }
+ if after:=boardRealCLIRawState(t,db,phase=="changed");after!=rawBefore{t.Fatalf("real CLI mutated private records/cursors/schema: before=%s after=%s",rawBefore,after)}
+ if phase=="changed"{var finalText string;if err:=db.QueryRowContext(t.Context(),"SELECT text FROM records WHERE seq=1").Scan(&finalText);err!=nil||finalText!="background #99999 change 31"{t.Fatalf("controlled writer text drifted: got=%q error=%v",finalText,err)}}
+ summary,err:=json.Marshal(map[string]any{"population":population,"phase":phase,"actual_fresh_current_CLI":32,"actual_fresh_reference_CLI":32,"physical_install":physical,"cold":cold,"server_first":first})
+ if err!=nil{t.Fatal(err)}
+ t.Logf("BOARD_REAL_CLI_SUMMARY %s",summary)
+}
+
+func boardRealCLIRawState(t *testing.T,db *sql.DB,maskControlledText bool) string {
+ t.Helper()
+ digest:=sha256.New()
+ for _,table:=range []string{"records","cursors"}{
+  metadata,err:=db.QueryContext(t.Context(),"PRAGMA table_info("+table+")")
+  if err!=nil{t.Fatal(err)}
+  var names []string
+  for metadata.Next(){var cid,notNull,primary int;var name,kind string;var defaultValue any;if err:=metadata.Scan(&cid,&name,&kind,&notNull,&defaultValue,&primary);err!=nil{_ = metadata.Close();t.Fatal(err)};names=append(names,name)}
+  if err:=metadata.Err();err!=nil{_ = metadata.Close();t.Fatal(err)}
+  if err:=metadata.Close();err!=nil{t.Fatal(err)}
+  var projection []string
+  for _,name:=range names{
+   quoted:=`"`+strings.ReplaceAll(name,`"`,`""`)+`"`
+   value:=quoted
+   if table=="records"&&name=="text"&&maskControlledText{value="CASE WHEN seq=1 THEN 'controlled-text-field' ELSE "+quoted+" END"}
+   projection=append(projection,"typeof("+quoted+")","hex("+value+")")
+  }
+  ordering:="seq"
+  if table=="cursors"{ordering="name,drive"}
+  rows,err:=db.QueryContext(t.Context(),"SELECT "+strings.Join(projection,",")+" FROM "+table+" ORDER BY "+ordering)
+  if err!=nil{t.Fatal(err)}
+  fmt.Fprint(digest,table,"\n")
+  for rows.Next(){cells:=make([]string,len(projection));targets:=make([]any,len(cells));for i:=range cells{targets[i]=&cells[i]};if err:=rows.Scan(targets...);err!=nil{_ = rows.Close();t.Fatal(err)};for _,cell:=range cells{fmt.Fprintf(digest,"%d:%s|",len(cell),cell)};fmt.Fprint(digest,"\n")}
+  if err:=rows.Err();err!=nil{_ = rows.Close();t.Fatal(err)}
+  if err:=rows.Close();err!=nil{t.Fatal(err)}
+ }
+ rows,err:=db.QueryContext(t.Context(),"SELECT type,name,tbl_name,COALESCE(sql,'') FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name")
+ if err!=nil{t.Fatal(err)}
+ for rows.Next(){var kind,name,table,definition string;if err:=rows.Scan(&kind,&name,&table,&definition);err!=nil{_ = rows.Close();t.Fatal(err)};fmt.Fprintf(digest,"%q|%q|%q|%q\n",kind,name,table,definition)}
+ if err:=rows.Err();err!=nil{_ = rows.Close();t.Fatal(err)}
+ if err:=rows.Close();err!=nil{t.Fatal(err)}
+ return hex.EncodeToString(digest.Sum(nil))
+}
