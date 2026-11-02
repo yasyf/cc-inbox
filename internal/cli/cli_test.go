@@ -1667,7 +1667,7 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 func TestOnlyALanesOwnStandDownStandsItDown(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	for _, args := range [][]string{
-		{"--lane", "root", "--kind", "stand-down", "--to", "desk-5", "--to", "desk-6", "--successor", "desk-6", "--text", "desk-5 rotated to desk-6"},
+		{"--lane", "root", "--kind", "stand-down", "--to", "desk-6", "--successor", "desk-6", "--text", "desk-5 rotated to desk-6"},
 		{"--lane", "root", "--kind", "stand-down", "--to", "five-options-1", "--to", "desk-7", "--text", "five-options-1 stands down"},
 		{"--lane", "desk-7", "--kind", "state", "--text", "desk-7 answered"},
 		{"--lane", "root", "--kind", "stand-down", "--to", "desk-8", "--text", "desk-8 stands down"},
