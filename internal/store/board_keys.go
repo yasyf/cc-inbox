@@ -29,8 +29,8 @@ func boardDecimal(text string) *big.Int {
 		}
 		if value < 0 {
 			for _, entry := range unicode.Nd.R32 {
-				if r >= rune(entry.Lo) && r <= rune(entry.Hi) && (r-rune(entry.Lo))%rune(entry.Stride) == 0 {
-					value = int((r-rune(entry.Lo))/rune(entry.Stride)) % 10
+				if int64(r) >= int64(entry.Lo) && int64(r) <= int64(entry.Hi) && (int64(r)-int64(entry.Lo))%int64(entry.Stride) == 0 {
+					value = int(((int64(r) - int64(entry.Lo)) / int64(entry.Stride)) % 10)
 					break
 				}
 			}

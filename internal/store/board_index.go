@@ -387,7 +387,7 @@ func (index *BoardIndex) reconcile(ctx context.Context, scope *boardScope, encod
 		}
 		info, statErr := os.Stat(path)
 		regular := statErr == nil && info.Mode().IsRegular()
-		body, readErr := os.ReadFile(path)
+		body, readErr := os.ReadFile(path) //nolint:gosec // G304: record body references intentionally support arbitrary filesystem paths.
 		message := ""
 		if readErr != nil {
 			body = nil
