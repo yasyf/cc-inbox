@@ -58,6 +58,11 @@ jobs:
           ref: ${{ inputs.commit || github.sha }}
       - uses: actions/checkout@v7
         with:
+          ref: fe73b8c28964aa004782c8f0c7dd1fcca2ee082b
+          path: .ci-tail-page-baseline
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
           ref: 69637a6ba3370ec3a3ba11a59bb6b1d80d367dbb
           path: .ci-render-text-baseline
           persist-credentials: false
@@ -276,6 +281,25 @@ jobs:
           mkdir -p "$RUNNER_TEMP/cci-addressed-body-contract"
           (cd .ci-addressed-body-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
           CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli
+      - name: Tail page assembly current-head parity and allocation scaling
+        run: |
+          test "$(git -C .ci-tail-page-baseline rev-parse HEAD)" = fe73b8c28964aa004782c8f0c7dd1fcca2ee082b
+          cp internal/inbox/tail_page_assembly_test.go .ci-tail-page-baseline/internal/inbox/
+          cp internal/cli/tail_page_assembly_contract_test.go .ci-tail-page-baseline/internal/cli/
+          mkdir -p "$RUNNER_TEMP/cci-tail-page-contract"
+          (cd .ci-tail-page-baseline && CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailPageAssemblyContract$' -v ./internal/cli)
+          CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" go test -count=1 -race -run '^TestTailPageAssemblyContract$' -v ./internal/cli
+          if (cd .ci-tail-page-baseline && CCI_TAIL_PAGE_ALLOCATION=1 go test -count=1 -run '^TestTailPageAssemblyAllocationScaling$' -v ./internal/inbox) > "$RUNNER_TEMP/tail-page-negative.log" 2>&1; then
+            cat "$RUNNER_TEMP/tail-page-negative.log"
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/tail-page-negative.log"
+          for rows in 10000 20000; do
+            grep -F "TAIL_PAGE_ALLOCATION_BOUND_EXCEEDED rows=$rows " "$RUNNER_TEMP/tail-page-negative.log"
+          done
+          CCI_TAIL_PAGE_ALLOCATION=1 go test -count=1 -run '^TestTailPageAssemblyAllocationScaling$' -v ./internal/inbox
+          (cd .ci-tail-page-baseline && go test -run '^$' -bench '^BenchmarkTailPageAssembly$' -benchmem -benchtime=1x ./internal/inbox)
+          go test -run '^$' -bench '^BenchmarkTailPageAssembly$' -benchmem -benchtime=1x ./internal/inbox
       - name: Channel watch unchanged work and immutable 0.49.9 control
         run: |
           test "$(git -C .ci-channel-watch-baseline rev-parse HEAD)" = 696cde4efcdb47697901bebb2d6b1aa12a3496c9
