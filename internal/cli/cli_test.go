@@ -1646,6 +1646,35 @@ func TestPostReachesALaneThatHasNotStartedYet(t *testing.T) {
 	}
 }
 
+func TestARecordToAnOwnedScriptLaneReachesItsOwner(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--owned-by", "mq-health-9", "--to", "stall-watch", "--text", "x"); err == nil || !strings.Contains(err.Error(), "--kind decide") {
+		t.Fatalf("--owned-by on a go: %v", err)
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "defect", "--to", "stall-watch", "--text", "stale head paged", "--json")
+	if err != nil || !strings.Contains(out, `"to":["stall-watch"]`) {
+		t.Fatalf("defect to an unowned script lane = %q, %v", out, err)
+	}
+	for _, owner := range []string{"mq-health-8", "mq-health-9"} {
+		if _, err := run(t, "post", "--lane", "root", "--kind", "decide", "--owned-by", owner, "--to", "stall-watch", "--text", "stall-watch is owned by "+owner); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err = run(t, "post", "--lane", "s5-old-tree-1", "--kind", "defect", "--to", "stall-watch", "--text", "stale head paged", "--json")
+	if err != nil || !strings.Contains(out, `"to":["stall-watch","mq-health-9"]`) {
+		t.Fatalf("defect to an owned script lane = %q, %v; want its newest owner too", out, err)
+	}
+}
+
 func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
