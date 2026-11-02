@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `cci post --kind decide --owned-by <lane> --to <script lane>` records who
   owns a lane a script posts as, such as `stall-watch` or `desk-runner`. Later
-  records addressed to that lane also reach its owner and the owner's
-  successors, so a defect filed to a script reaches the lane that fixes it.
+  asks, decides and defects addressed to that lane also reach its owner and
+  the owner's successors, so a defect filed to a script reaches the lane that fixes it.
   The newest such decide wins.
 - The cci channel MCP server has a `post` tool that runs `cci post` with the
   arguments it is given, inside the server, so an agent posts without a Bash

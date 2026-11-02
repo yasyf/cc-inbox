@@ -1673,6 +1673,10 @@ func TestARecordToAnOwnedScriptLaneReachesItsOwner(t *testing.T) {
 	if err != nil || !strings.Contains(out, `"to":["stall-watch","mq-health-9"]`) {
 		t.Fatalf("defect to an owned script lane = %q, %v; want its newest owner too", out, err)
 	}
+	out, err = run(t, "post", "--lane", "root", "--kind", "go", "--to", "stall-watch", "--text", "go #12", "--json")
+	if err != nil || !strings.Contains(out, `"to":["stall-watch"]`) {
+		t.Fatalf("go to an owned script lane = %q, %v; want only the script lane", out, err)
+	}
 }
 
 func TestStandDownForwardsToTheSuccessor(t *testing.T) {
