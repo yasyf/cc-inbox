@@ -434,6 +434,44 @@ func TestConcurrentPostsAndPushWaitOutAHeldWriteLock(t *testing.T) {
 	}
 }
 
+func TestConcurrentPushesFromOneHomeSendEachRecordOnce(t *testing.T) {
+	_, a, b, _ := mesh(t)
+	const records = 40
+	for i := range records {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Decision, Text: fmt.Sprintf("record %d", i)})
+	}
+	second, err := relay.Open(a.st.HomeDir(), a.st, a.id, mustConfig(t, a))
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := make(chan relay.PushResult, 2)
+	errs := make(chan error, 2)
+	for _, n := range []*relay.Node{a.node, second} {
+		go func() {
+			res, err := n.Push(context.Background(), configs(t, a))
+			results <- res
+			errs <- err
+		}()
+	}
+	pushed := 0
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("push: %v", err)
+		}
+		res := <-results
+		if len(res.Rejected) != 0 {
+			t.Fatalf("a push racing another from the same home was refused %+v", res.Rejected)
+		}
+		pushed += res.Pushed
+	}
+	if pushed != records {
+		t.Fatalf("the two pushes sent %d records, want %d", pushed, records)
+	}
+	if got := pull(t, b); got.Inserted != records {
+		t.Fatalf("peer inserted %d records, want %d", got.Inserted, records)
+	}
+}
+
 func TestDelegatedInstanceReopensWithoutTheServiceKeyInItsEnvironment(t *testing.T) {
 	srv := relaytest.NewServer(t)
 	a := newPeer(t, srv, node.TierOwner)

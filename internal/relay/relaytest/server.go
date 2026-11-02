@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strconv"
 	"sync"
@@ -246,7 +247,11 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 			continue
 		}
 		k := fmt.Sprintf("%s/%s/%s/%020d", e.Mesh, e.Drive, e.Origin, e.OriginSeq)
-		if _, ok := s.log[k]; ok {
+		if stored, ok := s.log[k]; ok {
+			if !reflect.DeepEqual(stored, e) {
+				rejected = append(rejected, result{OriginSeq: e.OriginSeq, Reason: "conflict"})
+				continue
+			}
 			accepted = append(accepted, result{OriginSeq: e.OriginSeq, Duplicate: true})
 			continue
 		}
