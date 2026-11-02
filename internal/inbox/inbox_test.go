@@ -578,3 +578,25 @@ func TestLaneMailDeliversRootRecordsBeforeABacklogFromOtherLanes(t *testing.T) {
 		}
 	}
 }
+
+func TestANewLaneHearsRecordsToAllOnlyFromItsSpawn(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Go, To: []string{"landing"}, Text: "order waiting since yesterday"})
+	c.Advance(time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Correction, To: []string{"all"}, Text: "correction before the spawn"})
+	c.Advance(time.Hour)
+	spawn := c.Now()
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Correction, To: []string{"all"}, Text: "correction after the spawn"})
+	k := store.PeerKey{Session: "s1", Agent: "landing-2"}
+	if err := st.BindLane(ctx, k, "d", "landing", spawn); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if _, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: store.LaneMail(k, store.Binding{Drive: "d", Lane: "landing"}), Cursor: store.LaneCursor(k)}, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, "order waiting since yesterday") || !strings.Contains(got, "correction after the spawn") || strings.Contains(got, "correction before the spawn") {
+		t.Fatalf("a new lane's mail replays records to all from before its spawn, or drops its waiting order:\n%s", got)
+	}
+}
