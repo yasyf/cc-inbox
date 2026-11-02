@@ -1625,6 +1625,20 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
 		t.Fatal(err)
 	}
+	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	desk := store.PeerKey{Session: "bbbb2222-desk", Agent: "adesk-2"}
+	if err := st.BindLane(context.Background(), desk, "d", "desk-2", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(context.Background(), store.Peer{Session: desk.Session, Agent: desk.Agent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--successor", "desk-2", "--to", "desk-1", "--text", "x"); err == nil || !strings.Contains(err.Error(), "--kind stand-down") {
 		t.Fatalf("--successor on a go: %v", err)
 	}
@@ -1645,12 +1659,11 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 		t.Fatalf("a stand-down is forwarded = %q, %v", out, err)
 	}
 	again := seqOf(t, out)
-	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
-	if err != nil {
-		t.Fatal(err)
+	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || !strings.Contains(out, " lane=desk-2 stood-down successor=desk-3 ") {
+		t.Fatalf("who --lane desk-2 = %q, %v; want it marked stood down", out, err)
 	}
-	desk := store.PeerKey{Session: "bbbb2222-desk", Agent: "adesk-2"}
-	if err := st.BindLane(context.Background(), desk, "d", "desk-2", time.Now()); err != nil {
+	time.Sleep(10 * time.Millisecond)
+	if st, err = store.Open(context.Background(), os.Getenv("CCI_HOME")); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Announce(context.Background(), store.Peer{Session: desk.Session, Agent: desk.Agent}); err != nil {
@@ -1659,8 +1672,8 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || !strings.Contains(out, " lane=desk-2 stood-down successor=desk-3 ") {
-		t.Fatalf("who --lane desk-2 = %q, %v; want it marked stood down", out, err)
+	if out, err := run(t, "who", "--all", "--lane", "desk-2"); err != nil || strings.Contains(out, "stood-down") || !strings.Contains(out, " lane=desk-2 successor=desk-3 ") {
+		t.Fatalf("who --lane desk-2 seen after its stand-down = %q, %v; want it live, not stood down", out, err)
 	}
 	if out, err := run(t, "who", "--successor-of", "desk-2"); err != nil || out != "desk-3\n" {
 		t.Fatalf("who --successor-of desk-2 = %q, %v", out, err)

@@ -257,7 +257,13 @@ func markStoodDown(ctx context.Context, st *store.Store, views []peers.View) err
 		if err != nil {
 			return err
 		}
-		views[i].StoodDown = standDown != 0
+		if standDown != 0 {
+			down, err := st.Get(ctx, standDown)
+			if err != nil {
+				return err
+			}
+			views[i].StoodDown = !v.LastSeen().After(down.At)
+		}
 		if len(chain) > 0 {
 			views[i].Successor = chain[len(chain)-1]
 		}
