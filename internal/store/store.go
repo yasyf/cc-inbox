@@ -353,7 +353,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	s := &Store{db: db, home: home, node: n, owner: true, Now: time.Now}
 	err = s.initialize(ctx)
 	for _, pause := range openRetries {
-		if !busy(err) {
+		if !Busy(err) {
 			break
 		}
 		time.Sleep(pause)
@@ -368,7 +368,9 @@ func Open(ctx context.Context, home string) (*Store, error) {
 
 var openRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 
-func busy(err error) bool {
+// Busy reports whether err is SQLite reporting the store locked by another
+// writer past its busy timeout.
+func Busy(err error) bool {
 	var locked *sqlite.Error
 	return errors.As(err, &locked) && locked.Code()&0xff == sqlite3.SQLITE_BUSY
 }

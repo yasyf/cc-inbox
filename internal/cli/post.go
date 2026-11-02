@@ -90,7 +90,7 @@ func newPostCmd() *cobra.Command {
 			}
 			return validateTargets(len(re)+len(reSeqs), len(resolves)+len(resolvesSeqs), pairwise)
 		},
-		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+		RunE: untilStored(withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
 			var (
 				err      error
@@ -226,7 +226,7 @@ func newPostCmd() *cobra.Command {
 					return selfAddressed(cmd.Context(), st, records[i], lane)
 				}
 			}
-			if self, window, err := peerIdentity(); err == nil && window.PID != 0 {
+			if self, window, err := peerIdentity(); os.Getenv(unsentEnv) == "" && err == nil && window.PID != 0 {
 				if err := refuseSecondBinder(cmd.Context(), st, self, r.Drive, lane, at); err != nil {
 					return err
 				}
@@ -247,7 +247,7 @@ func newPostCmd() *cobra.Command {
 				}
 			}
 			return nil
-		}),
+		})),
 	}
 	f := cmd.Flags()
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")

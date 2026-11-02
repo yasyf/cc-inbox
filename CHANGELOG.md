@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A `cci post` the store does not take within 15 seconds, or refuses as
+  locked, tells its sender the bus is down and that the post was not stored,
+  and exits 75. A post naming `--lane` and `--drive` is kept under
+  `$CCI_HOME/unsent`, and the next `cci post` that reaches the store stores
+  every kept post, oldest first, and says how many it stored. A kept post the
+  store refuses moves to a `.refused` file beside it, and the post that found
+  it says so. A post that names no `--lane` or `--drive`, or reads stdin, is
+  not kept, and the error says to repost it.
 - A `spawn` kind records a lane's start: the lane as `--lane-ref`, its brief
   and model as `--attr brief=` and `--attr model=`, and its effort and task id
   when known. It never expires, unlike the `state` record that carried
@@ -95,6 +103,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cci hook prompt --deferred`, which records the root's owner ruling once
   the store frees, so a prompt no longer waits out the hook's 10-second
   timeout.
+- The upgrade command for a standalone `cci` runs the new binary once before
+  moving it over the old one, so macOS's first-launch hold, which hung every
+  drive `cci` call for up to 22 minutes on Oct 31, lands on the copy no
+  caller runs yet.
 - `cci post` refuses to bind a thread to a lane another live thread holds,
   unless that thread is the one it answers to or the lane stood down. It posts
   nothing, names the holder, and posts root one `defect`. A numbered successor
