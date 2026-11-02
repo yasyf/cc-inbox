@@ -40,12 +40,12 @@ func (s Session) Address() string {
 // Alive reports whether the window's process still runs: the pid exists and
 // was created when the registry says it was, to the second. The registry
 // writes procStart as ANSIC in UTC.
-func (s Session) Alive() bool {
+func (s Session) Alive(procs Procs) bool {
 	started, err := time.ParseInLocation(time.ANSIC, s.ProcStart, time.UTC)
 	if err != nil {
 		return false
 	}
-	created, ok := createTime(s.PID)
+	created, ok := procs.createTime(s.PID)
 	if !ok {
 		return false
 	}
@@ -98,11 +98,29 @@ func Sessions(dir string) (map[string]Session, error) {
 	return out, nil
 }
 
-// ProcessAlive reports whether pid exists and was created at the given
-// millisecond timestamp, as a Window records it.
-func ProcessAlive(pid int, started int64) bool {
-	created, ok := createTime(pid)
-	return ok && created == started
+// Procs reads each process's create time once, however many registry rows
+// and windows name it.
+type Procs map[int]created
+
+type created struct {
+	at int64
+	ok bool
+}
+
+// Alive reports whether pid exists and was created at the given millisecond
+// timestamp, as a Window records it.
+func (p Procs) Alive(pid int, started int64) bool {
+	at, ok := p.createTime(pid)
+	return ok && at == started
+}
+
+func (p Procs) createTime(pid int) (int64, bool) {
+	c, read := p[pid]
+	if !read {
+		c.at, c.ok = createTime(pid)
+		p[pid] = c
+	}
+	return c.at, c.ok
 }
 
 func createTime(pid int) (int64, bool) {

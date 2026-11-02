@@ -10,15 +10,24 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // Key is a P-256 key held in memory: the Identity a node or a stateless
 // service signs, and agrees group keys, as.
 type Key struct {
 	priv *ecdsa.PrivateKey
+	pub  []byte
+	id   string
 }
 
-func NewKey(priv *ecdsa.PrivateKey) Key { return Key{priv: priv} }
+func NewKey(priv *ecdsa.PrivateKey) Key {
+	pub, err := priv.PublicKey.Bytes()
+	if err != nil {
+		panic("e2e: encode a valid P-256 public key: " + err.Error())
+	}
+	return Key{priv: priv, pub: pub, id: NodeID(pub)}
+}
 
 // ParseKey reads a P-256 key from PKCS#8 PEM, the form node key files and
 // service secrets carry.
@@ -35,23 +44,17 @@ func ParseKey(raw []byte) (Key, error) {
 	if !ok || ec.Curve != elliptic.P256() {
 		return Key{}, errors.New("node key is not a P-256 ECDSA key")
 	}
-	return Key{priv: ec}, nil
+	return NewKey(ec), nil
 }
 
 func (k Key) Private() *ecdsa.PrivateKey { return k.priv }
 
 // ID is the key's name in origins: the first 16 hex characters of its
 // fingerprint. Trust a full key, never an ID.
-func (k Key) ID() string { return NodeID(k.PublicKey()) }
+func (k Key) ID() string { return k.id }
 
 // PublicKey is the uncompressed X9.63 encoding of the key's P-256 point.
-func (k Key) PublicKey() []byte {
-	pub, err := k.priv.PublicKey.Bytes()
-	if err != nil {
-		panic("e2e: encode a valid P-256 public key: " + err.Error())
-	}
-	return pub
-}
+func (k Key) PublicKey() []byte { return slices.Clone(k.pub) }
 
 // Sign signs SHA-256(msg) with ECDSA, ASN.1 DER encoded.
 func (k Key) Sign(msg []byte) ([]byte, error) {

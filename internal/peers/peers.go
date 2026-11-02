@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -152,9 +153,9 @@ type View struct {
 // a prefix, Origin "-" matches this node's own sessions, and Agent matches an
 // agent id or name. Root keeps only root threads. Kind, Key and Rel select by
 // claim, and a matched peer carries the claims that selected it; a claim made
-// by a subagent of a lane selects the lane's thread. Viewer is
-// the tier of whoever reads the result: a paired viewer sees no process,
-// environment or filesystem detail.
+// by a subagent of a lane selects the lane's thread. With All, Since leaves
+// out the ended peers last seen before it. Viewer is the tier of whoever reads
+// the result: a paired viewer sees no process, environment or filesystem detail.
 type Filter struct {
 	Session  string
 	Agent    string
@@ -173,6 +174,7 @@ type Filter struct {
 	Key      string
 	Rel      string
 	All      bool
+	Since    time.Time
 	Viewer   node.Tier
 }
 
@@ -206,7 +208,7 @@ func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]
 	var rows []store.Peer
 	var err error
 	if lanes == nil {
-		rows, err = st.Peers(ctx)
+		rows, err = st.Peers(ctx, store.PeerQuery{Session: f.Session, Agent: f.Agent, Root: f.Root, Local: f.Origin == LocalOrigin, Drive: f.Drive, Lane: f.Lane, Role: f.Role, All: f.All, Since: f.Since})
 	} else {
 		rows, err = st.LanePeers(ctx, lanes)
 	}
@@ -241,13 +243,14 @@ func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]
 		return nil, err
 	}
 	now := st.Now()
+	procs := harness.Procs{}
 	capacity := len(rows)
 	if lanes == nil {
 		capacity += len(windows)
 	}
 	views := make([]View, 0, capacity)
 	for _, p := range rows {
-		v := View{Peer: p, Live: live(p, now), Claims: claimed[p.Key()]}
+		v := View{Peer: p, Live: live(p, now, procs), Claims: claimed[p.Key()]}
 		if p.Origin != "" {
 			v.Address = store.PeerAddressOn(p.Origin, p.Key().String())
 		}
@@ -257,7 +260,7 @@ func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]
 			continue
 		}
 		if w, ok := windows[p.Session]; ok {
-			v.Name, v.Address, v.Status, v.Live = w.Name, w.Address(), w.Status, w.Alive() && !p.Superseded
+			v.Name, v.Address, v.Status, v.Live = w.Name, w.Address(), w.Status, w.Alive(procs) && !p.Superseded
 			v.StatusAt = time.UnixMilli(w.StatusUpdatedAt).UTC()
 			if v.Cwd == "" {
 				v.Cwd = w.Cwd
@@ -267,14 +270,21 @@ func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]
 		views = append(views, v)
 	}
 	if lanes == nil {
+		registered, err := st.RegisteredRoots(ctx, slices.Collect(maps.Keys(windows)))
+		if err != nil {
+			return nil, err
+		}
 		for _, w := range windows {
+			if registered[w.SessionID] {
+				continue
+			}
 			views = append(views, View{
 				Peer:     store.Peer{Session: w.SessionID, Role: RoleSession, Cwd: w.Cwd, PID: w.PID, SeenAt: time.UnixMilli(w.StatusUpdatedAt).UTC()},
 				Name:     w.Name,
 				Address:  w.Address(),
 				Status:   w.Status,
 				StatusAt: time.UnixMilli(w.StatusUpdatedAt).UTC(),
-				Live:     w.Alive(),
+				Live:     w.Alive(procs),
 				Claims:   claimed[store.PeerKey{Session: w.SessionID}],
 			})
 		}
@@ -305,18 +315,18 @@ func laneHolder(ctx context.Context, st *store.Store, k store.PeerKey) (store.Pe
 	return owner, nil
 }
 
-func live(p store.Peer, now time.Time) bool {
+func live(p store.Peer, now time.Time, procs harness.Procs) bool {
 	switch {
 	case p.Superseded:
 		return false
 	case p.Origin == "" && p.PID != 0:
-		return harness.ProcessAlive(p.PID, p.PIDStarted)
+		return procs.Alive(p.PID, p.PIDStarted)
 	}
 	return now.Sub(p.SeenAt) < StaleAfter
 }
 
 func (f Filter) matches(v View) bool {
-	if !f.All && !v.Live || f.byClaim() && len(v.Claims) == 0 {
+	if !f.All && !v.Live || !v.Live && v.SeenAt.Before(f.Since) || f.byClaim() && len(v.Claims) == 0 {
 		return false
 	}
 	worktree := f.Worktree

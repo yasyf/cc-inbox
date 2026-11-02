@@ -34,9 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lands in `fields.attrs` as `head:<pr>` = `[<was>..]<sha>[ <note>]`, every PR
   joins `refs.prs`, and the text opens with `HEAD <n> PRs: #<pr> <short sha>, ...`.
   The wire format is unchanged, so nodes on older releases keep replicating.
+- `cci who --fields lane,live,seen_at` prints only those keys of each peer
+  with `--json`, and `cci who --since 24h` includes the ended sessions last
+  seen since then, so a supervisor that reads a drive's roster every pass
+  reads only what it needs.
 
 ### Changed
 
+- `cci who --json` leaves out each peer's `env` unless `--fields` names it.
 - `cci claim --for <lane>@<drive>` falls back to the newest ended session
   bound as that lane when none is live, so the runner can record the codex
   lane that started a release build; a codex lane's session never announces a
@@ -97,6 +102,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci who` reads only the registry rows its flags select, checks each
+  process once however many rows name it, and reads a drive's stand-downs in
+  one query, so `cci who --drive <d> --all --json` on a registry of 19,000
+  threads no longer takes over a second of CPU. Every store read also stops
+  re-deriving this node's id from its key on each row.
+- A text `cci tail` or `cci show` numbers each reply once and joins it only to
+  the records it read. A record that resolves 2,084 others had cost 2,084
+  squared name lookups on every page showing any of them, so a 4 MB tail of a
+  lane's blockers took 50 seconds and `cci show` of one such record 9.
 - The `UserPromptSubmit` hook (`cci hook prompt`) answers within two seconds even
   when another process holds the store's writer or init lock, or a read
   stalls on disk. Past that budget it hands the prompt to a detached

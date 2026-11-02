@@ -49,3 +49,38 @@ func TestRepliesSelectionExceedsVariableLimit(t *testing.T) {
 	}
 	t.Logf("selected_sequences=%d sqlite_variable_limit=64 reply_count=%d", len(seqs), len(replies[opener.Seq]))
 }
+
+func TestAReplyResolvingManyRecordsJoinsOnlyTheSelectedOnes(t *testing.T) {
+	ctx := context.Background()
+	st, err := Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	blockers := make([]int64, 300)
+	for i := range blockers {
+		r, _, err := st.Post(ctx, Record{Drive: "d", Lane: "runner", Kind: kinds.Blocker, Text: "red"}, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		blockers[i] = r.Seq
+	}
+	sweep, _, err := st.Post(ctx, Record{Drive: "d", Lane: "runner", Kind: kinds.Note, Text: "all stale", Resolves: blockers[0], AlsoResolves: blockers[1:]}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selected := blockers[100:110]
+	replies, err := st.Replies(ctx, selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(replies) != len(selected) {
+		t.Fatalf("Replies(%d of %d resolved records) keyed %d records, want only the selected ones", len(selected), len(blockers), len(replies))
+	}
+	for _, seq := range selected {
+		got := replies[seq]
+		if len(got) != 1 || got[0].Seq != sweep.Seq || len(got[0].CloseNums) != len(blockers) {
+			t.Fatalf("replies to #%d = %+v, want the one numbered sweep #%d naming all %d records", seq, got, sweep.Seq, len(blockers))
+		}
+	}
+}

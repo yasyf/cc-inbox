@@ -11,6 +11,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -137,10 +138,11 @@ func printPeer(cmd *cobra.Command, st *store.Store, self store.PeerKey) error {
 
 func newWhoCmd() *cobra.Command {
 	var (
-		f                     peers.Filter
-		pr                    store.PR
-		build, ref, successor string
-		asJSON                bool
+		f                            peers.Filter
+		pr                           store.PR
+		build, ref, successor, since string
+		fields                       []string
+		asJSON                       bool
 	)
 	cmd := &cobra.Command{
 		Use:   "who",
@@ -160,6 +162,19 @@ func newWhoCmd() *cobra.Command {
 			if len(refs) == 1 {
 				f.Kind, f.Key = refs[0].Kind, refs[0].Key
 			}
+			if since != "" {
+				seq, at, err := parseSince(cmd.Context(), st, since)
+				if err != nil {
+					return err
+				}
+				if seq != 0 || at.IsZero() {
+					return fmt.Errorf("--since %q: name a duration, a clock time or an RFC3339 time, since sessions have no seq", since)
+				}
+				f.All, f.Since = true, at
+			}
+			if unknown := slices.DeleteFunc(slices.Clone(fields), func(k string) bool { return slices.Contains(viewKeys, k) }); len(unknown) > 0 {
+				return fmt.Errorf("--fields: no peer key %s; the keys are %s", strings.Join(unknown, ", "), strings.Join(viewKeys, ","))
+			}
 			views, err := peers.Resolve(cmd.Context(), st, f)
 			if err != nil {
 				return err
@@ -168,13 +183,7 @@ func newWhoCmd() *cobra.Command {
 				return err
 			}
 			if asJSON {
-				enc := json.NewEncoder(cmd.OutOrStdout())
-				for _, v := range views {
-					if err := enc.Encode(v); err != nil {
-						return err
-					}
-				}
-				return nil
+				return writePeersJSON(cmd.OutOrStdout(), views, fields)
 			}
 			spawns, err := unboundSpawns(cmd.Context(), st, f)
 			if err != nil {
@@ -224,14 +233,17 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&ref, "ref", "", "sessions with a claim on this <kind>:<key>, e.g. branch:yasyf/eng-1062 or thread:C0822AHFY3G/1759")
 	fl.StringVar(&f.Rel, "rel", "", "only claims with this relation, e.g. opened, watches, started")
 	fl.BoolVar(&f.All, "all", false, "include sessions whose process has ended")
+	fl.StringVar(&since, "since", "", "include sessions whose process has ended that were last seen since this time: a duration back (24h), a Pacific clock time (9:00 AM) or an RFC3339 time")
+	fl.StringSliceVar(&fields, "fields", nil, "with --json, only these keys of each peer, e.g. lane,live,seen_at; env prints only when named")
 	fl.StringVar(&successor, "successor-of", "", "print the lane that now stands in for this lane on --drive (default: this session's drive), following every stand-down that named a successor, or nothing when it never stood down with one; with --json, one object naming the drive, the lane, whether it stood down, its successor and the chain")
 	fl.BoolVar(&asJSON, "json", false, "one JSON object per peer")
 	return cmd
 }
 
 // unboundSpawns lists the lanes spawn records started on the filter's drive
-// that no thread has bound yet, in the last hour or, with --all, ever, when
-// the filter narrows by nothing but drive, lane and the lane role.
+// that no thread has bound yet, in the last hour or, with --all, ever, or with
+// --since since then, when the filter narrows by nothing but drive, lane and
+// the lane role.
 func unboundSpawns(ctx context.Context, st *store.Store, f peers.Filter) ([]store.Spawn, error) {
 	if f.Session != "" || f.Agent != "" || f.Origin != "" || f.Name != "" || f.Role != "" && f.Role != peers.RoleLane || f.Tag != "" || f.Repo != "" || f.Worktree != "" || f.Branch != "" || f.Query != "" || f.Root || f.Kind != "" || f.Key != "" || f.Rel != "" {
 		return nil, nil
@@ -242,29 +254,80 @@ func unboundSpawns(ctx context.Context, st *store.Store, f peers.Filter) ([]stor
 	}
 	since := st.Now().Add(-time.Hour)
 	if f.All {
-		since = time.Time{}
+		since = f.Since
 	}
 	spawns, err := st.UnboundSpawns(ctx, drive, since)
 	return slices.DeleteFunc(spawns, func(sp store.Spawn) bool { return f.Lane != "" && sp.Lane != f.Lane }), err
 }
 
+var viewKeys = jsonKeys(reflect.TypeFor[peers.View]())
+
+func jsonKeys(t reflect.Type) []string {
+	var keys []string
+	for i := range t.NumField() {
+		field := t.Field(i)
+		if field.Anonymous {
+			keys = append(keys, jsonKeys(field.Type)...)
+			continue
+		}
+		if name, _, _ := strings.Cut(field.Tag.Get("json"), ","); name != "" && name != "-" {
+			keys = append(keys, name)
+		}
+	}
+	return keys
+}
+
+func writePeersJSON(w io.Writer, views []peers.View, fields []string) error {
+	enc := json.NewEncoder(w)
+	for _, v := range views {
+		if !slices.Contains(fields, "env") {
+			v.Env = nil
+		}
+		if len(fields) == 0 {
+			if err := enc.Encode(v); err != nil {
+				return err
+			}
+			continue
+		}
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		var all map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &all); err != nil {
+			return err
+		}
+		picked := make(map[string]json.RawMessage, len(fields))
+		for _, k := range fields {
+			if value, ok := all[k]; ok {
+				picked[k] = value
+			}
+		}
+		if err := enc.Encode(picked); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func markStoodDown(ctx context.Context, st *store.Store, views []peers.View) error {
+	drives := map[string]store.StandDowns{}
 	for i, v := range views {
 		if v.Lane == "" || v.Drive == "" {
 			continue
 		}
-		chain, standDown, err := st.Successors(ctx, v.Drive, v.Lane)
-		if err != nil {
-			return err
-		}
-		if standDown != 0 {
-			down, err := st.Get(ctx, standDown)
-			if err != nil {
+		downs, ok := drives[v.Drive]
+		if !ok {
+			var err error
+			if downs, err = st.StandDowns(ctx, v.Drive); err != nil {
 				return err
 			}
+			drives[v.Drive] = downs
+		}
+		if down := downs[v.Lane]; down.Seq != 0 {
 			views[i].StoodDown = !v.LastSeen().After(down.At)
 		}
-		if len(chain) > 0 {
+		if chain := downs.Chain(v.Lane); len(chain) > 0 {
 			views[i].Successor = chain[len(chain)-1]
 		}
 	}
