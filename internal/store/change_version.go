@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"time"
 )
 
 // ChangeVersion observes commits through one dedicated read-only connection.
@@ -41,6 +42,23 @@ func (v *ChangeVersion) Read(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("read change version: %w", err)
 	}
 	return version, nil
+}
+
+// Await reads the version every interval until a commit moves it off seen.
+func (v *ChangeVersion) Await(ctx context.Context, seen int64, every time.Duration) (int64, error) {
+	tick := time.NewTicker(every)
+	defer tick.Stop()
+	for {
+		version, err := v.Read(ctx)
+		if err != nil || version != seen {
+			return version, err
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		case <-tick.C:
+		}
+	}
 }
 
 // Close releases the observer's connection and its independent pool.

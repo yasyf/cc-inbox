@@ -152,6 +152,14 @@ func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
 	}
 	var out []Result
 	for _, src := range sources {
+		info, err := os.Stat(src.Path)
+		missing := os.IsNotExist(err)
+		if err != nil && !missing {
+			return nil, fmt.Errorf("stat %s: %w", src.Path, err)
+		}
+		if !missing && info.Size() == src.Offset && info.Sys().(*syscall.Stat_t).Ino == src.Inode && src.Parser == ParserVersion {
+			continue
+		}
 		archives, err := filepath.Glob(src.Path + ".archive/*.md")
 		if err != nil {
 			return nil, fmt.Errorf("list archives of %s: %w", src.Path, err)
@@ -167,14 +175,7 @@ func Refresh(ctx context.Context, st *store.Store) ([]Result, error) {
 			}
 			out = append(out, res)
 		}
-		info, err := os.Stat(src.Path)
-		if os.IsNotExist(err) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("stat %s: %w", src.Path, err)
-		}
-		if info.Size() == src.Offset && info.Sys().(*syscall.Stat_t).Ino == src.Inode && src.Parser == ParserVersion {
+		if missing {
 			continue
 		}
 		res, err := Import(ctx, st, src.Path, "", "")
