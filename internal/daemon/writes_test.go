@@ -115,8 +115,8 @@ func TestDaemonAppliesNothingOfAWriteThatMissedItsTurn(t *testing.T) {
 	awaitRouted(t, w)
 
 	release := holdStore(t, home)
-	if _, err := commit(w, note("missed its turn"), 1500*time.Millisecond); !errors.Is(err, store.ErrUnconfirmed) {
-		t.Fatalf("a write behind a held store = %v, want ErrUnconfirmed", err)
+	if _, err := commit(w, note("missed its turn"), 3*time.Second); !store.Busy(err) || errors.Is(err, store.ErrUnconfirmed) {
+		t.Fatalf("a write behind a held store = %v, want the daemon to answer busy before the caller's deadline", err)
 	}
 	release()
 	if _, err := commit(w, note("after the hold"), 10*time.Second); err != nil {

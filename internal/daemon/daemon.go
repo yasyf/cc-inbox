@@ -34,6 +34,12 @@ const (
 	Schema         daemonkit.Schema = "cci.v1"
 	Addr                            = "127.0.0.1:7377"
 	ImportInterval                  = time.Second
+	// Sessions is how many client sessions, and requests in flight, the
+	// daemon takes at once: every cci process that writes holds one.
+	Sessions = 256
+	// SessionIdle frees a quiet session's slot, so a long-lived client such as
+	// a window's channel server never holds one between its writes.
+	SessionIdle = time.Minute
 	// MaintenanceDrive holds the records the daemon writes about the store
 	// itself, such as a migration that held every client open.
 	MaintenanceDrive = "cci"
@@ -50,8 +56,10 @@ func Definition() (daemonkit.Daemon, error) {
 		Args:    []string{"daemon", "run"},
 		Schemas: []daemonkit.Schema{Schema},
 
-		Restart:  daemonkit.RestartOnFailure,
-		Shutdown: daemonkit.Grace(10 * time.Second),
+		Restart:     daemonkit.RestartOnFailure,
+		Shutdown:    daemonkit.Grace(10 * time.Second),
+		Idle:        daemonkit.Grace(SessionIdle),
+		Concurrency: Sessions,
 	}, nil
 }
 
