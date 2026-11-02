@@ -618,6 +618,42 @@ WHERE drive = ? AND kind = ? AND seq IN (SELECT source_seq FROM record_recipient
 	return successor, seq, nil
 }
 
+// Spawn is a lane a spawn record started on a drive that no thread has bound yet.
+type Spawn struct {
+	Seq   int64     `json:"spawned"`
+	At    time.Time `json:"at"`
+	Drive string    `json:"drive"`
+	Lane  string    `json:"lane"`
+	Brief string    `json:"brief"`
+	Model string    `json:"model"`
+	Task  string    `json:"task,omitempty"`
+}
+
+// UnboundSpawns lists the newest spawn of each lane on drive posted since
+// since that no thread on drive is bound as yet.
+func (s *Store) UnboundSpawns(ctx context.Context, drive string, since time.Time) ([]Spawn, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT r.seq, r.at, json_extract(r.refs, '$.lanes[0]') AS lane, COALESCE(json_extract(r.fields, '$.attrs.brief'), ''), COALESCE(json_extract(r.fields, '$.attrs.model'), ''), COALESCE(json_extract(r.fields, '$.attrs.task'), '')
+FROM records r WHERE r.drive = ? AND r.kind = ? AND r.at >= ?
+AND NOT EXISTS (SELECT 1 FROM sessions WHERE drive = r.drive AND lane = json_extract(r.refs, '$.lanes[0]'))
+AND NOT EXISTS (SELECT 1 FROM records later WHERE later.drive = r.drive AND later.kind = r.kind AND later.seq > r.seq AND json_extract(later.refs, '$.lanes[0]') = json_extract(r.refs, '$.lanes[0]'))
+ORDER BY r.seq`, drive, string(kinds.Spawn), since.UnixMilli())
+	if err != nil {
+		return nil, fmt.Errorf("read spawns on %s: %w", drive, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Spawn
+	for rows.Next() {
+		sp := Spawn{Drive: drive}
+		var at int64
+		if err := rows.Scan(&sp.Seq, &at, &sp.Lane, &sp.Brief, &sp.Model, &sp.Task); err != nil {
+			return nil, fmt.Errorf("read spawns on %s: %w", drive, err)
+		}
+		sp.At = time.UnixMilli(at).UTC()
+		out = append(out, sp)
+	}
+	return out, rows.Err()
+}
+
 // NamedSuccessor reports whether a stand-down record in drive hands a lane over to lane.
 func (s *Store) NamedSuccessor(ctx context.Context, drive, lane string) (bool, error) {
 	var ok bool

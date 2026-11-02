@@ -25,6 +25,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -175,7 +176,20 @@ func newWhoCmd() *cobra.Command {
 				}
 				return nil
 			}
-			if len(views) == 0 {
+			spawns, err := unboundSpawns(cmd.Context(), st, f)
+			if err != nil {
+				return err
+			}
+			for _, sp := range spawns {
+				task := ""
+				if sp.Task != "" {
+					task = " task=" + sp.Task
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s spawned drive=%s lane=%s by #%d %s brief=%s model=%s%s, not bound yet\n", sp.Lane, sp.Drive, sp.Lane, sp.Seq, render.Stamp(sp.At, st.Now()), sp.Brief, sp.Model, task); err != nil {
+					return err
+				}
+			}
+			if len(views) == 0 && len(spawns) == 0 {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), "no matching peers; cci who --all includes sessions that have ended")
 				return err
 			}
@@ -213,6 +227,25 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&successor, "successor-of", "", "print the lane that now stands in for this lane on --drive (default: this session's drive), following every stand-down that named a successor, or nothing when it never stood down with one; with --json, one object naming the drive, the lane, whether it stood down, its successor and the chain")
 	fl.BoolVar(&asJSON, "json", false, "one JSON object per peer")
 	return cmd
+}
+
+// unboundSpawns lists the lanes spawn records started on the filter's drive
+// that no thread has bound yet, in the last hour or, with --all, ever, when
+// the filter narrows by nothing but drive, lane and the lane role.
+func unboundSpawns(ctx context.Context, st *store.Store, f peers.Filter) ([]store.Spawn, error) {
+	if f.Session != "" || f.Agent != "" || f.Origin != "" || f.Name != "" || f.Role != "" && f.Role != peers.RoleLane || f.Tag != "" || f.Repo != "" || f.Worktree != "" || f.Branch != "" || f.Query != "" || f.Root || f.Kind != "" || f.Key != "" || f.Rel != "" {
+		return nil, nil
+	}
+	drive, err := resolveDrive(ctx, st, f.Drive)
+	if err != nil {
+		return nil, nil
+	}
+	since := st.Now().Add(-time.Hour)
+	if f.All {
+		since = time.Time{}
+	}
+	spawns, err := st.UnboundSpawns(ctx, drive, since)
+	return slices.DeleteFunc(spawns, func(sp store.Spawn) bool { return f.Lane != "" && sp.Lane != f.Lane }), err
 }
 
 func markStoodDown(ctx context.Context, st *store.Store, views []peers.View) error {

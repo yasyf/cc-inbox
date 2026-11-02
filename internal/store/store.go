@@ -595,6 +595,9 @@ func Validate(r Record) error {
 	if err := validateFields(r.Fields); err != nil {
 		return err
 	}
+	if r.Kind == kinds.Spawn && (len(r.Refs.Lanes) != 1 || !strings.HasPrefix(r.Fields.Attrs["brief"], "/") || r.Fields.Attrs["model"] == "") {
+		return errors.New("kind spawn names one lane, its brief and its model: --lane-ref <lane> --attr brief=<absolute path> --attr model=<model>, with --attr effort=<effort> and --attr task=<task id> when known")
+	}
 	if len(r.Body) > MaxBody {
 		return fmt.Errorf("body is %d bytes; the limit is %d", len(r.Body), MaxBody)
 	}

@@ -1914,3 +1914,46 @@ func TestASecondThreadCannotBindALiveLane(t *testing.T) {
 		t.Fatalf("a thread binding p8a-step7 after it stood down = %s; want it bound", out)
 	}
 }
+
+func TestASpawnRecordNamesTheLaneCciWhoListsUntilItBinds(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--lane", "root", "--kind", "spawn", "--text", "SPAWNED p8a-step7-3"); err == nil || !strings.Contains(err.Error(), "kind spawn names one lane, its brief and its model") {
+		t.Fatalf("a spawn naming no lane, brief or model: %v", err)
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "spawn", "--lane-ref", "p8a-step7-3", "--attr", "brief=/briefs/p8a-step7-3.md", "--attr", "model=opus", "--attr", "task=1977", "--text", "SPAWNED p8a-step7-3 /briefs/p8a-step7-3.md", "--json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spawn := seqOf(t, out)
+	if strings.Contains(out, `"expires_at"`) {
+		t.Fatalf("spawn record = %s; want it kept, since the registry reads it as the lane's birth", out)
+	}
+	if out, err := run(t, "who", "--lane", "p8a-step7-3"); err != nil || !strings.Contains(out, "p8a-step7-3 spawned drive=d lane=p8a-step7-3 by #"+spawn+" ") || !strings.HasSuffix(out, "brief=/briefs/p8a-step7-3.md model=opus task=1977, not bound yet\n") {
+		t.Fatalf("who --lane p8a-step7-3 after its spawn = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--lane", "p8a-step7-3", "--json"); err != nil || out != "" {
+		t.Fatalf("who --json after a spawn = %q, %v; want peer rows only", out, err)
+	}
+	st, err := store.Open(context.Background(), os.Getenv("CCI_HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "bbbb2222-lane", Agent: "ap8a-step7-3"}, "d", "p8a-step7-3", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "who", "--all", "--lane", "p8a-step7-3"); err != nil || strings.Contains(out, "not bound yet") {
+		t.Fatalf("who --all --lane p8a-step7-3 once bound = %q, %v", out, err)
+	}
+}
