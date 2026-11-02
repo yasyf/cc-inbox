@@ -695,6 +695,62 @@ jobs:
           cp internal/cli/tail_cost_test.go internal/cli/tail_limit_cost_test.go .ci-tail-baseline/internal/cli/
           (cd .ci-tail-baseline && CCI_TAIL_EXPECT_GLOBAL_SCANS=1 go test -run "$TAIL_COST_TESTS" -v ./internal/cli)
           go test -run "$TAIL_COST_TESTS" -v ./internal/cli
+      - uses: actions/checkout@v7
+        with:
+          ref: f16b1782cd20252d6b64bb940f412da4c247d23b
+          path: .ci-index-phase-f16b
+          persist-credentials: false
+      - name: Selected closer maintenance phase diagnostics only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C .ci-index-phase-f16b rev-parse HEAD)" = f16b1782cd20252d6b64bb940f412da4c247d23b
+          python3 - <<'PYGUARD'
+          from pathlib import Path
+          import hashlib
+          for path, expected in [
+              (".ci-index-phase-f16b/internal/store/indexes.go", "542125e04fe2844acc7f7171632b0307fa084a5255ce62841f54d88836ec21e3"),
+              ("internal/store/indexes.go", "2f20220b968daa9a4d8172e0c3b74de1d785dc4c53d4ea919a74c192337f2d63"),
+          ]:
+              assert hashlib.sha256(Path(path).read_bytes()).hexdigest() == expected, path
+          PYGUARD
+          test ! -e internal/store/index_maintenance_profile_internal_test.go
+          test ! -e .ci-index-phase-f16b/internal/store/index_maintenance_profile_internal_test.go
+          current_index_source="$RUNNER_TEMP/index-profile-current-uninstrumented.go"
+          f16b_index_source="$RUNNER_TEMP/index-profile-f16b-uninstrumented.go"
+          cp internal/store/indexes.go "$current_index_source"
+          cp .ci-index-phase-f16b/internal/store/indexes.go "$f16b_index_source"
+          restore_index_profiles() {
+            cp "$current_index_source" internal/store/indexes.go
+            cp "$f16b_index_source" .ci-index-phase-f16b/internal/store/indexes.go
+            rm -f internal/store/index_maintenance_profile_internal_test.go .ci-index-phase-f16b/internal/store/index_maintenance_profile_internal_test.go
+          }
+          trap restore_index_profiles EXIT
+          git -C .ci-index-phase-f16b apply --unidiff-zero "$GITHUB_WORKSPACE/internal/store/testdata/index-profile/f16b.patch"
+          git apply --unidiff-zero internal/store/testdata/index-profile/current.patch
+          cp internal/store/testdata/index-profile/selected_closure_profile_test.go.txt internal/store/index_maintenance_profile_internal_test.go
+          cp internal/store/testdata/index-profile/selected_closure_profile_test.go.txt .ci-index-phase-f16b/internal/store/index_maintenance_profile_internal_test.go
+          f16b_profile_log="$RUNNER_TEMP/index-profile-f16b.log"
+          current_profile_log="$RUNNER_TEMP/index-profile-current.log"
+          f16b_profile_status=0
+          (cd .ci-index-phase-f16b && CCI_CLOSER_PHASE_PROFILE=1 CCI_CLOSER_PROVISION_ROWS=250000 CCI_INDEX_PROFILE_LABEL=f16b go test -p 2 -count=1 -run '^TestSelectedClosureProvisioningPhaseProfile$' -v ./internal/store) >"$f16b_profile_log" 2>&1 || f16b_profile_status=$?
+          cat "$f16b_profile_log"
+          python3 internal/store/testdata/index-profile/grade.py f16b "$f16b_profile_log" "$f16b_profile_status"
+          current_profile_status=0
+          CCI_CLOSER_PHASE_PROFILE=1 CCI_CLOSER_PROVISION_ROWS=250000 CCI_INDEX_PROFILE_LABEL=current go test -p 2 -count=1 -run '^TestSelectedClosureProvisioningPhaseProfile$' -v ./internal/store >"$current_profile_log" 2>&1 || current_profile_status=$?
+          cat "$current_profile_log"
+          python3 internal/store/testdata/index-profile/grade.py current "$current_profile_log" "$current_profile_status"
+          restore_index_profiles
+          trap - EXIT
+          python3 - <<'PYRESTORE'
+          from pathlib import Path
+          import hashlib
+          assert hashlib.sha256(Path("internal/store/indexes.go").read_bytes()).hexdigest() == "2f20220b968daa9a4d8172e0c3b74de1d785dc4c53d4ea919a74c192337f2d63"
+          assert hashlib.sha256(Path(".ci-index-phase-f16b/internal/store/indexes.go").read_bytes()).hexdigest() == "542125e04fe2844acc7f7171632b0307fa084a5255ce62841f54d88836ec21e3"
+          assert not Path("internal/store/index_maintenance_profile_internal_test.go").exists()
+          assert not Path(".ci-index-phase-f16b/internal/store/index_maintenance_profile_internal_test.go").exists()
+          print("CCI_INDEX_PROFILE_RESTORED immutable_f16b=true current_uninstrumented=true original_required_5s_positive_remains=true")
+          PYRESTORE
       - name: Selected opener closure work and error scope
         run: |
           cp internal/server/openamong_refutation_test.go .ci-openamong-oracle/internal/server/

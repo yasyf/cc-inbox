@@ -1,0 +1,166 @@
+--- a/internal/store/indexes.go
++++ b/internal/store/indexes.go
+@@ -5,0 +6 @@
++	"encoding/json"
+@@ -12,0 +14,44 @@
++
++type indexMaintenanceProfile struct {
++	Label             string `json:"label"`
++	Phase             string `json:"phase"`
++	Object            string `json:"object"`
++	AtNS              int64  `json:"at_ns"`
++	ElapsedNS         int64  `json:"elapsed_ns"`
++	RowsAffected      *int64 `json:"rows_affected,omitempty"`
++	RowsAffectedError string `json:"rows_affected_error,omitempty"`
++	Value             *int64 `json:"value,omitempty"`
++	Installed         *bool  `json:"installed,omitempty"`
++}
++
++func emitIndexMaintenanceProfile(sample indexMaintenanceProfile) {
++	if os.Getenv("CCI_INDEX_PROFILE_SCOPE") != "selected-250k" {
++		return
++	}
++	sample.Label = os.Getenv("CCI_INDEX_PROFILE_LABEL")
++	sample.AtNS = time.Now().UnixNano()
++	encoded, err := json.Marshal(sample)
++	if err != nil {
++		panic(err)
++	}
++	fmt.Printf("CCI_INDEX_PROFILE %s\n", encoded)
++}
++
++func indexMaintenanceProfileSince(phase, object string, started time.Time) {
++	emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: phase, Object: object, ElapsedNS: time.Since(started).Nanoseconds()})
++}
++
++func indexMaintenanceProfileValue(phase, object string, started time.Time, value int64) {
++	emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: phase, Object: object, ElapsedNS: time.Since(started).Nanoseconds(), Value: &value})
++}
++
++func indexMaintenanceProfileResult(object string, started time.Time, result sql.Result) {
++	sample := indexMaintenanceProfile{Phase: "Populate", Object: object, ElapsedNS: time.Since(started).Nanoseconds()}
++	rows, err := result.RowsAffected()
++	if err != nil {
++		sample.RowsAffectedError = err.Error()
++	} else {
++		sample.RowsAffected = &rows
++	}
++	emitIndexMaintenanceProfile(sample)
++}
+@@ -105,0 +151 @@
++	profilePhaseStarted := time.Now()
+@@ -109,0 +156 @@
++	indexMaintenanceProfileSince("LockOpen", "init.lock", profilePhaseStarted)
+@@ -110,0 +158 @@
++	profilePhaseStarted = time.Now()
+@@ -114 +162,11 @@
+-	defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
++	profileLockAcquired := time.Now()
++	indexMaintenanceProfileSince("LockAcquire", "init.lock", profilePhaseStarted)
++	defer func() {
++		profileUnlockStarted := time.Now()
++		if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err == nil {
++			profileLockReleased := time.Now()
++			emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "LockRelease", Object: "init.lock", ElapsedNS: profileLockReleased.Sub(profileUnlockStarted).Nanoseconds()})
++			emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "LockHeld", Object: "init.lock", ElapsedNS: profileLockReleased.Sub(profileLockAcquired).Nanoseconds()})
++		}
++	}()
++	profilePhaseStarted = time.Now()
+@@ -119 +177,7 @@
+-	defer func() { _ = db.Close() }()
++	indexMaintenanceProfileSince("HandleOpen", "sqlite", profilePhaseStarted)
++	defer func() {
++		profileCloseStarted := time.Now()
++		if err := db.Close(); err == nil {
++			indexMaintenanceProfileSince("HandleClose", "sqlite", profileCloseStarted)
++		}
++	}()
+@@ -121,0 +186 @@
++	profilePhaseStarted = time.Now()
+@@ -127,0 +193,2 @@
++	indexMaintenanceProfileValue("Validate", "user_version", profilePhaseStarted, int64(schema))
++	profilePhaseStarted = time.Now()
+@@ -131,0 +199,2 @@
++	indexMaintenanceProfileSince("StatsAggregate", "before", profilePhaseStarted)
++	profilePhaseStarted = time.Now()
+@@ -135,0 +205,2 @@
++	indexMaintenanceProfileValue("Validate", "physical_indexes", profilePhaseStarted, int64(len(missing)))
++	profilePhaseStarted = time.Now()
+@@ -139,0 +211,2 @@
++	emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Validate", Object: "record_membership", ElapsedNS: time.Since(profilePhaseStarted).Nanoseconds(), Installed: &installed})
++	profilePhaseStarted = time.Now()
+@@ -143,0 +217,2 @@
++	emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Validate", Object: "closer_membership", ElapsedNS: time.Since(profilePhaseStarted).Nanoseconds(), Installed: &closersInstalled})
++	profilePhaseStarted = time.Now()
+@@ -147,0 +223,2 @@
++	emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Validate", Object: "root_audience", ElapsedNS: time.Since(profilePhaseStarted).Nanoseconds(), Installed: &rootInstalled})
++	profilePhaseStarted = time.Now()
+@@ -151,0 +229,2 @@
++	emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Validate", Object: "incident_projection", ElapsedNS: time.Since(profilePhaseStarted).Nanoseconds(), Installed: &incidents})
++	profilePhaseStarted = time.Now()
+@@ -157,0 +237 @@
++		profileBeginStarted := time.Now()
+@@ -162 +242,10 @@
+-		defer func() { _ = tx.Rollback() }()
++		profileTransactionStarted := time.Now()
++		indexMaintenanceProfileSince("Begin", "maintenance", profileBeginStarted)
++		defer func() {
++			profileRollbackStarted := time.Now()
++			if err := tx.Rollback(); err == nil {
++				profileRolledBack := time.Now()
++				emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Rollback", Object: "maintenance", ElapsedNS: profileRolledBack.Sub(profileRollbackStarted).Nanoseconds()})
++				emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Transaction", Object: "maintenance", ElapsedNS: profileRolledBack.Sub(profileTransactionStarted).Nanoseconds()})
++			}
++		}()
+@@ -185,0 +275 @@
++		profileCommitStarted := time.Now()
+@@ -188,0 +279,3 @@
++		profileCommitted := time.Now()
++		emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Commit", Object: "maintenance", ElapsedNS: profileCommitted.Sub(profileCommitStarted).Nanoseconds()})
++		emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Transaction", Object: "maintenance", ElapsedNS: profileCommitted.Sub(profileTransactionStarted).Nanoseconds()})
+@@ -212,0 +306 @@
++	profilePhaseStarted = time.Now()
+@@ -216,0 +311 @@
++	indexMaintenanceProfileSince("StatsAggregate", "after", profilePhaseStarted)
+@@ -217,0 +313 @@
++	emitIndexMaintenanceProfile(indexMaintenanceProfile{Phase: "Total", Object: "maintenance", ElapsedNS: report.Elapsed.Nanoseconds()})
+@@ -268,0 +365 @@
++		profileStarted := time.Now()
+@@ -271,0 +369 @@
++		indexMaintenanceProfileSince("Index", index.name, profileStarted)
+@@ -306,0 +405 @@
++		profileStarted := time.Now()
+@@ -309,0 +409,8 @@
++		profilePhase := "Create"
++		switch object.kind {
++		case "index":
++			profilePhase = "Index"
++		case "trigger":
++			profilePhase = "Trigger"
++		}
++		indexMaintenanceProfileSince(profilePhase, object.name, profileStarted)
+@@ -313 +420,3 @@
+-		if _, err := tx.ExecContext(ctx, object.fill); err != nil {
++		profileStarted = time.Now()
++		profileResult, err := tx.ExecContext(ctx, object.fill)
++		if err != nil {
+@@ -315,0 +425 @@
++		indexMaintenanceProfileResult(object.name, profileStarted, profileResult)
+@@ -321,0 +432 @@
++	profileStarted := time.Now()
+@@ -324,0 +436,2 @@
++	indexMaintenanceProfileValue("Stats", "page_count", profileStarted, stats.PageCount)
++	profileStarted = time.Now()
+@@ -327,0 +441,2 @@
++	indexMaintenanceProfileValue("Stats", "page_size", profileStarted, stats.PageSize)
++	profileStarted = time.Now()
+@@ -330,0 +446,2 @@
++	indexMaintenanceProfileValue("Stats", "freelist_count", profileStarted, stats.FreelistCount)
++	profileStarted = time.Now()
+@@ -335,0 +453,2 @@
++	indexMaintenanceProfileValue("FileStat", "database", profileStarted, stats.DatabaseBytes)
++	profileStarted = time.Now()
+@@ -337,0 +457 @@
++		indexMaintenanceProfileSince("FileAbsent", "wal", profileStarted)
+@@ -343,0 +464 @@
++	indexMaintenanceProfileValue("FileStat", "wal", profileStarted, stats.WALBytes)
