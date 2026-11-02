@@ -53,7 +53,7 @@ func newPostCmd() *cobra.Command {
 		r                       store.Record
 		counts                  map[string]string
 		census, bodyFile        string
-		successor               string
+		successor, ownedBy      string
 		heads                   []store.Head
 		ttl                     time.Duration
 		asJSON, label, force    bool
@@ -82,6 +82,9 @@ func newPostCmd() *cobra.Command {
 			}
 			if successor != "" && (parsedKind != kinds.StandDown || len(r.To) != 1) {
 				return errors.New("--successor names who takes over the one --to lane of a --kind stand-down record")
+			}
+			if ownedBy != "" && (parsedKind != kinds.Decide || len(r.To) != 1) {
+				return errors.New("--owned-by names the lane that owns the one --to lane of a --kind decide record")
 			}
 			for _, seq := range append(slices.Clone(reSeqs), resolvesSeqs...) {
 				if seq < 0 {
@@ -202,6 +205,12 @@ func newPostCmd() *cobra.Command {
 				}
 				r.Fields.Attrs["successor"] = successor
 			}
+			if ownedBy != "" {
+				if r.Fields.Attrs == nil {
+					r.Fields.Attrs = map[string]string{}
+				}
+				r.Fields.Attrs[store.OwnedByAttr] = ownedBy
+			}
 			if cmd.Flags().Changed("re") {
 				if reSeqs, err = resolveAll(cmd.Context(), st, re); err != nil {
 					return err
@@ -259,6 +268,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time more than 3 minutes and less than 3 hours after the post refuses it unless a date follows the time or by, until, till, before, next, ETA, due, expected or since sits in the four words before it, and one 3 hours or more ahead is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&ownedBy, "owned-by", "", "with --kind decide, the lane that owns the one --to lane, such as the lane that maintains a script posting as that lane: stored as fields.attrs.owned-by: later records addressed to the owned lane reach its owner, and the owner's successors, too; the newest such decide wins")
 	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; owner and all always pass; a record every --to of which names the posting lane itself is refused, naming who wrote the record it answers")
@@ -383,6 +393,17 @@ func forwarded(ctx context.Context, st *store.Store, drive string, to []string) 
 		chain, _, err := st.Successors(ctx, laneDrive, lane)
 		if err != nil {
 			return nil, err
+		}
+		owner, err := st.Owner(ctx, laneDrive, lane)
+		if err != nil {
+			return nil, err
+		}
+		if owner != "" {
+			owners, _, err := st.Successors(ctx, laneDrive, owner)
+			if err != nil {
+				return nil, err
+			}
+			chain = append(append(chain, owner), owners...)
 		}
 		for _, successor := range chain {
 			if cross {

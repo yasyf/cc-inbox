@@ -646,6 +646,23 @@ func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []str
 	return downs.Chain(lane), downs[lane].Seq, nil
 }
 
+// OwnedByAttr is the record attribute a --owned-by decide stores its owner lane under.
+const OwnedByAttr = "owned-by"
+
+// Owner reads the lane the newest --owned-by decide on drive names as the owner of lane, "" for none.
+func (s *Store) Owner(ctx context.Context, drive, lane string) (string, error) {
+	var owner string
+	err := s.db.QueryRowContext(ctx, `SELECT json_extract(fields, '$.attrs."owned-by"') FROM records
+WHERE drive = ? AND kind = ? AND json_valid(recipients) AND json_extract(recipients, '$[0]') = ? AND json_extract(fields, '$.attrs."owned-by"') IS NOT NULL ORDER BY seq DESC LIMIT 1`, drive, string(kinds.Decide), lane).Scan(&owner)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the owner of %s on %s: %w", lane, drive, err)
+	}
+	return owner, nil
+}
+
 // StandDown is a lane's own newest stand-down: its seq, when it was posted,
 // and the successor it names, "" for none.
 type StandDown struct {
