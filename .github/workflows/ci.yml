@@ -535,12 +535,24 @@ jobs:
           test -x "$CCI_OLD_STORE_PROBE"
           go test -run 'TestRegisteredLaneComparisonsStayBounded|TestExistingStoreOpenDoesNotBuildPhysicalIndexes|TestMaintainIndexes|TestPhysicalIndexes' -v ./internal/store
       - name: Recipient identity and targeted session query costs
+        shell: bash
         run: |
+          set -euo pipefail
           test "$(git -C .ci-recipients-baseline rev-parse HEAD)" = 722f03bcbaadf335f6ee9cb7d2c4b57e274f942e
           cp internal/cli/recipient_identity_test.go .ci-recipients-baseline/internal/cli/recipient_identity_test.go
           (cd .ci-recipients-baseline && go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli)
           go test -run '^TestPostRecipientUsesHarnessSessionIdentity$' -v ./internal/cli
-          go test -run '^TestRecipientLaneQueryUsesTargetedIndex$' -v ./internal/store
+          recipient_log="$RUNNER_TEMP/recipient-lane-allocations.log"
+          CCI_RECIPIENT_ALLOCATION_DIAGNOSTIC=1 go test -count=1 -run '^TestRecipientLaneQueryUsesTargetedIndex$' -v ./internal/store | tee "$recipient_log"
+          test "$(grep -c 'RECIPIENT_LANE_FUNCTIONAL_CASE ' "$recipient_log")" -eq 6
+          test "$(grep -c 'actual_candidate_allocs=' "$recipient_log")" -eq 6
+          for population in 64 4096 65536; do
+            recipient_rows=$((population + 4))
+            for indexed in false true; do
+              test "$(grep -Ec "RECIPIENT_LANE_FUNCTIONAL_CASE rows=$population indexed=$indexed actual_lane_comparisons=[0-9]+ actual_materialized_rows=2 baseline_materialized_rows=$recipient_rows$" "$recipient_log")" -eq 1
+              test "$(grep -Ec "unrelated_sessions=$population fixed_lanes=2 indexed=$indexed actual_lane_comparisons=[0-9]+ actual_materialized_rows=2 baseline_materialized_rows=$recipient_rows actual_candidate_allocs=[0-9]+ actual_baseline_allocs=[0-9]+$" "$recipient_log")" -eq 1
+            done
+          done
       - name: Grep actual caller operation counts and paged output equivalence
         run: |
           test "$(git -C .ci-grep-baseline rev-parse HEAD)" = e08497bf9ce5880788f6103a949e034c9ed13fc4
