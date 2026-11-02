@@ -83,23 +83,24 @@ func BoardRecordsHandler(st *store.Store, home string) (*BoardHTTP, error) {
 				}
 				return
 			}
+			ctx := r.Context()
 			selection := store.BoardSelection{PRs: boardStrings(request.PRs), RowIDs: boardStrings(request.RowIDs)}
 			var encoded []byte
-			err = index.Read(r.Context(), &requestView, spec, selection, func(snapshot *store.BoardSnapshot, result *store.BoardResult) error {
+			err = index.Read(ctx, &requestView, spec, selection, func(snapshot *store.BoardSnapshot, result *store.BoardResult) error {
 				annotate := func(ctx context.Context, category *store.BoardCategory) {
 					if category.Error == nil {
 						category.Error = inbox.Annotate(ctx, snapshot, category.Records)
 					}
 				}
-				annotate(r.Context(), &result.Rulings)
-				annotate(r.Context(), &result.Withdrawals)
-				annotate(r.Context(), &result.Reviews)
+				annotate(ctx, &result.Rulings)
+				annotate(ctx, &result.Withdrawals)
+				annotate(ctx, &result.Reviews)
 				var rulingError error
 				if result.Rulings.Error != nil || result.Withdrawals.Error != nil {
 					result.ErrorReplay = true
-					rulingError = request.originalReadError(r.Context(), &requestView, 0)
+					rulingError = request.originalReadError(ctx, &requestView, 0)
 					if rulingError == nil {
-						rulingError = request.originalReadError(r.Context(), &requestView, 2)
+						rulingError = request.originalReadError(ctx, &requestView, 2)
 					}
 					if rulingError == nil {
 						return errors.New("cached board ruling error did not reproduce in the original read")
@@ -107,7 +108,7 @@ func BoardRecordsHandler(st *store.Store, home string) (*BoardHTTP, error) {
 				}
 				if result.Reviews.Error != nil {
 					result.ErrorReplay = true
-					result.Reviews.Error = request.originalReadError(r.Context(), &requestView, 1)
+					result.Reviews.Error = request.originalReadError(ctx, &requestView, 1)
 					if result.Reviews.Error == nil {
 						return errors.New("cached board review error did not reproduce in the original read")
 					}
