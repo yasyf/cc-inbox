@@ -590,27 +590,32 @@ func (s *Store) Registered(ctx context.Context, drive, lane string) (bool, error
 }
 
 // Successors follows the stand-down records of drive from lane, each naming the
-// lane that took the last one over; stoodDown reports whether lane itself stood down.
-func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []string, stoodDown bool, err error) {
-	successor, stoodDown, err := s.successor(ctx, drive, lane)
+// lane that took the last one over; standDown is the seq of lane's own newest
+// stand-down, 0 when it never stood down. A stand-down is its first --to lane's
+// own: the lanes it copies, a successor it names included, did not stand down.
+func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []string, standDown int64, err error) {
+	successor, standDown, err := s.successor(ctx, drive, lane)
 	for err == nil && successor != "" && successor != lane && !slices.Contains(chain, successor) {
 		chain = append(chain, successor)
 		successor, _, err = s.successor(ctx, drive, successor)
 	}
-	return chain, stoodDown, err
+	return chain, standDown, err
 }
 
-func (s *Store) successor(ctx context.Context, drive, lane string) (string, bool, error) {
-	var successor string
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(json_extract(fields, '$.attrs.successor'), '') FROM records
-WHERE drive = ? AND kind = ? AND seq IN (SELECT source_seq FROM record_recipients WHERE address = ?) ORDER BY seq DESC LIMIT 1`, drive, string(kinds.StandDown), lane).Scan(&successor)
+func (s *Store) successor(ctx context.Context, drive, lane string) (string, int64, error) {
+	var (
+		successor string
+		seq       int64
+	)
+	err := s.db.QueryRowContext(ctx, `SELECT seq, COALESCE(json_extract(fields, '$.attrs.successor'), '') FROM records
+WHERE drive = ? AND kind = ? AND seq IN (SELECT source_seq FROM record_recipients WHERE address = ?) AND json_extract(recipients, '$[0]') = ? ORDER BY seq DESC LIMIT 1`, drive, string(kinds.StandDown), lane, lane).Scan(&seq, &successor)
 	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
+		return "", 0, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("read the stand-down of %s on %s: %w", lane, drive, err)
+		return "", 0, fmt.Errorf("read the stand-down of %s on %s: %w", lane, drive, err)
 	}
-	return successor, true, nil
+	return successor, seq, nil
 }
 
 // NamedSuccessor reports whether a stand-down record in drive hands a lane over to lane.

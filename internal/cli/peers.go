@@ -220,11 +220,11 @@ func markStoodDown(ctx context.Context, st *store.Store, views []peers.View) err
 		if v.Lane == "" || v.Drive == "" {
 			continue
 		}
-		chain, stoodDown, err := st.Successors(ctx, v.Drive, v.Lane)
+		chain, standDown, err := st.Successors(ctx, v.Drive, v.Lane)
 		if err != nil {
 			return err
 		}
-		views[i].StoodDown = stoodDown
+		views[i].StoodDown = standDown != 0
 		if len(chain) > 0 {
 			views[i].Successor = chain[len(chain)-1]
 		}
@@ -237,7 +237,7 @@ func printSuccessor(cmd *cobra.Command, st *store.Store, drive, lane string, asJ
 	if err != nil {
 		return err
 	}
-	chain, stoodDown, err := st.Successors(cmd.Context(), drive, lane)
+	chain, standDown, err := st.Successors(cmd.Context(), drive, lane)
 	if err != nil {
 		return err
 	}
@@ -253,9 +253,10 @@ func printSuccessor(cmd *cobra.Command, st *store.Store, drive, lane string, asJ
 			Drive     string   `json:"drive"`
 			Lane      string   `json:"lane"`
 			StoodDown bool     `json:"stood_down"`
+			Record    int64    `json:"record,omitempty"`
 			Successor string   `json:"successor"`
 			Chain     []string `json:"chain"`
-		}{drive, lane, stoodDown, successor, chain})
+		}{drive, lane, standDown != 0, standDown, successor, chain})
 	}
 	if successor == "" {
 		return nil
