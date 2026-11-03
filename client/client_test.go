@@ -89,6 +89,35 @@ func TestAPostRefusedByCciReturnsItsError(t *testing.T) {
 	}
 }
 
+func TestAForcedPostReachesALaneThatLooksLikeASlipForALiveOne(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := store.PeerKey{Session: "live-session", Agent: "alane-2"}
+	if err := st.BindLane(ctx, live, "d", "lane-2", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: live.Session, Agent: live.Agent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	standDown := client.Draft{Drive: "d", Lane: "supervisor", Kind: "stand-down", Text: "lane-1 stood down", To: []string{"lane-1"}, Successor: "lane-2"}
+
+	if _, err := client.Post(ctx, standDown); err == nil || !strings.Contains(err.Error(), "looks like a slip") {
+		t.Fatalf("Post without Force = %v, want the slip refusal", err)
+	}
+	standDown.Force = true
+	if stored := post(t, standDown); len(stored.To) != 1 || stored.To[0] != "lane-1" {
+		t.Fatalf("forced stored = %+v", stored)
+	}
+}
+
 func TestAReplyNamesTheRecordItAnswers(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	ask := post(t, client.Draft{Drive: "d", Lane: "lane-7", Kind: "ask", Text: "which base?", To: []string{"root"}})

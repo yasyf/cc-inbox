@@ -53,6 +53,9 @@ type Draft struct {
 	URL       string
 	// Path names the file holding the record's whole body, as cci post --path does.
 	Path string
+	// Force addresses each To lane as written, for a sender that takes the name
+	// from a registry rather than from a person's typing.
+	Force bool
 }
 
 // Post stores d through cci post itself, so its recipient checks, reply routing,
@@ -115,6 +118,9 @@ func (d Draft) args() []string {
 	}
 	if d.Path != "" {
 		args = append(args, "--path", d.Path)
+	}
+	if d.Force {
+		args = append(args, "--force")
 	}
 	return args
 }
