@@ -47,6 +47,7 @@ type Filter struct {
 	Since          time.Time
 	Until          time.Time
 	IncludeExpired bool
+	NoLateParents  bool
 	Descending     bool
 	Limit          int
 }
@@ -153,6 +154,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		names := f.addressees(f.To)
 		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.FirstOnly))+") AND json_extract(recipients, '$[0]') NOT IN ("+placeholders(len(names))+"))")
 		params = append(append(params, kindArgs(f.FirstOnly)...), names...)
+	}
+	if f.NoLateParents {
+		clauses = append(clauses, "NOT ((EXISTS (SELECT 1 FROM records child WHERE child.re = records.seq) OR EXISTS (SELECT 1 FROM records child WHERE child.drive = records.drive AND child.resolves = records.seq AND child.resolves != 0)) AND (SELECT later.seq FROM records later WHERE later.origin = records.origin AND later.origin_seq > records.origin_seq ORDER BY later.origin_seq LIMIT 1) < records.seq)")
 	}
 	if f.RepeatWindow > 0 {
 		clauses = append(clauses, "NOT (kind = ? AND topic != '' AND EXISTS (SELECT 1 FROM records prior WHERE prior.drive = records.drive AND prior.kind = records.kind AND prior.lane = records.lane AND prior.topic = records.topic AND prior.seq < records.seq AND prior.at > records.at - ?))")

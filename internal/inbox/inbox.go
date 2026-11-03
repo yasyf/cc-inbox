@@ -57,6 +57,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	f := opts.Filter
 	seeded := false
 	if opts.Cursor != "" {
+		f.NoLateParents = true
 		seq, ok, err := st.Cursor(ctx, opts.Cursor, f.Drive)
 		if err != nil {
 			return TailResult{}, err

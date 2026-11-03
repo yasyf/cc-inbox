@@ -47,6 +47,46 @@ func TestResolveAcrossTwoStores(t *testing.T) {
 	}
 }
 
+func TestCursorTailSkipsAnOldParentFetchedForANewReply(t *testing.T) {
+	ctx := context.Background()
+	hub, _ := testutil.Store(t)
+	sprite, _ := testutil.Store(t)
+	ask := testutil.Post(t, hub, store.Record{Lane: "sender", Kind: kinds.Ask, To: []string{"desk"}, Text: "old ask"})
+	testutil.Post(t, hub, store.Record{Lane: "sender", Kind: kinds.Note, To: []string{"desk"}, Text: "first note"})
+	ship := func(since int64, limit int) {
+		t.Helper()
+		rows, err := hub.Export(ctx, hub.Self(), since, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sprite.Apply(ctx, rows, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tail := func() (inbox.TailResult, string) {
+		t.Helper()
+		var out bytes.Buffer
+		res, err := inbox.Tail(ctx, sprite, inbox.TailOptions{Filter: store.Filter{Drive: "d", To: "desk"}, Cursor: "desk-wake"}, &out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res, out.String()
+	}
+	ship(ask.Seq, 0)
+	if res, out := tail(); res.Printed != 1 || !strings.Contains(out, "first note") {
+		t.Fatalf("first tail printed %d:\n%s\nwant only the note the sprite holds", res.Printed, out)
+	}
+	reply := testutil.Post(t, hub, store.Record{Lane: "api", Kind: kinds.Note, To: []string{"desk"}, Re: ask.Seq, Text: "fresh reply"})
+	ship(reply.Seq-1, 0)
+	ship(0, 1)
+	if res, out := tail(); res.Printed != 1 || !strings.Contains(out, "fresh reply") {
+		t.Fatalf("tail after the reply printed %d:\n%s\nwant the reply alone, not the old ask fetched as its parent", res.Printed, out)
+	}
+	if res, out := tail(); res.Printed != 0 || out != "" {
+		t.Fatalf("caught-up tail printed %d:\n%s", res.Printed, out)
+	}
+}
+
 func replicate(t *testing.T, from, to *store.Store) {
 	t.Helper()
 	rows, err := from.Export(context.Background(), from.Self(), 0, 0)
