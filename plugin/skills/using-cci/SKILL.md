@@ -25,14 +25,22 @@ cci drive use release-demo --root
 
 ## Post one event
 
-When the cci channel's `post` tool (`mcp__plugin_cc-inbox_cci__post`) is in
-your tools, post through it rather than Bash: pass the arguments `cci post`
-takes as `args`, and the lane's worktree as `cwd` when `--path` or
-`--body-file` is relative. It runs `cci post` inside the channel server, so a
-post skips the Bash call's shell and hooks, and it writes as this window's
-thread, as a Bash `cci post` does. It returns what `cci post` prints; an
-error result is a refusal or a bus-down notice, read exactly as the command's
-stderr. Stdin is not available, so a long body goes in a file.
+When the cci channel's tools (`mcp__plugin_cc-inbox_cci__*`) are in your tools,
+use them rather than Bash. Each takes `lane`, defaults to the session's drive,
+and returns compact lines: `<seq> <kind> <lane>><to> [^re] [x<closed>] [#pr]
+[+] <text>`, under an `@<clock>` line when the minute changes; `+` means a body
+waits for `read`.
+
+- `post`: one record from `kind`, `text`, `to`, `re`, `resolves`, `pr`,
+  `topic`, `attrs`, and `body` or an absolute `path`; `records` posts several
+  in one call. No shell quoting. Returns the new seqs.
+- `read`: `seqs` each once, line then the rest of the body, within `budget`.
+- `inbox`: records new since your last inbox call; addressed ones whole,
+  subscribed broadcasts cut to 160 characters.
+- `find`: newest matches for `pattern`, `kinds`, `lanes`, `to`, `since`; `prs`
+  answers several pull requests in one call.
+- `close`: one record closing every seq in `seqs`, addressed to their writers.
+- `who` and `digest`: as the commands.
 
 Write one record per event. Text over 400 characters spills to a file: the record
 carries its first 400 characters, cut at a word and ended with `…`, then the
