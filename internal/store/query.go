@@ -575,7 +575,33 @@ func (s *Store) BindLane(ctx context.Context, k PeerKey, drive, lane string, sta
 	return err
 }
 
-func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string, started time.Time) error {
+// ClaimLane binds k to lane on drive over whatever lane or drive it was bound
+// to, as cci announce --lane and cci subscribe --reader name it, so its hooks
+// deliver and block for that lane alone. Only Bind and another ClaimLane move
+// it after; a post as another lane never does. A root thread keeps its root
+// flag, so its prompts are still the owner's.
+func (s *Store) ClaimLane(ctx context.Context, k PeerKey, drive, lane string, started time.Time) error {
+	if RootName(lane) {
+		lane = "root"
+	}
+	_, err := s.Commit(ctx, Write{Bind: &LaneBinding{Key: k, Drive: drive, Lane: lane, Started: started, Explicit: true}})
+	return err
+}
+
+// MovesLane reports whether sub names a lane its session's root thread is not
+// bound to, so subscribing claims it: a thread bound there already, or its
+// drive's root reading as root, stays as it is.
+func (s *Store) MovesLane(ctx context.Context, sub Subscription) (bool, error) {
+	b, ok, err := s.Binding(ctx, PeerKey{Session: sub.Session})
+	if err != nil {
+		return false, err
+	}
+	stays := ok && b.Drive == sub.Drive && (SameLane(b.Lane, sub.Reader) || b.Root && RootName(sub.Reader))
+	return !stays, nil
+}
+
+func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, lb LaneBinding) error {
+	k, drive, lane, started := lb.Key, lb.Drive, lb.Lane, lb.Started
 	if err := s.claimSession(ctx, tx, k.Session); err != nil {
 		return err
 	}
@@ -589,7 +615,8 @@ func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, origin, drive, root, lane, role) VALUES (?, ?, ?, ?, 0, ?, 'lane')
 ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin, drive = excluded.drive, lane = excluded.lane,
-	role = CASE WHEN sessions.role IN `+inferredRoles+` THEN 'lane' ELSE sessions.role END WHERE NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND sessions.lane = ''`, k.Session, k.Agent, s.Self(), drive, lane); err != nil {
+	role = CASE WHEN sessions.root OR sessions.role NOT IN `+inferredRoles+` THEN sessions.role ELSE 'lane' END
+WHERE ? OR NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND sessions.lane = ''`, k.Session, k.Agent, s.Self(), drive, lane, lb.Explicit); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, MIN(?, COALESCE(

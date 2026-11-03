@@ -794,12 +794,13 @@ func (s *Store) PostAt(ctx context.Context, r Record, ttl time.Duration, at time
 }
 
 // LaneBinding is the lane a post binds its thread to before its records land,
-// as BindLane binds it.
+// as BindLane binds it, or, Explicit, the lane ClaimLane names.
 type LaneBinding struct {
-	Key     PeerKey
-	Drive   string
-	Lane    string
-	Started time.Time
+	Key      PeerKey
+	Drive    string
+	Lane     string
+	Started  time.Time
+	Explicit bool
 }
 
 // Posted is one record a post stored, or the stored record it duplicated.

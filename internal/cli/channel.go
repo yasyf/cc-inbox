@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
 	"github.com/spf13/cobra"
@@ -76,8 +77,23 @@ hook's overdue-ask nudge.`,
 			if sub.Cursor == "" {
 				sub.Cursor = "channel-" + session
 			}
+			self := store.PeerKey{Session: session}
+			moves, err := st.MovesLane(cmd.Context(), sub)
+			if err != nil {
+				return err
+			}
+			if moves {
+				if err := refuseHeldLane(cmd.Context(), st, self, d, reader, st.Now()); err != nil {
+					return err
+				}
+			}
 			if _, err := st.Subscribe(cmd.Context(), sub); err != nil {
 				return err
+			}
+			if moves {
+				if err := st.ClaimLane(cmd.Context(), self, d, reader, time.UnixMilli(window.Started)); err != nil {
+					return err
+				}
 			}
 			from, _, err := st.Cursor(cmd.Context(), sub.Cursor, d)
 			if err != nil {

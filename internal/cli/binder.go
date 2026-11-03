@@ -21,6 +21,13 @@ func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey
 	if b, ok, err := st.Binding(ctx, self); err != nil || ok && (b.Root || b.Lane != "" || b.Drive != drive) {
 		return err
 	}
+	return refuseHeldLane(ctx, st, self, drive, lane, at)
+}
+
+// refuseHeldLane refuses self taking lane on drive from another live thread
+// that never stood down, whatever self is bound to now, as refuseSecondBinder
+// refuses an unbound thread's first post.
+func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, drive, lane string, at time.Time) error {
 	owner, _, _, err := st.Owner(ctx, self)
 	if err != nil {
 		return err

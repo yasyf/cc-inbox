@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `github.com/yasyf/cc-inbox/client`, a public Go package other modules import
   to post and read records: `Post`, `Tail` and `Open` use the store and the rules
   `cci` uses, so a Go tool never shells out to the binary.
+- `cci announce --lane <lane>` binds the thread to a lane explicitly, and
+  `cci subscribe --reader <lane>` binds the window's root thread to its
+  reader; a session a `/clear` starts in that window keeps it. The explicit
+  lane wins over the lane a first post or a teammate name inferred, so the
+  `PostToolUse` hook injects and the `Stop` hook blocks on that lane's records
+  only: a bridge window that once posted `--lane root` and subscribes as
+  owner-relay no longer hears root's mail. Claiming a lane another live thread
+  holds is refused, as a second binder's post is.
 - `cci post --kind decide --owned-by <lane> --to <script lane>` records who
   owns a lane a script posts as, such as `stall-watch` or `desk-runner`. Later
   asks, decides and defects addressed to that lane also reach its owner and

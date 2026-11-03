@@ -221,30 +221,6 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	}
 }
 
-func TestPostToolUseDeliversToTheSubscriptionReaderNotTheLaneTheSessionPostedAs(t *testing.T) {
-	st, clock := testutil.Store(t)
-	ctx := context.Background()
-	started := clock.Now()
-	clock.Advance(time.Minute)
-	testutil.Post(t, st, store.Record{Lane: "lane-a", Kind: kinds.Stopped, To: []string{"root"}, Text: "for the coordinator"})
-	testutil.Post(t, st, store.Record{Lane: "lane-a", Kind: kinds.Stopped, To: []string{"owner-relay"}, Text: "for the relay"})
-	k := store.PeerKey{Session: "s1"}
-	if err := st.BindLane(ctx, k, "d", "root", started); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: store.Window{PID: 100, Started: 1}, Drive: "d", Reader: "owner-relay", Cursor: "relay-watch"}); err != nil {
-		t.Fatal(err)
-	}
-	var out bytes.Buffer
-	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
-		t.Fatal(err)
-	}
-	got := hookContext(t, &out, "PostToolUse")
-	if !strings.Contains(got, "cci records addressed to owner-relay; act on each") || !strings.Contains(got, "STOPPED lane-a -> owner-relay for the relay") || strings.Contains(got, "for the coordinator") {
-		t.Fatalf("additionalContext = %q; want only the record addressed to the subscription's reader owner-relay", got)
-	}
-}
-
 func TestPostToolUseDeliversBroadcastKindsOnlyToTheirFirstAddressee(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
@@ -860,5 +836,105 @@ func TestDeliveryRedeliversWhatTheHookNeverAcknowledged(t *testing.T) {
 				t.Fatalf("an acknowledged delivery came back: %q", got)
 			}
 		})
+	}
+}
+
+func TestAClaimedLaneTakesTheThreadOffTheRootItsPostsBoundIt(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	bridge := store.PeerKey{Session: "s1"}
+	p := bindRoot(t, st)
+	stop := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := hook.Stop(ctx, st, hook.Payload{SessionID: "s1", Event: "Stop"}, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	if got := stop(); got != "" {
+		t.Fatalf("the first stop blocked: %q", got)
+	}
+	if err := st.ClaimLane(ctx, bridge, "d", "owner-relay", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, bridge, "d", "root", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, err := st.Binding(ctx, bridge); err != nil || b.Lane != "owner-relay" {
+		t.Fatalf("a post as root rebound the claimed lane: %+v %v", b, err)
+	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "merge the stack?"})
+	testutil.Post(t, st, store.Record{Kind: kinds.Go, To: []string{"main"}, Text: "for the coordinator"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Report, To: []string{"owner-relay"}, Text: "landed #12"})
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, p, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "addressed to owner-relay") || !strings.Contains(got, "landed #12") {
+		t.Fatalf("owner-relay mail missing: %q", got)
+	}
+	for _, unwanted := range []string{"merge the stack?", "for the coordinator", "addressed to root"} {
+		if strings.Contains(got, unwanted) {
+			t.Fatalf("root mail reached the owner-relay thread, %q: %q", unwanted, got)
+		}
+	}
+	clock.Advance(11 * time.Minute)
+	if got := stop(); got != "" {
+		t.Fatalf("a root ask blocked the owner-relay thread: %q", got)
+	}
+	owed := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"owner-relay"}, Text: "ask the owner?"})
+	clock.Advance(11 * time.Minute)
+	if got := stop(); !strings.Contains(got, fmt.Sprintf("cci #%d ASK from root to owner-relay", owed.Seq)) {
+		t.Fatalf("stop = %q", got)
+	}
+}
+
+func TestAClaimedLaneKeepsTheRootFlagAndARootReadingAsRootStays(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	root := store.PeerKey{Session: "root"}
+	if err := st.Bind(ctx, root, "d", true); err != nil {
+		t.Fatal(err)
+	}
+	if moves, err := st.MovesLane(ctx, store.Subscription{Session: "root", Drive: "d", Reader: "main"}); err != nil || moves {
+		t.Fatalf("a root reading as main moves its lane: %v %v", moves, err)
+	}
+	if moves, err := st.MovesLane(ctx, store.Subscription{Session: "root", Drive: "d", Reader: "owner-relay"}); err != nil || !moves {
+		t.Fatalf("a root reading as owner-relay keeps its lane: %v %v", moves, err)
+	}
+	if err := st.ClaimLane(ctx, root, "d", "owner-relay", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, err := st.Binding(ctx, root); err != nil || !b.Root || b.Lane != "owner-relay" {
+		t.Fatalf("binding = %+v %v", b, err)
+	}
+	if err := st.ClaimLane(ctx, store.PeerKey{Session: "coordinator"}, "d", "main", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, _, err := st.Binding(ctx, store.PeerKey{Session: "coordinator"}); err != nil || b.Root || b.Lane != "root" {
+		t.Fatalf("coordinator binding = %+v %v", b, err)
+	}
+}
+
+func TestSessionStartKeepsTheLaneTheWindowSubscribedAs(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	window := store.Window{PID: 100, Started: 1}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "root", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "owner-relay", Cursor: "relay"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ClaimLane(ctx, store.PeerKey{Session: "s1"}, "d", "owner-relay", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s2", Source: "clear"}, window, &bytes.Buffer{}); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok, err := st.Binding(ctx, store.PeerKey{Session: "s2"}); err != nil || !ok || b.Drive != "d" || b.Lane != "owner-relay" {
+		t.Fatalf("cleared session binding = %+v %v %v", b, ok, err)
 	}
 }
