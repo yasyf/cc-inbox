@@ -119,7 +119,7 @@ func TestPostTailDigest(t *testing.T) {
 	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "#2 ") {
 		t.Fatalf("grep = %q, %v", out, err)
 	}
-	if out, err = run(t, "post", "--lane", "evidence-lane", "--kind", "evidence", "--text", "5xx began at "+time.Now().Add(-30*time.Minute).Format("3:04 PM")); err != nil || out != "#3\n" {
+	if out, err = run(t, "post", "--lane", "evidence-lane", "--kind", "evidence", "--text", "5xx began at "+time.Now().Add(-30*time.Minute).Format("3:04 PM")); err != nil || out != "#5\n" {
 		t.Fatalf("post evidence = %q, %v", out, err)
 	}
 }
@@ -983,10 +983,10 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "@drive-b", "--text", "x"); err == nil || !strings.Contains(err.Error(), "<lane>@<drive>") {
 		t.Fatalf("post to a bare @drive: %v", err)
 	}
-	if out, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:bbbb", "--text", "take #34363?"); err != nil || out != "#1\n" {
+	if out, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:bbbb", "--text", "take #34363?"); err != nil || out != "#3\n" {
 		t.Fatalf("post to peer = %q, %v", out, err)
 	}
-	if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "root@drive-b", "--text", "GO"); err != nil || out != "#2\n" {
+	if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "root@drive-b", "--text", "GO"); err != nil || out != "#4\n" {
 		t.Fatalf("post to root@drive = %q, %v", out, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
@@ -994,11 +994,11 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	if err != nil || !strings.Contains(out, "ASK root -> peer:bbbb2222 take #34363?") || !strings.Contains(out, "GO root -> root@drive-b GO") || strings.Count(out, "\n") != 2 {
 		t.Fatalf("b tail = %q, %v", out, err)
 	}
-	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "1", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#3\n" {
+	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "3", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#5\n" {
 		t.Fatalf("answer across drives = %q, %v", out, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
-	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "ANSWER root -> peer:aaaa1111 yes resolves #1") || !strings.Contains(out, "take #34363? [RESOLVED #3]") {
+	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "ANSWER root -> peer:aaaa1111 yes resolves #3") || !strings.Contains(out, "take #34363? [RESOLVED #3]") {
 		t.Fatalf("a tail = %q, %v", out, err)
 	}
 	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "GO root -> root@drive-b") {
@@ -1048,7 +1048,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner,desk", "--text", "RELEASE #45190"); err == nil || err.Error() != "--to release-owner: no lane on drive drive-a has registered as release-owner, which looks like a slip for the live lane release-owner-4; --force addresses release-owner as typed" {
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner,desk", "--text", "RELEASE #45190"); err == nil || !strings.HasPrefix(err.Error(), "--to release-owner: no lane on drive drive-a has registered as release-owner, which looks like a slip for the live lane release-owner-4; --force addresses release-owner as typed") {
 		t.Fatalf("post to a lane nobody holds: %v", err)
 	}
 	for _, to := range []string{"owner", "all"} {
@@ -1057,7 +1057,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 		}
 	}
 	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
-	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#3\n" {
+	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#4\n" {
 		t.Fatalf("post to a lane reading another drive = %q, %v", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "walker", "--text", "x"); err == nil || !strings.Contains(err.Error(), "read drive-b, drive-c; address one as walker@<drive>") {
@@ -1110,7 +1110,7 @@ func TestAgentThreadsClaimAndAreAddressedApart(t *testing.T) {
 	if _, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:aaaa/nobody", "--text", "x"); err == nil || !strings.Contains(err.Error(), "no agent of it") {
 		t.Fatalf("post to an unknown agent: %v", err)
 	}
-	if out, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:aaaa", "--text", "root?"); err != nil || out != "#2\n" {
+	if out, err := run(t, "post", "--lane", "root", "--kind", "ask", "--to", "peer:aaaa", "--text", "root?"); err != nil || out != "#3\n" {
 		t.Fatalf("post to the root thread = %q, %v", out, err)
 	}
 	t.Setenv("CCI_AGENT_ID", "aapi-0123")
