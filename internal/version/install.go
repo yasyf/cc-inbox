@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"golang.org/x/mod/semver"
 )
@@ -107,12 +108,12 @@ func newestPlugin(root string) (Install, error) {
 	if err != nil {
 		return Install{}, fmt.Errorf("scan cci installs: %w", err)
 	}
-	var newest Install
+	slices.SortFunc(entries, func(a, b fs.DirEntry) int { return semver.Compare("v"+b.Name(), "v"+a.Name()) })
 	for _, e := range entries {
-		dir := filepath.Join(root, e.Name())
-		if !e.IsDir() || !Newer(e.Name(), newest.Version) {
+		if !e.IsDir() || !IsRelease(e.Name()) {
 			continue
 		}
+		dir := filepath.Join(root, e.Name())
 		if _, err := os.Stat(filepath.Join(dir, ".orphaned_at")); err == nil {
 			continue
 		}
@@ -120,9 +121,9 @@ func newestPlugin(root string) (Install, error) {
 		if info, err := os.Stat(path); err != nil || info.Mode().Perm()&0o111 == 0 {
 			continue
 		}
-		newest = Install{Path: path, Version: e.Name()}
+		return Install{Path: path, Version: e.Name()}, nil
 	}
-	return newest, nil
+	return Install{}, nil
 }
 
 func IsRelease(v string) bool {
