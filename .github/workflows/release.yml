@@ -135,6 +135,32 @@ jobs:
           echo "manifest=$manifest pinned=$pinned"
           test "$manifest" = "$pinned"
 
+  plugin-archive:
+    needs: descriptor
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.descriptor.outputs.commit }}
+      - name: Publish the plugin tree with its checksum, which a Sprite's plugin pin installs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          name="cc-inbox_${version}.tar.gz"
+          cd "$RUNNER_TEMP"
+          git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD:plugin | gzip -n > "$name"
+          test "$(tar -xzOf "$name" .claude-plugin/plugin.json | jq -r .version)" = "$version"
+          gh release download "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --pattern checksums.txt
+          grep -v "  ${name}\$" checksums.txt > checksums.new || true
+          sha256sum "$name" >> checksums.new
+          mv checksums.new checksums.txt
+          gh release upload "${GITHUB_REF_NAME}" "$name" checksums.txt --repo "${GITHUB_REPOSITORY}" --clobber
+
   post-release-guides:
     needs: descriptor
     permissions:
