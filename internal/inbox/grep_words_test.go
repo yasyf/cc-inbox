@@ -94,7 +94,7 @@ func TestDigestOfOpenItemsMatchesTheWholeRecordReads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []int64
+	got := make([]int64, 0, len(open))
 	for _, r := range open {
 		if r.Drive != "d" || r.Text == "" {
 			t.Fatalf("open record %+v is not whole", r)

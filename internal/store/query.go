@@ -134,7 +134,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		params = append(params, f.Origin)
 	}
 	if len(f.Contains) > 0 {
-		var holds []string
+		holds := make([]string, 0, len(renderedColumns)*len(f.Contains))
 		for _, word := range f.Contains {
 			columns := renderedColumns
 			if strings.Trim(word, "0123456789") == "" {

@@ -70,7 +70,7 @@ func stronger(words, than []string) bool {
 func longestWord(literal []rune) string {
 	lowered := strings.ToLower(string(literal))
 	words := strings.FieldsFunc(lowered, func(c rune) bool {
-		return !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.')
+		return (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' && c != '.'
 	})
 	best := ""
 	for _, word := range words {
