@@ -368,7 +368,8 @@ a pull request's open, push, close, merge, draft, base and label changes, a
 submitted or dismissed review, a finished check run, a commit status that is no
 longer pending, and a push to the repository's default branch. Each carries the
 pull request when the event names one, the head commit, and the action, review
-state or conclusion as its outcome. A pull request push and a default-branch
+state or conclusion as its outcome. A pull request record names its author as
+`author` and its labels, comma-separated, as `labels`. A pull request push and a default-branch
 push carry the commit they replaced as `before`, and a check run or status
 carries GitHub's id as `id`, which orders two that finished in the same second.
 A redelivery of the same `X-GitHub-Delivery` stays one record, a bad signature

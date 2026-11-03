@@ -29,12 +29,14 @@ const secret = "github webhook secret"
 
 const synchronized = `{"action":"synchronize","number":45700,"before":"0987654321abc",
 "pull_request":{"html_url":"https://github.com/acme/app/pull/45700","draft":false,"merged":false,
-"updated_at":"2026-11-03T14:33:00Z","head":{"ref":"lane/fix","sha":"abc1234567890"},"base":{"ref":"dev"}},
+"updated_at":"2026-11-03T14:33:00Z","user":{"login":"lane-bot"},"labels":[{"name":"drive"},{"name":"infra"}],
+"head":{"ref":"lane/fix","sha":"abc1234567890"},"base":{"ref":"dev"}},
 "repository":{"full_name":"acme/app"}}`
 
 const merged = `{"action":"closed","number":45700,
 "pull_request":{"html_url":"https://github.com/acme/app/pull/45700","draft":false,"merged":true,"merge_commit_sha":"def456",
-"updated_at":"2026-11-03T15:00:00Z","head":{"ref":"lane/fix","sha":"abc1234567890"},"base":{"ref":"dev"}},
+"updated_at":"2026-11-03T15:00:00Z","user":{"login":"lane-bot"},"labels":[],
+"head":{"ref":"lane/fix","sha":"abc1234567890"},"base":{"ref":"dev"}},
 "repository":{"full_name":"acme/app"}}`
 
 const greenStatus = `{"id":9001,"sha":"abc1234567890","context":"buildkite/ci","state":"success",
@@ -86,13 +88,13 @@ func TestRecordShapes(t *testing.T) {
 			"a push to a pull request", "pull_request", synchronized, "synchronize", "abc1234567890",
 			"acme/app#45700 synchronize at abc1234567 onto dev",
 			[]string{"acme/app#45700"},
-			map[string]string{"base": "dev", "before": "0987654321abc", "branch": "lane/fix", "draft": "false"},
+			map[string]string{"author": "lane-bot", "base": "dev", "before": "0987654321abc", "branch": "lane/fix", "draft": "false", "labels": "drive,infra"},
 		},
 		{
 			"a merge", "pull_request", merged, "merged", "abc1234567890",
 			"acme/app#45700 merged at abc1234567 onto dev",
 			[]string{"acme/app#45700"},
-			map[string]string{"base": "dev", "branch": "lane/fix", "draft": "false", "merge": "def456"},
+			map[string]string{"author": "lane-bot", "base": "dev", "branch": "lane/fix", "draft": "false", "labels": "", "merge": "def456"},
 		},
 		{
 			"a commit status, which names no pull request", "status", greenStatus, "success", "abc1234567890",
