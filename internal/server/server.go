@@ -239,7 +239,7 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	if !s.emit(r.Context(), w, &f, head) {
 		return
 	}
-	follower := s.hub.Follow(f, head)
+	follower := s.hub.Follow(f, head) //nolint:contextcheck // the hub outlives one request.
 	defer follower.Leave()
 	tick := time.NewTicker(s.interval)
 	defer tick.Stop()
@@ -299,7 +299,7 @@ func (s *Server) follow(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, errors.New("streaming unsupported"))
 		return
 	}
-	follower := s.hub.Follow(in.Filter, in.Filter.After)
+	follower := s.hub.Follow(in.Filter, in.Filter.After) //nolint:contextcheck // the hub outlives one request.
 	defer follower.Leave()
 	w.Header().Set("Content-Type", "application/x-ndjson")
 	w.WriteHeader(http.StatusOK)
