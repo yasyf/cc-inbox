@@ -80,12 +80,14 @@ func TestRecordShapes(t *testing.T) {
 	}{
 		{
 			"a push to a pull request", "pull_request", synchronized, "synchronize", "abc1234567890",
-			"acme/app#45700 synchronize at abc1234567 onto dev", []string{"acme/app#45700"},
+			"acme/app#45700 synchronize at abc1234567 onto dev",
+			[]string{"acme/app#45700"},
 			map[string]string{"base": "dev", "branch": "lane/fix", "draft": "false"},
 		},
 		{
 			"a merge", "pull_request", merged, "merged", "abc1234567890",
-			"acme/app#45700 merged at abc1234567 onto dev", []string{"acme/app#45700"},
+			"acme/app#45700 merged at abc1234567 onto dev",
+			[]string{"acme/app#45700"},
 			map[string]string{"base": "dev", "branch": "lane/fix", "draft": "false", "merge": "def456"},
 		},
 		{
@@ -96,13 +98,15 @@ func TestRecordShapes(t *testing.T) {
 		{
 			"a finished check run", "check_run",
 			`{"action":"completed","check_run":{"name":"lint","head_sha":"abc1234567890","conclusion":"failure","details_url":"https://ci/1","completed_at":"2026-11-03T14:41:00Z","pull_requests":[{"number":45700}]},"repository":{"full_name":"acme/app"}}`,
-			"failure", "abc1234567890", "acme/app abc1234567 lint failure", []string{"acme/app#45700"},
+			"failure", "abc1234567890", "acme/app abc1234567 lint failure",
+			[]string{"acme/app#45700"},
 			map[string]string{"check": "lint"},
 		},
 		{
 			"an approval", "pull_request_review",
 			`{"action":"submitted","review":{"state":"APPROVED","commit_id":"abc1234567890","html_url":"https://github.com/acme/app/pull/45700#r1","submitted_at":"2026-11-03T14:50:00Z","user":{"login":"owner"}},"pull_request":{"number":45700},"repository":{"full_name":"acme/app"}}`,
-			"approved", "abc1234567890", "acme/app#45700 review approved by owner at abc1234567", []string{"acme/app#45700"},
+			"approved", "abc1234567890", "acme/app#45700 review approved by owner at abc1234567",
+			[]string{"acme/app#45700"},
 			map[string]string{"reviewer": "owner"},
 		},
 	} {
