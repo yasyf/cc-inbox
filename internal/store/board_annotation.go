@@ -44,7 +44,7 @@ func boardOpenerKeys(ctx context.Context, tx *sql.Tx, scope *boardScope, categor
 
 func boardChangedEffects(ctx context.Context, tx *sql.Tx, scope *boardScope, seq int64, affected map[[2]int64]bool) error {
 	collect := func() error {
-		rows, err := tx.QueryContext(ctx, "SELECT DISTINCT o.category,o.seq FROM board_query_effects e JOIN board_query_openers o ON o.scope=e.scope AND o.drive=e.drive AND o.axis=e.axis AND o.key=e.key WHERE e.scope=? AND e.source_seq=?", scope.id, seq)
+		rows, err := tx.QueryContext(ctx, "SELECT DISTINCT o.category,o.seq FROM board_query_effects e CROSS JOIN board_query_openers o ON o.scope=e.scope AND o.drive=e.drive AND o.axis=e.axis AND o.key=e.key WHERE e.scope=? AND e.source_seq=?", scope.id, seq)
 		if err != nil {
 			return err
 		}
