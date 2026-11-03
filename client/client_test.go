@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/client"
+	"github.com/yasyf/cc-inbox/internal/cli"
+	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 const head = "e718a7434fa01ee9835f992a9a647a825350732c"
@@ -191,5 +193,71 @@ func TestAnItemPostedToALaneByNameIsStored(t *testing.T) {
 
 	if len(stored.To) != 1 || stored.To[0] != "lane-7" {
 		t.Fatalf("stored = %+v", stored)
+	}
+}
+
+func TestAPostCarriesItsStampAttrsLaneRefsAndURL(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+
+	stored := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "report", Text: "RELAUNCHED a-1 as a-2", To: []string{"root"}, Stamp: true, LaneRefs: []string{"a-2"}, Attrs: map[string]string{"audience": "owner"}, URL: "https://example.com/x"})
+
+	if !strings.Contains(stored.Text, "RELAUNCHED a-1 as a-2") || !strings.Contains(stored.Text, "M ") {
+		t.Fatalf("text %q carries no time label", stored.Text)
+	}
+	if len(stored.Refs.Lanes) != 1 || stored.Refs.Lanes[0] != "a-2" || stored.Fields.Attrs["audience"] != "owner" || stored.Refs.URL != "https://example.com/x" {
+		t.Fatalf("stored = %+v", stored)
+	}
+}
+
+func TestAStandDownCarriesItsSuccessor(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+
+	stored := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "stand-down", Text: "a-1 stood down", To: []string{"a-1"}, Successor: "a-2"})
+
+	if stored.Fields.Attrs["successor"] != "a-2" {
+		t.Fatalf("stored = %+v", stored)
+	}
+}
+
+func TestWhoReadsTheSessionsBoundToADriveAndNoOthers(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	ctx := context.Background()
+	st, err := cli.OpenStore(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	now := time.Now()
+	for session, bound := range map[string][2]string{"aaaa1111": {"d", "desk-1"}, "bbbb2222": {"other", "desk-2"}} {
+		if err := st.BindLane(ctx, store.PeerKey{Session: session}, bound[0], bound[1], now); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Announce(ctx, store.Peer{Session: session}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rows, err := client.Who(ctx, "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(rows) != 1 || rows[0].Lane != "desk-1" || rows[0].Session != "aaaa1111" || rows[0].StoodDown {
+		t.Fatalf("rows = %+v", rows)
+	}
+}
+
+func TestAResolvesClosesItsOpener(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	blocker := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "blocker", Text: "LANDED-NOT-LIVE sand", To: []string{"root"}})
+
+	post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "note", Text: "outlived", Resolves: blocker.Seq})
+
+	open, err := client.Open(context.Background(), "d", "blocker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("open = %+v", open)
 	}
 }

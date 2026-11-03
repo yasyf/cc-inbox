@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
+	"slices"
 	"strconv"
 	"time"
 
@@ -40,6 +42,15 @@ type Draft struct {
 	PRs   []string
 	Re    int64
 	Body  json.RawMessage
+	// Resolves closes the opener with this seq.
+	Resolves int64
+	// Stamp has cci write the leading time label from the post's own clock.
+	Stamp bool
+	// Successor names who takes over the one To lane of a stand-down record.
+	Successor string
+	LaneRefs  []string
+	Attrs     map[string]string
+	URL       string
 }
 
 // Post stores d through cci post itself, so its recipient checks, reply routing,
@@ -82,7 +93,58 @@ func (d Draft) args() []string {
 	if d.Body != nil {
 		args = append(args, "--body-file", "-")
 	}
+	if d.Resolves != 0 {
+		args = append(args, "--resolves", strconv.FormatInt(d.Resolves, 10))
+	}
+	if d.Stamp {
+		args = append(args, "--stamp")
+	}
+	if d.Successor != "" {
+		args = append(args, "--successor", d.Successor)
+	}
+	for _, lane := range d.LaneRefs {
+		args = append(args, "--lane-ref", lane)
+	}
+	for _, key := range slices.Sorted(maps.Keys(d.Attrs)) {
+		args = append(args, "--attr", key+"="+d.Attrs[key])
+	}
+	if d.URL != "" {
+		args = append(args, "--url", d.URL)
+	}
 	return args
+}
+
+// Peer is one session bound to a drive, the row cci who --all --json prints.
+type Peer struct {
+	Session   string    `json:"session"`
+	Agent     string    `json:"agent"`
+	Lane      string    `json:"lane"`
+	Live      bool      `json:"live"`
+	SeenAt    time.Time `json:"seen_at"`
+	StoodDown bool      `json:"stood_down"`
+}
+
+// Who reads every session bound to drive, ended ones included, through cci who
+// itself, so its liveness and stand-down marks are the ones cci prints.
+func Who(ctx context.Context, drive string) ([]Peer, error) {
+	var out bytes.Buffer
+	root := cli.NewRootCmd() //nolint:contextcheck // the tree takes ctx from ExecuteContext below, which contextcheck cannot follow.
+	root.SetArgs([]string{"who", "--drive", drive, "--all", "--json", "--fields", "session,agent,lane,live,seen_at,stood_down"})
+	root.SetOut(&out)
+	root.SetErr(io.Discard)
+	if err := root.ExecuteContext(ctx); err != nil {
+		return nil, err
+	}
+	var rows []Peer
+	decoder := json.NewDecoder(&out)
+	for decoder.More() {
+		var row Peer
+		if err := decoder.Decode(&row); err != nil {
+			return nil, fmt.Errorf("cci who printed a row that does not parse: %w", err)
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
 }
 
 // Query selects records of one drive. After is the seq a cursor reader last saw;
