@@ -998,7 +998,7 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 		t.Fatalf("answer across drives = %q, %v", out, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
-	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "ANSWER root -> peer:aaaa1111 yes resolves #3") || !strings.Contains(out, "take #34363? [RESOLVED #5]") {
+	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "ANSWER root -> peer:aaaa1111 yes resolves #3") || !strings.Contains(out, "take #34363? resolves #1,#2 [RESOLVED #5]") {
 		t.Fatalf("a tail = %q, %v", out, err)
 	}
 	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "GO root -> root@drive-b") {
