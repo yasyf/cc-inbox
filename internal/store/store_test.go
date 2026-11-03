@@ -43,7 +43,6 @@ func TestPostValidation(t *testing.T) {
 		{"digest is internal", store.Record{Drive: "d", Lane: "l", Kind: kinds.Digest, Text: "x"}, "written only by cci"},
 		{"hold names a pr in text", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "HOLD #39489 until the canary clears"}, "hold names #39489 without --pr: add --pr 39489"},
 		{"hold names a pr in topic", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold"}, "add --pr 39489"},
-		{"hold binds only some prs", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold #1 and #2, then #2 again", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}}, "names #2 without --pr: add --pr 2 so"},
 		{"hold names an owner/repo pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold yasyf/cc-inbox#93"}, "hold names #93"},
 	}
 	for _, tt := range tests {
@@ -60,6 +59,7 @@ func TestPostValidation(t *testing.T) {
 	for _, r := range []store.Record{
 		{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold the queue"},
 		{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold #39489", Refs: store.Refs{PRs: []store.PR{{Repo: "Forge-AI/monorepo", Number: 39489}}}},
+		{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold #1 behind the test PR #2", Refs: store.Refs{PRs: []store.PR{{Number: 1}}}},
 		{Drive: "d", Lane: "l", Kind: kinds.Note, Text: "watching #39489"},
 		{Drive: "d", Lane: "l", Kind: kinds.Blocker, Text: "waits on #89603 and #7"},
 		{Drive: "d", Lane: "l", Kind: kinds.Blocked, Topic: "#89604", Text: "blocked per #89603"},

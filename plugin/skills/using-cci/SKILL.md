@@ -567,7 +567,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `blocked` / `unblock` | None | A deploy block stays open until unblock or a resolver. |
 | `answer`, `withdraw` | None | Close asks, decision requests, or blockers; require a link. |
 | `go` | None | Closes a matching ask or decision request. |
-| `hold` / `lift` | None | Lift closes hold and requires a link. Each `#<number>` in a hold's text or topic needs `--pr`. |
+| `hold` / `lift` | None | Lift closes hold and requires a link. A hold holds exactly its `--pr` PRs; a hold naming `#<number>` with no `--pr` is refused. |
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
