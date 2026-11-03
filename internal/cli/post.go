@@ -244,7 +244,7 @@ func newPostCmd() *cobra.Command {
 				if len(records[i].To) > 0 && !slices.ContainsFunc(records[i].To, func(t string) bool { return !addressesSelf(t, lane, records[i].Drive) }) {
 					return selfAddressed(cmd.Context(), st, records[i], lane)
 				}
-				if k != kinds.StandDown {
+				if k != kinds.StandDown && ownedBy == "" {
 					if records[i].To, err = stemmed(cmd.Context(), st, records[i].Drive, records[i].To); err != nil {
 						return err
 					}

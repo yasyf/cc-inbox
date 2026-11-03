@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reaches that same lane, so the record follows the stem to whichever lane holds
   it next. A name the stem does not reach, such as a running older lane beside a
   newer one, an unregistered name or a lane on another drive, is stored as typed,
-  and a stand-down keeps the lane it stands down. A reply's default recipient is
+  and a stand-down or an `--owned-by` decide keeps the lane it is about. A reply's default recipient is
   stored the same way.
 
 ### Removed

@@ -87,6 +87,10 @@ func TestAPostToANumberedLaneIsStoredForItsStemWhileTheStemReachesThatLane(t *te
 	if alone != `["sv"]` || older != `["sv-2"]` || newer != `["sv"]` || unregistered != `["other-1"]` {
 		t.Fatalf("stored recipients alone %s, older %s, newer %s, unregistered %s; want sv while the stem reaches the named lane, the name otherwise", alone, older, newer, unregistered)
 	}
+	owned, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "decide", "--owned-by", "sv-desk", "--to", "sv-3", "--text", "sv-desk owns sv-3", "--json")
+	if err != nil || !strings.Contains(owned, `"to":["sv-3"]`) {
+		t.Fatalf("an owned-by decide = %q, %v; want the owned lane kept by name", owned, err)
+	}
 	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--reader", "sv-3")
 	if err != nil || !strings.Contains(out, "NOTE root -> sv first") || !strings.Contains(out, "NOTE root -> sv third") || strings.Contains(out, "second") {
 		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's mail and none sent to the running sv-2", out, err)

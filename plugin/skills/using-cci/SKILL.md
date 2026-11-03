@@ -83,7 +83,7 @@ post, thread binding or spawn record came last, or the successor a stand-down
 named. A running `signal-valkey-2` still reads what is addressed to it by name.
 `cci post` stores `--to signal-valkey-2` as `--to signal-valkey` whenever the stem
 reaches that same lane, so the record follows the stem to whichever lane holds it
-next; a stand-down keeps the name it stands down.
+next; a stand-down or an `--owned-by` decide keeps the lane it is about.
 Once it stands down, that mail reaches the successor it named, else the stem's
 newest live lane, and `cci post` prints a line naming the stem. The lane holding
 a stem reads, in its tail, hook mail and open asks, what was addressed to the
