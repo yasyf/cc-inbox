@@ -13,6 +13,8 @@ import (
 
 	"github.com/yasyf/cc-inbox/client"
 	"github.com/yasyf/cc-inbox/internal/cli"
+	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -312,6 +314,40 @@ func TestWhoReadsTheSessionsBoundToADriveAndNoOthers(t *testing.T) {
 
 	if len(rows) != 1 || rows[0].Lane != "desk-1" || rows[0].Session != "aaaa1111" || rows[0].StoodDown {
 		t.Fatalf("rows = %+v", rows)
+	}
+}
+
+func TestASeqFromTailNamesAnotherNodesRecordOnANodeThatIsNoOwner(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	ctx := context.Background()
+	if err := relay.SaveConfig(home, relay.Config{Mesh: "machine", URL: "https://relay.invalid", Tier: "service"}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := store.Row{Origin: "bbbbbbbbbbbbbbbb", OriginSeq: 100, Drive: "d", Lane: "lane-a", Kind: kinds.Ask, At: time.Now(), Text: "read a build", To: []string{"desk"}, Source: "post"}
+	if _, err := st.Apply(ctx, []store.Row{row}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	asks, err := client.Tail(ctx, client.Query{Drive: "d", Kinds: []string{"ask"}})
+	if err != nil || len(asks) != 1 {
+		t.Fatalf("asks = %+v, %v", asks, err)
+	}
+
+	answer := post(t, client.Draft{Drive: "d", Lane: "desk", Kind: "answer", Text: "read", To: []string{"lane-a"}, Re: asks[0].Seq, Resolves: asks[0].Seq})
+
+	if answer.Re != asks[0].Seq || answer.Resolves != asks[0].Seq {
+		t.Fatalf("answer re %d resolves %d, want %d", answer.Re, answer.Resolves, asks[0].Seq)
+	}
+	open, err := client.Open(ctx, "d", "ask")
+	if err != nil || len(open) != 0 {
+		t.Fatalf("open = %+v, %v", open, err)
 	}
 }
 
