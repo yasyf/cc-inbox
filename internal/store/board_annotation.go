@@ -8,6 +8,13 @@ import (
 	"slices"
 )
 
+const boardColdEffectsSQL = `INSERT INTO board_query_effects(scope,source_seq,drive,axis,key)
+SELECT ?,source_seq,drive,axis,key FROM record_closer_keys
+UNION SELECT ?,seq,'','self',CAST(seq AS TEXT) FROM records
+UNION SELECT ?,seq,'','incident',CAST(seq AS TEXT) FROM records
+UNION SELECT ?,seq,'','resolve',CAST(resolves AS TEXT) FROM records WHERE resolves!=0
+UNION SELECT ?,source_seq,'','resolve',CAST(target AS TEXT) FROM record_also_resolves`
+
 func boardOpenerKeys(ctx context.Context, tx *sql.Tx, scope *boardScope, category int, record Record) error {
 	if !record.Kind.Opens() || !record.Tracked() {
 		return nil
@@ -109,6 +116,51 @@ func boardAnnotateErrors(ctx context.Context, tx *sql.Tx, st *Store, scope *boar
 		}
 		if _, err := tx.ExecContext(ctx, "UPDATE board_query_rows SET annotation_error=? WHERE scope=? AND category=? AND seq=?", message, scope.id, key[0], key[1]); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// boardColdMatches returns nil when a malformed row fails the scan, so the
+// per-record probes pin that failure to its own row.
+func boardColdMatches(ctx context.Context, tx *sql.Tx, st *Store, filter Filter) map[int64]bool {
+	filter.IncludeExpired = true
+	where, params := filter.where(st.Self(), st.Now())
+	rows, err := tx.QueryContext(ctx, "SELECT seq FROM records WHERE ("+where+")", params...)
+	if err != nil {
+		return nil
+	}
+	matches := map[int64]bool{}
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			_ = rows.Close()
+			return nil
+		}
+		matches[seq] = true
+	}
+	if errors.Join(rows.Err(), rows.Close()) != nil {
+		return nil
+	}
+	return matches
+}
+
+// boardAnnotateColdErrors reads one drive's closure at once. A batch that
+// succeeds proves every row in it, since each row reads a subset of the batch.
+func boardAnnotateColdErrors(ctx context.Context, tx *sql.Tx, st *Store, scope *boardScope, opened map[string][]int64) error {
+	snapshot := &BoardSnapshot{store: st, tx: tx, now: st.Now()}
+	for drive, seqs := range opened {
+		if _, err := snapshot.OpenAmong(ctx, drive, seqs); err == nil {
+			continue
+		}
+		for _, seq := range seqs {
+			_, annotationErr := snapshot.OpenAmong(ctx, drive, []int64{seq})
+			if annotationErr == nil {
+				continue
+			}
+			if _, err := tx.ExecContext(ctx, "UPDATE board_query_rows SET annotation_error=? WHERE scope=? AND "+everyBoardCategory+" AND seq=? AND error=''", annotationErr.Error(), scope.id, seq); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

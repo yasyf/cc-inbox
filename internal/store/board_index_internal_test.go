@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -64,6 +65,91 @@ func TestBoardProjectionBodyAndCrossDriveWithdrawal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestBoardColdProvisionMatchesIncrementalProjection(t *testing.T) {
+	st, index, spec, peer := boardFixture(t)
+	if _, err := index.Provision(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(spec.CWD, "ruling")
+	if err := os.WriteFile(path, []byte("close #123\r\nmerge-row-1234"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	post := func(record Record) Record {
+		t.Helper()
+		posted, _, err := st.Post(t.Context(), record, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return posted
+	}
+	ruling := post(Record{Drive: "d", Lane: "root", Kind: kinds.Go, Text: "short #123", Refs: Refs{Path: path}, To: []string{PeerAddress(peer)}})
+	opener := post(Record{Drive: "d", Lane: "root", Kind: kinds.Decide, Text: "decide #124", Refs: Refs{Targets: []string{"service"}}})
+	post(Record{Drive: "d", Lane: "root", Kind: kinds.Decide, Text: "healthy #125", Topic: "healthy"})
+	closer := post(Record{Drive: "d", Lane: "root", Kind: kinds.Answer, Text: "answer", Re: opener.Seq})
+	post(Record{Drive: "d", Lane: "builder", Kind: kinds.Head, Text: "head", Refs: Refs{PRs: []PR{{Repo: "owner/repo", Number: 123}}}})
+	post(Record{Drive: "foreign", Lane: "root", Kind: kinds.Decide, Text: "foreign #126", To: []string{PeerAddress(peer)}})
+	post(Record{Drive: "other", Lane: "root", Kind: kinds.Withdraw, Text: "withdraw", Resolves: ruling.Seq, To: []string{PeerAddress(peer)}})
+	post(Record{Drive: "d", Lane: "noise", Kind: kinds.Note, Text: "unselected #127"})
+	malformed := post(Record{Drive: "d", Lane: "noise", Kind: kinds.Note, Text: "malformed recipients"})
+	if _, err := st.db.ExecContext(t.Context(), "UPDATE records SET refs='{' WHERE seq=?", closer.Seq); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(t.Context(), "UPDATE records SET recipients='[' WHERE seq=?", malformed.Seq); err != nil {
+		t.Fatal(err)
+	}
+	if err := index.Read(t.Context(), st, spec, BoardSelection{}, func(*BoardSnapshot, *BoardResult) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	incremental := boardProjectionRows(t, st)
+	if _, err := index.Provision(t.Context(), spec); err != nil {
+		t.Fatal(err)
+	}
+	cold := boardProjectionRows(t, st)
+	if !slices.Equal(cold, incremental) {
+		t.Fatalf("cold projection differs:\ncold=%q\nincremental=%q", cold, incremental)
+	}
+	var malformedRows, annotatedRows int
+	if err := st.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM board_query_rows WHERE seq=? AND error!=''", malformed.Seq).Scan(&malformedRows); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM board_query_rows WHERE annotation_error!=''").Scan(&annotatedRows); err != nil {
+		t.Fatal(err)
+	}
+	if malformedRows != len(spec.Filters) || annotatedRows != 1 {
+		t.Fatalf("malformed rows=%d annotated rows=%d", malformedRows, annotatedRows)
+	}
+}
+
+func boardProjectionRows(t *testing.T, st *Store) []string {
+	t.Helper()
+	var out []string
+	for _, query := range []string{
+		"SELECT category||'|'||seq||'|'||path||'|'||lane||'|'||IFNULL(expires_at,'')||'|'||error||'|'||annotation_error||'|'||active FROM board_query_rows ORDER BY category,seq",
+		"SELECT category||'|'||axis||'|'||key||'|'||seq FROM board_query_keys ORDER BY category,axis,key,seq",
+		"SELECT category||'|'||seq||'|'||drive||'|'||axis||'|'||key FROM board_query_openers ORDER BY category,seq,drive,axis,key",
+		"SELECT source_seq||'|'||drive||'|'||axis||'|'||key FROM board_query_effects ORDER BY source_seq,drive,axis,key",
+		"SELECT lane||'|'||n FROM board_query_lanes ORDER BY lane",
+		"SELECT path||'|'||regular||'|'||error||'|'||HEX(body) FROM board_query_bodies ORDER BY path",
+	} {
+		rows, err := st.db.QueryContext(t.Context(), query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var row string
+			if err := rows.Scan(&row); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			out = append(out, row)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return out
 }
 
 func TestBoardProjectionClosingCutRejectsBodyMutation(t *testing.T) {

@@ -77,13 +77,13 @@ SELECT n+1,?,'noise','ask',?,'ignored','post','changed-watch-'||n,'["other"]',?,
 		if err := st.Close(); err != nil {
 			t.Fatal(err)
 		}
-		for _, query := range []string{"DROP TRIGGER IF EXISTS record_root_audience_insert", "DROP TRIGGER IF EXISTS record_root_audience_update", "DROP TRIGGER IF EXISTS record_root_audience_delete", "DROP INDEX IF EXISTS record_root_audience_stream", "DROP INDEX IF EXISTS record_root_audience_kind_stream", "DROP TABLE IF EXISTS record_root_audience"} {
+		for _, query := range []string{"DROP TRIGGER IF EXISTS record_root_audience_insert", "DROP TRIGGER IF EXISTS record_root_audience_update", "DROP TRIGGER IF EXISTS record_root_audience_delete", "DROP INDEX IF EXISTS record_root_audience_parent", "DROP INDEX IF EXISTS record_root_audience_stream", "DROP INDEX IF EXISTS record_root_audience_kind_stream", "DROP TABLE IF EXISTS record_root_audience"} {
 			if _, err := db.ExecContext(t.Context(), query); err != nil {
 				t.Fatal(err)
 			}
 		}
 		var rootObjects int
-		if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('record_root_audience','record_root_audience_stream','record_root_audience_kind_stream','record_root_audience_insert','record_root_audience_update','record_root_audience_delete')").Scan(&rootObjects); err != nil || rootObjects != 0 {
+		if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('record_root_audience','record_root_audience_parent','record_root_audience_stream','record_root_audience_kind_stream','record_root_audience_insert','record_root_audience_update','record_root_audience_delete')").Scan(&rootObjects); err != nil || rootObjects != 0 {
 			t.Fatalf("unenrolled root audience objects=%d, error=%v", rootObjects, err)
 		}
 		t.Log("WATCH_CHANGED_GENERATION_UNENROLLED_SCOPE root_audience_objects=0 route=general unbounded_reference=true")

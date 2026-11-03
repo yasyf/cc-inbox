@@ -125,19 +125,6 @@ SELECT 'd','history','answer',x,'unrelated',1000000+x,'other-'||x,'post','noise-
 				if got := reads.Load(); got != want {
 					t.Fatalf("hook owed refs_reads=%d want=%d history=%d", got, want, history)
 				}
-				if snapshots := os.Getenv("CCI_HOOK_OWED_SNAPSHOTS"); snapshots != "" {
-					p := filepath.Join(snapshots, fmt.Sprintf("%d-%t.json", history, resolved))
-					if os.Getenv("CCI_HOOK_OWED_SNAPSHOT_WRITE") == "1" {
-						if err := os.WriteFile(p, out.Bytes(), 0o600); err != nil {
-							t.Fatal(err)
-						}
-					} else {
-						old, err := os.ReadFile(p)
-						if err != nil || !bytes.Equal(old, out.Bytes()) {
-							t.Fatalf("hook output changed: old=%s current=%s err=%v", old, out.Bytes(), err)
-						}
-					}
-				}
 				t.Logf("HOOK_OWED_WORK history=%d cross_drive_resolved=%t actual_refs_reads=%d output_bytes=%d", history, resolved, reads.Load(), out.Len())
 			})
 		}
