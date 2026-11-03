@@ -50,7 +50,7 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, dr
 			return err
 		}
 		if held == lane {
-			return fmt.Errorf("lane %s is held by live thread %s %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d", lane, holder.Name, holder.Key(), seen, defect.Seq)
+			return reported{fmt.Errorf("lane %s is held by live thread %s %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d", lane, holder.Name, holder.Key(), seen, defect.Seq)}
 		}
 	}
 	return nil

@@ -78,22 +78,25 @@ func newPostCmd() *cobra.Command {
 			}
 			var err error
 			if parsedKind, err = kinds.Parse(kind); err != nil {
-				return err
+				return refusedBeforeStore(cmd, drive, lane, kind, args, text, err)
 			}
 			if successor != "" && (parsedKind != kinds.StandDown || len(r.To) != 1) {
-				return errors.New("--successor names who takes over the one --to lane of a --kind stand-down record")
+				return refusedBeforeStore(cmd, drive, lane, kind, args, text, errors.New("--successor names who takes over the one --to lane of a --kind stand-down record"))
 			}
 			if ownedBy != "" && (parsedKind != kinds.Decide || len(r.To) != 1) {
-				return errors.New("--owned-by names the lane that owns the one --to lane of a --kind decide record")
+				return refusedBeforeStore(cmd, drive, lane, kind, args, text, errors.New("--owned-by names the lane that owns the one --to lane of a --kind decide record"))
 			}
 			for _, seq := range append(slices.Clone(reSeqs), resolvesSeqs...) {
 				if seq < 0 {
 					return errors.New("--re-seq and --resolves-seq must be nonnegative")
 				}
 			}
-			return validateTargets(len(re)+len(reSeqs), len(resolves)+len(resolvesSeqs), pairwise)
+			if err := validateTargets(len(re)+len(reSeqs), len(resolves)+len(resolvesSeqs), pairwise); err != nil {
+				return refusedBeforeStore(cmd, drive, lane, kind, args, text, err)
+			}
+			return nil
 		},
-		RunE: untilStored(withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+		RunE: untilStored(withStore(refusalsBlock(&drive, &lane, &kind, &text, func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
 			var (
 				err      error
@@ -140,6 +143,9 @@ func newPostCmd() *cobra.Command {
 					re = append(re, "--re "+m[1])
 				}
 				return fmt.Errorf("a withdrawn go is one withdraw record every lane reads as gone, never a sentence in a %s record: post cci post --kind withdraw %s --text '<why>', then this record without the withdrawal", cmp.Or(string(k), "note"), cmp.Or(strings.Join(re, " "), "--re <go seq>"))
+			}
+			if err := refuseProseEnd(k, text, lane); err != nil {
+				return err
 			}
 			if quoted != "" {
 				text += " " + quoted
@@ -237,11 +243,19 @@ func newPostCmd() *cobra.Command {
 			}
 			var bind *store.LaneBinding
 			if self, window, err := peerIdentity(); os.Getenv(unsentEnv) == "" && err == nil && window.PID != 0 {
+				if err := refuseUnregistered(cmd.Context(), st, r.Drive, lane); err != nil {
+					return err
+				}
 				if err := refuseSecondBinder(cmd.Context(), st, self, r.Drive, lane, at); err != nil {
 					return err
 				}
 				bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
 			}
+			refusals, err := st.OpenRefusals(cmd.Context(), r.Drive, lane)
+			if err != nil {
+				return err
+			}
+			records[0] = records[0].Resolving(refusals)
 			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
 			if errors.Is(err, store.ErrUnconfirmed) {
 				if os.Getenv(unsentEnv) != "" {
@@ -261,7 +275,7 @@ func newPostCmd() *cobra.Command {
 				}
 			}
 			return nil
-		})),
+		}))),
 	}
 	f := cmd.Flags()
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")

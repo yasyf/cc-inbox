@@ -43,6 +43,15 @@ Address lanes with `--to`; when an action needs the owner, use `--to owner`.
 A post that exits 75 was not stored: the bus is down. With `--lane` and
 `--drive` it is kept, and the next `cci post` that reaches the store stores it;
 without them, repost it once the bus answers. Never treat exit 75 as sent.
+A launched lane's turn ends only on a typed record: `cci hook stop` refuses
+every other stop and prints the commands. The records that end a turn are
+`done`, `stopped`, `stand-down`, a `handoff` with no doc, and an open `ask`,
+`blocker` or `blocked`. To wait on an event, post `blocked` with `--pr`,
+`--target`, `--lane-ref`, or a `card-` id in the text; that event wakes the lane.
+A second stop with nothing new posted writes the blocker for the lane.
+A refused `cci post` stores a `blocker` holding the refusal and the refused
+words, and the lane's next stored post closes it. A new lane's first post needs
+a `spawn` record naming it, or `CLAUDE_LONG_RUNNING_LANE` set to its name.
 A lane that has not started yet is addressed like any other and reads the
 record once it binds. `cci post` refuses only a never-seen bare `--to` lane
 that looks like a slip for a live one, one or two edits from it or an older

@@ -44,6 +44,8 @@ type Payload struct {
 	Source         string `json:"source"`
 	Prompt         string `json:"prompt"`
 	ToolName       string `json:"tool_name"`
+	LastMessage    string `json:"last_assistant_message"`
+	Error          string `json:"error"`
 }
 
 // Key is the session thread the hook fired in: the root thread, or the
@@ -219,8 +221,26 @@ func AnnounceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 	return st.SetParent(ctx, p.Key(), agent.Parent)
 }
 
-// SubagentStop retires the subagent's peer until its next tool call.
-func SubagentStop(ctx context.Context, st *store.Store, p Payload) error {
+// SubagentStop retires the subagent's peer until its next tool call, unless the
+// subagent is the lane its binding names and its turn has not ended on a typed
+// record. A helper posting under its parent's lane stops freely.
+func SubagentStop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
+	b, ok, err := st.Binding(ctx, p.Key())
+	if err != nil {
+		return err
+	}
+	if ok && b.Lane != "" {
+		peer, err := st.Peer(ctx, p.Key())
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return err
+		}
+		if err == nil && store.SameLane(peer.AgentName, b.Lane) {
+			refused, err := endTurn(ctx, st, p, b, w)
+			if err != nil || refused {
+				return err
+			}
+		}
+	}
 	return st.Retire(ctx, p.Key())
 }
 
@@ -339,31 +359,42 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 	return ack, nil
 }
 
-// Stop blocks a lane's thread's stop once per record, about the newest open
-// ask, blocker or question-ending decide that names the lane first, came from
-// another lane, and has waited past overdue; the next stop passes. A thread's
-// first stop only records the head, so older records never block.
+// Stop holds a lane's thread until its turn can end: first on an overdue ask
+// addressed to it, then on a turn with open work and no typed record.
 func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 	b, ok, err := st.Binding(ctx, p.Key())
 	if err != nil || !ok || b.Lane == "" {
 		return err
 	}
+	nudged, err := nudgeOverdue(ctx, st, p, b, w)
+	if err != nil || nudged {
+		return err
+	}
+	_, err = endTurn(ctx, st, p, b, w)
+	return err
+}
+
+// nudgeOverdue blocks the stop once per record, about the newest open ask,
+// blocker or question-ending decide that names the lane first, came from
+// another lane, and has waited past overdue; the next stop passes. A thread's
+// first stop only records the head, so older records never block.
+func nudgeOverdue(ctx context.Context, st *store.Store, p Payload, b store.Binding, w io.Writer) (bool, error) {
 	cursor := "stop-" + p.Key().String()
 	nudged, ok, err := st.Cursor(ctx, cursor, b.Drive)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !ok {
-		return watermark(ctx, st, cursor, b.Drive)
+		return false, watermark(ctx, st, cursor, b.Drive)
 	}
 	open, err := owed(ctx, st, b.Drive, b.Lane)
 	if err != nil {
-		return err
+		return false, err
 	}
 	now := st.Now()
 	late := slices.DeleteFunc(open, func(r store.Record) bool { return r.Seq <= nudged || now.Sub(r.At) < overdue })
 	if len(late) == 0 {
-		return nil
+		return false, nil
 	}
 	newest := late[len(late)-1]
 	reason := fmt.Sprintf("cci #%d %s from %s to %s has waited %dm unanswered: %s. Answer it, then close it with cci post --resolves %d.", newest.Seq, strings.ToUpper(string(newest.Kind)), newest.Lane, b.Lane, int(now.Sub(newest.At).Minutes()), render.Clip(strings.Join(strings.Fields(newest.Text), " "), openWidth), newest.Seq)
@@ -371,9 +402,9 @@ func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 		reason += fmt.Sprintf(" %d older overdue asks also wait.", len(late)-1)
 	}
 	if err := json.NewEncoder(w).Encode(map[string]string{"decision": "block", "reason": reason}); err != nil {
-		return err
+		return false, err
 	}
-	return st.SetCursor(ctx, cursor, b.Drive, newest.Seq)
+	return true, st.SetCursor(ctx, cursor, b.Drive, newest.Seq)
 }
 
 func additionalContext(w io.Writer, event, text string) error {

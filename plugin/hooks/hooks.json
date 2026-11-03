@@ -29,6 +29,13 @@
         ]
       }
     ],
+    "StopFailure": [
+      {
+        "hooks": [
+          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook stop-failure", "timeout": 10 }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [

@@ -430,7 +430,7 @@ func TestPostToolUseAnnouncesAgentsAndDeliversTheirLanes(t *testing.T) {
 	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "GO root -> web ship web") || strings.Contains(got, "ship api") {
 		t.Fatalf("web agent's delivery = %q", got)
 	}
-	if err := hook.SubagentStop(ctx, st, api); err != nil {
+	if err := hook.SubagentStop(ctx, st, api, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := st.Peer(ctx, api.Key()); !got.Superseded {
