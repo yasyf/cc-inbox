@@ -26,18 +26,20 @@ const (
 )
 
 type TailOptions struct {
-	Filter store.Filter
-	Cursor string
-	Limit  int
-	Budget int
-	Width  int
-	JSON   bool
-	Resume string
-	Open   bool
-	Oldest bool
-	Fold   int
-	Notes  io.Writer
-	Defer  bool
+	Filter  store.Filter
+	Cursor  string
+	Limit   int
+	Budget  int
+	Width   int
+	JSON    bool
+	Resume  string
+	Open    bool
+	Oldest  bool
+	Fold    int
+	Notes   io.Writer
+	Defer   bool
+	Compact bool
+	Reader  string
 }
 
 // TailResult reports what a Tail printed. Ack holds the cursor moves a
@@ -73,7 +75,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		f.Limit = opts.Limit
 	}
 	f.Descending = newest || opts.Limit > 0
-	v := view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold}
+	v := view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold, Compact: opts.Compact, Reader: opts.Reader}
 	records, rendered, folded, paged, err := tailPages(ctx, st, f, v, opts.Budget, opts.Limit > 0)
 	if err != nil {
 		return TailResult{}, err

@@ -8,16 +8,16 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	mcp "github.com/yasyf/cc-interact/channel"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/render"
+	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 const (
@@ -237,9 +237,9 @@ func readTool() mcp.Tool {
 			}
 			share := max(cmp.Or(in.Budget, readBudget)/len(records), 1)
 			var b strings.Builder
-			w := wire{}
+			w := render.Wire{Now: time.Now()}
 			for _, r := range records {
-				w.line(&b, r, 0)
+				b.WriteString(w.Line(r, 0) + "\n")
 				if r.Refs.Path == "" {
 					continue
 				}
@@ -514,13 +514,13 @@ func renderWire(ctx context.Context, reader string, width int, args []string) (s
 	}
 	var last int64
 	var b strings.Builder
-	w := wire{}
+	w := render.Wire{Now: time.Now()}
 	for _, r := range records {
 		clip := width
 		if reader != "" && slices.Contains(r.To, reader) {
 			clip = 0
 		}
-		w.line(&b, r, clip)
+		b.WriteString(w.Line(r, clip) + "\n")
 		last = max(last, r.Seq)
 	}
 	for _, note := range strings.Split(strings.TrimSpace(errOut), "\n") {
@@ -534,84 +534,17 @@ func renderWire(ctx context.Context, reader string, width int, args []string) (s
 	return strings.TrimSpace(b.String()), last, false
 }
 
-type wireRecord struct {
-	Seq      int64     `json:"seq"`
-	Lane     string    `json:"lane"`
-	Kind     string    `json:"kind"`
-	At       time.Time `json:"at"`
-	Text     string    `json:"text"`
-	To       []string  `json:"to"`
-	Re       int64     `json:"re"`
-	Resolves int64     `json:"resolves"`
-	Also     []int64   `json:"also_resolves"`
-	Topic    string    `json:"topic"`
-	Status   string    `json:"status"`
-	Refs     struct {
-		PRs  []json.RawMessage `json:"prs"`
-		Path string            `json:"path"`
-	} `json:"refs"`
-}
-
-func wireRecords(out string) ([]wireRecord, error) {
-	var records []wireRecord
+func wireRecords(out string) ([]store.Record, error) {
+	var records []store.Record
 	for _, line := range strings.Split(out, "\n") {
 		if !strings.HasPrefix(line, "{") {
 			continue
 		}
-		var r wireRecord
+		var r store.Record
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			return nil, fmt.Errorf("decode record: %w", err)
 		}
 		records = append(records, r)
 	}
 	return records, nil
-}
-
-var leadingStamp = regexp.MustCompile(`^\s*(?:R\d+ \()?\d{1,2}:\d\d ?[AP]M\)?:? ?`)
-
-type wire struct{ minute string }
-
-func (w *wire) line(b *strings.Builder, r wireRecord, clip int) {
-	if minute := r.At.In(time.Local).Format("3:04 PM"); minute != w.minute {
-		w.minute = minute
-		fmt.Fprintf(b, "@%s\n", minute)
-	}
-	fmt.Fprintf(b, "%d %s", r.Seq, r.Kind)
-	if r.Status == "closed" {
-		b.WriteString(" closed")
-	}
-	b.WriteString(" " + r.Lane)
-	if len(r.To) > 0 {
-		b.WriteString(">" + strings.Join(r.To, ","))
-	}
-	if r.Re != 0 {
-		fmt.Fprintf(b, " ^%d", r.Re)
-	}
-	for _, seq := range append([]int64{r.Resolves}, r.Also...) {
-		if seq != 0 {
-			fmt.Fprintf(b, " x%d", seq)
-		}
-	}
-	text := leadingStamp.ReplaceAllString(r.Text, "")
-	text = strings.TrimPrefix(strings.TrimPrefix(text, r.Lane+": "), r.Lane+" ")
-	for _, raw := range r.Refs.PRs {
-		repo, n, found := strings.Cut(word(raw), "#")
-		if !found {
-			repo, n = "", repo
-		}
-		if strings.Contains(text, "#"+n) {
-			continue
-		}
-		b.WriteString(" " + repo[strings.LastIndex(repo, "/")+1:] + "#" + n)
-	}
-	if r.Topic != "" && !strings.Contains(text, r.Topic) {
-		b.WriteString(" t:" + r.Topic)
-	}
-	if r.Refs.Path != "" {
-		b.WriteString(" +")
-	}
-	if clip > 0 && utf8.RuneCountInString(text) > clip {
-		text = string([]rune(text)[:clip-1]) + "…"
-	}
-	b.WriteString(" " + text + "\n")
 }

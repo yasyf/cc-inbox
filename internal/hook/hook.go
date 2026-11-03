@@ -257,7 +257,7 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 			f.Mute, f.ToKinds = sub.Mute, sub.ToKinds
 		}
 	}
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true, Defer: true}, &tail)
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Compact: true, Reader: b.Lane, Resume: "the next tool call", Open: true, Defer: true}, &tail)
 	if err != nil {
 		return err
 	}

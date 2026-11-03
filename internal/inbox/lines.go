@@ -60,6 +60,8 @@ func Annotate(ctx context.Context, st openerReader, records []store.Record) erro
 
 type view struct {
 	JSON     bool
+	Compact  bool
+	Reader   string
 	Width    int
 	Fold     int
 	Untagged bool
@@ -101,6 +103,7 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 func textLines(records []store.Record, replies map[int64][]store.Record, v view, now time.Time) ([]string, []bool) {
 	out := make([]string, len(records))
 	folded := make([]bool, len(records))
+	wire := render.Wire{Now: now}
 	line := func(r store.Record, width int) string {
 		switch {
 		case v.Whole:
@@ -111,6 +114,14 @@ func textLines(records []store.Record, replies map[int64][]store.Record, v view,
 		return render.Brief(r, now, width)
 	}
 	for i, r := range records {
+		if v.Compact {
+			width := compactWidth(r, v)
+			if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) {
+				width, folded[i] = v.Fold, true
+			}
+			out[i] = wire.Line(r, width) + marks(r.Seq, replies[r.Seq])
+			continue
+		}
 		text := line(r, v.Width)
 		if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) && utf8.RuneCountInString(text) > v.Fold {
 			text, folded[i] = line(r, v.Fold), true
@@ -138,4 +149,14 @@ func marks(seq int64, replies []store.Record) string {
 		fmt.Fprintf(&b, " [%s %s]", label, r.Name())
 	}
 	return b.String()
+}
+
+func compactWidth(r store.Record, v view) int {
+	switch {
+	case v.Reader == "":
+		return v.Width
+	case slices.Contains(r.To, v.Reader):
+		return 0
+	}
+	return render.FoldWidth
 }
