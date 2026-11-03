@@ -43,6 +43,7 @@ const (
 	// MaintenanceDrive holds the records the daemon writes about the store
 	// itself, such as a migration that held every client open.
 	MaintenanceDrive = "cci"
+	maintainRetry    = time.Minute
 )
 
 func Definition() (daemonkit.Daemon, error) {
@@ -172,6 +173,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 		loop.Run(syncCtx)
 	})
 	loops.Go(func() { up.Follow(syncCtx, UpgradeInterval) })
+	loops.Go(func() { maintainIndexes(syncCtx, r.home) })
 	go func() {
 		loops.Wait()
 		close(p.synced)
@@ -200,6 +202,21 @@ func (p *Product) syncImports(ctx context.Context) error {
 		case <-ctx.Done():
 			return nil
 		case <-tick.C:
+		}
+	}
+}
+
+func maintainIndexes(ctx context.Context, home string) {
+	for {
+		_, err := store.MaintainIndexes(ctx, home)
+		if err == nil || ctx.Err() != nil {
+			return
+		}
+		slog.Warn("cci daemon could not maintain the store's indexes yet", "err", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(maintainRetry):
 		}
 	}
 }
