@@ -2064,3 +2064,17 @@ func TestASpawnRecordNamesTheLaneCciWhoListsUntilItBinds(t *testing.T) {
 		t.Fatalf("who --all --lane p8a-step7-3 once bound = %q, %v", out, err)
 	}
 }
+
+func TestReadsTakeTheFlagsLanesReachFor(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "note", "--text", "needle "+strings.Repeat("hay ", 50)+"TAIL"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "search", "needle", "--drive", "d", "--width", "60")
+	if err != nil || !strings.Contains(out, "needle") || strings.Contains(out, "TAIL") {
+		t.Errorf("search needle --width 60 = %q, %v; want the match clipped to 60 characters", out, err)
+	}
+	if out, err := run(t, "tail", "--drive", "d", "--since", "2000-01-01"); err != nil || !strings.Contains(out, "needle") {
+		t.Errorf("tail --since 2000-01-01 = %q, %v; want the record posted after that date", out, err)
+	}
+}

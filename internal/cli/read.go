@@ -213,9 +213,10 @@ func newGrepCmd() *cobra.Command {
 		ignoreCase bool
 	)
 	cmd := &cobra.Command{
-		Use:   "grep PATTERN",
-		Short: "Search whole record lines (kind, lane, topic, text, refs), newest first",
-		Args:  cobra.ExactArgs(1),
+		Use:     "grep PATTERN",
+		Aliases: []string{"search"},
+		Short:   "Search whole record lines (kind, lane, topic, text, refs), newest first",
+		Args:    cobra.ExactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			expr := args[0]
 			if fixed {
@@ -233,10 +234,11 @@ func newGrepCmd() *cobra.Command {
 				return err
 			}
 			f.IncludeExpired = true
-			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.json, cmd.OutOrStdout(), tailNotes(cmd, false))
+			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.width, rf.json, cmd.OutOrStdout(), tailNotes(cmd, false))
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
+	rf.registerWidth(cmd)
 	cmd.Flags().BoolVarP(&ignoreCase, "ignore-case", "i", true, "match case-insensitively; --ignore-case=false matches case exactly")
 	cmd.Flags().BoolVarP(&fixed, "fixed-strings", "F", false, "match PATTERN literally; the default reads it as a regular expression, so | alternates")
 	rf.registerLimit(cmd, "print at most this many matches, newest first")
