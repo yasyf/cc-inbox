@@ -31,19 +31,22 @@ var (
 	typedStamp      = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
 	leadingLabel    = regexp.MustCompile(`^\s*((?:\S+\s+){0,4}?)(` + clockLabel + `)(:?)`)
 	anyLabel        = regexp.MustCompile(clockLabel)
-	datedAfter      = regexp.MustCompile(`^,?\s*(?:on\s+)?(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b`)
+	datedAfter      = regexp.MustCompile(`^,?\s*(?:on\s+)?(?:(?i:yesterday)\b|(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b)`)
+	datedBefore     = regexp.MustCompile(`(?:\b(?i:yesterday)|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,?\s+\d{4})?|\b\d{4}-\d{2}-\d{2})[,\s]*(?:at\s+)?$`)
 	proseWithdrawal = regexp.MustCompile(`(?i)\bwithdraw(?:s|n|ing)?:?\s+(?:the\s+|root\s+|my\s+)?go(?:s|\s+records?)?\b[^.;]*`)
 	seqRef          = regexp.MustCompile(`#(\d+)\b`)
 	notGoRef        = regexp.MustCompile(`(?i)\([^)]*\)|\b(?:on|for|of)\s+#\d+\b`)
 )
 
 const (
-	clockLabel   = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
-	clockSkew    = 3 * time.Minute
-	refuseWithin = 3 * time.Hour
+	clockLabel = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
+	clockSkew  = 3 * time.Minute
 )
 
-var tenseWords = map[string]bool{"by": true, "until": true, "till": true, "before": true, "next": true, "eta": true, "due": true, "expected": true, "since": true}
+var (
+	tenseWords = map[string]bool{"by": true, "until": true, "till": true, "before": true, "next": true, "eta": true, "due": true, "expected": true, "scheduled": true, "planned": true, "since": true}
+	pastWords  = map[string]bool{"was": true, "were": true, "did": true, "had": true, "read": true, "ran": true, "began": true, "came": true, "went": true, "got": true, "sent": true, "left": true, "saw": true, "said": true, "told": true, "wrote": true, "made": true, "took": true, "broke": true, "fell": true}
+)
 
 func newPostCmd() *cobra.Command {
 	var (
@@ -547,11 +550,11 @@ func stamped(w io.Writer, text, lane string, at time.Time, label bool) (string, 
 	for _, m := range anyLabel.FindAllStringIndex(text, -1) {
 		typed := text[m[0]:m[1]]
 		d := off(typed)
-		if d <= clockSkew || datedAfter.MatchString(text[m[1]:]) || tensed(text[:m[0]]) {
+		if d <= clockSkew || datedAfter.MatchString(text[m[1]:]) || datedBefore.MatchString(text[:m[0]]) || lastWords(text[:m[0]], func(w string) bool { return tenseWords[w] }) {
 			continue
 		}
-		if d <= refuseWithin {
-			return "", fmt.Errorf("time %s in the text is %d minutes after the post time %s, so it names something that has not happened yet: write the time it happened, or put by, until or next before a time still ahead", typed, int(d.Minutes()), stamp)
+		if lastWords(text[:m[0]], past) && now.Add(d).Day() == now.Day() {
+			return "", fmt.Errorf("time %s in the text is %d minutes after the post time %s, so it names something that has not happened yet: write the time it happened or the date beside it, or put by, until or next before a time still ahead", typed, int(d.Minutes()), stamp)
 		}
 		if _, err := fmt.Fprintf(w, "cci: time %s in the text is later than the post time %s; stored as typed\n", typed, stamp); err != nil {
 			return "", err
@@ -560,14 +563,18 @@ func stamped(w io.Writer, text, lane string, at time.Time, label bool) (string, 
 	return strings.ReplaceAll(text, "{at}", stamp), nil
 }
 
-func tensed(before string) bool {
+func lastWords(before string, match func(string) bool) bool {
 	words := strings.Fields(strings.ToLower(before))
 	for _, word := range words[max(len(words)-4, 0):] {
-		if tenseWords[strings.Trim(word, ".,;:()'\"")] {
+		if match(strings.Trim(word, ".,;:()'\"")) {
 			return true
 		}
 	}
 	return false
+}
+
+func past(word string) bool {
+	return pastWords[word] || len(word) > 3 && strings.HasSuffix(word, "ed")
 }
 
 func labels(prefix, colon, lane string) bool {

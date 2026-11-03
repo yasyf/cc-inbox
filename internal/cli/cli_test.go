@@ -477,7 +477,7 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 		{name: "stamped label ahead of the clock", text: ahead + ": live on dev", stamp: true, want: "{at}: live on dev"},
 		{name: "stamped label after the lane's name", text: "root " + before + " count: 0 ungraded", stamp: true, want: "root {at} count: 0 ungraded"},
 		{name: "stamped text without a label", text: "live on dev", stamp: true, want: "{at} live on dev"},
-		{name: "time in an opening clause", text: "for his " + ahead + " ask", future: ahead},
+		{name: "time in an opening clause read as yesterday's", text: "for his " + ahead + " ask", want: "for his " + ahead + " ask", stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
 		{name: "later time inside the text", text: "live on dev, read " + ahead, future: ahead},
 		{name: "plan for a time ahead", text: "live on dev; next state by " + ahead, want: "live on dev; next state by " + ahead},
 		{name: "time a date follows", text: "per the owner's " + ahead + " Oct 30 ask", want: "per the owner's " + ahead + " Oct 30 ask"},
