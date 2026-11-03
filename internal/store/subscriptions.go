@@ -137,6 +137,25 @@ func (s *Store) Subscription(_ context.Context, w Window) (Subscription, bool, e
 	return sub, true, nil
 }
 
+// SubscriptionStamp names the state of w's subscription file, for a reader
+// that rereads it only when the stamp moves.
+type SubscriptionStamp struct {
+	ModTime int64
+	Size    int64
+}
+
+// SubscriptionStamp stats w's subscription file; a window with none stamps zero.
+func (s *Store) SubscriptionStamp(w Window) (SubscriptionStamp, error) {
+	info, err := os.Stat(s.subscriptionPath(w.PID))
+	if errors.Is(err, fs.ErrNotExist) {
+		return SubscriptionStamp{}, nil
+	}
+	if err != nil {
+		return SubscriptionStamp{}, fmt.Errorf("stat subscription: %w", err)
+	}
+	return SubscriptionStamp{ModTime: info.ModTime().UnixNano(), Size: info.Size()}, nil
+}
+
 // SessionSubscription finds the subscription session holds in any window.
 func (s *Store) SessionSubscription(_ context.Context, session string) (Subscription, bool, error) {
 	all, err := s.subscriptions()

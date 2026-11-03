@@ -22,6 +22,7 @@ var physicalIndexes = [...]namedIndex{
 	{"records_drive_kind_lane", "CREATE INDEX records_drive_kind_lane ON records(drive, kind, lane, seq)"},
 	{"records_drive_lane_score", "CREATE INDEX records_drive_lane_score ON records(drive, lane, (at * 1000000 + seq) DESC, seq ASC) WHERE kind != 'digest'"},
 	{"records_drive_tally", "CREATE INDEX records_drive_tally ON records(drive, kind, lane, at, expires_at)"},
+	{"records_at", "CREATE INDEX records_at ON records(at)"},
 	{"sessions_drive_lane", "CREATE INDEX sessions_drive_lane ON sessions(drive, lane)"},
 	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
 }

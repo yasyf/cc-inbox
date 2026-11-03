@@ -28,6 +28,7 @@ const (
 	Source       = "plugin:cc-inbox:" + Server
 	notifyMethod = "notifications/claude/channel"
 	batchKind    = "batch"
+	releaseTicks = 12
 )
 
 // Resumed is the channel flag a re-executed channel server runs with: Claude
@@ -118,12 +119,12 @@ func untilInitialized(in io.Reader, out io.Writer, initialized chan<- struct{}) 
 }
 
 func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, notify func(method string, params any) error) {
-	for ctx.Err() == nil {
+	for tick := 1; ctx.Err() == nil; tick++ {
 		sub, ok, err := st.Subscription(ctx, window)
 		switch {
 		case err == nil && ok:
 			err = follow(ctx, st, sub, channeled, notify)
-		case err == nil:
+		case err == nil && tick%releaseTicks == 0:
 			err = newerRelease()
 		}
 		var newer upgrade
@@ -296,8 +297,19 @@ func (m laneMail) has(ctx context.Context, st *store.Store, r store.Record) (boo
 }
 
 func untilChanged(ctx context.Context, st *store.Store, sub store.Subscription, stop context.CancelFunc) error {
-	for sleep(ctx, idle) {
-		now, ok, err := st.Subscription(ctx, sub.Window)
+	var seen store.SubscriptionStamp
+	for tick := 1; sleep(ctx, idle); tick++ {
+		stamp, err := st.SubscriptionStamp(sub.Window)
+		if err == nil && stamp != seen {
+			seen = stamp
+			var now store.Subscription
+			var ok bool
+			now, ok, err = st.Subscription(ctx, sub.Window)
+			if err == nil && (!ok || !reflect.DeepEqual(now, sub)) {
+				stop()
+				return nil
+			}
+		}
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -305,13 +317,11 @@ func untilChanged(ctx context.Context, st *store.Store, sub store.Subscription, 
 			stop()
 			return err
 		}
-		if !ok || !reflect.DeepEqual(now, sub) {
-			stop()
-			return nil
-		}
-		if err := newerRelease(); err != nil {
-			stop()
-			return err
+		if tick%releaseTicks == 0 {
+			if err := newerRelease(); err != nil {
+				stop()
+				return err
+			}
 		}
 	}
 	return nil
