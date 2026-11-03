@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -173,6 +174,42 @@ func TestATailFiltersByKindAndWindow(t *testing.T) {
 	none, err := client.Tail(context.Background(), client.Query{Drive: "d", Since: time.Now().Add(time.Hour)})
 	if err != nil || len(none) != 0 {
 		t.Fatalf("Tail after the window = %+v, %v", none, err)
+	}
+}
+
+func TestFollowDeliversEveryKindAddressedToRootAndOnlyTheBroadcastsItNames(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	start := post(t, client.Draft{Drive: "d", Lane: "lane-7", Kind: "note", Text: "before the watch"})
+	hold := post(t, client.Draft{Drive: "d", Lane: "owner-relay", Kind: "hold", Text: "hold #48889", PRs: []string{"48889"}, To: []string{"root"}})
+	post(t, client.Draft{Drive: "d", Lane: "lane-7", Kind: "note", Text: "a broadcast of a kind root does not follow"})
+	post(t, client.Draft{Drive: "d", Lane: "lane-7", Kind: "ask", Text: "addressed to another lane", To: []string{"lane-8"}})
+	report := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "report", Text: "hourly waste", To: []string{"root"}})
+	service := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "waste.rank", Text: "a kind cci has no name for", To: []string{"root"}})
+	incident := post(t, client.Draft{Drive: "d", Lane: "lane-8", Kind: "incident", Text: "api down"})
+	want := []int64{hold.Seq, report.Seq, service.Seq, incident.Seq}
+
+	ctx, stop := context.WithTimeout(context.Background(), 30*time.Second)
+	defer stop()
+	var got []int64
+	err := client.Follow(ctx, client.Watch{Drive: "d", Reader: "root", After: start.Seq, Kinds: []string{"incident"}}, func(r client.Record) error {
+		got = append(got, r.Seq)
+		if len(got) == len(want) {
+			stop()
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Follow delivered %v, want %v", got, want)
+	}
+}
+
+func TestKindsNamesEveryKindALanePostsButNoneOnlyCciWrites(t *testing.T) {
+	got := client.Kinds()
+	if !slices.Contains(got, "hold") || !slices.Contains(got, "report") || slices.Contains(got, "digest") {
+		t.Fatalf("Kinds = %v", got)
 	}
 }
 

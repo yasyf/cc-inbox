@@ -162,7 +162,7 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 	if drive != "" {
 		return drive, nil
 	}
-	if self := selfPeer(); self.Session != "" {
+	if self := SelfPeer(); self.Session != "" {
 		b, ok, err := st.Binding(ctx, self)
 		if err == nil && !ok {
 			_, b, ok, err = st.Owner(ctx, self)
@@ -235,7 +235,7 @@ func (f *readFlags) registerLimit(cmd *cobra.Command, usage string) {
 }
 
 func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, error) {
-	return f.filterPeer(ctx, st, selfPeer())
+	return f.filterPeer(ctx, st, SelfPeer())
 }
 
 func (f *readFlags) filterPeer(ctx context.Context, st *store.Store, peer store.PeerKey) (store.Filter, error) {
@@ -293,7 +293,8 @@ func parseSince(ctx context.Context, st *store.Store, s string) (int64, time.Tim
 	return 0, time.Time{}, fmt.Errorf("--since %q is not a seq, a duration, a clock time (9:00 AM, 21:30), a date (2026-10-26), or an RFC3339 time", s)
 }
 
-func selfPeer() store.PeerKey {
+// SelfPeer is the peer address of the Claude Code or Codex session running this process.
+func SelfPeer() store.PeerKey {
 	session := cmp.Or(os.Getenv(sessionEnv), os.Getenv(codexSessionEnv))
 	if session == "" {
 		return store.PeerKey{}
