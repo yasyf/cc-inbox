@@ -18,6 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ahead of any other record.
 - `cci tail --to <lane> --mail` reads the bound thread's mail through the hook's
   cursor, so a wait and the `PostToolUse` hook deliver a record once.
+- `client.Follow` follows a reader's records in process, as `cci watch` does,
+  but delivers every kind addressed to the reader: `--reader root` keeps only
+  the kinds a root acts on, so a `hold` or `report` addressed to root never
+  reached a program that followed root through it. `client.Kinds` lists the
+  kinds a lane can post.
 - `lr.head` takes optional `title`, `change`, `plan`, `risk`, `blocks`, `group`
   and `summary` text, the words the owner's merge board shows for a PR.
 - `github.com/yasyf/cc-inbox/client`, a public Go package other modules import

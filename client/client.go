@@ -1,6 +1,6 @@
 // Package client is the typed Go surface of the cci store for programs in other
-// modules. Post, Tail and Open write and read the records cci itself writes and
-// reads, in the store CCI_HOME names, under the rules cci applies.
+// modules. Post, Tail, Follow and Open write and read the records cci itself
+// writes and reads, in the store CCI_HOME names, under the rules cci applies.
 package client
 
 import (
@@ -245,6 +245,42 @@ func Open(ctx context.Context, drive string, names ...string) ([]Record, error) 
 		seqs = append(seqs, r.Seq)
 	}
 	return st.OpenAmong(ctx, drive, seqs)
+}
+
+// Watch selects what Follow delivers: the records after seq After addressed to
+// Reader or to this session's peer address, of every kind, and other lanes'
+// broadcasts of Kinds. With no After it starts past the drive's newest record.
+type Watch struct {
+	Drive  string
+	Reader string
+	After  int64
+	Kinds  []string
+}
+
+// Follow calls emit with each record w selects, oldest first, as the store takes
+// it, until ctx ends or emit fails. Unlike cci watch --reader root it never
+// narrows the kinds addressed to the reader, so a hold addressed to root arrives.
+func Follow(ctx context.Context, w Watch, emit func(Record) error) error {
+	selected, err := kinds.ParseAll(w.Kinds)
+	if err != nil {
+		return err
+	}
+	st, err := cli.OpenStore(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	filter := store.Filter{Drive: w.Drive, For: w.Reader, Peer: cli.SelfPeer().String(), Kinds: selected, After: w.After}
+	return inbox.Watch(ctx, st, inbox.WatchOptions{Filter: filter, Interval: time.Second, JSON: true}, func(r store.Record, _ string) error {
+		return emit(r)
+	})
+}
+
+// Kinds lists the kinds a lane can post, every fixed kind but those only cci writes.
+func Kinds() []string {
+	return slices.DeleteFunc(kinds.Names(), func(name string) bool {
+		return kinds.Kind(name).Spec().Internal
+	})
 }
 
 // Schema is one typed kind's table entry: its fields, identity and audience.

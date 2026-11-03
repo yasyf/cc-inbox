@@ -337,7 +337,7 @@ func newPostCmd() *cobra.Command {
 var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and was spawned with no name, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
 
 func threadLane(ctx context.Context, st *store.Store) (string, error) {
-	self := selfPeer()
+	self := SelfPeer()
 	if self.Session == "" {
 		return "", errNoLane
 	}

@@ -402,7 +402,7 @@ func announceSelf(ctx context.Context, st *store.Store) error {
 }
 
 func peerIdentity() (store.PeerKey, store.Window, error) {
-	self := selfPeer()
+	self := SelfPeer()
 	if self.Session == "" {
 		return store.PeerKey{}, store.Window{}, errNoPeerSession
 	}
@@ -732,7 +732,7 @@ func resolvePeer(ctx context.Context, st *store.Store, t, target string) (string
 			v, err = onePeer(ctx, st, peers.Filter{Origin: origin, Session: v.Session, Agent: agent})
 		}
 	}
-	if self := selfPeer(); errors.Is(err, sql.ErrNoRows) && origin == peers.LocalOrigin && self.Session != "" {
+	if self := SelfPeer(); errors.Is(err, sql.ErrNoRows) && origin == peers.LocalOrigin && self.Session != "" {
 		v, err = onePeer(ctx, st, peers.Filter{Origin: origin, Session: self.Session, Agent: rest})
 	}
 	if errors.Is(err, sql.ErrNoRows) {

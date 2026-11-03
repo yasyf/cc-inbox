@@ -78,7 +78,7 @@ func newDriveCmd() *cobra.Command {
 		Short: "Bind this session to DRIVE so --drive defaults to it",
 		Args:  cobra.ExactArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
-			self := selfPeer()
+			self := SelfPeer()
 			if self.Session == "" {
 				return errNoPeerSession
 			}

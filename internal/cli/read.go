@@ -26,9 +26,9 @@ import (
 )
 
 func newTailCmd() *cobra.Command {
-	cmd, flags := tailCommand(selfPeer().String())
+	cmd, flags := tailCommand(SelfPeer().String())
 	cmd.RunE = withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-		return flags.run(cmd.Context(), cmd, st, selfPeer())
+		return flags.run(cmd.Context(), cmd, st, SelfPeer())
 	})
 	return cmd
 }
@@ -164,7 +164,7 @@ func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *sto
 }
 
 func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, start, last int64) error {
-	self := selfPeer()
+	self := SelfPeer()
 	b, bound, err := st.Binding(ctx, self)
 	if err != nil || !bound || b.Lane == "" || !store.SameLane(b.Lane, f.For) || b.Drive != f.Drive {
 		return err
