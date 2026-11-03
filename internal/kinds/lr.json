@@ -5,7 +5,7 @@
   "verdict": {"fields": {"pr": "int", "head": "sha", "verdict": ["fix", "accept"]}, "identity": ["pr", "head"], "audience": ["supervisor"]},
   "item": {"fields": {"item": "int", "action": "str", "pr": "int", "head": "sha", "mover": "str", "deadline": "time"}, "identity": ["item"], "audience": ["lane", "pool", "owner"]},
   "done": {"fields": {"item": "int"}, "identity": ["item"], "audience": ["supervisor"]},
-  "escalation": {"fields": {"subject": "str", "cause": "str"}, "identity": ["subject", "cause"], "audience": ["supervisor", "root", "owner"]},
+  "escalation": {"fields": {"subject": "str", "cause": "str"}, "identity": ["subject", "cause"], "audience": ["supervisor", "root", "owner", "lane"]},
   "decision": {"fields": {"text": "str"}, "identity": [], "audience": "any"},
   "ask": {"fields": {"text": "str"}, "identity": [], "audience": "any"},
   "answer": {"fields": {"re": "int", "text": "str"}, "identity": ["re"], "audience": "any"},

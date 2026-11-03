@@ -136,6 +136,15 @@ func TestAnItemReachesALaneByNameButNeverARole(t *testing.T) {
 	}
 }
 
+func TestAnEscalationReachesADeskLaneByNameAsWellAsRoot(t *testing.T) {
+	escalation := body(t, map[string]any{"subject": "org/repo#45470", "cause": "grade overdue"})
+	for _, to := range []string{"grader-appeals-1", "root"} {
+		if err := kinds.CheckBody(kinds.Kind("lr.escalation"), escalation, []string{to}); err != nil {
+			t.Fatalf("to %s: %v", to, err)
+		}
+	}
+}
+
 func TestSchemaNamesRequiredFieldsThenOptional(t *testing.T) {
 	tap, _ := kinds.Typed(kinds.Kind("lr.tap"))
 	if got, want := strings.Join(tap.Names(), ","), "pr,head,by,value,condition,rule"; got != want {
