@@ -1,0 +1,160 @@
+package client_test
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/yasyf/cc-inbox/client"
+)
+
+const head = "e718a7434fa01ee9835f992a9a647a825350732c"
+
+func grade() client.Draft {
+	return client.Draft{
+		Drive: "d",
+		Lane:  "finder-desk",
+		Kind:  "lr.grade",
+		Text:  "grade #45821 finder clear",
+		ID:    "lr.grade/45821/" + head + "/finder",
+		To:    []string{"supervisor"},
+		PRs:   []string{"45821"},
+		Body:  json.RawMessage(`{"pr":45821,"head":"` + head + `","grader":"finder","verdict":"clear"}`),
+	}
+}
+
+func post(t *testing.T, d client.Draft) client.Record {
+	t.Helper()
+	stored, err := client.Post(context.Background(), d)
+	if err != nil {
+		t.Fatalf("Post(%+v): %v", d, err)
+	}
+	return stored
+}
+
+func TestAPostStoresTheTypedBodyATailReadsBack(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+
+	stored := post(t, grade())
+
+	if stored.Seq == 0 || string(stored.Kind) != "lr.grade" || stored.Lane != "finder-desk" {
+		t.Fatalf("stored = %+v", stored)
+	}
+	records, err := client.Tail(context.Background(), client.Query{Drive: "d", Kinds: []string{"lr.grade"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Seq != stored.Seq {
+		t.Fatalf("Tail = %+v, want seq %d", records, stored.Seq)
+	}
+	var body struct {
+		PR      int    `json:"pr"`
+		Verdict string `json:"verdict"`
+	}
+	if err := json.Unmarshal(records[0].Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.PR != 45821 || body.Verdict != "clear" {
+		t.Fatalf("body = %+v", body)
+	}
+	if len(records[0].To) != 1 || records[0].To[0] != "supervisor" || len(records[0].Refs.PRs) != 1 || records[0].Refs.PRs[0].Number != 45821 {
+		t.Fatalf("record = %+v", records[0])
+	}
+}
+
+func TestARepostOfAnIDReturnsTheStoredRecord(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+
+	first, second := post(t, grade()), post(t, grade())
+
+	if first.Seq != second.Seq {
+		t.Fatalf("seqs %d and %d, want one record", first.Seq, second.Seq)
+	}
+}
+
+func TestAPostRefusedByCciReturnsItsError(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	d := grade()
+	d.Kind = "evidence"
+
+	if _, err := client.Post(context.Background(), d); err == nil || !strings.Contains(err.Error(), "unknown kind") {
+		t.Fatalf("Post = %v, want unknown kind", err)
+	}
+}
+
+func TestAReplyNamesTheRecordItAnswers(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	ask := post(t, client.Draft{Drive: "d", Lane: "lane-7", Kind: "ask", Text: "which base?", To: []string{"root"}})
+
+	answer := post(t, client.Draft{Drive: "d", Lane: "root", Kind: "answer", Text: "dev", To: []string{"lane-7"}, Re: ask.Seq})
+
+	if answer.Re != ask.Seq {
+		t.Fatalf("Re = %d, want %d", answer.Re, ask.Seq)
+	}
+}
+
+func TestATailReadsPastOnePageFromItsCursor(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	const posted = 503
+	var first int64
+	for i := range posted {
+		stored := post(t, client.Draft{Drive: "d", Lane: "lane-7", Kind: "lr.note", Text: fmt.Sprintf("note %d", i), To: []string{"supervisor"}, Body: json.RawMessage(`{"text":"note"}`)})
+		if i == 0 {
+			first = stored.Seq
+		}
+	}
+
+	all, err := client.Tail(context.Background(), client.Query{Drive: "d", Kinds: []string{"lr.note"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != posted {
+		t.Fatalf("Tail read %d records, want %d", len(all), posted)
+	}
+	for i := 1; i < len(all); i++ {
+		if all[i].Seq <= all[i-1].Seq {
+			t.Fatalf("records out of order at %d: %d after %d", i, all[i].Seq, all[i-1].Seq)
+		}
+	}
+	later, err := client.Tail(context.Background(), client.Query{Drive: "d", After: first, Kinds: []string{"lr.note"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(later) != posted-1 {
+		t.Fatalf("Tail after %d read %d records, want %d", first, len(later), posted-1)
+	}
+}
+
+func TestATailFiltersByKindAndWindow(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	post(t, client.Draft{Drive: "d", Lane: "root", Kind: "note", Text: "a note"})
+	post(t, grade())
+
+	records, err := client.Tail(context.Background(), client.Query{Drive: "d", Kinds: []string{"note"}})
+	if err != nil || len(records) != 1 || string(records[0].Kind) != "note" {
+		t.Fatalf("Tail by kind = %+v, %v", records, err)
+	}
+	none, err := client.Tail(context.Background(), client.Query{Drive: "d", Since: time.Now().Add(time.Hour)})
+	if err != nil || len(none) != 0 {
+		t.Fatalf("Tail after the window = %+v, %v", none, err)
+	}
+}
+
+func TestOpenReadsOnlyTheHoldsNothingHasLifted(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	lifted := post(t, client.Draft{Drive: "d", Lane: "root", Kind: "hold", Text: "hold #46038", PRs: []string{"46038"}})
+	held := post(t, client.Draft{Drive: "d", Lane: "root", Kind: "hold", Text: "hold #45821", PRs: []string{"org/repo#45821"}})
+	post(t, client.Draft{Drive: "d", Lane: "root", Kind: "lift", Text: "lift #46038", Re: lifted.Seq, PRs: []string{"46038"}})
+	post(t, client.Draft{Drive: "d", Lane: "lane-7", Kind: "ask", Text: "an open ask is no hold", To: []string{"root"}})
+
+	open, err := client.Open(context.Background(), "d", "hold")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Seq != held.Seq || open[0].Refs.PRs[0].Number != 45821 {
+		t.Fatalf("Open = %+v, want the one held record", open)
+	}
+}
