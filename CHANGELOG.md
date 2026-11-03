@@ -20,7 +20,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   newer one, an unregistered name or a lane on another drive, is stored as typed,
   and a stand-down or an `--owned-by` decide keeps the lane it is about. A
   reply's default recipient is stored the same way.
-
 ### Removed
 
 - No clock in a post's text refuses it any more. A leading `H:MM AM/PM` label
@@ -42,6 +41,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   group key read and one push, so a receiver relaying a batch makes two relay
   calls instead of two per record.
 
+- `client.Generations` lists every lane ever registered under a stem on a
+  drive, live or stood down, from the lane registry's stem index, so a launch
+  can number past them and never reuse a name.
 - `client.Resolve` reaches a lane name as `cci post --to` does, through the
   same lane registry: a stem gives its newest live lane, a stood-down lane its
   successor, and the result names the stem's live holders. `client.Reach` and

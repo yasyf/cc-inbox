@@ -287,6 +287,29 @@ func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []str
 	}
 }
 
+// Generations lists every lane registered under stem on drive, live or stood
+// down, oldest name first: the names a launch numbers past, so none is reused.
+// The query reads the stem's own rows through its index.
+func (s *Store) Generations(ctx context.Context, drive, stem string) ([]string, error) {
+	if err := s.laneRegistry(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT lane FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? ORDER BY lane", drive, stem)
+	if err != nil {
+		return nil, fmt.Errorf("read the generations of %s on %s: %w", stem, drive, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var lane string
+		if err := rows.Scan(&lane); err != nil {
+			return nil, fmt.Errorf("scan the generations of %s on %s: %w", stem, drive, err)
+		}
+		out = append(out, lane)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane string) (string, []any, error) {
 	switch err := s.laneRegistry(ctx); {
 	case errors.Is(err, ErrNoLaneRegistry):
