@@ -9,6 +9,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -94,5 +96,43 @@ func TestPostRefusesAnUnknownKind(t *testing.T) {
 	_, owner := relaytest.JoinOwner(t, srv, svc)
 	if err := writer(srv, svc, owner.Identity.PublicKey()).Post(context.Background(), service.Record{Drive: "trunk", Kind: "queued", At: time.Now(), Text: "x"}); err == nil {
 		t.Fatal("post of kind queued succeeded")
+	}
+}
+
+type counted struct {
+	next  http.RoundTripper
+	calls int
+}
+
+func (c *counted) RoundTrip(req *http.Request) (*http.Response, error) {
+	c.calls++
+	return c.next.RoundTrip(req)
+}
+
+func TestABatchCostsOneKeyReadAndOnePush(t *testing.T) {
+	for _, n := range []int{1, 10} {
+		srv := relaytest.NewServer(t)
+		svc := serviceKey(t)
+		st, owner := relaytest.JoinOwner(t, srv, svc)
+		w := writer(srv, svc, owner.Identity.PublicKey())
+		calls := &counted{next: srv.Client().Transport}
+		w.HTTP = &http.Client{Transport: calls}
+		records := make([]service.Record, n)
+		for i := range records {
+			records[i] = service.Record{ID: fmt.Sprintf("trunk:msg_%d", i), Drive: "trunk", Kind: "queue", At: time.Now(), Text: fmt.Sprintf("record %d", i), PRs: []string{"acme/app#7"}}
+		}
+		if err := w.Post(context.Background(), records...); err != nil {
+			t.Fatalf("post %d: %v", n, err)
+		}
+		if calls.calls != 2 {
+			t.Fatalf("a batch of %d made %d relay calls, want 2", n, calls.calls)
+		}
+		if _, err := owner.Pull(context.Background(), 0, nil); err != nil {
+			t.Fatal(err)
+		}
+		recs, err := st.Query(context.Background(), store.Filter{Drive: "trunk", Kinds: []kinds.Kind{kinds.Queue}})
+		if err != nil || len(recs) != n {
+			t.Fatalf("owner holds %d of %d records, %v", len(recs), n, err)
+		}
 	}
 }
