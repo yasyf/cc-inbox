@@ -326,6 +326,7 @@ type Store struct {
 	node   node.Node
 	owner  bool
 	writer Writer
+	feed   Feed
 	moved  *Migration
 	Now    func() time.Time
 }
@@ -663,6 +664,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		return err
 	}
 	if err := installProjection(ctx, tx, refKeyObjects[:], "alias index"); err != nil {
+		return err
+	}
+	if err := installProjection(ctx, tx, recordMutationObjects[:], "record mutation"); err != nil {
 		return err
 	}
 	if err := installProjection(ctx, tx, laneHoldObjects[:], "lane registry"); err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -22,13 +23,35 @@ const (
 	maxLimit     = 500
 )
 
+// FollowPath is where a reader posts a FollowRequest for its stream of wakes.
+const FollowPath = "/v1/follow"
+
+const followHeartbeat = 30 * time.Second
+
+// FollowRequest names the store a reader reads and what it reads.
+type FollowRequest struct {
+	Home   string       `json:"home"`
+	Filter store.Filter `json:"filter"`
+}
+
 type Server struct {
 	st       *store.Store
 	interval time.Duration
+	hub      *inbox.Hub
 }
 
 func New(st *store.Store, interval time.Duration) *Server {
-	return &Server{st: st, interval: interval}
+	return &Server{st: st, interval: interval, hub: inbox.NewHub(st, interval)}
+}
+
+// Kick reports a commit to every stream, ahead of the next interval.
+func (s *Server) Kick() {
+	s.hub.Kick()
+}
+
+// Close ends every stream.
+func (s *Server) Close() {
+	s.hub.Close()
 }
 
 func (s *Server) Handler() http.Handler {
@@ -37,6 +60,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/records", s.records)
 	mux.HandleFunc("GET /v1/digest", s.digest)
 	mux.HandleFunc("GET /v1/stream", s.stream)
+	mux.HandleFunc("POST "+FollowPath, s.follow)
 	mux.HandleFunc("GET /v1/lanes", s.lanes)
 	mux.HandleFunc("GET /v1/peers", s.peers)
 	return mux
@@ -195,55 +219,109 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
+	head, err := s.st.MaxSeq(r.Context())
+	if err != nil {
+		respond(w, nil, err)
+		return
+	}
 	if f.After == 0 {
-		if f.After, err = s.st.MaxSeq(r.Context()); err != nil {
-			respond(w, nil, err)
-			return
-		}
+		f.After = head
 	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		respond(w, nil, errors.New("streaming unsupported"))
 		return
 	}
-	changes, err := s.st.OpenChangeVersion(r.Context())
-	if err != nil {
-		respond(w, nil, err)
-		return
-	}
-	defer func() { _ = changes.Close() }()
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+	if !s.emit(r.Context(), w, &f, head) {
+		return
+	}
+	follower := s.hub.Follow(f, head)
+	defer follower.Leave()
 	tick := time.NewTicker(s.interval)
 	defer tick.Stop()
-	var previous int64
-	idle := false
 	for {
-		version, err := changes.Read(r.Context())
-		if err != nil {
-			return
-		}
-		if !idle || version != previous {
-			records, err := s.st.Query(r.Context(), f)
-			if err != nil {
-				return
-			}
-			previous, idle = version, len(records) < f.Limit
-			for _, rec := range records {
-				if _, err := fmt.Fprintf(w, "id: %d\nevent: record\ndata: %s\n\n", rec.Seq, render.JSON(rec)); err != nil {
-					return
-				}
-				f.After = rec.Seq
-			}
-		}
 		flusher.Flush()
 		select {
 		case <-r.Context().Done():
 			return
+		case <-s.hub.Done():
+			return
+		case <-follower.Ready():
+			wake := follower.Take()
+			f.After = max(f.After, wake.First-1)
+			if !s.emit(r.Context(), w, &f, wake.Head) {
+				return
+			}
 		case <-tick.C:
+			if r.Context().Err() != nil {
+				return
+			}
 		}
+	}
+}
+
+func (s *Server) emit(ctx context.Context, w http.ResponseWriter, f *store.Filter, head int64) bool {
+	for {
+		page := *f
+		page.Before = head + 1
+		records, err := s.st.Query(ctx, page)
+		if err != nil {
+			return false
+		}
+		for _, rec := range records {
+			if _, err := fmt.Fprintf(w, "id: %d\nevent: record\ndata: %s\n\n", rec.Seq, render.JSON(rec)); err != nil {
+				return false
+			}
+			f.After = rec.Seq
+		}
+		if len(records) < f.Limit {
+			return true
+		}
+	}
+}
+
+func (s *Server) follow(w http.ResponseWriter, r *http.Request) {
+	var in FollowRequest
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		respond(w, nil, badRequest{fmt.Errorf("decode follow request: %w", err)})
+		return
+	}
+	if filepath.Clean(in.Home) != filepath.Clean(s.st.HomeDir()) {
+		w.WriteHeader(http.StatusConflict)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		respond(w, nil, errors.New("streaming unsupported"))
+		return
+	}
+	follower := s.hub.Follow(in.Filter, in.Filter.After)
+	defer follower.Leave()
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+	lines := json.NewEncoder(w)
+	heartbeat := time.NewTicker(followHeartbeat)
+	defer heartbeat.Stop()
+	for {
+		var wake store.Wake
+		select {
+		case <-r.Context().Done():
+			return
+		case <-s.hub.Done():
+			return
+		case <-follower.Ready():
+			wake = follower.Take()
+		case <-heartbeat.C:
+		}
+		if err := lines.Encode(wake); err != nil {
+			return
+		}
+		flusher.Flush()
 	}
 }
 

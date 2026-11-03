@@ -131,6 +131,7 @@ func ownStore(st *store.Store, home string) (*store.Store, error) {
 			return nil, err
 		}
 		st.WriteThrough(daemon.Writes(d, home, st.Self()))
+		st.FollowThrough(daemon.Follows(home, daemon.Addr))
 	}
 	return st, nil
 }

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sync"
 	"time"
 
@@ -51,6 +52,7 @@ type committed struct {
 
 type queue struct {
 	st      *store.Store
+	posted  func()
 	jobs    chan job
 	mu      sync.RWMutex
 	closed  bool
@@ -131,6 +133,9 @@ func (q *queue) commit(batch []job) {
 	ctx, cancel := context.WithDeadline(q.ctx, lastTurn(live))
 	defer cancel()
 	written, errs := q.st.CommitAll(ctx, writes)
+	if q.posted != nil && slices.ContainsFunc(writes, func(w store.Write) bool { return len(w.Records) > 0 }) {
+		q.posted()
+	}
 	for i, j := range live {
 		j.done <- committed{written: written[i], err: errs[i]}
 	}

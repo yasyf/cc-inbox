@@ -137,7 +137,8 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	handler.HandleFunc("/debug/pprof/profile", pprof.Profile)
 	handler.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	handler.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	handler.Handle("/", server.New(st, time.Second).Handler())
+	feed := server.New(st, time.Second)
+	handler.Handle("/", feed.Handler())
 	p := &Product{
 		home:   r.home,
 		st:     st,
@@ -153,6 +154,8 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	if p.writes, err = newQueue(st); err != nil {
 		return nil, errors.Join(err, reads.Close(), st.Close())
 	}
+	p.writes.posted = feed.Kick
+	p.http.RegisterOnShutdown(feed.Close)
 	st.WriteThrough(p.writes)
 	var syncCtx context.Context
 	syncCtx, p.stopSync = context.WithCancel(context.Background())
