@@ -61,7 +61,7 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 			if err != nil {
 				return err
 			}
-			rendered, _, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Untagged: opts.Untagged})
+			rendered, _, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Untagged: opts.Untagged, Unnamed: f.For != "" || f.To != ""})
 			if ctx.Err() != nil {
 				return nil
 			}

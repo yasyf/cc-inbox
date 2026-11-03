@@ -171,6 +171,10 @@ What never arrives:
 - records addressed to the reader of a kind outside `--to-kind`; neither the
   channel nor the `PostToolUse` hook delivers them, and `cci tail` and
   `cci digest` still read them;
+- records of a `--batch-kinds` kind addressed to the reader, on arrival: the
+  channel carries them together in one tag, at most every five minutes and at
+  once ahead of any other record, and the hook leaves them to it. A window not
+  launched with `--channels` cannot use this flag;
 - records of a `--mute-kinds` kind, even addressed to `root`; neither the
   channel nor the `PostToolUse` hook delivers them, and `cci tail` still reads
   them;

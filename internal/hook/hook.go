@@ -250,15 +250,9 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload, w io.Writer) 
 func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, relist bool, w io.Writer) error {
 	var tail bytes.Buffer
 	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
-	f := store.LaneMail(k, b)
-	if k.Agent == "" {
-		sub, ok, err := st.SessionSubscription(ctx, k.Session)
-		if err != nil {
-			return err
-		}
-		if ok && sub.Drive == b.Drive && store.SameLane(sub.Reader, b.Lane) {
-			f.Mute, f.ToKinds = sub.Mute, sub.ToKinds
-		}
+	f, err := st.WindowMail(ctx, k, b)
+	if err != nil {
+		return err
 	}
 	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Compact: true, Reader: b.Lane, Resume: "the next tool call", Open: true, Defer: true}, &tail)
 	if err != nil {
@@ -357,7 +351,9 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 			_, _ = fmt.Fprintf(w, "... %d older open asks\n", i+1)
 			break
 		}
-		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Brief(r, now, openWidth), int(now.Sub(r.At).Minutes()))
+		age := int(now.Sub(r.At).Minutes())
+		r.To = nil
+		_, _ = fmt.Fprintf(w, "%s (open %dm)\n", render.Brief(r, now, openWidth), age)
 	}
 	return ack, nil
 }

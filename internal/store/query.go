@@ -271,7 +271,7 @@ func kindArgs(ks []kinds.Kind) []any {
 }
 
 func addressedTo(in string) string {
-	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR EXISTS (SELECT 1 FROM records own WHERE own.seq = records.re AND own.lane IN " + in + "))"
+	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR EXISTS (SELECT 1 FROM records own WHERE own.seq = records.re AND own.lane IN " + in + " AND records.lane <> own.lane))"
 }
 
 func (f Filter) peerAddresses(self string) []any {

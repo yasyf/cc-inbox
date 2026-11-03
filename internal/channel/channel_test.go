@@ -434,3 +434,189 @@ func TestAResumedChannelAnnouncesItsToolsThenStreamsWithoutAnotherHandshake(t *t
 	s.record(ask)
 	s.close()
 }
+
+func batched(t *testing.T, st *store.Store, batch ...kinds.Kind) store.Subscription {
+	t.Helper()
+	sub, err := st.Subscribe(context.Background(), store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "owner-relay", Batch: batch, Cursor: "relay-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sub
+}
+
+type delivered struct {
+	content string
+	meta    map[string]string
+}
+
+func following(t *testing.T, st *store.Store, sub store.Subscription) (<-chan delivered, func()) {
+	t.Helper()
+	tags := make(chan delivered, 64)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- follow(ctx, st, sub, false, func(_ string, params any) error {
+			p := params.(map[string]any)
+			tags <- delivered{content: p["content"].(string), meta: p["meta"].(map[string]string)}
+			return nil
+		})
+	}()
+	return tags, func() {
+		t.Helper()
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func nextTag(t *testing.T, tags <-chan delivered) delivered {
+	t.Helper()
+	select {
+	case tag := <-tags:
+		return tag
+	case <-time.After(5 * time.Second):
+		t.Fatal("no tag within 5s")
+		return delivered{}
+	}
+}
+
+func noTag(t *testing.T, tags <-chan delivered, d time.Duration) {
+	t.Helper()
+	select {
+	case tag := <-tags:
+		t.Fatalf("delivered %+v, want nothing", tag)
+	case <-time.After(d):
+	}
+}
+
+func TestABatchIsOneTagWhateverItCarries(t *testing.T) {
+	for _, n := range []int{1, 1000} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 200*time.Millisecond
+			sub := batched(t, st, kinds.Report, kinds.Note)
+			for i := range n {
+				testutil.Post(t, st, store.Record{Lane: "signal", Kind: kinds.Note, To: []string{"owner-relay", "root"}, Text: fmt.Sprintf("look at %d;", i)})
+			}
+			last := testutil.Post(t, st, store.Record{Lane: "fix-1", Kind: kinds.Report, To: []string{"owner-relay"}, Text: "the fix is live"})
+			tags, stop := following(t, st, sub)
+			defer stop()
+			tag := nextTag(t, tags)
+			content := tag.content
+			if tag.meta["kind"] != batchKind || tag.meta["seq"] != fmt.Sprint(last.Seq) || !strings.Contains(content, last.Text) {
+				t.Fatalf("tag %+v, want one batch through #%d", tag.meta, last.Seq)
+			}
+			for i := range n {
+				if !strings.Contains(content, fmt.Sprintf("look at %d;", i)) {
+					t.Fatalf("batch lacks record %d: %q", i, content)
+				}
+			}
+			if strings.Contains(content, ">") || strings.Contains(content, " -> ") {
+				t.Fatalf("batch names recipients: %q", content)
+			}
+			noTag(t, tags, 3*batchWindow)
+		})
+	}
+}
+
+func TestAnOwnerRecordArrivesAtOnceWithTheBatchAheadOfIt(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
+	sub := batched(t, st, kinds.Report, kinds.Note)
+	tags, stop := following(t, st, sub)
+	defer stop()
+	report := testutil.Post(t, st, store.Record{Lane: "fix-1", Kind: kinds.Report, To: []string{"owner-relay"}, Text: "the fix is live"})
+	noTag(t, tags, 50*time.Millisecond)
+	tap := testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"owner-relay"}, Text: "he tapped Land"})
+	if tag := nextTag(t, tags); tag.meta["kind"] != batchKind || !strings.Contains(tag.content, report.Text) {
+		t.Fatalf("first tag %+v, want the held report", tag)
+	}
+	if tag := nextTag(t, tags); tag.meta["seq"] != fmt.Sprint(tap.Seq) || tag.meta["kind"] != string(kinds.Owner) || !strings.Contains(tag.content, tap.Text) {
+		t.Fatalf("second tag %+v, want his tap", tag)
+	}
+	noTag(t, tags, 50*time.Millisecond)
+}
+
+func TestABatchHeldAcrossARestartArrivesOnce(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
+	sub := batched(t, st, kinds.Note)
+	_, stop := following(t, st, sub)
+	note := testutil.Post(t, st, store.Record{Lane: "signal", Kind: kinds.Note, To: []string{"owner-relay"}, Text: "look at 7"})
+	time.Sleep(50 * time.Millisecond)
+	stop()
+	batchWindow = 20 * time.Millisecond
+	tags, stop := following(t, st, sub)
+	if tag := nextTag(t, tags); !strings.Contains(tag.content, note.Text) {
+		t.Fatalf("tag %+v, want the note the first channel held", tag)
+	}
+	stop()
+	tags, stop = following(t, st, sub)
+	defer stop()
+	noTag(t, tags, 100*time.Millisecond)
+}
+
+func TestTheHookLeavesBatchKindsToTheChannelAndLosesNothing(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond
+	ctx := context.Background()
+	relay := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
+	if err := st.BindLane(ctx, store.PeerKey{Session: relay.SessionID}, "d", "owner-relay", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	sub := batched(t, st, kinds.Note)
+	note := testutil.Post(t, st, store.Record{Lane: "signal", Kind: kinds.Note, To: []string{"owner-relay"}, Text: "look at 7"})
+	tap := testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"owner-relay"}, Text: "he tapped Land"})
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, relay, func() (store.Window, error) { return window, nil }, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, tap.Text) || strings.Contains(got, note.Text) {
+		t.Fatalf("hook delivered %q", got)
+	}
+	tags, stop := following(t, st, sub)
+	defer stop()
+	if tag := nextTag(t, tags); tag.meta["kind"] != batchKind || !strings.Contains(tag.content, note.Text) || strings.Contains(tag.content, tap.Text) {
+		t.Fatalf("tag %+v, want only the note", tag)
+	}
+}
+
+func TestARecipientListNeverReachesARecipientAndOwnRepliesNeverEcho(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
+	ctx := context.Background()
+	relay := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
+	if err := st.BindLane(ctx, store.PeerKey{Session: relay.SessionID}, "d", "owner-relay", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	sub := batched(t, st, kinds.Note)
+	everyone := make([]string, 0, 100)
+	for i := range 100 {
+		everyone = append(everyone, fmt.Sprintf("lane-%d", i))
+	}
+	mine := testutil.Post(t, st, store.Record{Lane: "owner-relay", Kind: kinds.Ask, To: []string{"meta"}, Text: "order one"})
+	testutil.Post(t, st, store.Record{Lane: "owner-relay", Kind: kinds.Ask, Re: mine.Seq, To: []string{"meta"}, Text: "order two"})
+	answer := testutil.Post(t, st, store.Record{Lane: "meta", Kind: kinds.Answer, Re: mine.Seq, To: []string{"owner-relay"}, Text: "on it"})
+	broadcast := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: append([]string{"owner-relay"}, everyone...), Text: "register touched"})
+	tags, stop := following(t, st, sub)
+	defer stop()
+	for _, want := range []store.Record{answer, broadcast} {
+		tag := nextTag(t, tags)
+		if tag.meta["seq"] != fmt.Sprint(want.Seq) || strings.Contains(tag.content, "lane-") || strings.Contains(tag.content, "lanes") || strings.Contains(tag.content, "->") {
+			t.Fatalf("tag %+v, want #%d with no recipients", tag, want.Seq)
+		}
+	}
+	noTag(t, tags, 50*time.Millisecond)
+	later := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: append([]string{"owner-relay"}, everyone...), Text: "register touched again"})
+	if err := st.SetCursor(ctx, store.LaneCursor(store.PeerKey{Session: relay.SessionID}), "d", broadcast.Seq); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, relay, func() (store.Window, error) { return window, nil }, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); !strings.Contains(got, later.Text) || strings.Contains(got, "lane-") {
+		t.Fatalf("hook delivered %q, want the record with no recipients", got)
+	}
+}

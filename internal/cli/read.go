@@ -39,6 +39,7 @@ type tailFlags struct {
 	seed   string
 	all    bool
 	oldest bool
+	mail   bool
 	seqs   []string
 }
 
@@ -56,6 +57,7 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	cmd.Flags().StringVar(&f.cursor, "cursor", peer, "cursor name, read and advanced when --since is absent")
 	cmd.Flags().StringVar(&f.seed, "seed", "", "start a --cursor that does not exist yet where this cursor stands, or at the newest record when this one does not exist either, instead of an hour back")
 	cmd.Flags().BoolVar(&f.oldest, "oldest", false, "when the budget cuts a text --since window, keep its oldest records instead of its newest, as --json reads always do")
+	cmd.Flags().BoolVar(&f.mail, "mail", false, "when this thread is bound as --to, read its lane mail through the cursor the PostToolUse hook advances, so a record reaches the window once")
 	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")
 	_ = cmd.Flags().MarkHidden("seqs")
 	return cmd, f
@@ -64,6 +66,12 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
 	if cmd.Flags().Changed("seqs") {
 		return f.runSelected(ctx, cmd, st)
+	}
+	if f.mail {
+		delivered, err := f.runMail(ctx, cmd, st, peer)
+		if delivered || err != nil {
+			return err
+		}
 	}
 	filter, err := f.rf.filterPeer(ctx, st, peer)
 	var older []store.Record
@@ -90,6 +98,23 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 		return err
 	}
 	return advanceLaneCursor(ctx, st, filter, start, res.Last)
+}
+
+func (f *tailFlags) runMail(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) (bool, error) {
+	drive, err := resolveDrive(ctx, st, f.rf.drive)
+	if err != nil {
+		return false, err
+	}
+	b, bound, err := st.Binding(ctx, peer)
+	if err != nil || !bound || b.Drive != drive || !store.SameLane(b.Lane, f.rf.to) {
+		return false, err
+	}
+	mail, err := st.WindowMail(ctx, peer, b)
+	if err != nil {
+		return false, err
+	}
+	_, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: mail, Cursor: store.LaneCursor(peer), Seed: f.seed, Budget: f.rf.budget, Compact: true, Reader: b.Lane, Open: true, Notes: tailNotes(cmd, false)}, cmd.OutOrStdout())
+	return true, err
 }
 
 func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *store.Store) error {

@@ -10,6 +10,8 @@ import (
 	"os"
 	"reflect"
 	"strconv"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -25,6 +27,7 @@ const (
 	Server       = "cci"
 	Source       = "plugin:cc-inbox:" + Server
 	notifyMethod = "notifications/claude/channel"
+	batchKind    = "batch"
 )
 
 // Resumed is the channel flag a re-executed channel server runs with: Claude
@@ -34,6 +37,8 @@ const Resumed = "resumed"
 var (
 	idle     = 5 * time.Second
 	interval = time.Second
+
+	batchWindow = 5 * time.Minute
 
 	newerInstall = defaultNewerInstall
 	execve       = syscall.Exec
@@ -53,7 +58,7 @@ func (u upgrade) Error() string {
 	return "cci " + u.Version + " is installed at " + u.Path
 }
 
-const instructions = `This MCP server is cci's channel. It carries coordination records from a long-running drive. After this session runs ` + "`cci subscribe`" + `, every new record for the subscription's reader arrives as a <channel source="` + Source + `" seq="..." kind="..." lane="..."> tag. The tag's body is the record line without the seq, kind and lane the tag already carries: ` + "`<time> -> <to> <text> [path]`" + `; ` + "`cci show <seq>`" + `, or this server's read tool, prints the whole record. Its tools post, read, inbox, find, close, who and digest do in one call what cci does in Bash, with no shell quoting.
+const instructions = `This MCP server is cci's channel. It carries coordination records from a long-running drive. After this session runs ` + "`cci subscribe`" + `, every new record for the subscription's reader arrives as a <channel source="` + Source + `" seq="..." kind="..." lane="..."> tag. The tag's body is the record line without the seq, kind and lane the tag already carries: ` + "`<time> <text> [path]`" + `; ` + "`cci show <seq>`" + `, or this server's read tool, prints the whole record, its recipients included. A tag of kind ` + "`" + batchKind + "`" + ` carries the subscription's batch kinds together, one record a line as ` + "`<seq> <kind> <lane> <text>`" + `, at most every few minutes and at once ahead of any other record. Its tools post, read, inbox, find, close, who and digest do in one call what cci does in Bash, with no shell quoting.
 
 Every tag already passed the subscription's filter, so act on each one as you would a line from ` + "`cci tail`" + `. A record addressed to the reader arrives when its kind is one of the subscription's addressed kinds, by default every kind except for the reader ` + "`root`" + `, which hears only the kinds a root acts on; ` + "`cci tail`" + ` reads the rest. A record addressed to ` + "`main`" + ` is addressed to the reader ` + "`root`" + `: the drive's root answers to both names. Other lanes' broadcasts arrive only for the subscribed kinds. A record addressed to ` + "`peer:<this session>`" + ` or ` + "`<reader>@<drive>`" + ` arrives from any drive; reply to its lane with ` + "`cci post --lane <reader> --to peer:<its session prefix>`" + `, which ` + "`cci who`" + ` lists. Every post names its writer with ` + "`--lane <reader>`" + `: answer with ` + "`cci post --lane <reader> --re <seq>`" + `, close an ask, decide, hold or blocker with ` + "`cci post --lane <reader> --resolves <seq>`" + `, and read a record's full body from the path it names. The ` + "`post`" + ` tool posts without a Bash call: its args are the arguments ` + "`cci post`" + ` takes, and it posts as this window's thread, as a Bash ` + "`cci post`" + ` here does. A record this channel delivers is not delivered again by the PostToolUse hook, nor one the hook delivered first by this channel. Delivery is at-least-once, so skip any seq you have already handled.
 
@@ -132,6 +137,62 @@ func Stream(ctx context.Context, st *store.Store, window store.Window, channeled
 	}
 }
 
+type batch struct {
+	st     *store.Store
+	filter store.Filter
+	cursor string
+	notify func(string, any) error
+	tick   *time.Ticker
+	mu     sync.Mutex
+}
+
+func (b *batch) run(ctx context.Context, stop context.CancelFunc) error {
+	if len(b.filter.Kinds) == 0 {
+		return nil
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-b.tick.C:
+			if err := b.flush(ctx); err != nil && ctx.Err() == nil {
+				stop()
+				return err
+			}
+		}
+	}
+}
+
+func (b *batch) flush(ctx context.Context) error {
+	if len(b.filter.Kinds) == 0 {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	f := b.filter
+	var err error
+	if f.After, _, err = b.st.Cursor(ctx, b.cursor, f.Drive); err != nil {
+		return err
+	}
+	records, err := b.st.Query(ctx, f)
+	if err != nil || len(records) == 0 {
+		return err
+	}
+	wire := render.Wire{Now: b.st.Now()}
+	lines := make([]string, len(records))
+	for i, r := range records {
+		line := r
+		line.To = nil
+		lines[i] = render.WithBody(wire.Line(line, 0), r)
+	}
+	last := records[len(records)-1].Seq
+	if err := b.notify(notifyMethod, map[string]any{"content": strings.Join(lines, "\n"), "meta": map[string]string{"seq": strconv.FormatInt(last, 10), "kind": batchKind}}); err != nil {
+		return err
+	}
+	b.tick.Reset(batchWindow)
+	return b.st.SetCursor(context.WithoutCancel(ctx), b.cursor, f.Drive, last)
+}
+
 func follow(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, notify func(string, any) error) error {
 	mail, shared, err := hookMail(ctx, st, sub, channeled)
 	if err != nil {
@@ -141,6 +202,10 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 	defer stop()
 	changed := make(chan error, 1)
 	go func() { changed <- untilChanged(watchCtx, st, sub, stop) }()
+	held := &batch{st: st, filter: sub.BatchFilter(), cursor: sub.BatchCursor(), notify: notify, tick: time.NewTicker(batchWindow)}
+	defer held.tick.Stop()
+	batched := make(chan error, 1)
+	go func() { batched <- held.run(watchCtx, stop) }()
 	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: sub.Filter(), Cursor: sub.Cursor, Interval: interval, Untagged: true}, func(r store.Record, line string) error {
 		now, ok, err := st.Subscription(watchCtx, sub.Window)
 		if err != nil {
@@ -168,6 +233,9 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 				}
 			}
 		}
+		if err := held.flush(watchCtx); err != nil {
+			return err
+		}
 		meta := map[string]string{"seq": strconv.FormatInt(r.Seq, 10), "kind": string(r.Kind), "lane": r.Lane}
 		if r.ID != "" {
 			meta["id"] = r.ID
@@ -184,7 +252,7 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 	if errors.Is(err, errStale) {
 		err = nil
 	}
-	return errors.Join(err, <-changed)
+	return errors.Join(err, <-changed, <-batched)
 }
 
 type laneMail struct {

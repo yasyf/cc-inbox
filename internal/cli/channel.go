@@ -26,6 +26,7 @@ func newSubscribeCmd() *cobra.Command {
 		kindsF []string
 		muteF  []string
 		toF    []string
+		batchF []string
 		follow []string
 		cursor string
 	)
@@ -39,7 +40,11 @@ lanes' broadcasts arrive when their kind is a --kind. For reader root (or main)
 --to-kind defaults to ` + kindList(kinds.RootAddressed()) + `, the kinds a
 drive's root acts on; for any other reader every addressed kind arrives.
 Records the channel holds back still show in cci tail, cci digest and the stop
-hook's overdue-ask nudge.`,
+hook's overdue-ask nudge.
+
+A record addressed to --reader of a --batch-kinds kind wakes nobody on arrival:
+the channel carries those together in one tag, at most every five minutes and
+at once ahead of any other record, and the PostToolUse hook leaves them to it.`,
 		Args: cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			window, session, err := thisSession()
@@ -62,6 +67,12 @@ hook's overdue-ask nudge.`,
 			}
 			if len(sub.ToKinds) == 0 {
 				sub.ToKinds = store.DefaultToKinds(reader)
+			}
+			if sub.Batch, err = kinds.ParseAll(batchF); err != nil {
+				return err
+			}
+			if len(sub.Batch) > 0 && !channelsOn(window.PID) {
+				return errors.New("--batch-kinds needs this window launched with --channels plugin:cc-inbox@cc-inbox: only the channel delivers those kinds")
 			}
 			for _, spec := range follow {
 				other, list, ok := strings.Cut(spec, "=")
@@ -109,6 +120,7 @@ hook's overdue-ask nudge.`,
 	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
 	cmd.Flags().StringSliceVar(&muteF, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
 	cmd.Flags().StringSliceVar(&toF, "to-kind", nil, "deliver records addressed to --reader only of these kinds; cci tail still reads the rest (repeatable; default for root: "+kindList(kinds.RootAddressed())+", otherwise every kind)")
+	cmd.Flags().StringSliceVar(&batchF, "batch-kinds", nil, "deliver records addressed to --reader of these kinds together, one tag at most every five minutes, never on arrival (repeatable)")
 	cmd.Flags().StringArrayVar(&follow, "follow", nil, "also deliver another drive's broadcasts of these kinds, as <drive>=<kind>[,<kind>...], e.g. oncall=incident (repeatable)")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")
 	_ = cmd.MarkFlagRequired("reader")
@@ -239,7 +251,7 @@ func describe(sub store.Subscription) string {
 	for i, f := range sub.Follow {
 		followed[i] = f.Drive + "=" + kindList(f.Kinds)
 	}
-	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, followed %s, urgent repeats held %s", sub.Drive, sub.Reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), cmp.Or(strings.Join(followed, " "), "none"), store.UrgentRepeat)
+	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, batched %s, followed %s, urgent repeats held %s", sub.Drive, sub.Reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), kindList(sub.Batch), cmp.Or(strings.Join(followed, " "), "none"), store.UrgentRepeat)
 }
 
 func addressedList(ks []kinds.Kind) string {
