@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and reads behave as before. `client.Stem` applies the same rule in Go.
 - A post's stand-down successors come from an indexed lane registry instead of
   a read of every stand-down record on the drive.
+- A `github` kind for a GitHub pull request, review or check change or a push
+  to the default branch, kept 14 days, and `github.Handler`, which turns GitHub
+  webhooks signed with `X-Hub-Signature-256` into one `github` record per
+  delivery. A push record names the commit it replaced as `before`, as a pull
+  request push does, and a check record carries GitHub's check run or status
+  id.
 - `lr.head` takes optional `title`, `change`, `plan`, `risk`, `blocks`, `group`
   and `summary` text, the words the owner's merge board shows for a PR.
 - `github.com/yasyf/cc-inbox/client`, a public Go package other modules import

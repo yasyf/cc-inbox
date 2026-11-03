@@ -353,6 +353,32 @@ redelivery of the same message stays one record. A bad signature answers
 cci tail --drive trunk --kind queue --json
 ```
 
+### Hear GitHub pull-request events as records
+
+Enroll a GitHub webhook receiver's service key for the `github` drive and kind:
+
+```bash
+cci relay enroll --tier service --pub <base64 key> --allow 'github|github' --label github
+```
+
+The receiver wraps `github.Handler` from `github.com/yasyf/cc-inbox/github`
+around a `service.Writer`, as the Trunk receiver does. A delivery that verifies
+under `X-Hub-Signature-256` becomes one `github` record on the `github` drive:
+a pull request's open, push, close, merge, draft, base and label changes, a
+submitted or dismissed review, a finished check run, a commit status that is no
+longer pending, and a push to the repository's default branch. Each carries the
+pull request when the event names one, the head commit, and the action, review
+state or conclusion as its outcome. A pull request push and a default-branch
+push carry the commit they replaced as `before`, and a check run or status
+carries GitHub's id as `id`, which orders two that finished in the same second.
+A redelivery of the same `X-GitHub-Delivery` stays one record, a bad signature
+answers 401, and a relay failure answers 502 for GitHub to mark the delivery
+failed.
+
+```bash
+cci tail --drive github --kind github --json
+```
+
 ### Let a machine outside your mesh read a drive
 
 A colleague's laptop sits outside your synckit mesh and should follow your
@@ -571,6 +597,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
+| `github` | 14 days | A GitHub pull request, review or check change, or a push to the default branch, with the action or conclusion in `--outcome` and the commit in `--commit`. A commit status or a push names no pull request. |
 | `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |

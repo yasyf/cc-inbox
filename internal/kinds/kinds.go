@@ -63,6 +63,7 @@ const (
 	Peer       Kind = "peer"
 	Red        Kind = "red"
 	Queue      Kind = "queue"
+	Github     Kind = "github"
 	Spawn      Kind = "spawn"
 )
 
@@ -131,6 +132,7 @@ var specs = map[Kind]Spec{
 	Urgent:     {},
 	Red:        {NeedsPR: true},
 	Queue:      {NeedsPR: true},
+	Github:     {TTL: ServiceTTL},
 	Spawn:      {},
 }
 
