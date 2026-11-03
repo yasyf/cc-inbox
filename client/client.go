@@ -51,6 +51,8 @@ type Draft struct {
 	LaneRefs  []string
 	Attrs     map[string]string
 	URL       string
+	// Path names the file holding the record's whole body, as cci post --path does.
+	Path string
 }
 
 // Post stores d through cci post itself, so its recipient checks, reply routing,
@@ -111,6 +113,9 @@ func (d Draft) args() []string {
 	if d.URL != "" {
 		args = append(args, "--url", d.URL)
 	}
+	if d.Path != "" {
+		args = append(args, "--path", d.Path)
+	}
 	return args
 }
 
@@ -148,12 +153,16 @@ func Who(ctx context.Context, drive string) ([]Peer, error) {
 }
 
 // Query selects records of one drive. After is the seq a cursor reader last saw;
-// Since bounds a first read that has no cursor. Empty Kinds selects every kind.
+// Since bounds a first read that has no cursor. Empty Kinds selects every kind,
+// empty Lanes every lane. PR, as owner/repo#N or a bare N, keeps records about
+// that pull request, as cci tail --pr does.
 type Query struct {
 	Drive string
 	After int64
 	Since time.Time
 	Kinds []string
+	Lanes []string
+	PR    string
 }
 
 // Tail reads every record q selects, oldest first, with Status set on each
@@ -164,12 +173,18 @@ func Tail(ctx context.Context, q Query) ([]Record, error) {
 	if err != nil {
 		return nil, err
 	}
+	var pr store.PR
+	if q.PR != "" {
+		if pr, err = store.ParsePR(q.PR); err != nil {
+			return nil, err
+		}
+	}
 	st, err := cli.OpenStore(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = st.Close() }()
-	filter := store.Filter{Drive: q.Drive, Kinds: selected, After: q.After, Since: q.Since, Limit: pageRows}
+	filter := store.Filter{Drive: q.Drive, Kinds: selected, Lanes: q.Lanes, PR: pr, After: q.After, Since: q.Since, Limit: pageRows}
 	var records []Record
 	for {
 		page, err := st.Query(ctx, filter)
@@ -182,6 +197,21 @@ func Tail(ctx context.Context, q Query) ([]Record, error) {
 		}
 		filter.After = page[len(page)-1].Seq
 	}
+}
+
+// Among reads the records of drive with the named seqs, oldest first, leaving out
+// a seq that names no record there, as cci tail --seqs does.
+func Among(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
+	st, err := cli.OpenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = st.Close() }()
+	records, err := st.RecordsAmong(ctx, drive, seqs)
+	if err != nil {
+		return nil, err
+	}
+	return records, inbox.Annotate(ctx, st, records)
 }
 
 // Open reads the drive's openers of the named kinds that no closer or resolver

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -259,5 +261,53 @@ func TestAResolvesClosesItsOpener(t *testing.T) {
 	}
 	if len(open) != 0 {
 		t.Fatalf("open = %+v", open)
+	}
+}
+
+func TestATailKeepsOnlyTheNamedPullRequestAndLanes(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	wanted := post(t, client.Draft{Drive: "d", Lane: "finder-desk", Kind: "review", Text: "finder: ok " + head, PRs: []string{"org/repo#45821"}})
+	post(t, client.Draft{Drive: "d", Lane: "finder-desk", Kind: "review", Text: "finder: ok " + head, PRs: []string{"org/repo#45822"}})
+	post(t, client.Draft{Drive: "d", Lane: "another-desk", Kind: "review", Text: "finder: ok " + head, PRs: []string{"org/repo#45821"}})
+
+	records, err := client.Tail(context.Background(), client.Query{Drive: "d", PR: "org/repo#45821", Lanes: []string{"finder-desk"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Seq != wanted.Seq {
+		t.Fatalf("Tail = %+v, want only seq %d", records, wanted.Seq)
+	}
+	if _, err := client.Tail(context.Background(), client.Query{Drive: "d", PR: "not a pull request"}); err == nil {
+		t.Fatal("Tail took a PR that does not parse")
+	}
+}
+
+func TestAmongReadsTheNamedRecordsOfOneDriveOldestFirst(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	first := post(t, client.Draft{Drive: "d", Lane: "root", Kind: "note", Text: "first"})
+	post(t, client.Draft{Drive: "d", Lane: "root", Kind: "note", Text: "unnamed"})
+	second := post(t, client.Draft{Drive: "d", Lane: "root", Kind: "note", Text: "second"})
+	elsewhere := post(t, client.Draft{Drive: "other", Lane: "root", Kind: "note", Text: "elsewhere"})
+
+	records, err := client.Among(context.Background(), "d", []int64{second.Seq, first.Seq, elsewhere.Seq, second.Seq + 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || records[0].Seq != first.Seq || records[1].Seq != second.Seq {
+		t.Fatalf("Among = %+v, want seqs %d and %d", records, first.Seq, second.Seq)
+	}
+}
+
+func TestAPostCarriesTheFileHoldingItsWholeBody(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	whole := filepath.Join(t.TempDir(), "record.md")
+	if err := os.WriteFile(whole, []byte("finder: ok\n\nthe whole reply\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stored := post(t, client.Draft{Drive: "d", Lane: "finder-desk", Kind: "review", Text: "finder: ok " + head, Path: whole})
+
+	if stored.Refs.Path != whole {
+		t.Fatalf("Refs.Path = %q, want %q", stored.Refs.Path, whole)
 	}
 }
