@@ -26,6 +26,8 @@ type BoardSpec struct {
 	Filters [3]Filter `json:"filters"`
 }
 
+const everyBoardCategory = "category IN (0,1,2)"
+
 type BoardSelection struct {
 	PRs    []string
 	RowIDs []string
@@ -280,7 +282,7 @@ func (index *BoardIndex) reconcile(ctx context.Context, scope *boardScope, encod
 		if err := boardChangedEffects(ctx, tx, scope, seq, affected); err != nil {
 			return err
 		}
-		old, err := tx.QueryContext(ctx, "SELECT DISTINCT path FROM board_query_rows WHERE scope=? AND seq=? AND path!=''", scope.id, seq)
+		old, err := tx.QueryContext(ctx, "SELECT path FROM board_query_rows WHERE scope=? AND "+everyBoardCategory+" AND seq=? AND path!=''", scope.id, seq)
 		if err != nil {
 			return err
 		}
@@ -298,10 +300,10 @@ func (index *BoardIndex) reconcile(ctx context.Context, scope *boardScope, encod
 		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_keys WHERE scope=? AND seq=?", scope.id, seq); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_rows WHERE scope=? AND seq=?", scope.id, seq); err != nil {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_rows WHERE scope=? AND "+everyBoardCategory+" AND seq=?", scope.id, seq); err != nil {
 			return err
 		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_openers WHERE scope=? AND seq=?", scope.id, seq); err != nil {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_openers WHERE scope=? AND "+everyBoardCategory+" AND seq=?", scope.id, seq); err != nil {
 			return err
 		}
 		for category, filter := range scope.spec.Filters {
