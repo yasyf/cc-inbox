@@ -54,7 +54,7 @@ func TestGrepTextBodyProjectionWork(t *testing.T) {
 				}
 				wantReads := int64(0)
 				if asJSON {
-					wantReads = int64(population)
+					wantReads = 2
 				}
 				if reads.Load() != wantReads {
 					t.Errorf("GREP_BODY_TRANSFER_BOUND_EXCEEDED rows=%d json=%t reads=%d want=%d", population, asJSON, reads.Load(), wantReads)
@@ -89,29 +89,26 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 		pattern string
 		args    []string
 		code    int
+		skips   bool
+		replies bool
 	}{
-		{"text large body", nil, "pure port", nil, 0},
-		{"JSON large body", nil, "pure port", []string{"--json"}, 0},
-		{"body is outside regex line", nil, "body-only-token", nil, 0},
-		{"malformed body stays opaque in text", []string{"UPDATE records SET body='{' WHERE seq=1"}, "pure port", nil, 0},
-		{"nonmatching malformed fields", []string{"UPDATE records SET fields='{' WHERE seq=2"}, "pure port", nil, 1},
-		{"nonmatching malformed refs", []string{"UPDATE records SET refs='{' WHERE seq=2"}, "pure port", nil, 1},
-		{"nonmatching malformed recipients", []string{"UPDATE records SET recipients='[' WHERE seq=2"}, "pure port", nil, 1},
-		{"nonmatching malformed also", []string{"UPDATE records SET also_resolves='[' WHERE seq=2"}, "pure port", nil, 1},
-		{"nonmatching malformed timestamp", []string{"UPDATE records SET at=X'FF' WHERE seq=2"}, "pure port", nil, 1},
-		{"out of order timestamps", []string{"UPDATE records SET at=at-90000000 WHERE seq=32", "UPDATE records SET text='pure port selected older' WHERE seq=2"}, "pure port", nil, 0},
-		{"fields suppress PR rendering", []string{`UPDATE records SET refs='{"prs":[7]}', fields='{"attrs":{"head:7":"abc"}}' WHERE seq=1`}, "pure port", nil, 0},
-		{"fixed case options", nil, "PURE PORT", []string{"-F", "--ignore-case=false"}, 0},
-		{"negative limit", nil, "pure port", []string{"--limit", "-1"}, 0},
-		{"regex identity", []string{"UPDATE records SET origin='feedfacefeedface', origin_seq=900 WHERE seq=1"}, "#900@feedface", nil, 0},
+		{name: "text large body", pattern: "pure port"},
+		{name: "JSON large body", pattern: "pure port", args: []string{"--json"}},
+		{name: "body is outside regex line", pattern: "body-only-token"},
+		{name: "malformed body stays opaque in text", updates: []string{"UPDATE records SET body='{' WHERE seq=1"}, pattern: "pure port"},
+		{name: "nonmatching malformed fields", updates: []string{"UPDATE records SET fields='{' WHERE seq=2"}, pattern: "pure port", code: 1, skips: true},
+		{name: "nonmatching malformed refs", updates: []string{"UPDATE records SET refs='{' WHERE seq=2"}, pattern: "pure port", code: 1, skips: true},
+		{name: "nonmatching malformed recipients", updates: []string{"UPDATE records SET recipients='[' WHERE seq=2"}, pattern: "pure port", code: 1, skips: true},
+		{name: "nonmatching malformed also", updates: []string{"UPDATE records SET also_resolves='[' WHERE seq=2"}, pattern: "pure port", code: 1, replies: true},
+		{name: "nonmatching malformed timestamp", updates: []string{"UPDATE records SET at=X'FF' WHERE seq=2"}, pattern: "pure port", code: 1, skips: true},
+		{name: "out of order timestamps", updates: []string{"UPDATE records SET at=at-90000000 WHERE seq=32", "UPDATE records SET text='pure port selected older' WHERE seq=2"}, pattern: "pure port"},
+		{name: "fields suppress PR rendering", updates: []string{`UPDATE records SET refs='{"prs":[7]}', fields='{"attrs":{"head:7":"abc"}}' WHERE seq=1`}, pattern: "pure port"},
+		{name: "fixed case options", pattern: "PURE PORT", args: []string{"-F", "--ignore-case=false"}},
+		{name: "negative limit", pattern: "pure port", args: []string{"--limit", "-1"}},
+		{name: "regex identity", updates: []string{"UPDATE records SET origin='feedfacefeedface', origin_seq=900 WHERE seq=1"}, pattern: "#900@feedface"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			db, _ := grepBodyStore(t, 32)
-			for _, update := range test.updates {
-				if _, err := db.ExecContext(t.Context(), update); err != nil {
-					t.Fatal(err)
-				}
-			}
 			invoke := func(binary string) ([]byte, []byte, int) {
 				t.Helper()
 				args := make([]string, 0, 10+len(test.args))
@@ -128,10 +125,28 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 				}
 				return stdout.Bytes(), stderr.Bytes(), command.ProcessState.ExitCode()
 			}
+			intact, _, _ := invoke(current)
+			for _, update := range test.updates {
+				if _, err := db.ExecContext(t.Context(), update); err != nil {
+					t.Fatal(err)
+				}
+			}
 			wantOut, wantErr, wantCode := invoke(old)
 			gotOut, gotErr, gotCode := invoke(current)
 			if wantCode != test.code {
 				t.Fatalf("immutable CLI exit=%d, want=%d; stderr=%s", wantCode, test.code, wantErr)
+			}
+			if test.skips {
+				if gotCode != 0 || len(gotErr) != 0 || !bytes.Equal(gotOut, intact) {
+					t.Fatalf("a row with no required word read as malformed: code=%d stdout=%q stderr=%q", gotCode, gotOut, gotErr)
+				}
+				return
+			}
+			if test.replies {
+				if gotCode != test.code || !bytes.Contains(gotErr, []byte("read replies")) {
+					t.Fatalf("malformed also_resolves: code=%d stderr=%q", gotCode, gotErr)
+				}
+				return
 			}
 			if !bytes.Equal(gotOut, wantOut) || !pipedStderrMatches(gotOut, gotErr, wantErr) || gotCode != wantCode {
 				t.Fatalf("CLI parity code=%d/%d stdout=%q/%q stderr=%q/%q", gotCode, wantCode, gotOut, wantOut, gotErr, wantErr)
