@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -41,6 +42,7 @@ type Filter struct {
 	Stack          string
 	Target         string
 	PR             PR
+	prKeyed        bool
 	After          int64
 	PeerAfter      int64
 	Before         int64
@@ -192,8 +194,8 @@ func (f Filter) boundedAudience(self string, now time.Time, rootAudience bool) (
 		return where, params
 	}
 	candidate := "seq"
-	if f.Origin != "" || f.PeerAfter > 0 {
-		// Unary plus retains records_origin and peer-after OR scans, including their native error order.
+	if f.Origin != "" {
+		// Unary plus retains the records_origin scan, including its native error order.
 		candidate = "+seq"
 	}
 	return where + " AND " + candidate + " IN (" + strings.Join(arms, " UNION ALL ") + ")", append(params, candidates...)
@@ -223,18 +225,26 @@ func (f Filter) candidateArmsAudience(self string, rootAudience bool) ([]string,
 		params = append(params, selected...)
 		arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ?"+selector+bounds("seq", f.After))
 	}
-	if rootAudience {
+	switch {
+	case rootAudience:
 		arms = append(arms, f.rootAudienceArms(bounds, &params)...)
-	} else if f.For == "" && f.Origin == "" && f.PeerAfter == 0 && len(f.Kinds) > 0 {
-		seen := map[kinds.Kind]bool{}
-		for _, kind := range f.Kinds {
-			if seen[kind] {
-				continue
-			}
-			seen[kind] = true
+	case f.To != "":
+		for _, address := range append(f.addressees(f.To), "all") {
+			params = append(params, address)
+			arms = append(arms, "SELECT source_seq AS candidate_seq FROM record_recipients WHERE address = ?"+bounds("source_seq", f.After))
+		}
+	case f.prKeyed:
+		params = append(params, f.Drive, strconv.Itoa(f.PR.Number))
+		arms = append(arms, "SELECT source_seq AS candidate_seq FROM record_ref_keys WHERE drive = ? AND axis = 'pr' AND key = ?"+bounds("source_seq", f.After))
+	case f.For == "" && f.Origin == "" && len(f.Lanes) > 0:
+		for _, lane := range slices.Compact(slices.Sorted(slices.Values(f.Lanes))) {
+			appendDrive(" AND lane = ?", lane)
+		}
+	case f.For == "" && f.Origin == "" && len(f.Kinds) > 0:
+		for _, kind := range slices.Compact(slices.Sorted(slices.Values(f.Kinds))) {
 			appendDrive(" AND kind = ?", string(kind))
 		}
-	} else {
+	default:
 		appendDrive("")
 	}
 	for _, addresses := range []struct {
@@ -346,6 +356,14 @@ func (f Filter) addressees(lane string) []any {
 }
 
 func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
+	if f.PR.Number != 0 {
+		switch err := s.refIndex(ctx); {
+		case err == nil:
+			f.prKeyed = true
+		case !errors.Is(err, ErrNoRefIndex):
+			return f, err
+		}
+	}
 	reader := cmp.Or(f.To, f.For, f.Addressed)
 	if reader == "" || f.Drive == "" {
 		return f, nil

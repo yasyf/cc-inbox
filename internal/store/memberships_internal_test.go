@@ -301,13 +301,7 @@ func TestBoundedReadPlansStayIndexed(t *testing.T) {
 				"count": queryPlan(ctx, t, st, "SELECT COUNT(*) FROM records WHERE "+where, countParams...),
 			} {
 				joined := strings.Join(plan, "\n")
-				if name == "count" && tt.f.PeerAfter > 0 {
-					nativeWhere, nativeParams := tt.f.where(st.Self(), st.Now())
-					nativePlan := queryPlan(ctx, t, st, "SELECT COUNT(*) FROM records WHERE "+nativeWhere, nativeParams...)
-					if plan[0] != nativePlan[0] {
-						t.Fatalf("peer-after count access path = %v, want original %v", plan, nativePlan)
-					}
-				} else if !strings.Contains(joined, "SEARCH records USING INTEGER PRIMARY KEY (rowid=?)") {
+				if !strings.Contains(joined, "SEARCH records USING INTEGER PRIMARY KEY (rowid=?)") {
 					t.Fatalf("%s plan lacks keyed record lookup:\n%s", name, joined)
 				}
 				for _, want := range []string{
@@ -318,7 +312,7 @@ func TestBoundedReadPlansStayIndexed(t *testing.T) {
 						t.Fatalf("%s plan lacks %q:\n%s", name, want, joined)
 					}
 				}
-				if !driveCandidates.MatchString(joined) || strings.Contains(joined, "USE TEMP B-TREE FOR ORDER BY") {
+				if tt.f.To == "" && !driveCandidates.MatchString(joined) || strings.Contains(joined, "USE TEMP B-TREE FOR ORDER BY") {
 					t.Fatalf("%s plan does not walk indexed candidates in seq order:\n%s", name, joined)
 				}
 				for _, line := range plan {
@@ -431,6 +425,50 @@ func TestBoundedReadsMatchUnboundedPredicates(t *testing.T) {
 				opened, openErr := st.OpenItems(ctx, drive)
 				t.Logf("resolvers %s: %v error=%v open=%d open_error=%v", drive, got, gotErr, len(opened), openErr)
 			}
+		})
+	}
+}
+
+func TestSelectiveFiltersWalkTheirOwnIndexes(t *testing.T) {
+	ctx := t.Context()
+	st := openMembershipStore(ctx, t, t.TempDir())
+	now := time.Date(2026, 10, 31, 12, 0, 0, 0, time.UTC)
+	st.Now = func() time.Time { return now }
+	seedMembershipFixture(ctx, t, st, now)
+	if _, err := MaintainIndexes(ctx, st.home); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name string
+		f    Filter
+		want string
+	}{
+		{"mail", Filter{Drive: "d", Peer: "reader", To: "api", After: 1, PeerAfter: 1, Limit: 500}, "record_recipients_address (address=? AND source_seq>?)"},
+		{"lanes", Filter{Drive: "d", Peer: "reader", Lanes: []string{"api", "desk", "api"}, After: 1, PeerAfter: 1, Limit: 500}, "(drive=? AND lane=?"},
+		{"pr", Filter{Drive: "d", Peer: "reader", PR: PR{Number: 1}, Limit: 500}, "record_ref_keys"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			f, err := st.aliased(ctx, tt.f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			q, params := st.selection(f)
+			where, countParams := f.bounded(st.Self(), st.Now())
+			for name, plan := range map[string][]string{
+				"query": queryPlan(ctx, t, st, q, params...),
+				"count": queryPlan(ctx, t, st, "SELECT COUNT(*) FROM records WHERE "+where, countParams...),
+			} {
+				joined := strings.Join(plan, "\n")
+				if !strings.Contains(joined, tt.want) || strings.Contains(joined, "records_drive_seq") {
+					t.Fatalf("%s plan does not walk %q alone:\n%s", name, tt.want, joined)
+				}
+			}
+			got, gotErr := st.Query(ctx, tt.f)
+			want, wantErr := unboundedQuery(ctx, st, tt.f)
+			assertSameRead(t, "query", got, gotErr, want, wantErr)
+			n, nErr := st.Count(ctx, tt.f)
+			m, mErr := unboundedCount(ctx, st, tt.f)
+			assertSameRead(t, "count", n, nErr, m, mErr)
 		})
 	}
 }
