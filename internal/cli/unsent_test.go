@@ -1,8 +1,10 @@
 package cli_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,10 +12,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
+
+func TestAPostWhoseStoreReadHitsItsDeadlineIsABusDown(t *testing.T) {
+	store := cli.UntilStored(func(*cobra.Command, []string) error {
+		return fmt.Errorf("read the refusals of lane-a on d1: %w", context.DeadlineExceeded)
+	})
+	cmd := &cobra.Command{}
+	cmd.SetContext(context.Background())
+
+	var down *cli.BusDown
+	if err := store(cmd, nil); !errors.As(err, &down) {
+		t.Fatalf("a store read past its deadline = %v; want a BusDown", err)
+	}
+}
 
 func TestAPostTheBusCannotStoreTellsItsSenderAndTheNextPostStoresIt(t *testing.T) {
 	home := t.TempDir()
