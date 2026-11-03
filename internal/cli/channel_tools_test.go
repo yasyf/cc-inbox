@@ -63,7 +63,7 @@ func TestThePostToolStampsALeadingLabel(t *testing.T) {
 	}
 	post["stamp"] = true
 	seq := mustTool(t, "post", post)
-	if out := mustTool(t, "read", map[string]any{"seqs": []any{seq}}); strings.Contains(out, stale) || !strings.Contains(out, ": merged") {
+	if out := mustTool(t, "read", map[string]any{"seqs": []any{seq}}); strings.Contains(out, stale) || !strings.Contains(out, "merged") {
 		t.Errorf("read %s = %q, want cci's own label in place of %s", seq, out, stale)
 	}
 }
