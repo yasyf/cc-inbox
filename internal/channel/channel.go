@@ -67,7 +67,7 @@ var errStale = errors.New("subscription replaced")
 // the same stdio, resumed, so a long-lived window never keeps filtering with
 // the release it started on.
 func Serve(ctx context.Context, st *store.Store, window store.Window, channeled, resumed bool, in io.Reader, out io.Writer, tools ...mcp.Tool) error {
-	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions}, tools)
+	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions, Resumed: resumed}, tools)
 	initialized := make(chan struct{})
 	watch := initialized
 	if resumed {
@@ -115,8 +115,11 @@ func untilInitialized(in io.Reader, out io.Writer, initialized chan<- struct{}) 
 func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, notify func(method string, params any) error) {
 	for ctx.Err() == nil {
 		sub, ok, err := st.Subscription(ctx, window)
-		if err == nil && ok {
+		switch {
+		case err == nil && ok:
 			err = follow(ctx, st, sub, channeled, notify)
+		case err == nil:
+			err = newerRelease()
 		}
 		var newer upgrade
 		if errors.As(err, &newer) {
@@ -235,17 +238,20 @@ func untilChanged(ctx context.Context, st *store.Store, sub store.Subscription, 
 			stop()
 			return nil
 		}
-		newer, found, err := newerInstall()
-		if err != nil {
+		if err := newerRelease(); err != nil {
 			stop()
 			return err
 		}
-		if found {
-			stop()
-			return upgrade{newer}
-		}
 	}
 	return nil
+}
+
+func newerRelease() error {
+	newer, found, err := newerInstall()
+	if err != nil || !found {
+		return err
+	}
+	return upgrade{newer}
 }
 
 func sleep(ctx context.Context, d time.Duration) bool {

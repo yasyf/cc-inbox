@@ -151,7 +151,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the relay up to the store's first record of it, then the store's own, as one
   list under the usual filters and budget. A number no relay holds keeps its
   error.
-
+- A Claude Code window whose cci channel started on an older release now sees
+  the MCP tools a newer one adds. The channel re-executes the newest installed
+  `cci` in every window, subscribed or not, and the resumed server opens with
+  `notifications/tools/list_changed`, which Claude Code honors because the
+  server now advertises `tools.listChanged` (cc-interact 0.40.0). Before, a
+  window that never ran `cci subscribe` kept its first build for life, and a
+  re-executed one kept the first build's tool list, so a drive's sessions
+  saw no `post` tool and posted through Bash. A window whose channel started
+  on 0.49.36 or earlier needs one restart to load a server that advertises it.
+- The MCP `post` tool takes `stamp`, as `cci post --stamp` does: cci writes
+  the leading H:MM AM/PM label from the post's own clock.
 - A typed kind whose audience includes `lane`, such as `lr.item` and `lr.note`,
   reaches any lane by name again, and never a role such as `root`. The store
   refused every `lr.item` addressed to a lane.
