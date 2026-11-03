@@ -59,7 +59,6 @@ func TestAPostToALaneNoLiveLaneReadsTellsThePoster(t *testing.T) {
 }
 
 func TestAPostToANumberedLaneIsStoredForItsStemWhileTheStemReachesThatLane(t *testing.T) {
-func TestAReaderNamesAWriterByTheStemItHoldsAndAnOlderLaneByItsNumber(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	for _, name := range peers.IdentityEnv {
@@ -95,6 +94,15 @@ func TestAReaderNamesAWriterByTheStemItHoldsAndAnOlderLaneByItsNumber(t *testing
 	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--reader", "sv-3")
 	if err != nil || !strings.Contains(out, "NOTE root -> sv first") || !strings.Contains(out, "NOTE root -> sv third") || strings.Contains(out, "second") {
 		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's mail and none sent to the running sv-2", out, err)
+	}
+}
+
+func TestAReaderNamesAWriterByTheStemItHoldsAndAnOlderLaneByItsNumber(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
 	if _, err := run(t, "post", "--drive", "d", "--lane", "sv-2", "--kind", "state", "--text", "first word"); err != nil {
 		t.Fatal(err)
 	}
