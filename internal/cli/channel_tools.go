@@ -161,9 +161,9 @@ func recordProps() map[string]any {
 		"body":     prop("string", "full body of any length, read back with read"),
 		"path":     prop("string", "absolute path of a file to attach as the body"),
 		"to":       list("addressed lanes"),
-		"re":       map[string]any{"type": []string{"string", "integer"}, "description": "seq this answers"},
-		"resolves": list("seqs this closes"),
-		"pr":       list("pull requests: N, owner/repo#N or URL"),
+		"re":       map[string]any{"type": []string{"string", "integer"}, "description": "seq this answers, or an alias: t:<topic>, ccn:<id or text prefix>, card:<id>, pr#N, last:<kind>[:<lane>]"},
+		"resolves": list("seqs or aliases this closes"),
+		"pr":       list("pull requests: N, pr#N, owner/repo#N or URL, or an alias whose record's pull requests this carries"),
 		"topic":    prop("string", "pairing key"),
 		"attrs":    map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 	}

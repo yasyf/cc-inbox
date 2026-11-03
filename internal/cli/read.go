@@ -280,6 +280,44 @@ func newGrepCmd() *cobra.Command {
 	return cmd
 }
 
+func newFindCmd() *cobra.Command {
+	var (
+		asJSON bool
+		drive  string
+	)
+	cmd := &cobra.Command{
+		Use:   "find ALIAS",
+		Short: "Print the record an alias names, as --re would take it: t:<topic>, ccn:<id or text prefix>, card:<id>, pr#N, or last:<kind>[:<lane>]",
+		Args:  cobra.ExactArgs(1),
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			n, err := store.ParseNamedRef(args[0])
+			if err != nil {
+				return err
+			}
+			if drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
+				return err
+			}
+			seq, err := st.ResolveNamed(cmd.Context(), n, drive, false)
+			if err != nil {
+				return err
+			}
+			r, err := st.Get(cmd.Context(), seq)
+			if err != nil {
+				return err
+			}
+			if asJSON {
+				_, err = fmt.Fprintln(cmd.OutOrStdout(), render.JSON(r))
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s %s\n", n, render.Line(r, st.Now()))
+			return err
+		}),
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "the record as one JSON line")
+	cmd.Flags().StringVar(&drive, "drive", "", "drive to look in (default: the drive bound to this session)")
+	return cmd
+}
+
 func newShowCmd() *cobra.Command {
 	var (
 		asJSON bool

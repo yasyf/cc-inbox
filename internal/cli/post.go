@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,8 +51,9 @@ func newPostCmd() *cobra.Command {
 		ttl                     time.Duration
 		asJSON, force           bool
 		pairwise                bool
-		re, resolves            []string
+		re, resolves, namedPRs  []string
 		reSeqs, resolvesSeqs    []int64
+		named                   = map[int64]string{}
 	)
 	cmd := &cobra.Command{
 		Use:   "post [TEXT]",
@@ -222,14 +224,21 @@ func newPostCmd() *cobra.Command {
 				r.Fields.Attrs[store.OwnedByAttr] = ownedBy
 			}
 			if cmd.Flags().Changed("re") {
-				if reSeqs, err = resolveAll(cmd.Context(), st, re); err != nil {
+				if reSeqs, err = resolveAll(cmd.Context(), st, r.Drive, re, false, named); err != nil {
 					return err
 				}
 			}
 			if cmd.Flags().Changed("resolves") {
-				if resolvesSeqs, err = resolveAll(cmd.Context(), st, resolves); err != nil {
+				if resolvesSeqs, err = resolveAll(cmd.Context(), st, r.Drive, resolves, true, named); err != nil {
 					return err
 				}
+			}
+			for _, ref := range namedPRs {
+				prs, err := namedRefPRs(cmd.Context(), st, r.Drive, ref)
+				if err != nil {
+					return err
+				}
+				r.Refs.PRs = append(r.Refs.PRs, prs...)
 			}
 			records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
 			if err != nil {
@@ -265,6 +274,9 @@ func newPostCmd() *cobra.Command {
 				return err
 			}
 			records[0] = records[0].Resolving(refusals)
+			for i := range records {
+				records[i].Fields.Attrs = namedAttrs(records[i], named)
+			}
 			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
 			if errors.Is(err, store.ErrUnconfirmed) {
 				if os.Getenv(unsentEnv) != "" {
@@ -296,8 +308,8 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; a name ending -<n> answers under its stem, the name without it: --to <stem> reaches the stem's newest live lane, a numbered name is stored as its stem while the stem reaches that same lane, a stood-down lane's mail reaches the successor it named or else that lane, and the post prints one line when no live lane reads a name or several running lanes share its stem; owner and all always pass; a record every --to of which names the posting lane itself is refused, naming who wrote the record it answers")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
-	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) of the record this one answers or closes; repeated, each gets its own record; with no --to, each is addressed to the lane that wrote the record it answers, as <lane>@<drive> when that record is on another drive")
-	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
+	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) or alias (t:<topic>, ccn:<id or text prefix>, card:<id>, pr#N, last:<kind>[:<lane>]) of the record this one answers or closes; an alias names its one open record, else its one record, and refuses naming the candidates; repeated, each gets its own record; with no --to, each is addressed to the lane that wrote the record it answers, as <lane>@<drive> when that record is on another drive")
+	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) or alias, as for --re but naming an open record, of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
 	f.Int64SliceVar(&reSeqs, "re-seq", nil, "internal store sequences this record answers")
 	f.Int64SliceVar(&resolvesSeqs, "resolves-seq", nil, "internal store sequences this record resolves")
 	_ = f.MarkHidden("re-seq")
@@ -310,7 +322,7 @@ func newPostCmd() *cobra.Command {
 	f.BoolVar(&pairwise, "pairwise", false, "pair equal non-empty --re and --resolves lists in order, posting one record per pair")
 	f.StringVar(&r.Refs.Path, "path", "", "file holding the full body, or - for stdin; stdin, /dev/stdin, and other pipes are copied to a file under $CCI_HOME/blobs, which the record names; its first line is the text when no text is given, stored exactly as written with no clock or {at} replaced, so the record's text equals that line")
 	f.StringVar(&r.Refs.CCN, "ccn", "", "cc-notes id")
-	f.Var(&prsFlag{prs: &r.Refs.PRs}, "pr", "pull requests as numbers, owner/repo#N, or URLs (repeatable)")
+	f.Var(&prsFlag{prs: &r.Refs.PRs, named: &namedPRs}, "pr", "pull requests as numbers, pr#N, owner/repo#N, or URLs, or an alias as for --re, whose record's pull requests this one carries (repeatable)")
 	f.StringSliceVar(&r.Refs.Builds, "build", nil, "build URLs or ids (repeatable)")
 	f.StringSliceVar(&r.Refs.Stacks, "stack", nil, "deploy stacks as <project>/<env> (repeatable)")
 	f.StringSliceVar(&r.Refs.Targets, "target", nil, "release targets (repeatable)")
@@ -527,16 +539,64 @@ func perTarget(r store.Record, re, resolves []int64, pairwise bool) ([]store.Rec
 	return out, nil
 }
 
-func resolveAll(ctx context.Context, st *store.Store, refs []string) ([]int64, error) {
+func resolveAll(ctx context.Context, st *store.Store, drive string, refs []string, resolving bool, named map[int64]string) ([]int64, error) {
 	seqs := make([]int64, len(refs))
 	for i, ref := range refs {
-		seq, err := st.Resolve(ctx, ref)
+		if !store.IsNamedRef(ref) {
+			seq, err := st.Resolve(ctx, ref)
+			if err != nil {
+				return nil, err
+			}
+			seqs[i] = seq
+			continue
+		}
+		n, err := store.ParseNamedRef(ref)
 		if err != nil {
 			return nil, err
 		}
-		seqs[i] = seq
+		if seqs[i], err = st.ResolveNamed(ctx, n, drive, resolving); err != nil {
+			return nil, err
+		}
+		named[seqs[i]] = ref
 	}
 	return seqs, nil
+}
+
+func namedRefPRs(ctx context.Context, st *store.Store, drive, ref string) ([]store.PR, error) {
+	n, err := store.ParseNamedRef(ref)
+	if err != nil {
+		return nil, err
+	}
+	seq, err := st.ResolveNamed(ctx, n, drive, false)
+	if err != nil {
+		return nil, err
+	}
+	r, err := st.Get(ctx, seq)
+	if err != nil {
+		return nil, err
+	}
+	if len(r.Refs.PRs) == 0 {
+		return nil, fmt.Errorf("--pr %s names %s, which carries no pull request", ref, r.Name())
+	}
+	return r.Refs.PRs, nil
+}
+
+func namedAttrs(r store.Record, named map[int64]string) map[string]string {
+	attrs := maps.Clone(r.Fields.Attrs)
+	set := func(key, alias string) {
+		if alias == "" {
+			return
+		}
+		if attrs == nil {
+			attrs = map[string]string{}
+		}
+		attrs[key] = alias
+	}
+	set(store.ReAliasAttr, named[r.Re])
+	for i, seq := range r.Closes() {
+		set(store.ResolvesAliasAttr(i), named[seq])
+	}
+	return attrs
 }
 
 func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {

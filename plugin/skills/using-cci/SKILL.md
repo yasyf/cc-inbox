@@ -115,6 +115,30 @@ Withdraw a go with `cci post --kind withdraw --re <go seq>`, one `--re` per go;
 Repeat `--resolves`, or give a comma list, to close several at once: one record
 resolves every seq, and its line reads `resolves #<a>,#<b>,#<c>`.
 
+Name a record by what it carries instead of typing its seq: `--re`, `--resolves`
+and `--pr` take an alias, and `cci find <alias>` prints the record it names.
+
+| Alias | Names |
+| --- | --- |
+| `t:<topic>` | records with that `--topic` |
+| `ccn:<id or prefix>` | records whose `--ccn` id, or whose text, starts with it |
+| `card:<id>` | records whose text names `card-<id>` |
+| `pr#N` | records carrying `--pr N` |
+| `last:<kind>[:<lane>]` | the newest record of that kind, from that lane |
+
+An alias resolves once, when the record is posted, and the record stores the
+seq it found. When exactly one of its records is open, an ask, blocker, hold or
+other opener nothing has closed, the alias names that one; otherwise `--re`
+and `--pr` take its only record. `--resolves` takes only an open record. An
+alias that names nothing, or several where one is needed, is refused with the
+candidates listed; post again with the seq you meant. `--pr <alias>` copies the
+named record's pull requests. Readers print the alias beside the seq it found,
+as `^374168(t:rollout)`. `ccn:` reads only cci's own records, so it works on a
+box without `ccn`; it matches the id a record linked with `--ccn` or the start
+of that record's text, never the doc's title in cc-notes. A store from an
+older cci gets the alias index from `cci maintain-indexes`; until then an alias
+is refused and names that command.
+
 Every `defect`, `matrix`, `hold`, `go`, or `opened` record about a stack carries
 `--stack <project>/<env>`, `--target <name>`, or both. Attach them to related records
 too, so a stack or target query finds both the problem and the work addressing it.

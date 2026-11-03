@@ -25,12 +25,17 @@ func (*prFlag) Type() string { return "pr" }
 
 type prsFlag struct {
 	prs   *[]store.PR
+	named *[]string
 	given []string
 }
 
 func (f *prsFlag) Set(s string) error {
 	for _, part := range strings.Split(s, ",") {
-		pr, err := store.ParsePR(part)
+		if f.named != nil && store.IsNamedRef(part) && !strings.HasPrefix(part, "pr#") {
+			*f.named = append(*f.named, part)
+			continue
+		}
+		pr, err := store.ParsePR(strings.TrimPrefix(part, "pr#"))
 		if err != nil {
 			return err
 		}
