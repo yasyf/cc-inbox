@@ -34,9 +34,10 @@ func TestAPostToAStemReadsTheSameRegistryAtOneAndAThousandLanes(t *testing.T) {
 			if _, err := st.db.ExecContext(ctx, "DROP TABLE lane_holds"); err != nil {
 				t.Fatal(err)
 			}
-			for _, definition := range strings.SplitN(laneHolds, ";\n", 4)[:3] {
+			for _, object := range laneHoldObjects[:3] {
+				definition := object.sql
 				for _, column := range []string{"stem", "lane", "successor"} {
-					definition = strings.Replace(definition, "\t"+column+" TEXT", "\t"+column+" TEXT COLLATE "+collation, 1)
+					definition = strings.Replace(definition, " "+column+" TEXT", " "+column+" TEXT COLLATE "+collation, 1)
 				}
 				if _, err := st.db.ExecContext(ctx, definition); err != nil {
 					t.Fatal(err)

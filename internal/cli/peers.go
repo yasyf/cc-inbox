@@ -706,16 +706,19 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 				reading, err = laneDrives(ctx, st, lanes)
 			}
 			var reach store.Reach
+			registry := true
 			if err == nil {
-				reach, err = st.Reach(ctx, drive, t)
+				if reach, err = st.Reach(ctx, drive, t); errors.Is(err, store.ErrNoLaneRegistry) {
+					registry, err = false, nil
+				}
 			}
-			if err == nil && !force && len(reading[t]) == 0 && !reach.Started && (t != reach.Stem || len(reach.Holders) == 0) {
+			if err == nil && !force && len(reading[t]) == 0 && !(registry && (reach.Started || t == reach.Stem && len(reach.Holders) > 0)) {
 				err = mistypedLane(ctx, st, drive, t)
 			}
 			if err == nil {
 				out[i], err = routeLane(t, drive, reading[t], notices)
 			}
-			if err == nil && out[i] == t && kind != kinds.StandDown {
+			if err == nil && registry && out[i] == t && kind != kinds.StandDown {
 				err = noticeReach(notices, t, reach)
 			}
 		}

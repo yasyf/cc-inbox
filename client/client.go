@@ -65,6 +65,12 @@ type Draft struct {
 	Notices io.Writer
 }
 
+// Stem is the name a lane answers under, the lane without a trailing -<n>:
+// cci delivers a post to the stem to the newest live lane registered under it.
+func Stem(lane string) string {
+	return store.Stem(lane)
+}
+
 // Post stores d through cci post itself, so its recipient checks, reply routing,
 // text limits and the unsent queue a down bus falls back to all apply; the error
 // is the one cci post would exit on.

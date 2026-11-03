@@ -643,7 +643,7 @@ WHERE ? OR NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND sess
 	}
 	waiting := int64(math.MaxInt64)
 	if fresh {
-		if waiting, err = waitingFor(ctx, tx, drive, lane); err != nil {
+		if waiting, err = s.waitingFor(ctx, tx, drive, lane); err != nil {
 			return err
 		}
 	}
@@ -667,16 +667,18 @@ ON CONFLICT (name, drive) DO NOTHING`, BroadcastCursor(k), drive, k.Session, k.A
 }
 
 func freshLane(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string) (bool, error) {
-	var fresh bool
-	if err := tx.QueryRowContext(ctx, "SELECT NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?) AND NOT EXISTS (SELECT 1 FROM sessions WHERE drive = ? AND lane = ?) AND NOT EXISTS (SELECT 1 FROM records WHERE drive = ? AND lane = ?)",
-		LaneCursor(k), drive, drive, lane, drive, lane).Scan(&fresh); err != nil {
+	var started bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)", LaneCursor(k), drive).Scan(&started); err != nil || started {
+		return false, err
+	}
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sessions WHERE drive = ? AND lane = ?) OR EXISTS (SELECT 1 FROM records WHERE drive = ? AND lane = ?)", drive, lane, drive, lane).Scan(&started); err != nil {
 		return false, fmt.Errorf("read whether lane %s started on %s: %w", lane, drive, err)
 	}
-	return fresh, nil
+	return !started, nil
 }
 
-func waitingFor(ctx context.Context, tx *sql.Tx, drive, lane string) (int64, error) {
-	arms, params, err := waitingAliases(ctx, tx, drive, lane)
+func (s *Store) waitingFor(ctx context.Context, tx *sql.Tx, drive, lane string) (int64, error) {
+	arms, params, err := s.waitingAliases(ctx, tx, drive, lane)
 	if err != nil {
 		return 0, err
 	}

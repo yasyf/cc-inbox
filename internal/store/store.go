@@ -213,7 +213,6 @@ INSERT INTO meta (key, value) SELECT 'compacted_through', MAX(seq) FROM records 
 ALTER TABLE records ADD COLUMN also_resolves_origin TEXT`,
 	`CREATE INDEX sessions_lane ON sessions(origin, drive, lane)`,
 	`ALTER TABLE sessions ADD COLUMN parent TEXT NOT NULL DEFAULT ''`,
-	laneHolds,
 }
 
 var (
@@ -658,6 +657,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+		return err
+	}
+	if err := installProjection(ctx, tx, laneHoldObjects[:], "lane registry"); err != nil {
 		return err
 	}
 	if _, err := createQueryIndexes(ctx, tx); err != nil {

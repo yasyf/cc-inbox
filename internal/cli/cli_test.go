@@ -1873,8 +1873,9 @@ func TestPostReplyAddressesTheLaneThatWroteTheRecordItAnswers(t *testing.T) {
 	post := func(args ...string) store.Record {
 		t.Helper()
 		out, err := run(t, append([]string{"post", "--json"}, args...)...)
+		lines := strings.Split(strings.TrimSpace(out), "\n")
 		var got store.Record
-		if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil {
+		if err != nil || json.Unmarshal([]byte(lines[len(lines)-1]), &got) != nil {
 			t.Fatalf("post %v = %q, %v", args, out, err)
 		}
 		return got

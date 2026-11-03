@@ -156,6 +156,10 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	holdsInstalled, err := projectionInstalled(ctx, s.db, laneHoldObjects[:], "lane registry")
+	if err != nil {
+		return report, err
+	}
 	incidents, err := incidentProjectionInstalled(ctx, s.db)
 	if err != nil {
 		return report, err
@@ -165,8 +169,8 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if !installed || !closersInstalled || !rootInstalled || !incidents {
-		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, incidents); err != nil {
+	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !incidents {
+		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, incidents); err != nil {
 			return report, err
 		}
 		if !installed {
@@ -181,6 +185,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !rootInstalled {
 			for _, object := range rootAudienceObjects {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !holdsInstalled {
+			for _, object := range laneHoldObjects {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}
@@ -216,7 +225,7 @@ func lockMaintenance(home string) (*os.File, error) {
 	return lock, nil
 }
 
-func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, incidents bool) error {
+func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, incidents bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin projection maintenance: %w", err)
@@ -234,6 +243,11 @@ func (s *Store) installProjections(ctx context.Context, memberships, closers, ro
 	}
 	if !roots {
 		if err := installProjection(ctx, tx, rootAudienceObjects[:], "root audience"); err != nil {
+			return err
+		}
+	}
+	if !holds {
+		if err := installProjection(ctx, tx, laneHoldObjects[:], "lane registry"); err != nil {
 			return err
 		}
 	}

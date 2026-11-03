@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -15,16 +16,19 @@ type registry struct {
 	t     *testing.T
 	st    *store.Store
 	clock *testutil.Clock
+	posts *int
 }
 
 func newRegistry(t *testing.T) registry {
 	st, clock := testutil.Store(t)
-	return registry{t, st, clock}
+	return registry{t, st, clock, new(int)}
 }
 
 func (g registry) post(r store.Record) int64 {
 	g.t.Helper()
 	g.clock.Advance(time.Second)
+	*g.posts++
+	r.Text = fmt.Sprintf("%s, post %d", r.Text, *g.posts)
 	return testutil.Post(g.t, g.st, r).Seq
 }
 
@@ -58,7 +62,7 @@ func (g registry) reads(lane string) []int64 {
 	if err != nil {
 		g.t.Fatal(err)
 	}
-	var seqs []int64
+	seqs := make([]int64, 0, len(got))
 	for _, r := range got {
 		seqs = append(seqs, r.Seq)
 	}

@@ -36,19 +36,12 @@ func spawnedSQL(record string) string {
 
 const liveSQL = "(down = 0 OR seen > down)"
 
-var laneHolds = `CREATE TABLE lane_holds (
-	drive TEXT NOT NULL,
-	stem TEXT NOT NULL,
-	lane TEXT NOT NULL,
-	held INTEGER NOT NULL,
-	seen INTEGER NOT NULL DEFAULT 0,
-	down INTEGER NOT NULL DEFAULT 0,
-	successor TEXT NOT NULL DEFAULT '',
-	PRIMARY KEY (drive, stem, lane)
-) WITHOUT ROWID;
-CREATE INDEX lane_holds_lane ON lane_holds(drive, lane);
-CREATE INDEX lane_holds_successor ON lane_holds(drive, successor) WHERE successor != '';
-INSERT INTO lane_holds (drive, stem, lane, held, seen)
+func liveOf(table string) string {
+	return "(" + table + ".down = 0 OR " + table + ".seen > " + table + ".down)"
+}
+
+func holdsFill() string {
+	return `INSERT INTO lane_holds (drive, stem, lane, held, seen)
 SELECT drive, ` + stemSQL("lane") + `, lane, MIN(seq), MAX(CASE WHEN kind != 'stand-down' THEN seq ELSE 0 END) FROM records
 WHERE drive != '' AND ` + holdableSQL("lane") + ` GROUP BY drive, lane;
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
@@ -67,22 +60,28 @@ SELECT drive, ` + stemSQL("l") + `, l, seq, seq, successor FROM newest WHERE ` +
 ON CONFLICT (drive, stem, lane) DO UPDATE SET down = excluded.down, successor = excluded.successor;
 INSERT INTO lane_holds (drive, stem, lane, held)
 SELECT drive, stem, successor, down FROM lane_holds WHERE successor != '' AND ` + holdableSQL("successor") + `
-ON CONFLICT (drive, stem, lane) DO UPDATE SET held = max(held, excluded.held);
-CREATE TRIGGER lane_holds_post AFTER INSERT ON records
+ON CONFLICT (drive, stem, lane) DO UPDATE SET held = max(held, excluded.held)`
+}
+
+var laneHoldObjects = [...]physicalObject{
+	{"table", "lane_holds", "CREATE TABLE lane_holds (drive TEXT NOT NULL, stem TEXT NOT NULL, lane TEXT NOT NULL, held INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0, down INTEGER NOT NULL DEFAULT 0, successor TEXT NOT NULL DEFAULT '', PRIMARY KEY (drive, stem, lane)) WITHOUT ROWID", holdsFill()},
+	{"index", "lane_holds_lane", "CREATE INDEX lane_holds_lane ON lane_holds(drive, lane)", ""},
+	{"index", "lane_holds_successor", "CREATE INDEX lane_holds_successor ON lane_holds(drive, successor) WHERE successor != ''", ""},
+	{"trigger", "lane_holds_post", `CREATE TRIGGER lane_holds_post AFTER INSERT ON records
 WHEN NEW.drive != '' AND ` + holdableSQL("NEW.lane") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen) VALUES (NEW.drive, ` + stemSQL("NEW.lane") + `, NEW.lane, NEW.seq, CASE WHEN NEW.kind = 'stand-down' THEN 0 ELSE NEW.seq END)
 ON CONFLICT (drive, stem, lane) DO NOTHING;
 UPDATE lane_holds SET seen = NEW.seq WHERE drive = NEW.drive AND lane = NEW.lane AND down > seen AND NEW.kind != 'stand-down';
-END;
-CREATE TRIGGER lane_holds_spawn AFTER INSERT ON records
+END`, ""},
+	{"trigger", "lane_holds_spawn", `CREATE TRIGGER lane_holds_spawn AFTER INSERT ON records
 WHEN NEW.kind IN ('spawn', 'state') AND NEW.drive != '' AND ` + holdableSQL(spawnedSQL("NEW")) + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 VALUES (NEW.drive, ` + stemSQL(spawnedSQL("NEW")) + `, ` + spawnedSQL("NEW") + `, NEW.seq, NEW.seq)
 ON CONFLICT (drive, stem, lane) DO UPDATE SET held = excluded.held, seen = excluded.seen;
-END;
-CREATE TRIGGER lane_holds_stand_down AFTER INSERT ON records
+END`, ""},
+	{"trigger", "lane_holds_stand_down", `CREATE TRIGGER lane_holds_stand_down AFTER INSERT ON records
 WHEN NEW.kind = 'stand-down' AND NEW.drive != '' AND json_valid(NEW.recipients) AND json_type(NEW.recipients, '$[0]') = 'text' AND ` + holdableSQL("json_extract(NEW.recipients, '$[0]')") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held)
@@ -94,21 +93,37 @@ INSERT INTO lane_holds (drive, stem, lane, held)
 SELECT drive, stem, successor, NEW.seq FROM lane_holds
 WHERE drive = NEW.drive AND lane = json_extract(NEW.recipients, '$[0]') AND ` + holdableSQL("successor") + `
 ON CONFLICT (drive, stem, lane) DO UPDATE SET held = max(held, excluded.held);
-END;
-CREATE TRIGGER lane_holds_bind AFTER INSERT ON sessions
+END`, ""},
+	{"trigger", "lane_holds_bind", `CREATE TRIGGER lane_holds_bind AFTER INSERT ON sessions
 WHEN NEW.drive != '' AND ` + holdableSQL("NEW.lane") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 VALUES (NEW.drive, ` + stemSQL("NEW.lane") + `, NEW.lane, (SELECT COALESCE(MAX(seq), 0) FROM records), (SELECT COALESCE(MAX(seq), 0) FROM records))
 ON CONFLICT (drive, stem, lane) DO UPDATE SET seen = max(seen, excluded.seen);
-END;
-CREATE TRIGGER lane_holds_rebind AFTER UPDATE OF drive, lane ON sessions
+END`, ""},
+	{"trigger", "lane_holds_rebind", `CREATE TRIGGER lane_holds_rebind AFTER UPDATE OF drive, lane ON sessions
 WHEN (NEW.drive IS NOT OLD.drive OR NEW.lane IS NOT OLD.lane) AND NEW.drive != '' AND ` + holdableSQL("NEW.lane") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 VALUES (NEW.drive, ` + stemSQL("NEW.lane") + `, NEW.lane, (SELECT COALESCE(MAX(seq), 0) FROM records), (SELECT COALESCE(MAX(seq), 0) FROM records))
 ON CONFLICT (drive, stem, lane) DO UPDATE SET seen = max(seen, excluded.seen);
-END`
+END`, ""},
+}
+
+// ErrNoLaneRegistry is what a registry read returns on a store whose lane
+// registry cci maintain-indexes has not installed yet.
+var ErrNoLaneRegistry = errors.New("this store has no lane registry yet; cci maintain-indexes installs it")
+
+func (s *Store) laneRegistry(ctx context.Context) error {
+	var installed bool
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'lane_holds')").Scan(&installed); err != nil {
+		return fmt.Errorf("look for the lane registry: %w", err)
+	}
+	if !installed {
+		return ErrNoLaneRegistry
+	}
+	return nil
+}
 
 // Reach says who reads mail addressed to one lane name on a drive.
 type Reach struct {
@@ -134,6 +149,9 @@ type hold struct {
 // its stem's holder; a stem reaches its holder. An unregistered numbered name
 // keeps its mail until it registers. Each hop is one indexed lookup.
 func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
+	if err := s.laneRegistry(ctx); err != nil {
+		return Reach{}, err
+	}
 	out := Reach{Stem: Stem(name)}
 	for cur, visited := name, []string{}; ; {
 		rows, err := s.holds(ctx, drive, cur)
@@ -199,6 +217,12 @@ type rowsQuerier interface {
 // ends at one of those. The query walks indexes from lane, so its cost does not
 // grow with the drive's other lanes.
 func (s *Store) Aliases(ctx context.Context, drive, lane string) ([]string, error) {
+	switch err := s.laneRegistry(ctx); {
+	case errors.Is(err, ErrNoLaneRegistry):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	}
 	return aliases(ctx, s.db, drive, lane)
 }
 
@@ -212,8 +236,8 @@ held(stem) AS (SELECT h.stem FROM lane_holds h WHERE h.drive = ?1 AND h.lane = ?
 reach(name) AS (
 	SELECT ?2
 	UNION SELECT stem FROM held
-	UNION SELECT r.lane FROM lane_holds r JOIN held ON r.stem = held.stem WHERE r.drive = ?1 AND r.down > 0 AND r.seen <= r.down AND r.successor = ''
-	UNION SELECT r.lane FROM lane_holds r JOIN reach ON r.successor = reach.name WHERE r.drive = ?1 AND r.successor != '' AND r.down > 0 AND r.seen <= r.down
+	UNION SELECT r.lane FROM held CROSS JOIN lane_holds r ON r.drive = ?1 AND r.stem = held.stem WHERE r.down > 0 AND r.seen <= r.down AND r.successor = ''
+	UNION SELECT r.lane FROM reach CROSS JOIN lane_holds r ON r.drive = ?1 AND r.successor = reach.name WHERE r.successor != '' AND r.down > 0 AND r.seen <= r.down
 )
 SELECT name FROM reach WHERE name != ?2 ORDER BY name`, drive, lane)
 	if err != nil {
@@ -237,6 +261,12 @@ SELECT name FROM reach WHERE name != ?2 ORDER BY name`, drive, lane)
 // own: the lanes it copies, a successor it names included, did not stand down.
 // Each step is one indexed registry lookup.
 func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []string, standDown int64, err error) {
+	if err := s.laneRegistry(ctx); errors.Is(err, ErrNoLaneRegistry) {
+		downs, err := s.StandDowns(ctx, drive)
+		return downs.Chain(lane), downs[lane].Seq, err
+	} else if err != nil {
+		return nil, 0, err
+	}
 	for cur := lane; ; {
 		var successor string
 		var down int64
@@ -257,12 +287,18 @@ func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []str
 	}
 }
 
-func waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane string) (string, []any, error) {
+func (s *Store) waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane string) (string, []any, error) {
+	switch err := s.laneRegistry(ctx); {
+	case errors.Is(err, ErrNoLaneRegistry):
+		return "", nil, nil
+	case err != nil:
+		return "", nil, err
+	}
 	names, err := aliases(ctx, tx, drive, lane)
 	if err != nil || len(names) == 0 {
 		return "", nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT o.lane, o.held, o.down, `+liveSQL+` FROM lane_holds o JOIN lane_holds h ON h.drive = o.drive AND h.stem = o.stem WHERE h.drive = ? AND h.lane = ?
+	rows, err := tx.QueryContext(ctx, `SELECT o.lane, o.held, o.down, `+liveOf("o")+` FROM lane_holds h CROSS JOIN lane_holds o ON o.drive = h.drive AND o.stem = h.stem WHERE h.drive = ? AND h.lane = ?
 UNION SELECT lane, held, down, `+liveSQL+` FROM lane_holds WHERE drive = ? AND lane IN (`+placeholders(len(names))+`)`,
 		append([]any{drive, lane, drive}, toAny(names)...)...)
 	if err != nil {
