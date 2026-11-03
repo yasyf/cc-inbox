@@ -74,7 +74,7 @@ func newPostCmd() *cobra.Command {
 			case len(args) == 1 && cmd.Flags().Changed("text"):
 				return fmt.Errorf("post takes its text once: as an argument or --text, not both")
 			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path") && !cmd.Flags().Changed("head") && !cmd.Flags().Changed("quoted"):
-				return fmt.Errorf("post needs its text, as one quoted argument, --text, --quoted, or a --path file whose first line becomes the text")
+				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
 			}
 			if !cmd.Flags().Changed("kind") {
 				return nil
