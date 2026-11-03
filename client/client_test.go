@@ -78,7 +78,7 @@ func TestARepostOfAnIDReturnsTheStoredRecord(t *testing.T) {
 func TestAPostRefusedByCciReturnsItsError(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	d := grade()
-	d.Kind = "evidence"
+	d.Kind = "no-such-kind"
 
 	if _, err := client.Post(context.Background(), d); err == nil || !strings.Contains(err.Error(), "unknown kind") {
 		t.Fatalf("Post = %v, want unknown kind", err)
