@@ -1748,8 +1748,8 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 		}
 	}
 	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "desk-1", "--text", "take #12", "--json")
-	if err != nil || !strings.Contains(out, `"to":["desk-1","desk-2","desk-3"]`) {
-		t.Fatalf("go to a stood-down lane = %q, %v; want it addressed to every successor", out, err)
+	if err != nil || !strings.Contains(out, `"to":["desk"]`) {
+		t.Fatalf("go to a stood-down lane = %q, %v; want it addressed to the stem its last successor holds", out, err)
 	}
 	out, err = run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json")
 	if err != nil || !strings.Contains(out, `"to":["desk-1"]`) {

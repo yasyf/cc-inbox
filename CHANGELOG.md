@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the successor with no `lr request stand-down` step. The predecessor posts its
   handoff and stops. A second thread binding the same lane is still refused, and
   root still hears that `defect`.
+- `cci post` stores a `--to` lane ending `-<n>` as its stem whenever the stem
+  reaches that same lane, so the record follows the stem to whichever lane holds
+  it next. A name the stem does not reach, such as a running older lane beside a
+  newer one, an unregistered name or a lane on another drive, is stored as typed,
+  and a stand-down or an `--owned-by` decide keeps the lane it is about. A
+  reply's default recipient is stored the same way.
 
 ### Removed
 

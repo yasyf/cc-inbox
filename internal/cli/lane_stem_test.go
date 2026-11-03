@@ -35,8 +35,8 @@ func TestAPostToALaneNoLiveLaneReadsTellsThePoster(t *testing.T) {
 		t.Fatalf("post to a retired sv-2 = %q, %v; want the hint naming sv", out, err)
 	}
 	out, err = run(t, "tail", "--drive", "d", "--since", "0", "--reader", "sv-3")
-	if err != nil || !strings.Contains(out, "NOTE root -> sv-2 late word") || !strings.Contains(out, "NOTE root -> sv pool word") {
-		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's and retired sv-2's mail", out, err)
+	if err != nil || !strings.Contains(out, "NOTE root -> sv late word") || !strings.Contains(out, "NOTE root -> sv pool word") {
+		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's mail, retired sv-2's stored for the stem", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "sv-3", "--text", "sv-3 stands down"); err != nil {
 		t.Fatal(err)
@@ -55,5 +55,44 @@ func TestAPostToALaneNoLiveLaneReadsTellsThePoster(t *testing.T) {
 	out, err = run(t, "tail", "--drive", "d", "--since", "0", "--reader", "sv-4")
 	if err != nil || !strings.Contains(out, "NOTE root -> sv anyone?") || !strings.Contains(out, "NOTE root -> sv welcome") {
 		t.Fatalf("tail --reader sv-4 = %q, %v; want what waited on the stem and what followed", out, err)
+	}
+}
+
+func TestAPostToANumberedLaneIsStoredForItsStemWhileTheStemReachesThatLane(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "sv-2", "--kind", "state", "--text", "sv-2 up"); err != nil {
+		t.Fatal(err)
+	}
+	to := func(name, text string) string {
+		t.Helper()
+		out, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "note", "--to", name, "--text", text, "--json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, stored, _ := strings.Cut(out, `"to":`)
+		stored, _, _ = strings.Cut(stored, "]")
+		return stored + "]"
+	}
+
+	alone := to("sv-2", "first")
+	if _, err := run(t, "post", "--drive", "d", "--lane", "sv-3", "--kind", "state", "--text", "sv-3 up"); err != nil {
+		t.Fatal(err)
+	}
+	older, newer, unregistered := to("sv-2", "second"), to("sv-3", "third"), to("other-1", "fourth")
+
+	if alone != `["sv"]` || older != `["sv-2"]` || newer != `["sv"]` || unregistered != `["other-1"]` {
+		t.Fatalf("stored recipients alone %s, older %s, newer %s, unregistered %s; want sv while the stem reaches the named lane, the name otherwise", alone, older, newer, unregistered)
+	}
+	owned, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "decide", "--owned-by", "sv-desk", "--to", "sv-3", "--text", "sv-desk owns sv-3", "--json")
+	if err != nil || !strings.Contains(owned, `"to":["sv-3"]`) {
+		t.Fatalf("an owned-by decide = %q, %v; want the owned lane kept by name", owned, err)
+	}
+	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--reader", "sv-3")
+	if err != nil || !strings.Contains(out, "NOTE root -> sv first") || !strings.Contains(out, "NOTE root -> sv third") || strings.Contains(out, "second") {
+		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's mail and none sent to the running sv-2", out, err)
 	}
 }
