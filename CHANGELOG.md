@@ -103,6 +103,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A numbered successor that binds beside its live predecessor now sends its
+  `defect` to itself, never root, naming the `lr request stand-down` it runs once
+  the predecessor's handoff is posted. A second binder of the same lane name is
+  still refused and still reaches root.
 - `cci post` refuses a clock later than the post time only when a past-tense
   word before it claims it already happened today. A clock with an earlier date
   beside it (`Nov 2`, `yesterday`, an ISO date) passes, and a bare clock with no

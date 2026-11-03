@@ -2028,8 +2028,27 @@ func TestASecondThreadCannotBindALiveLane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := strings.Count(out, `"kind":"defect"`); n != 2 || !strings.Contains(out, "second binder of p8a-step7 refused") || !strings.Contains(out, "p8a-step7-2 bound while its predecessor p8a-step7") || !strings.Contains(out, `"to":["root"]`) {
-		t.Fatalf("defects to root = %s; want one refusal and one successor bounce", out)
+	var got []string
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		var r struct {
+			To   []string `json:"to"`
+			Text string   `json:"text"`
+		}
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("%q: %v", line, err)
+		}
+		for _, head := range []string{"second binder of p8a-step7 refused", "p8a-step7-2 bound while its predecessor p8a-step7,"} {
+			if strings.HasPrefix(r.Text, head) {
+				got = append(got, head+" to "+strings.Join(r.To, ","))
+			}
+		}
+	}
+	slices.Sort(got)
+	if want := []string{"p8a-step7-2 bound while its predecessor p8a-step7, to p8a-step7-2", "second binder of p8a-step7 refused to root"}; !slices.Equal(got, want) {
+		t.Fatalf("defects = %q, want %q: the refusal reaches root and the successor's notice reaches the successor alone", got, want)
+	}
+	if !strings.Contains(out, "lr request stand-down p8a-step7 --successor p8a-step7-2 --by p8a-step7-2 --last-read") {
+		t.Fatalf("the successor's notice = %s; want the command that takes the predecessor over", out)
 	}
 	if out, err := run(t, "who", "--all", "--lane", "p8a-step7", "--json"); err != nil || strings.Contains(out, "019a3c3e-duplicate") {
 		t.Fatalf("who --lane p8a-step7 = %s, %v; want the refused thread unbound", out, err)
