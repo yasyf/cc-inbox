@@ -2,7 +2,7 @@ name: CI
 
 on:
   schedule:
-    - cron: "27 9 * * *"
+    - cron: "27 4 * * *"
   workflow_call:
     inputs:
       commit:
