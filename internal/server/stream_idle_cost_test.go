@@ -70,8 +70,8 @@ SELECT 'd','noise','note',1,'ignored','post','idle-'||n,'["noise"]',?,n,'idle-'|
 				t.Fatalf("idle stream: flushes=%d bytes=%d headers=%v", response.flushes, response.body.Len(), response.header)
 			}
 			t.Logf("population=%d idle_polls=3 record_queries=%d body_bytes=%d", count, queries.Load(), response.body.Len())
-			if got := queries.Load(); got != 1 {
-				t.Fatalf("idle record queries %d for %d unmatched rows, want 1", got, count)
+			if got := queries.Load(); got > 2 {
+				t.Fatalf("idle record queries %d for %d unmatched rows, want at most the catch-up and the hub's first read", got, count)
 			}
 			var cursors int
 			if err := db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM cursors").Scan(&cursors); err != nil || cursors != 0 {

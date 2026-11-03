@@ -57,12 +57,14 @@ func TestStreamChangesPreserveSameSequenceMutationAndLateAppend(t *testing.T) {
 			if n, err := st.IngestAll(t.Context(), []store.Ingestion{item}); err != nil || n != 1 {
 				t.Fatalf("IngestAll = %d, %v", n, err)
 			}
-			ctx, cancel := context.WithCancel(t.Context())
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
 			var late store.Record
-			response := &streamResponse{header: make(http.Header), afterFlush: func(n int) {
-				switch n {
-				case 2:
+			response := &streamResponse{header: make(http.Header)}
+			response.afterFlush = func(n int) {
+				delivered := strings.Count(response.body.String(), "event: record")
+				switch {
+				case n == 2:
 					item.Record.Kind = kinds.Hold
 					if method == "reparse" {
 						if n, _, err := st.Reparse(t.Context(), []store.Ingestion{item}, false); err != nil || n != 1 {
@@ -78,12 +80,12 @@ func TestStreamChangesPreserveSameSequenceMutationAndLateAppend(t *testing.T) {
 							t.Fatal(err)
 						}
 					}
-				case 3:
+				case delivered == 1 && late.Seq == 0:
 					late = testutil.Post(t, st, store.Record{Kind: kinds.Hold, Text: "late matching append", To: []string{"root"}, Refs: store.Refs{Targets: []string{"private"}}})
-				case 4:
+				case delivered == 2:
 					cancel()
 				}
-			}}
+			}
 			request := httptest.NewRequestWithContext(ctx, http.MethodGet, "/v1/stream?drive=d&kind=hold&since=1&expired=1", nil)
 			server.New(st, time.Nanosecond).Handler().ServeHTTP(response, request)
 			records := streamRows(t, response)

@@ -11,6 +11,10 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
+const feedRetry = 10 * time.Second
+
+var errWatchStopped = errors.New("watch stopped")
+
 type WatchOptions struct {
 	Filter   store.Filter
 	Cursor   string
@@ -21,6 +25,9 @@ type WatchOptions struct {
 	Untagged bool
 }
 
+// Watch emits each record opts.Filter passes as it commits. With a feed on st
+// it reads the store only when the feed says a record passes; without one, or
+// while the feed is away, it looks for commits itself every opts.Interval.
 func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(store.Record, string) error) error {
 	f := opts.Filter
 	if f.After == 0 && f.Since.IsZero() {
@@ -30,16 +37,74 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 		}
 		f.After = start
 	}
-	var deadline time.Time
+	w := &watcher{st: st, opts: opts, filter: f, floor: f.After, emit: emit}
 	if opts.For > 0 {
-		deadline = time.Now().Add(opts.For)
+		w.deadline = time.Now().Add(opts.For)
 	}
-	changes, err := st.OpenChangeVersion(ctx)
+	if feed := st.Feed(); feed != nil {
+		for {
+			done, err := w.follow(ctx, feed)
+			if done {
+				return err
+			}
+			if done, err = w.poll(ctx, time.Now().Add(feedRetry)); done {
+				return err
+			}
+		}
+	}
+	_, err := w.poll(ctx, time.Time{})
+	return err
+}
+
+type watcher struct {
+	st       *store.Store
+	opts     WatchOptions
+	filter   store.Filter
+	floor    int64
+	deadline time.Time
+	emit     func(store.Record, string) error
+}
+
+func (w *watcher) follow(ctx context.Context, feed store.Feed) (bool, error) {
+	followed := ctx
+	if !w.deadline.IsZero() {
+		var cancel context.CancelFunc
+		followed, cancel = context.WithDeadline(ctx, w.deadline)
+		defer cancel()
+	}
+	from := w.filter
+	from.After = max(w.filter.After, w.floor)
+	err := feed.Follow(followed, from, func(wake store.Wake) error {
+		w.filter.After = max(w.filter.After, wake.First-1)
+		w.filter.Before = wake.Head + 1
+		defer func() { w.filter.Before = 0 }()
+		w.floor = max(w.floor, wake.Head)
+		for {
+			n, err := w.page(followed)
+			if err != nil {
+				return err
+			}
+			if n < pageRows {
+				return nil
+			}
+		}
+	})
+	switch {
+	case followed.Err() != nil, errors.Is(err, errWatchStopped):
+		return true, nil
+	case errors.Is(err, store.ErrUnrouted):
+		return false, nil
+	}
+	return true, err
+}
+
+func (w *watcher) poll(ctx context.Context, until time.Time) (bool, error) {
+	changes, err := w.st.OpenChangeVersion(ctx)
 	if err != nil {
 		if ctx.Err() != nil {
-			return nil
+			return true, nil
 		}
-		return err
+		return true, err
 	}
 	defer func() { _ = changes.Close() }()
 	var previous int64
@@ -47,56 +112,72 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 	for {
 		version, err := changes.Read(ctx)
 		if ctx.Err() != nil {
-			return nil
+			return true, nil
 		}
 		if err != nil {
-			return err
+			return true, err
 		}
 		if !idle || version != previous {
-			f.Limit = pageRows
-			records, err := st.Query(ctx, f)
-			if ctx.Err() != nil {
-				return nil
+			n, err := w.page(ctx)
+			if errors.Is(err, errWatchStopped) {
+				return true, nil
 			}
 			if err != nil {
-				return err
+				return true, err
 			}
-			rendered, _, err := lines(ctx, st, records, view{JSON: opts.JSON, Width: opts.Width, Untagged: opts.Untagged, Unnamed: f.For != "" || f.To != ""})
-			if ctx.Err() != nil {
-				return nil
-			}
-			if err != nil {
-				return err
-			}
-			from := f.After
-			for i, r := range records {
-				if err = emit(r, rendered[i]); err != nil {
-					break
-				}
-				f.After = r.Seq
-			}
-			if f.After > from && opts.Cursor != "" {
-				if cerr := st.SetCursor(context.WithoutCancel(ctx), opts.Cursor, f.Drive, f.After); cerr != nil {
-					return errors.Join(err, cerr)
-				}
-			}
-			if err != nil {
-				return err
-			}
-			previous, idle = version, len(records) < pageRows
-			if len(records) == pageRows {
+			previous, idle = version, n < pageRows
+			if n == pageRows {
 				continue
 			}
 		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			return nil
+		now := time.Now()
+		if !w.deadline.IsZero() && now.After(w.deadline) {
+			return true, nil
+		}
+		if !until.IsZero() && now.After(until) {
+			return false, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil
-		case <-time.After(opts.Interval):
+			return true, nil
+		case <-time.After(w.opts.Interval):
 		}
 	}
+}
+
+func (w *watcher) page(ctx context.Context) (int, error) {
+	f := &w.filter
+	f.Limit = pageRows
+	records, err := w.st.Query(ctx, *f)
+	if ctx.Err() != nil {
+		return 0, errWatchStopped
+	}
+	if err != nil {
+		return 0, err
+	}
+	rendered, _, err := lines(ctx, w.st, records, view{JSON: w.opts.JSON, Width: w.opts.Width, Untagged: w.opts.Untagged, Unnamed: f.For != "" || f.To != ""})
+	if ctx.Err() != nil {
+		return 0, errWatchStopped
+	}
+	if err != nil {
+		return 0, err
+	}
+	from := f.After
+	for i, r := range records {
+		if err = w.emit(r, rendered[i]); err != nil {
+			break
+		}
+		f.After = r.Seq
+	}
+	if f.After > from && w.opts.Cursor != "" {
+		if cerr := w.st.SetCursor(context.WithoutCancel(ctx), w.opts.Cursor, f.Drive, f.After); cerr != nil {
+			return 0, errors.Join(err, cerr)
+		}
+	}
+	if err != nil {
+		return 0, err
+	}
+	return len(records), nil
 }
 
 // WriteLines prints each watched line, with a text line's record body under it.

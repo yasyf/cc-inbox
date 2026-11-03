@@ -167,6 +167,10 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	mutationsInstalled, err := projectionInstalled(ctx, s.db, recordMutationObjects[:], "record mutation")
+	if err != nil {
+		return report, err
+	}
 	incidents, err := incidentProjectionInstalled(ctx, s.db)
 	if err != nil {
 		return report, err
@@ -176,8 +180,8 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !refsInstalled || !incidents {
-		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, refsInstalled, incidents); err != nil {
+	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !refsInstalled || !mutationsInstalled || !incidents {
+		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, refsInstalled, mutationsInstalled, incidents); err != nil {
 			return report, err
 		}
 		if !installed {
@@ -202,6 +206,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !refsInstalled {
 			for _, object := range refKeyObjects {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !mutationsInstalled {
+			for _, object := range recordMutationObjects {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}
@@ -237,7 +246,7 @@ func lockMaintenance(home string) (*os.File, error) {
 	return lock, nil
 }
 
-func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, incidents bool) error {
+func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, mutations, incidents bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin projection maintenance: %w", err)
@@ -265,6 +274,11 @@ func (s *Store) installProjections(ctx context.Context, memberships, closers, ro
 	}
 	if !refs {
 		if err := installProjection(ctx, tx, refKeyObjects[:], "alias index"); err != nil {
+			return err
+		}
+	}
+	if !mutations {
+		if err := installProjection(ctx, tx, recordMutationObjects[:], "record mutation"); err != nil {
 			return err
 		}
 	}
