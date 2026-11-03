@@ -169,7 +169,7 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, w Write) (Written, error)
 		}
 	}
 	if b := w.Bind; b != nil {
-		if err := s.bindLane(ctx, tx, b.Key, b.Drive, b.Lane, b.Started); err != nil {
+		if err := s.bindLane(ctx, tx, *b); err != nil {
 			return Written{}, err
 		}
 	}

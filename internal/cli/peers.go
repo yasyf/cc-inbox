@@ -32,8 +32,8 @@ import (
 
 func newAnnounceCmd() *cobra.Command {
 	var (
-		role, description string
-		tags              []string
+		role, description, lane, drive string
+		tags                           []string
 	)
 	cmd := &cobra.Command{
 		Use:   "announce",
@@ -48,12 +48,19 @@ func newAnnounceCmd() *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("resolve cwd: %w", err)
 			}
+			if lane != "" {
+				if err := claimLane(cmd.Context(), st, self, window, drive, lane); err != nil {
+					return err
+				}
+			}
 			if _, err := peers.Announce(cmd.Context(), st, peers.Options{Session: self.Session, Agent: self.Agent, Window: window, Cwd: cwd, Role: role, Description: description, Tags: tags, Speak: true}); err != nil {
 				return err
 			}
 			return printPeer(cmd, st, self)
 		}),
 	}
+	cmd.Flags().StringVar(&lane, "lane", "", "bind this thread to this lane, over any lane its posts or its drive binding gave it, so its hooks deliver and block for this lane alone")
+	cmd.Flags().StringVar(&drive, "drive", "", "drive --lane binds on (default: the drive bound to this session, else $"+driveEnv+")")
 	cmd.Flags().StringVar(&role, "role", "", "root, lane, desk, watcher, codex or session (default: inferred from the drive binding)")
 	cmd.Flags().StringVar(&description, "desc", "", "what this session is doing, in one line")
 	cmd.Flags().StringSliceVar(&tags, "tag", nil, "free-form tags other sessions can select on (repeatable)")
@@ -122,6 +129,20 @@ func bindNamedLane(ctx context.Context, st *store.Store, self store.PeerKey, win
 		return err
 	}
 	return st.BindLane(ctx, self, drive, lane, time.UnixMilli(window.Started))
+}
+
+func claimLane(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window, drive, lane string) error {
+	drive, err := resolveDrive(ctx, st, drive)
+	if errors.Is(err, store.ErrNoDrive) {
+		return fmt.Errorf("--lane %s needs a drive: pass --drive, set $%s, or run cci drive use", lane, driveEnv)
+	}
+	if err != nil {
+		return err
+	}
+	if err := refuseHeldLane(ctx, st, self, drive, lane, st.Now()); err != nil {
+		return err
+	}
+	return st.ClaimLane(ctx, self, drive, lane, time.UnixMilli(window.Started))
 }
 
 func printPeer(cmd *cobra.Command, st *store.Store, self store.PeerKey) error {

@@ -195,8 +195,15 @@ session, and later posts keep that drive and default `--lane` to that lane.
 A subagent or teammate spawned with a name is that lane already: `cci me`
 binds it, and its posts default `--lane` to the name. Records posted to a
 lane before any thread bound it arrive on the first binding. `--drive` on a
-post or cursor applies to that one call, and only `cci drive use` moves the
-binding. A post never defaults to `root`: the root passes `--lane root`, and
+post or cursor applies to that one call. A post never rebinds a bound thread;
+only an explicit binding moves it: `cci drive use`, `cci announce --lane
+<lane>`, or `cci subscribe --reader <lane>`, which binds the window's root
+thread to its reader, and a session a `/clear` starts in that window takes the
+same lane. The explicit lane wins over the one a first post or a name gave the
+thread, so a bridge window that once posted `--lane root` and subscribes as
+`--reader owner-relay` hears and owes only owner-relay's records. Claiming a
+lane another live thread holds and never stood down is refused, as a second
+binder's post is. A post never defaults to `root`: the root passes `--lane root`, and
 an unnamed thread bound to no lane is refused. From
 then every record addressed to the lane arrives as hook context after the
 next tool call, including records posted since the window started. A
@@ -289,6 +296,7 @@ Announce what this session is doing so the lines above carry it:
 
 ```bash
 cci announce --desc "sandsql replica bake" --tag release --tag sandsql
+cci announce --lane root --drive demo   # this thread is the drive's coordinator
 ```
 
 The `SessionStart` hook, `cci drive use` and a lane's first post announce
