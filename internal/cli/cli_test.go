@@ -1472,6 +1472,39 @@ func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
 	}
 }
 
+func TestShowPrintsEachRecordsTextOnceWithinItsBudget(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	long := "OPENING " + strings.Repeat("a long finding about the stack cap ", 20) + "THE END"
+	body := filepath.Join(t.TempDir(), "report.txt")
+	if err := os.WriteFile(body, []byte("FIRST LINE of the report\n"+strings.Repeat("detail ", 200)+"LAST WORD\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", long); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "report", "--path", body); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "show", "1", "2", "--drive", "release-v3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(out, "OPENING") != 1 || strings.Count(out, "FIRST LINE") != 1 || !strings.Contains(out, "THE END") || !strings.Contains(out, "LAST WORD") {
+		t.Errorf("show 1 2 = %q, want each text printed once and each body through its end", out)
+	}
+	out, err = run(t, "show", "1", "2", "--budget", "200")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "LAST WORD") || !strings.Contains(out, "cci show 2 reads it whole") {
+		t.Errorf("show 1 2 --budget 200 = %q, want #2's body cut with the show that reads it whole", out)
+	}
+	if _, err := run(t, "show", "1", "--drive", "other"); err == nil || !strings.Contains(err.Error(), "#1 is on drive release-v3") {
+		t.Errorf("show 1 --drive other = %v, want it to name the record's drive", err)
+	}
+}
+
 func TestPostDefaultsOnlyToABoundLaneNeverToRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)

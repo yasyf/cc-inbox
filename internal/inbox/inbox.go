@@ -12,6 +12,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -523,7 +524,7 @@ func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, 
 	return pages
 }
 
-func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.Writer) error {
+func Show(ctx context.Context, st *store.Store, seqs []int64, drive string, budget int, asJSON bool, w io.Writer) error {
 	records := make([]store.Record, len(seqs))
 	for i, seq := range seqs {
 		r, err := st.Get(ctx, seq)
@@ -533,11 +534,18 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.
 		if err != nil {
 			return err
 		}
+		if drive != "" && r.Drive != drive {
+			return fmt.Errorf("show: #%d is on drive %s, not %s", seq, r.Drive, drive)
+		}
 		records[i] = r
 	}
 	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON, Whole: true})
 	if err != nil {
 		return err
+	}
+	share := 0
+	if budget > 0 {
+		share = max(budget/len(records), 1)
 	}
 	for i, line := range rendered {
 		if _, err := fmt.Fprintln(w, line); err != nil {
@@ -553,6 +561,13 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.
 		} else if err != nil {
 			return fmt.Errorf("show #%d: %w", records[i].Seq, err)
 		}
+		body = bodyAfterText(body, records[i].Text)
+		if share > 0 && len(body) > share {
+			body = fmt.Appendf(body[:share:share], "\n... cut %d bytes of #%d; cci show %d reads it whole", len(body)-share, records[i].Seq, records[i].Seq)
+		}
+		if len(body) == 0 {
+			continue
+		}
 		if !bytes.HasSuffix(body, []byte("\n")) {
 			body = append(body, '\n')
 		}
@@ -561,6 +576,18 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, asJSON bool, w io.
 		}
 	}
 	return nil
+}
+
+func bodyAfterText(body []byte, text string) []byte {
+	cut, spilled := strings.CutSuffix(text, "…")
+	rest, ok := bytes.CutPrefix(body, []byte(cut))
+	if !ok || cut == "" {
+		return body
+	}
+	if spilled {
+		return append([]byte("…"), rest...)
+	}
+	return bytes.TrimPrefix(rest, []byte("\n"))
 }
 
 func skippedOf(ctx context.Context, st *store.Store, records []store.Record, open bool) (map[int64]bool, error) {
