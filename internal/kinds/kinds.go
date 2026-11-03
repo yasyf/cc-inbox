@@ -149,6 +149,7 @@ var aliases = map[string]Kind{
 	"ruling":        Owner,
 	"refused":       Refuse,
 	"failed":        Fail,
+	"status":        State,
 }
 
 var openers = map[Kind][]Kind{
@@ -167,8 +168,10 @@ const ServiceTTL = 14 * 24 * time.Hour
 var service = regexp.MustCompile(`^[a-z][a-z0-9_-]*(\.[a-z][a-z0-9_-]*)+$`)
 
 func Parse(s string) (Kind, error) {
-	k := Kind(s)
-	if _, ok := specs[k]; ok || k.Service() {
+	if k, ok := Lookup(s); ok {
+		return k, nil
+	}
+	if k := Kind(s); k.Service() {
 		return k, nil
 	}
 	return "", fmt.Errorf("unknown kind %q: see cci post --help for kinds, or use a dotted service kind such as oncall.fix.status", s)

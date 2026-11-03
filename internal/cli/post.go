@@ -162,8 +162,16 @@ func newPostCmd() *cobra.Command {
 			}
 			if fromPath {
 				text = store.Clip(text)
-			} else if utf8.RuneCountInString(text) > store.MaxText && r.Refs.Path == "" {
-				excerpt, path, err := st.Fit(text)
+			} else if utf8.RuneCountInString(text) > store.MaxText {
+				full := text
+				if r.Refs.Path != "" {
+					attached, err := os.ReadFile(r.Refs.Path)
+					if err != nil {
+						return fmt.Errorf("--path: %w", err)
+					}
+					full += "\n\n" + string(attached)
+				}
+				excerpt, path, err := st.Fit(full)
 				if err != nil {
 					return err
 				}
@@ -281,7 +289,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time more than 3 minutes and less than 3 hours after the post refuses it unless a date follows the time or by, until, till, before, next, ETA, due, expected or since sits in the four words before it, and one 3 hours or more ahead is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time more than 3 minutes and less than 3 hours after the post refuses it unless a date follows the time or by, until, till, before, next, ETA, due, expected or since sits in the four words before it, and one 3 hours or more ahead is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs, followed by the --path file when one is named, and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&ownedBy, "owned-by", "", "with --kind decide, the lane that owns the one --to lane, such as the lane that maintains a script posting as that lane: stored as fields.attrs.owned-by: later asks, decides and defects addressed to the owned lane reach its owner, and the owner's successors, too; the newest such decide wins")
 	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
