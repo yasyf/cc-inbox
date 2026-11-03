@@ -75,6 +75,7 @@ func pagedGrep(ctx context.Context, st *store.Store, f store.Filter, pattern *re
 	matched, printed := 0, 0
 	f.Descending, f.Limit = true, pageRows
 	now := st.Now()
+	wire := render.Wire{Now: now}
 	for {
 		records, err := st.Query(ctx, f)
 		if err != nil {
@@ -86,11 +87,14 @@ func pagedGrep(ctx context.Context, st *store.Store, f store.Filter, pattern *re
 				hits = append(hits, r)
 			}
 		}
-		rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON, Whole: true})
+		rendered, _, err := lines(ctx, st, hits, view{JSON: asJSON, Compact: true})
 		if err != nil {
 			return err
 		}
-		for _, line := range rendered {
+		for i, line := range rendered {
+			if !asJSON {
+				line = wire.Headed(hits[i].At, line)
+			}
 			matched++
 			if (limit == 0 || printed < limit) && b.Line(line) {
 				printed++

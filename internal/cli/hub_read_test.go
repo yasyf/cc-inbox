@@ -121,12 +121,9 @@ func TestShowOnAReplicaReadsARecordOlderThanItFromTheHub(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, first := strings.Index(out, "#2 "), strings.Index(out, "#1 ")
-	if second < 0 || first < second || !strings.Contains(out, "older than the sprite") || !strings.Contains(out, "BRIEF END") {
+	second, first := strings.Index(out, "2 decision root older than the sprite"), strings.Index(out, "1 decision root + the brief")
+	if second < 0 || first < second || !strings.Contains(out, "BRIEF END") {
 		t.Fatalf("show #2 1 on the replica = %q; want the hub's #2, then #1 with its body through BRIEF END", out)
-	}
-	if !strings.Contains(out, filepath.Join(r.sprite.HomeDir(), "blobs")) {
-		t.Errorf("show #1 on the replica = %q; want its body read from this node's blobs", out)
 	}
 	if n := held(t, r.sprite); n != 1 {
 		t.Errorf("replica holds %d records after show, want 1: a record read from the hub is not stored", n)
@@ -164,7 +161,7 @@ func TestTailOnAReplicaFromAnOlderSeqReadsTheWholeRangeInOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "hub desk") || !strings.Contains(out, "#4 ") || !strings.Contains(out, "local two") {
+	if strings.Contains(out, "hub desk") || !strings.Contains(out, "4 decision root hub two") || !strings.Contains(out, "local two") {
 		t.Errorf("tail --since #1 --lane root = %q; want the hub's root records and the replica's, without the desk's", out)
 	}
 	out, err = run(t, "tail", "--drive", "d", "--since", "#1", "--oldest", "--budget", "1")

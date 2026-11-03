@@ -148,9 +148,16 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	run := func(first []store.Record) (*bytes.Buffer, *render.Budget, tailRun) {
 		var out bytes.Buffer
 		b := render.NewBudget(&out, opts.Budget)
+		wire := render.Wire{Now: st.Now()}
+		line := func(r store.Record) string {
+			if !v.Compact || opts.JSON {
+				return rendered[index[r.Seq]]
+			}
+			return wire.Headed(r.At, rendered[index[r.Seq]])
+		}
 		t := tailRun{res: TailResult{Last: f.After}, printed: map[int64]bool{}}
 		for _, r := range first {
-			if !b.Line(rendered[index[r.Seq]]) {
+			if !b.Line(line(r)) {
 				break
 			}
 			t.mark(r, folded[index[r.Seq]])
@@ -163,7 +170,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 				t.res.Last = r.Seq
 				continue
 			}
-			if !b.Line(rendered[index[r.Seq]]) {
+			if !b.Line(line(r)) {
 				t.done = false
 				break
 			}
@@ -454,6 +461,8 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 			}
 			if asJSON {
 				line = render.JSON(r)
+			} else {
+				line = render.Compact(r, width)
 			}
 			if candidateBudget.Line(line) {
 				hits = append(hits, r)
@@ -468,14 +477,18 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		}
 		f.Before = records[len(records)-1].Seq
 	}
-	for _, page := range grepPages(ctx, st, selected, asJSON, width, now) {
+	wire := render.Wire{Now: now}
+	for p, page := range grepPages(ctx, st, selected, asJSON, width, now) {
 		if b.Full() {
 			break
 		}
 		if page.err != nil {
 			return page.err
 		}
-		for _, line := range page.lines {
+		for i, line := range page.lines {
+			if !asJSON {
+				line = wire.Headed(selected[p][i].At, line)
+			}
 			if !b.Line(line) {
 				break
 			}
@@ -566,7 +579,7 @@ func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, 
 	for page, records := range selected {
 		pages[page].err = replies[page].Err
 		if replies[page].Err == nil {
-			pages[page].lines, _ = textLines(records, replies[page].Replies, view{Whole: true, Width: width}, now)
+			pages[page].lines, _ = textLines(records, replies[page].Replies, view{Compact: true, Width: width}, now)
 		}
 	}
 	return pages
@@ -578,7 +591,7 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 			return fmt.Errorf("show: %s is on drive %s, not %s", r.Name(), r.Drive, drive)
 		}
 	}
-	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON, Whole: true})
+	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON, Compact: true})
 	if err != nil {
 		return err
 	}
@@ -586,7 +599,11 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 	if budget > 0 {
 		share = max(budget/len(records), 1)
 	}
+	wire := render.Wire{Now: st.Now()}
 	for i, line := range rendered {
+		if !asJSON {
+			line = wire.Headed(records[i].At, line)
+		}
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}

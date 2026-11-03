@@ -97,7 +97,6 @@ type view struct {
 	Width    int
 	Fold     int
 	Untagged bool
-	Whole    bool
 	Now      time.Time
 	Unnamed  bool
 }
@@ -142,12 +141,8 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 func textLines(records []store.Record, replies map[int64][]store.Record, v view, now time.Time) ([]string, []bool) {
 	out := make([]string, len(records))
 	folded := make([]bool, len(records))
-	wire := render.Wire{Now: now}
 	line := func(r store.Record, width int) string {
-		switch {
-		case v.Whole:
-			return render.Clip(render.Line(r, now), width)
-		case v.Untagged:
+		if v.Untagged {
 			return render.Untagged(r, now, width)
 		}
 		return render.Brief(r, now, width)
@@ -159,10 +154,13 @@ func textLines(records []store.Record, replies map[int64][]store.Record, v view,
 		}
 		if v.Compact {
 			width := compactWidth(r, v)
-			if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) {
-				width, folded[i] = v.Fold, true
+			text := render.Compact(shown, width)
+			if v.Fold > 0 && (width == 0 || width > v.Fold) && resolved(r.Seq, replies[r.Seq]) {
+				if cut := render.Compact(shown, v.Fold); cut != text {
+					text, folded[i] = cut, true
+				}
 			}
-			out[i] = wire.Line(shown, width) + marks(r.Seq, replies[r.Seq])
+			out[i] = text + marks(r.Seq, replies[r.Seq])
 			continue
 		}
 		text := line(shown, v.Width)

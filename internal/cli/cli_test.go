@@ -102,10 +102,10 @@ func TestPostTailDigest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "OPENED landing-desk release: read published versions pr#30431") || !strings.Contains(out, "HOLD root -> landing-desk [#30431] hold until the walker reports") {
+	if !strings.Contains(out, "1 opened landing-desk #30431 release: read published versions") || !strings.Contains(out, "2 hold root>landing-desk #30431 t:#30431 hold until the walker reports") {
 		t.Fatalf("tail = %q", out)
 	}
-	if out, err = run(t, "tail", "--since", "0", "--to", "landing-desk"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "HOLD root") {
+	if out, err = run(t, "tail", "--since", "0", "--to", "landing-desk"); err != nil || len(recordLines(out)) != 1 || !strings.Contains(out, "hold root") {
 		t.Fatalf("tail --to = %q, %v", out, err)
 	}
 	if out, err = run(t, "digest"); err != nil || !strings.Contains(out, "open holds (1, newest first):") {
@@ -117,7 +117,7 @@ func TestPostTailDigest(t *testing.T) {
 	if _, err = run(t, "post", "--lane", "root", "--kind", "hold", "--text", "HOLD #39489 until the canary clears"); err == nil || !strings.Contains(err.Error(), "add --pr 39489") {
 		t.Fatalf("hold naming an unbound pr: %v", err)
 	}
-	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "#2 ") {
+	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "2 hold root") {
 		t.Fatalf("grep = %q, %v", out, err)
 	}
 	if out, err = run(t, "post", "--lane", "evidence-lane", "--kind", "evidence", "--text", "5xx began at "+time.Now().Add(-30*time.Minute).Format("3:04 PM")); err != nil || out != "#5\n" {
@@ -141,7 +141,7 @@ func TestTailLimitPrintsTheNewestRecords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		lines := strings.Split(strings.TrimSpace(out), "\n")
+		lines := recordLines(out)
 		if len(lines) != 2 || !strings.HasSuffix(lines[0], "third") || !strings.HasSuffix(lines[1], "fourth") {
 			t.Fatalf("tail %v = %q, want third then fourth", args, out)
 		}
@@ -216,13 +216,13 @@ func TestGrepMatchesWholeRecordLines(t *testing.T) {
 		args []string
 		want []string
 	}{
-		{[]string{"STATE census"}, []string{"STATE census"}},
-		{[]string{"CLAIM merge-walker-r2"}, []string{"CLAIM merge-walker-r2 #30541"}},
+		{[]string{"STATE census"}, []string{"state census"}},
+		{[]string{"CLAIM merge-walker-r2"}, []string{"claim merge-walker-r2 #30541"}},
 		{[]string{"runner-protocol-idle-tenant"}, []string{"runner-protocol-idle-tenant GREEN #30568"}},
-		{[]string{"census|GREEN"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
-		{[]string{"-i", "census|green"}, []string{"STATE census", "runner-protocol-idle-tenant GREEN"}},
+		{[]string{"census|GREEN"}, []string{"state census", "runner-protocol-idle-tenant GREEN"}},
+		{[]string{"-i", "census|green"}, []string{"state census", "runner-protocol-idle-tenant GREEN"}},
 		{[]string{"-F", "census|GREEN"}, []string{"no records on release-v3 match; store head #4"}},
-		{[]string{"234.293"}, []string{"STATE census"}},
+		{[]string{"234.293"}, []string{"state census"}},
 		{[]string{"--fixed-strings", "234.293"}, []string{"no records on release-v3 match; store head #4"}},
 		{[]string{"-n", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... more matches"}},
 		{[]string{"--limit", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... more matches"}},
@@ -234,7 +234,7 @@ func TestGrepMatchesWholeRecordLines(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := strings.Count(out, "\n"); got != len(tt.want) {
+		if got := len(recordLines(out)); got != len(tt.want) {
 			t.Errorf("grep %v printed %d lines, want %d:\n%s", tt.args, got, len(tt.want), out)
 		}
 		for _, w := range tt.want {
@@ -305,7 +305,7 @@ func TestPostTakesItsTextAsOneArgument(t *testing.T) {
 	if out, err := run(t, append(post, "land the fix")...); err != nil || out != "cci: --to cci-fix-4: no lane has registered as cci-fix-4 or holds cci-fix; cci-fix-4 reads this once it registers\n#1\n" {
 		t.Fatalf("post with a text argument = %q, %v", out, err)
 	}
-	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, "GO root -> cci-fix-4 land the fix") {
+	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, "go root>cci-fix-4 land the fix") {
 		t.Fatalf("tail = %q, %v", out, err)
 	}
 	for _, tt := range []struct {
@@ -338,8 +338,8 @@ func TestPostPathSuppliesTheTextFromItsFirstLine(t *testing.T) {
 	for _, tt := range []struct {
 		path, want string
 	}{
-		{summary, "NOTE perf-asks perf findings for api-sql " + summary},
-		{wide, "NOTE perf-asks " + strings.Repeat("x", 399) + "… " + wide},
+		{summary, "note perf-asks + perf findings for api-sql"},
+		{wide, "note perf-asks + " + strings.Repeat("x", 399) + "…"},
 	} {
 		if _, err := run(t, append(post, "--path", tt.path)...); err != nil {
 			t.Fatalf("post --path %s: %v", tt.path, err)
@@ -379,8 +379,8 @@ func TestPostSpillsTextOver400CharactersToAFile(t *testing.T) {
 	if body, err := os.ReadFile(got.Refs.Path); err != nil || string(body) != long+"\n" {
 		t.Errorf("spilled file %q = %q, %v; want the full text", got.Refs.Path, body, err)
 	}
-	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, got.Text+" "+got.Refs.Path) {
-		t.Errorf("tail of the spilled record = %q, %v; want the whole excerpt then the path", out, err)
+	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, "+ "+got.Text) {
+		t.Errorf("tail of the spilled record = %q, %v; want the body mark then the whole excerpt", out, err)
 	}
 	if _, err := run(t, append(post, "--topic", "words", "--text", strings.Repeat("words ", 80))...); err != nil {
 		t.Fatal(err)
@@ -434,19 +434,19 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 	ahead := time.Now().Add(7 * time.Minute)
 	began, planned := time.Now().Add(-time.Hour).Format("3:04 PM"), time.Now().Add(-70*time.Minute).Format("3:04 PM")
 	for _, tt := range []struct {
-		name, text, want string
+		name, text, want, shown string
 	}{
-		{"twelve-hour clock", "R84 (" + ahead.Format("3:04 PM") + ") orca-desk: relay to api: hold", "R84 ({at}) orca-desk: relay to api: hold"},
-		{"clock without a space", "R85 (" + ahead.Format("3:04pm") + ") orca-desk: relay to api: hold", "R85 ({at}) orca-desk: relay to api: hold"},
-		{"24-hour clock", "R86 (" + ahead.Format("15:04") + ") orca-desk: relay to api: hold", "R86 ({at}) orca-desk: relay to api: hold"},
-		{"fuzzy minute", "R87 (10:5x AM) orca-desk: relay to api: hold", "R87 ({at}) orca-desk: relay to api: hold"},
-		{"clock with a zone", "R92 (3:36 PM PT) orca-desk: launch api-fix NOW", "R92 ({at}) orca-desk: launch api-fix NOW"},
-		{"lettered key", "R88a (" + ahead.Format("3:04 PM") + ") orca-desk: relay to api: hold", "R88a ({at}) orca-desk: relay to api: hold"},
-		{"token in prose", "api landed {at}, live since {at}", "api landed {at}, live since {at}"},
-		{"neither", "ship it", "ship it"},
-		{"clock in prose", "R89 said the deploy began at " + began + " (not " + planned + ")", "R89 said the deploy began at " + began + " (not " + planned + ")"},
-		{"stamp past the start", "relay R90 (" + began + ") was late", "relay R90 (" + began + ") was late"},
-		{"parenthesis without a clock", "R91 (orca-desk, " + began + ") relay to api", "R91 (orca-desk, " + began + ") relay to api"},
+		{"twelve-hour clock", "R84 (" + ahead.Format("3:04 PM") + ") orca-desk: relay to api: hold", "R84 ({at}) orca-desk: relay to api: hold", "orca-desk: relay to api: hold"},
+		{"clock without a space", "R85 (" + ahead.Format("3:04pm") + ") orca-desk: relay to api: hold", "R85 ({at}) orca-desk: relay to api: hold", "orca-desk: relay to api: hold"},
+		{"24-hour clock", "R86 (" + ahead.Format("15:04") + ") orca-desk: relay to api: hold", "R86 ({at}) orca-desk: relay to api: hold", "orca-desk: relay to api: hold"},
+		{"fuzzy minute", "R87 (10:5x AM) orca-desk: relay to api: hold", "R87 ({at}) orca-desk: relay to api: hold", "orca-desk: relay to api: hold"},
+		{"clock with a zone", "R92 (3:36 PM PT) orca-desk: launch api-fix NOW", "R92 ({at}) orca-desk: launch api-fix NOW", "orca-desk: launch api-fix NOW"},
+		{"lettered key", "R88a (" + ahead.Format("3:04 PM") + ") orca-desk: relay to api: hold", "R88a ({at}) orca-desk: relay to api: hold", "R88a ({at}) orca-desk: relay to api: hold"},
+		{"token in prose", "api landed {at}, live since {at}", "api landed {at}, live since {at}", "api landed {at}, live since {at}"},
+		{"neither", "ship it", "ship it", "ship it"},
+		{"clock in prose", "R89 said the deploy began at " + began + " (not " + planned + ")", "R89 said the deploy began at " + began + " (not " + planned + ")", "R89 said the deploy began at " + began + " (not " + planned + ")"},
+		{"stamp past the start", "relay R90 (" + began + ") was late", "relay R90 (" + began + ") was late", "relay R90 (" + began + ") was late"},
+		{"parenthesis without a clock", "R91 (orca-desk, " + began + ") relay to api", "R91 (orca-desk, " + began + ") relay to api", "R91 (orca-desk, " + began + ") relay to api"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := postJSON(t, tt.text)
@@ -454,8 +454,8 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 			if got.Text != want {
 				t.Fatalf("post %q stored %q, want %q", tt.text, got.Text, want)
 			}
-			line := got.stamp() + " NOTE root " + want
-			if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, line) {
+			line := fmt.Sprintf("%d note root %s", got.Seq, strings.ReplaceAll(tt.shown, "{at}", got.stamp()))
+			if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, line) || !strings.Contains(out, "@"+got.stamp()+"\n") {
 				t.Errorf("tail after post %q = %q, %v; want %q", tt.text, out, err, line)
 			}
 		})
@@ -642,7 +642,7 @@ func TestPostHeadCarriesEveryHeadOfARestack(t *testing.T) {
 	}
 	for _, pr := range []string{"45001", "yasyf/cc-inbox#45002"} {
 		out, err := run(t, "tail", "--since", "0", "--pr", pr)
-		if err != nil || strings.Count(out, "\n") != 1 || !strings.HasSuffix(strings.TrimSpace(out), "HEAD 2 PRs: #45001 a1b2c3d, #45002 c3b44a3: restacked onto dev") {
+		if err != nil || len(recordLines(out)) != 1 || !strings.HasSuffix(strings.TrimSpace(out), "HEAD 2 PRs: #45001 a1b2c3d, #45002 c3b44a3: restacked onto dev") {
 			t.Fatalf("tail --pr %s = %q, %v; want the one head record with no PR refs repeated after its text", pr, out, err)
 		}
 	}
@@ -858,7 +858,7 @@ func TestAnnounceMeWho(t *testing.T) {
 	if err != nil || me != out {
 		t.Fatalf("me = %q, %v; announce printed %q", me, err, out)
 	}
-	if spoke, err := run(t, "tail", "--since", "0", "--kind", "peer", "--reader", "root"); err != nil || !strings.HasPrefix(spoke, "#1 ") || !strings.Contains(spoke, " PEER registry - root drive=release-v3 ") {
+	if spoke, err := run(t, "tail", "--since", "0", "--kind", "peer", "--reader", "root"); err != nil || !strings.HasPrefix(recordLines(spoke)[0], "1 peer registry - root drive=release-v3 ") {
 		t.Fatalf("announce did not broadcast a peer record: %q, %v", spoke, err)
 	}
 	tests := []struct {
@@ -986,17 +986,17 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
 	out, err := run(t, "tail", "--since", "0", "--reader", "root")
-	if err != nil || !strings.Contains(out, "ASK root -> peer:bbbb2222 take #34363?") || !strings.Contains(out, "GO root -> root@drive-b GO") || strings.Count(out, "\n") != 2 {
+	if err != nil || !strings.Contains(out, "ask root>peer:bbbb2222 take #34363?") || !strings.Contains(out, "go root>root@drive-b GO") || len(recordLines(out)) != 2 {
 		t.Fatalf("b tail = %q, %v", out, err)
 	}
 	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "3", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#5\n" {
 		t.Fatalf("answer across drives = %q, %v", out, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
-	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "ANSWER root -> peer:aaaa1111 yes resolves #3") || !strings.Contains(out, "take #34363? resolves #1,#2 [RESOLVED #5]") {
+	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "answer root>peer:aaaa1111 x3 yes") || !strings.Contains(out, "x1 x2 take #34363? [RESOLVED #5]") {
 		t.Fatalf("a tail = %q, %v", out, err)
 	}
-	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "GO root -> root@drive-b") {
+	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || len(recordLines(out)) != 1 || !strings.Contains(out, "go root>root@drive-b") {
 		t.Fatalf("tail --to root@drive-b = %q, %v", out, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
@@ -1059,7 +1059,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 		t.Fatalf("post to a lane live in two other drives: %v", err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-owner")
-	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "release-owner-4"); err != nil || !strings.Contains(out, "GO root -> release-owner-4@drive-b,desk,root,nobody GO promote") || strings.Count(out, "\n") != 1 {
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "release-owner-4"); err != nil || !strings.Contains(out, "go root>release-owner-4@drive-b,desk,root,nobody GO promote") || len(recordLines(out)) != 1 {
 		t.Fatalf("drive-b reader release-owner-4 = %q, %v", out, err)
 	}
 	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "desk"); err != nil || out != "" {
@@ -1110,7 +1110,7 @@ func TestAgentThreadsClaimAndAreAddressedApart(t *testing.T) {
 	}
 	t.Setenv("CCI_AGENT_ID", "aapi-0123")
 	out, err = run(t, "tail", "--drive", "mesh", "--since", "0", "--reader", "api")
-	if err != nil || !strings.Contains(out, "ASK root -> peer:aaaa1111/aapi-0123 status?") || strings.Contains(out, "root?") {
+	if err != nil || !strings.Contains(out, "ask root>peer:aaaa1111/aapi-0123 status?") || strings.Contains(out, "root?") {
 		t.Fatalf("agent reader = %q, %v", out, err)
 	}
 }
@@ -1161,11 +1161,11 @@ func TestPostAndTailTakeQualifiedPRs(t *testing.T) {
 		t.Fatalf("post = %q, %v", out, err)
 	}
 	out, err := run(t, "tail", "--since", "0")
-	if err != nil || !strings.Contains(out, "chime fix pr:Forge-FDE/iris-chime#243 pr:Forge-AI/monorepo#35198 pr#30431") {
+	if err != nil || !strings.Contains(out, "1 opened fde iris-chime#243 monorepo#35198 #30431 chime fix") {
 		t.Fatalf("tail = %q, %v", out, err)
 	}
 	for _, pr := range []string{"Forge-FDE/iris-chime#243", "https://github.com/Forge-FDE/iris-chime/pull/243", "30431", "243"} {
-		if out, err := run(t, "tail", "--since", "0", "--pr", pr); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "chime fix") {
+		if out, err := run(t, "tail", "--since", "0", "--pr", pr); err != nil || len(recordLines(out)) != 1 || !strings.Contains(out, "chime fix") {
 			t.Fatalf("tail --pr %s = %q, %v", pr, out, err)
 		}
 	}
@@ -1318,7 +1318,7 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 	if out, err := run(t, "claim", "--for", "successor-2@drive-b", "--pr", "owner/repo#9"); err != nil || out != "owns pr:owner/repo#9\n" {
 		t.Fatalf("claim --for a teammate that never posted = %q, %v", out, err)
 	}
-	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0"); err != nil || !strings.Contains(out, "CLAIM successor claim: successor-2 owns #owner/repo#9") {
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0"); err != nil || !strings.Contains(out, "claim successor claim: successor-2 owns #owner/repo#9") {
 		t.Fatalf("claim record for a teammate that never posted = %q, %v", out, err)
 	}
 	if out, err := run(t, "who", "--drive", "drive-b", "--lane", "successor-2", "--json"); err != nil || !strings.Contains(out, `"agent":"asuccessor-2-0123"`) {
@@ -1393,7 +1393,7 @@ func TestRepeatedResolvesClosesEverySeq(t *testing.T) {
 	if out, err := run(t, "tail", "--since", "0", "--kind", "ask"); err != nil || strings.Count(out, "[RESOLVED #4]") != 3 {
 		t.Fatalf("tail after closing all three = %q, %v", out, err)
 	}
-	if out, err := run(t, "tail", "--since", "0", "--kind", "note"); err != nil || strings.Count(out, "\n") != 1 || !strings.Contains(out, "stale resolves #1,#2,#3") {
+	if out, err := run(t, "tail", "--since", "0", "--kind", "note"); err != nil || len(recordLines(out)) != 1 || !strings.Contains(out, "x1 x2 x3 stale") {
 		t.Fatalf("tail of the closing note = %q, %v; want one line naming all three", out, err)
 	}
 	if out, err := run(t, "digest"); err != nil || strings.Contains(out, "open asks") {
@@ -1436,7 +1436,7 @@ func TestClaimsPostAsTheOwningLane(t *testing.T) {
 		t.Fatal(err)
 	}
 	out, err := run(t, "tail", "--drive", "drive-a", "--since", "0")
-	if err != nil || !strings.Contains(out, "OPENED web opened #owner/repo#7") || !strings.Contains(out, "CLAIM web claim: web owns #8") || strings.Contains(out, "ada0addbf41f1f196") {
+	if err != nil || !strings.Contains(out, "opened web opened #owner/repo#7") || !strings.Contains(out, "claim web claim: web owns #8") || strings.Contains(out, "ada0addbf41f1f196") {
 		t.Fatalf("records of a lane subagent's claims = %q, %v; want both posted as lane web", out, err)
 	}
 	out, err = run(t, "who", "--all", "--pr", "owner/repo#7")
@@ -1458,8 +1458,8 @@ func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	short, end := strings.Index(out, "#2 "), strings.Index(out, "THE END")
-	if short < 0 || end < 0 || short > strings.Index(out, "#1 ") {
+	short, end := strings.Index(out, "2 note root short note"), strings.Index(out, "THE END")
+	if short < 0 || end < 0 || short > strings.Index(out, "1 note root a long finding") {
 		t.Errorf("show #2 1 = %q, want #2 first, then #1 with its text through THE END", out)
 	}
 	if _, err := run(t, "show", "9"); err == nil || !strings.Contains(err.Error(), "no record #9") {
@@ -1595,8 +1595,8 @@ func TestTailCutsResolvedRecordsUnlessAll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(strings.TrimSpace(out), "\n")
-	if len(lines) != 4 || utf8.RuneCountInString(strings.TrimSuffix(lines[0], " [RESOLVED #3]")) != 160 || !strings.HasSuffix(lines[0], "… [RESOLVED #3]") ||
+	lines := recordLines(out)
+	if len(lines) != 4 || utf8.RuneCountInString(strings.TrimSuffix(strings.TrimPrefix(lines[0], "1 ask lane-a>root "), " [RESOLVED #3]")) != 160 || !strings.HasSuffix(lines[0], "… [RESOLVED #3]") ||
 		!strings.HasSuffix(lines[1], "B build it") || lines[3] != "... 1 resolved records cut to 160 characters; cci show <seq> prints one whole, --all prints them whole" {
 		t.Fatalf("tail = %q", out)
 	}
@@ -2160,4 +2160,14 @@ func TestTailMailAndTheHookDeliverARecordOnce(t *testing.T) {
 	if out, err = run(t, "tail", "--drive", "d", "--to", "web", "--since", "0", "--mail"); err != nil || !strings.Contains(out, "the wait reads this") {
 		t.Fatalf("tail --mail of another lane = %q, %v, want its ordinary read", out, err)
 	}
+}
+
+func recordLines(out string) []string {
+	var lines []string
+	for line := range strings.Lines(out) {
+		if !strings.HasPrefix(line, "@") {
+			lines = append(lines, strings.TrimSuffix(line, "\n"))
+		}
+	}
+	return lines
 }

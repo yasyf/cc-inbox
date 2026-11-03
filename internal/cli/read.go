@@ -97,7 +97,7 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 	if err != nil {
 		return err
 	}
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Seed: f.seed, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(ctx, cmd, f.rf.json), Older: older}, cmd.OutOrStdout())
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Seed: f.seed, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Compact: true, Notes: tailNotes(ctx, cmd, f.rf.json), Older: older}, cmd.OutOrStdout())
 	if err != nil || name == "" || !resumed || f.rf.limit > 0 {
 		return err
 	}
