@@ -244,10 +244,14 @@ func newGrepCmd() *cobra.Command {
 }
 
 func newShowCmd() *cobra.Command {
-	var asJSON bool
+	var (
+		asJSON bool
+		drive  string
+		budget int
+	)
 	cmd := &cobra.Command{
 		Use:   "show SEQ...",
-		Short: "Print records whole by seq: the full line, then the full text or body file the record names",
+		Short: "Print records by seq, each once: the full line, then the rest of the text or body file the record names",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			seqs := make([]int64, len(args))
@@ -258,10 +262,12 @@ func newShowCmd() *cobra.Command {
 				}
 				seqs[i] = seq
 			}
-			return inbox.Show(cmd.Context(), st, seqs, asJSON, cmd.OutOrStdout())
+			return inbox.Show(cmd.Context(), st, seqs, drive, budget, asJSON, cmd.OutOrStdout())
 		}),
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "one JSON record per line, the body file not inlined")
+	cmd.Flags().StringVar(&drive, "drive", "", "refuse a seq that is not on this drive")
+	cmd.Flags().IntVar(&budget, "budget", 0, "bytes of body to print, split evenly across the seqs asked; each cut body names the show that reads it whole (default: whole bodies)")
 	return cmd
 }
 
