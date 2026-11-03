@@ -27,7 +27,7 @@ import (
 
 const secret = "github webhook secret"
 
-const synchronized = `{"action":"synchronize","number":45700,
+const synchronized = `{"action":"synchronize","number":45700,"before":"0987654321abc",
 "pull_request":{"html_url":"https://github.com/acme/app/pull/45700","draft":false,"merged":false,
 "updated_at":"2026-11-03T14:33:00Z","head":{"ref":"lane/fix","sha":"abc1234567890"},"base":{"ref":"dev"}},
 "repository":{"full_name":"acme/app"}}`
@@ -37,8 +37,12 @@ const merged = `{"action":"closed","number":45700,
 "updated_at":"2026-11-03T15:00:00Z","head":{"ref":"lane/fix","sha":"abc1234567890"},"base":{"ref":"dev"}},
 "repository":{"full_name":"acme/app"}}`
 
-const greenStatus = `{"sha":"abc1234567890","context":"buildkite/ci","state":"success",
+const greenStatus = `{"id":9001,"sha":"abc1234567890","context":"buildkite/ci","state":"success",
 "target_url":"https://buildkite.com/acme/ci/builds/9","updated_at":"2026-11-03T14:40:00Z","repository":{"full_name":"acme/app"}}`
+
+const squashed = `{"ref":"refs/heads/dev","before":"0987654321abc","after":"def4567890123",
+"compare":"https://github.com/acme/app/compare/0987654321ab...def456789012",
+"repository":{"full_name":"acme/app","default_branch":"dev","pushed_at":1762181400}}`
 
 func sign(event, id, body string) http.Header {
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -82,7 +86,7 @@ func TestRecordShapes(t *testing.T) {
 			"a push to a pull request", "pull_request", synchronized, "synchronize", "abc1234567890",
 			"acme/app#45700 synchronize at abc1234567 onto dev",
 			[]string{"acme/app#45700"},
-			map[string]string{"base": "dev", "branch": "lane/fix", "draft": "false"},
+			map[string]string{"base": "dev", "before": "0987654321abc", "branch": "lane/fix", "draft": "false"},
 		},
 		{
 			"a merge", "pull_request", merged, "merged", "abc1234567890",
@@ -93,14 +97,19 @@ func TestRecordShapes(t *testing.T) {
 		{
 			"a commit status, which names no pull request", "status", greenStatus, "success", "abc1234567890",
 			"acme/app abc1234567 buildkite/ci success", nil,
-			map[string]string{"check": "buildkite/ci", "repo": "acme/app"},
+			map[string]string{"check": "buildkite/ci", "id": "9001", "repo": "acme/app"},
 		},
 		{
 			"a finished check run", "check_run",
-			`{"action":"completed","check_run":{"name":"lint","head_sha":"abc1234567890","conclusion":"failure","details_url":"https://ci/1","completed_at":"2026-11-03T14:41:00Z","pull_requests":[{"number":45700}]},"repository":{"full_name":"acme/app"}}`,
+			`{"action":"completed","check_run":{"id":7001,"name":"lint","head_sha":"abc1234567890","conclusion":"failure","details_url":"https://ci/1","completed_at":"2026-11-03T14:41:00Z","pull_requests":[{"number":45700}]},"repository":{"full_name":"acme/app"}}`,
 			"failure", "abc1234567890", "acme/app abc1234567 lint failure",
 			[]string{"acme/app#45700"},
-			map[string]string{"check": "lint"},
+			map[string]string{"check": "lint", "id": "7001"},
+		},
+		{
+			"a squash landing on the default branch", "push", squashed, "pushed", "def4567890123",
+			"acme/app dev pushed def4567890 over 0987654321", nil,
+			map[string]string{"before": "0987654321abc", "branch": "dev", "repo": "acme/app"},
 		},
 		{
 			"an approval", "pull_request_review",
@@ -136,6 +145,7 @@ func TestEventsNoReaderActsOnMakeNoRecord(t *testing.T) {
 		{"status", strings.Replace(greenStatus, `"success"`, `"pending"`, 1)},
 		{"check_run", `{"action":"created","check_run":{"name":"lint"},"repository":{"full_name":"acme/app"}}`},
 		{"pull_request", strings.Replace(synchronized, "synchronize", "assigned", 1)},
+		{"push", strings.Replace(squashed, "refs/heads/dev", "refs/heads/lane/fix", 1)},
 	} {
 		if _, ok, err := github.Record(tc.event, "d1", "github", []byte(tc.body)); ok || err != nil {
 			t.Errorf("%s made a record: %v, %v", tc.event, ok, err)

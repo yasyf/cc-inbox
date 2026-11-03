@@ -1,6 +1,6 @@
 // Package github turns GitHub repository webhooks, which GitHub signs with
 // X-Hub-Signature-256, into one github record per pull request, review or
-// check change.
+// check change, or push to the default branch.
 package github
 
 import (
@@ -48,6 +48,7 @@ type user struct {
 type pullRequestEvent struct {
 	Action string `json:"action"`
 	Number int    `json:"number"`
+	Before string `json:"before"`
 	Label  *struct {
 		Name string `json:"name"`
 	} `json:"label"`
@@ -87,6 +88,7 @@ type reviewEvent struct {
 type checkRunEvent struct {
 	Action   string `json:"action"`
 	CheckRun struct {
+		ID           int64     `json:"id"`
 		Name         string    `json:"name"`
 		HeadSHA      string    `json:"head_sha"`
 		Conclusion   string    `json:"conclusion"`
@@ -100,6 +102,7 @@ type checkRunEvent struct {
 }
 
 type statusEvent struct {
+	ID         int64      `json:"id"`
 	SHA        string     `json:"sha"`
 	Context    string     `json:"context"`
 	State      string     `json:"state"`
@@ -108,11 +111,24 @@ type statusEvent struct {
 	Repository repository `json:"repository"`
 }
 
+type pushEvent struct {
+	Ref        string `json:"ref"`
+	Before     string `json:"before"`
+	After      string `json:"after"`
+	Compare    string `json:"compare"`
+	Repository struct {
+		FullName      string `json:"full_name"`
+		DefaultBranch string `json:"default_branch"`
+		PushedAt      int64  `json:"pushed_at"`
+	} `json:"repository"`
+}
+
 var pullRequestActions = []string{"opened", "reopened", "synchronize", "closed", "edited", "ready_for_review", "converted_to_draft", "labeled", "unlabeled"}
 
 // Record is the github record for delivery id of an event named by the
 // X-GitHub-Event header, false for an event or action no reader acts on.
-// A status names a commit, not a pull request, so its record carries no PR.
+// A status or a push names a commit, not a pull request, so its record carries
+// no PR, and only a push to the default branch makes one.
 func Record(event, id, drive string, body []byte) (service.Record, bool, error) {
 	r := service.Record{ID: "github:" + id, Drive: drive, Kind: "github"}
 	switch event {
@@ -134,6 +150,9 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		r.Text = fmt.Sprintf("%s %s at %s onto %s", pr, outcome, short(e.PullRequest.Head.SHA), e.PullRequest.Base.Ref)
 		if outcome == "merged" {
 			r.Attrs["merge"] = e.PullRequest.MergeSHA
+		}
+		if e.Before != "" {
+			r.Attrs["before"] = e.Before
 		}
 		if e.Label != nil {
 			r.Attrs["label"] = e.Label.Name
@@ -171,7 +190,7 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		}
 		r.At, r.URL, r.Outcome, r.Commit = c.CompletedAt, c.DetailsURL, c.Conclusion, c.HeadSHA
 		r.Topic = "check"
-		r.Attrs = map[string]string{"check": c.Name}
+		r.Attrs = map[string]string{"check": c.Name, "id": fmt.Sprint(c.ID)}
 		r.Text = fmt.Sprintf("%s %s %s %s", e.Repository.FullName, short(c.HeadSHA), c.Name, c.Conclusion)
 		return r, true, nil
 	case "status":
@@ -184,8 +203,22 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		}
 		r.At, r.URL, r.Outcome, r.Commit = e.UpdatedAt, e.TargetURL, e.State, e.SHA
 		r.Topic = "check"
-		r.Attrs = map[string]string{"check": e.Context, "repo": e.Repository.FullName}
+		r.Attrs = map[string]string{"check": e.Context, "id": fmt.Sprint(e.ID), "repo": e.Repository.FullName}
 		r.Text = fmt.Sprintf("%s %s %s %s", e.Repository.FullName, short(e.SHA), e.Context, e.State)
+		return r, true, nil
+	case "push":
+		var e pushEvent
+		if err := json.Unmarshal(body, &e); err != nil {
+			return r, false, err
+		}
+		branch, _ := strings.CutPrefix(e.Ref, "refs/heads/")
+		if branch != e.Repository.DefaultBranch {
+			return r, false, nil
+		}
+		r.At, r.URL, r.Outcome, r.Commit = time.Unix(e.Repository.PushedAt, 0), e.Compare, "pushed", e.After
+		r.Topic = "push"
+		r.Attrs = map[string]string{"before": e.Before, "branch": branch, "repo": e.Repository.FullName}
+		r.Text = fmt.Sprintf("%s %s pushed %s over %s", e.Repository.FullName, branch, short(e.After), short(e.Before))
 		return r, true, nil
 	}
 	return r, false, nil
