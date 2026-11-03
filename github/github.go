@@ -201,7 +201,7 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		}
 		r.At, r.URL, r.Outcome, r.Commit = c.CompletedAt, c.DetailsURL, c.Conclusion, c.HeadSHA
 		r.Topic = "check"
-		r.Attrs = map[string]string{"check": c.Name, "id": fmt.Sprint(c.ID)}
+		r.Attrs = map[string]string{"check": c.Name, "id": fmt.Sprint(c.ID), "repo": e.Repository.FullName}
 		r.Text = fmt.Sprintf("%s %s %s %s", e.Repository.FullName, short(c.HeadSHA), c.Name, c.Conclusion)
 		return r, true, nil
 	case "status":

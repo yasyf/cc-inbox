@@ -19,7 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A `github` pull request record names its author as `author` and its labels,
   comma-separated, as `labels`, so a reader can keep only its own drive's pull
-  requests without reading GitHub.
+  requests without reading GitHub. A check run record names its repository as
+  `repo`, as a status record does, since a check run need not name a pull
+  request.
 
 - `client.Resolve` reaches a lane name as `cci post --to` does, through the
   same lane registry: a stem gives its newest live lane, a stood-down lane its

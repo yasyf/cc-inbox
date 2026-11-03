@@ -106,7 +106,7 @@ func TestRecordShapes(t *testing.T) {
 			`{"action":"completed","check_run":{"id":7001,"name":"lint","head_sha":"abc1234567890","conclusion":"failure","details_url":"https://ci/1","completed_at":"2026-11-03T14:41:00Z","pull_requests":[{"number":45700}]},"repository":{"full_name":"acme/app"}}`,
 			"failure", "abc1234567890", "acme/app abc1234567 lint failure",
 			[]string{"acme/app#45700"},
-			map[string]string{"check": "lint", "id": "7001"},
+			map[string]string{"check": "lint", "id": "7001", "repo": "acme/app"},
 		},
 		{
 			"a squash landing on the default branch", "push", squashed, "pushed", "def4567890123",
