@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A refused `cci post` files its `refused-post` blocker to the posting lane, no
+  longer to root or the lane's owner. They get one only when the lane's retry is
+  refused too, naming both refusals, or when the lane's turn ends with no stored
+  post after the refusal. The lane's next stored post closes either.
+
 - The cci daemon is the store's preferred writer. `cci post`, the hooks'
   session touches and cursor moves, and every other client write go to the
   daemon over its socket, and one writer commits every write already waiting

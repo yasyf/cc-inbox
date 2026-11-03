@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-func openRefusals(t *testing.T, home, lane string) []int64 {
+func openRefusals(t *testing.T, home, lane string) []store.Record {
 	t.Helper()
 	ctx := context.Background()
 	st, err := store.Open(ctx, home)
@@ -28,32 +29,62 @@ func openRefusals(t *testing.T, home, lane string) []int64 {
 	return open
 }
 
-func TestARefusedPostIsABlockerItsNextPostCloses(t *testing.T) {
+func rootsBlockers(t *testing.T, home string) []store.Record {
+	t.Helper()
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	got, err := st.Query(ctx, store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Blocker}, To: "root", IncludeExpired: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func TestARefusedPostIsTheLanesBlockerItsNextPostCloses(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
-	refused := []string{"post", "--drive", "d", "--lane", "fix-lane-1", "--kind", "note", "--to", "fix-lane-1", "--text", "only to myself"}
-	_, err := run(t, refused...)
-	if err == nil || !strings.Contains(err.Error(), "addresses only fix-lane-1") || !strings.Contains(err.Error(), "blocker #") {
-		t.Fatalf("refused post = %v; want the refusal and the blocker it left", err)
+	_, err := run(t, "post", "--drive", "d", "--lane", "fix-lane-1", "--kind", "note", "--to", "fix-lane-1", "--text", "only to myself")
+	if err == nil || !strings.Contains(err.Error(), "addresses only fix-lane-1") || !strings.Contains(err.Error(), "went to fix-lane-1,") {
+		t.Fatalf("refused post = %v; want the refusal and the blocker it left the lane", err)
 	}
-	if open := openRefusals(t, home, "fix-lane-1"); len(open) != 1 {
-		t.Fatalf("open refusals = %v; want one blocker", open)
-	}
-	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--kind", "blocker", "--to", "root", "--json")
-	if err != nil || !strings.Contains(out, "post refused") || !strings.Contains(out, "only to myself") {
-		t.Fatalf("root reads %q, %v; want the refusal and the words it refused", out, err)
-	}
-	if _, err := run(t, refused...); err == nil {
-		t.Fatal("the same post went through")
-	}
-	if open := openRefusals(t, home, "fix-lane-1"); len(open) != 1 {
-		t.Fatalf("the same refusal twice left %v", open)
+	open := openRefusals(t, home, "fix-lane-1")
+	if len(open) != 1 || !slices.Equal(open[0].To, []string{"fix-lane-1"}) || !strings.Contains(open[0].Text, "only to myself") {
+		t.Fatalf("open refusals = %+v; want one blocker to the lane naming the words it refused", open)
 	}
 	if _, err := run(t, "post", "--drive", "d", "--lane", "fix-lane-1", "--kind", "note", "--to", "meta-desk-1", "--text", "to the desk"); err != nil {
 		t.Fatal(err)
 	}
 	if open := openRefusals(t, home, "fix-lane-1"); len(open) != 0 {
-		t.Fatalf("after the lane's next post, open refusals = %v", open)
+		t.Fatalf("after the lane's next post, open refusals = %+v", open)
+	}
+	if got := rootsBlockers(t, home); len(got) != 0 {
+		t.Fatalf("root's blockers = %+v; a refusal the lane fixed reaches only the lane", got)
+	}
+}
+
+func TestARefusalAfterARetryReachesRootNamingBoth(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	if _, err := run(t, "post", "--drive", "d", "--lane", "fix-lane-1", "--kind", "note", "--to", "fix-lane-1", "--text", "only to myself"); err == nil {
+		t.Fatal("the first post went through")
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "fix-lane-1", "--kind", "note", "--to", "fix-lane-1", "--text", "still only to myself"); err == nil || !strings.Contains(err.Error(), "went to root,") {
+		t.Fatalf("retry = %v; want its blocker sent to root", err)
+	}
+	first := openRefusals(t, home, "fix-lane-1")[0]
+	got := rootsBlockers(t, home)
+	if len(got) != 1 || !strings.Contains(got[0].Text, fmt.Sprintf("#%d", first.Seq)) || !strings.Contains(got[0].Text, "It said: note only to myself") || !strings.Contains(got[0].Text, "It said: note still only to myself") {
+		t.Fatalf("root's blockers = %+v; want one naming both refusals", got)
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "fix-lane-1", "--kind", "note", "--to", "meta-desk-1", "--text", "to the desk"); err != nil {
+		t.Fatal(err)
+	}
+	if open := openRefusals(t, home, "fix-lane-1"); len(open) != 0 {
+		t.Fatalf("after the lane's next post, open refusals = %+v", open)
 	}
 }
 

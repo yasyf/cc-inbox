@@ -135,6 +135,27 @@ func unsettledBlocker(ctx context.Context, st *store.Store, p Payload, b store.B
 	return err
 }
 
+// escalateRefusal hands the refusal that only its lane heard of to whoever hears
+// the lane's blockers, once the lane ends its turn without the stored post that
+// closes it.
+func escalateRefusal(ctx context.Context, st *store.Store, b store.Binding) error {
+	open, err := st.OpenRefusals(ctx, b.Drive, b.Lane)
+	if err != nil {
+		return err
+	}
+	first, quiet := store.Unescalated(open, b.Lane)
+	if !quiet {
+		return nil
+	}
+	to, err := st.Escalation(ctx, b.Drive, b.Lane)
+	if err != nil {
+		return err
+	}
+	text := fmt.Sprintf("%s ended its turn with no stored post after its refused post #%d: %s", b.Lane, first.Seq, first.Text)
+	_, _, err = st.PostAt(ctx, store.Record{ID: fmt.Sprintf("refused-turn-end:%s:%d", b.Lane, first.Seq), Drive: b.Drive, Lane: b.Lane, Kind: kinds.Blocker, Topic: store.RefusedPostTopic, To: to, Text: store.Clip(text), Source: "post"}, 0, st.Now())
+	return err
+}
+
 // TurnDied is the attr value of the blocker a turn killed by an API error leaves,
 // which tells the supervisor to resume the lane that wrote it.
 const TurnDied = "died"

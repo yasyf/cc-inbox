@@ -2,7 +2,6 @@ package store_test
 
 import (
 	"context"
-	"slices"
 	"testing"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -51,7 +50,7 @@ func TestOpenRefusalsCloseOnTheLanesNextRecord(t *testing.T) {
 	refused := testutil.Post(t, st, store.Record{Lane: "fix-lane-1", Kind: kinds.Blocker, Topic: store.RefusedPostTopic, To: []string{"root"}, Text: "post refused"})
 	testutil.Post(t, st, store.Record{Lane: "other-lane", Kind: kinds.Blocker, Topic: store.RefusedPostTopic, To: []string{"root"}, Text: "post refused"})
 	open, err := st.OpenRefusals(ctx, "d", "fix-lane-1")
-	if err != nil || !slices.Equal(open, []int64{refused.Seq}) {
+	if err != nil || len(open) != 1 || open[0].Seq != refused.Seq {
 		t.Fatalf("OpenRefusals = %v, %v; want only the lane's own", open, err)
 	}
 	testutil.Post(t, st, store.Record{Lane: "fix-lane-1", Kind: kinds.Note, Text: "went through"}.Resolving(open))
