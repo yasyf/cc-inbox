@@ -13,7 +13,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
 
-func TestAPostToAStemReadsTheSameRegistryAtOneAndAThousandLanes(t *testing.T) {
+func TestAPostToAStemReadsTheSameRegistryAtOneAndAThousandLanesAndRecordsOfIt(t *testing.T) {
 	ctx := context.Background()
 	counts := map[int]int64{}
 	for _, population := range []int{1, 1000} {
@@ -56,6 +56,10 @@ INSERT INTO records (drive, lane, kind, at, text, source, hash) SELECT 'd', 'oth
 					t.Fatal(err)
 				}
 			}
+			if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i + 1 FROM n WHERE i < ?)
+INSERT INTO records (drive, lane, kind, at, text, source, hash) SELECT 'd', 'sv-' || (2 + i % 2), 'note', 1, 'working', 'post', 'sv-' || i FROM n`, population); err != nil {
+				t.Fatal(err)
+			}
 			comparisons.Store(0)
 			reach, err := st.Reach(ctx, "d", "sv")
 			if err != nil || reach.Lane != "sv-3" {
@@ -73,6 +77,6 @@ INSERT INTO records (drive, lane, kind, at, text, source, hash) SELECT 'd', 'oth
 		})
 	}
 	if grew, bound := counts[1000]-counts[1], int64(16*bits.Len(1000)); grew > bound {
-		t.Fatalf("one post's registry comparisons grew by %d from 1 to 1,000 registered lanes (%d to %d); want at most the %d an indexed lookup's depth adds", grew, counts[1], counts[1000], bound)
+		t.Fatalf("one post's registry comparisons grew by %d from 1 to 1,000 registered lanes and records of the stem (%d to %d); want at most the %d an indexed lookup's depth adds", grew, counts[1], counts[1000], bound)
 	}
 }

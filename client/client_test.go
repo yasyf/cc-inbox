@@ -286,6 +286,26 @@ func TestAStandDownCarriesItsSuccessor(t *testing.T) {
 	}
 }
 
+func TestResolveReachesAStemsNewestLaneAndAStoodDownLanesSuccessor(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	ctx := context.Background()
+	post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "stand-down", Text: "desk-1 stood down", To: []string{"desk-1"}, Successor: "desk-2"})
+	for _, lane := range []string{"desk-2", "desk-3"} {
+		post(t, client.Draft{Drive: "d", Lane: lane, Kind: "state", Text: lane + " up"})
+	}
+
+	for name, want := range map[string]string{"desk": "desk-3", "desk-2": "desk-2", "desk-1": "desk-2", "other": ""} {
+		reach, err := client.Resolve(ctx, "d", name)
+		if err != nil || reach.Lane != want {
+			t.Fatalf("Resolve(%s) = %+v, %v; want lane %q", name, reach, err, want)
+		}
+	}
+	reach, err := client.Resolve(ctx, "d", "desk")
+	if err != nil || !slices.Equal(reach.Holders, []string{"desk-3", "desk-2"}) || reach.Stem != "desk" {
+		t.Fatalf("Resolve(desk) = %+v, %v; want desk-3 then desk-2 holding desk", reach, err)
+	}
+}
+
 func TestWhoReadsTheSessionsBoundToADriveAndNoOthers(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	ctx := context.Background()
