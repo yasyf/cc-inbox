@@ -251,7 +251,18 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return hook.SubagentStop(cmd.Context(), st, p)
+				return hook.SubagentStop(cmd.Context(), st, p, cmd.OutOrStdout())
+			}),
+		},
+		&cobra.Command{
+			Use:  "stop-failure",
+			Args: cobra.NoArgs,
+			RunE: withHookStore(hookRunBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {
+				p, err := hook.Read(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				return hook.StopFailure(cmd.Context(), st, p)
 			}),
 		},
 		newPromptHookCmd(),
