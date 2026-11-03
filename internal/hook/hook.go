@@ -11,6 +11,7 @@ import (
 	"hash/fnv"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -366,7 +367,15 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 // Stop holds a lane's thread until its turn can end: first on an overdue ask
 // addressed to it, then on a turn with open work and no typed record. A turn
 // that ends escalates the refusal the lane never followed with a stored post.
+// A store it cannot read lets the turn end with a warning.
 func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
+	if err := holdStop(ctx, st, p, w); err != nil {
+		slog.Warn("cci let a turn end on a store it could not read", "session", p.SessionID, "err", err)
+	}
+	return nil
+}
+
+func holdStop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 	b, ok, err := st.Binding(ctx, p.Key())
 	if err != nil || !ok || b.Lane == "" {
 		return err
