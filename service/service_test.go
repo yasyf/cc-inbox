@@ -127,8 +127,14 @@ func TestABatchCostsOneKeyReadAndOnePush(t *testing.T) {
 		if calls.calls != 2 {
 			t.Fatalf("a batch of %d made %d relay calls, want 2", n, calls.calls)
 		}
-		if _, err := owner.Pull(context.Background(), 0, nil); err != nil {
-			t.Fatal(err)
+		for {
+			got, err := owner.Pull(context.Background(), 0, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Inserted == 0 {
+				break
+			}
 		}
 		recs, err := st.Query(context.Background(), store.Filter{Drive: "trunk", Kinds: []kinds.Kind{kinds.Queue}})
 		if err != nil || len(recs) != n {
