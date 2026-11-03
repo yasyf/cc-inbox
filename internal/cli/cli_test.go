@@ -1634,7 +1634,8 @@ func TestPostReachesALaneThatHasNotStartedYet(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, to := range []string{"gate-fault-6", "n-enum-45414-1", "fresh-desk"} {
-		if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "GO start "+to); err != nil || !strings.HasPrefix(out, "#") {
+		out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "GO start "+to)
+		if lines := strings.Split(strings.TrimSpace(out), "\n"); err != nil || !strings.HasPrefix(lines[len(lines)-1], "#") || !strings.HasPrefix(out, "cci: --to "+to+": no lane has registered as "+to) && !strings.HasPrefix(out, "cci: --to "+to+": no lane holds "+to) {
 			t.Fatalf("post --to %s, a lane that has not started = %q, %v", to, out, err)
 		}
 	}

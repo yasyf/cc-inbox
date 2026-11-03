@@ -47,31 +47,31 @@ WHERE drive != '' AND ` + holdableSQL("lane") + ` GROUP BY drive, lane;
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 SELECT drive, ` + stemSQL("l") + `, l, MAX(seq), MAX(seq) FROM (SELECT drive, seq, ` + spawnedSQL("records") + ` AS l FROM records WHERE kind IN ('spawn', 'state') AND drive != '')
 WHERE ` + holdableSQL("l") + ` GROUP BY drive, l
-ON CONFLICT (drive, stem, lane) DO UPDATE SET held = max(held, excluded.held), seen = max(seen, excluded.seen);
+ON CONFLICT (drive, lane, stem) DO UPDATE SET held = max(held, excluded.held), seen = max(seen, excluded.seen);
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 SELECT DISTINCT drive, ` + stemSQL("lane") + `, lane, (SELECT COALESCE(MAX(seq), 0) FROM records), (SELECT COALESCE(MAX(seq), 0) FROM records) FROM sessions
 WHERE drive != '' AND ` + holdableSQL("lane") + `
-ON CONFLICT (drive, stem, lane) DO NOTHING;
+ON CONFLICT (drive, lane, stem) DO NOTHING;
 WITH downs AS (SELECT drive, json_extract(recipients, '$[0]') AS l, seq, COALESCE(json_extract(fields, '$.attrs.successor'), '') AS successor FROM records
 	WHERE kind = 'stand-down' AND drive != '' AND json_valid(recipients) AND json_type(recipients, '$[0]') = 'text'),
 newest AS (SELECT * FROM downs d WHERE seq = (SELECT MAX(seq) FROM downs o WHERE o.drive = d.drive AND o.l = d.l))
 INSERT INTO lane_holds (drive, stem, lane, held, down, successor)
 SELECT drive, ` + stemSQL("l") + `, l, seq, seq, successor FROM newest WHERE ` + holdableSQL("l") + `
-ON CONFLICT (drive, stem, lane) DO UPDATE SET down = excluded.down, successor = excluded.successor;
+ON CONFLICT (drive, lane, stem) DO UPDATE SET down = excluded.down, successor = excluded.successor;
 INSERT INTO lane_holds (drive, stem, lane, held)
 SELECT drive, stem, successor, down FROM lane_holds WHERE successor != '' AND ` + holdableSQL("successor") + `
-ON CONFLICT (drive, stem, lane) DO UPDATE SET held = max(held, excluded.held)`
+ON CONFLICT (drive, lane, stem) DO UPDATE SET held = max(held, excluded.held)`
 }
 
 var laneHoldObjects = [...]physicalObject{
-	{"table", "lane_holds", "CREATE TABLE lane_holds (drive TEXT NOT NULL, stem TEXT NOT NULL, lane TEXT NOT NULL, held INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0, down INTEGER NOT NULL DEFAULT 0, successor TEXT NOT NULL DEFAULT '', PRIMARY KEY (drive, stem, lane)) WITHOUT ROWID", holdsFill()},
-	{"index", "lane_holds_lane", "CREATE INDEX lane_holds_lane ON lane_holds(drive, lane)", ""},
+	{"table", "lane_holds", "CREATE TABLE lane_holds (drive TEXT NOT NULL, stem TEXT NOT NULL, lane TEXT NOT NULL, held INTEGER NOT NULL, seen INTEGER NOT NULL DEFAULT 0, down INTEGER NOT NULL DEFAULT 0, successor TEXT NOT NULL DEFAULT '', PRIMARY KEY (drive, lane, stem)) WITHOUT ROWID", holdsFill()},
+	{"index", "lane_holds_stem", "CREATE INDEX lane_holds_stem ON lane_holds(drive, stem, held)", ""},
 	{"index", "lane_holds_successor", "CREATE INDEX lane_holds_successor ON lane_holds(drive, successor) WHERE successor != ''", ""},
 	{"trigger", "lane_holds_post", `CREATE TRIGGER lane_holds_post AFTER INSERT ON records
 WHEN NEW.drive != '' AND ` + holdableSQL("NEW.lane") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen) VALUES (NEW.drive, ` + stemSQL("NEW.lane") + `, NEW.lane, NEW.seq, CASE WHEN NEW.kind = 'stand-down' THEN 0 ELSE NEW.seq END)
-ON CONFLICT (drive, stem, lane) DO NOTHING;
+ON CONFLICT (drive, lane, stem) DO NOTHING;
 UPDATE lane_holds SET seen = NEW.seq WHERE drive = NEW.drive AND lane = NEW.lane AND down > seen AND NEW.kind != 'stand-down';
 END`, ""},
 	{"trigger", "lane_holds_spawn", `CREATE TRIGGER lane_holds_spawn AFTER INSERT ON records
@@ -79,34 +79,34 @@ WHEN NEW.kind IN ('spawn', 'state') AND NEW.drive != '' AND ` + holdableSQL(spaw
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 VALUES (NEW.drive, ` + stemSQL(spawnedSQL("NEW")) + `, ` + spawnedSQL("NEW") + `, NEW.seq, NEW.seq)
-ON CONFLICT (drive, stem, lane) DO UPDATE SET held = excluded.held, seen = excluded.seen;
+ON CONFLICT (drive, lane, stem) DO UPDATE SET held = excluded.held, seen = excluded.seen;
 END`, ""},
 	{"trigger", "lane_holds_stand_down", `CREATE TRIGGER lane_holds_stand_down AFTER INSERT ON records
 WHEN NEW.kind = 'stand-down' AND NEW.drive != '' AND json_valid(NEW.recipients) AND json_type(NEW.recipients, '$[0]') = 'text' AND ` + holdableSQL("json_extract(NEW.recipients, '$[0]')") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held)
 VALUES (NEW.drive, ` + stemSQL("json_extract(NEW.recipients, '$[0]')") + `, json_extract(NEW.recipients, '$[0]'), NEW.seq)
-ON CONFLICT (drive, stem, lane) DO NOTHING;
+ON CONFLICT (drive, lane, stem) DO NOTHING;
 UPDATE lane_holds SET down = NEW.seq, successor = COALESCE(json_extract(NEW.fields, '$.attrs.successor'), '')
 WHERE drive = NEW.drive AND lane = json_extract(NEW.recipients, '$[0]');
 INSERT INTO lane_holds (drive, stem, lane, held)
 SELECT drive, stem, successor, NEW.seq FROM lane_holds
 WHERE drive = NEW.drive AND lane = json_extract(NEW.recipients, '$[0]') AND ` + holdableSQL("successor") + `
-ON CONFLICT (drive, stem, lane) DO UPDATE SET held = max(held, excluded.held);
+ON CONFLICT (drive, lane, stem) DO UPDATE SET held = max(held, excluded.held);
 END`, ""},
 	{"trigger", "lane_holds_bind", `CREATE TRIGGER lane_holds_bind AFTER INSERT ON sessions
 WHEN NEW.drive != '' AND ` + holdableSQL("NEW.lane") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 VALUES (NEW.drive, ` + stemSQL("NEW.lane") + `, NEW.lane, (SELECT COALESCE(MAX(seq), 0) FROM records), (SELECT COALESCE(MAX(seq), 0) FROM records))
-ON CONFLICT (drive, stem, lane) DO UPDATE SET seen = max(seen, excluded.seen);
+ON CONFLICT (drive, lane, stem) DO UPDATE SET seen = max(seen, excluded.seen);
 END`, ""},
 	{"trigger", "lane_holds_rebind", `CREATE TRIGGER lane_holds_rebind AFTER UPDATE OF drive, lane ON sessions
 WHEN (NEW.drive IS NOT OLD.drive OR NEW.lane IS NOT OLD.lane) AND NEW.drive != '' AND ` + holdableSQL("NEW.lane") + `
 BEGIN
 INSERT INTO lane_holds (drive, stem, lane, held, seen)
 VALUES (NEW.drive, ` + stemSQL("NEW.lane") + `, NEW.lane, (SELECT COALESCE(MAX(seq), 0) FROM records), (SELECT COALESCE(MAX(seq), 0) FROM records))
-ON CONFLICT (drive, stem, lane) DO UPDATE SET seen = max(seen, excluded.seen);
+ON CONFLICT (drive, lane, stem) DO UPDATE SET seen = max(seen, excluded.seen);
 END`, ""},
 }
 
@@ -189,7 +189,7 @@ func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 
 func (s *Store) holds(ctx context.Context, drive, lane string) ([]hold, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT lane, stem, successor, `+liveSQL+`, held FROM lane_holds WHERE drive = ? AND lane = ?
-UNION SELECT lane, stem, successor, `+liveSQL+`, held FROM lane_holds WHERE drive = ? AND stem = ? AND `+liveSQL+`
+UNION SELECT lane, stem, successor, `+liveSQL+`, held FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? AND `+liveSQL+`
 ORDER BY held DESC, lane`, drive, lane, drive, Stem(lane))
 	if err != nil {
 		return nil, fmt.Errorf("read the lane registry for %s on %s: %w", lane, drive, err)
@@ -232,12 +232,12 @@ func aliases(ctx context.Context, q rowsQuerier, drive, lane string) ([]string, 
 	}
 	rows, err := q.QueryContext(ctx, `WITH RECURSIVE
 held(stem) AS (SELECT h.stem FROM lane_holds h WHERE h.drive = ?1 AND h.lane = ?2 AND (h.down = 0 OR h.seen > h.down)
-	AND NOT EXISTS (SELECT 1 FROM lane_holds o WHERE o.drive = ?1 AND o.stem = h.stem AND o.lane != h.lane AND (o.down = 0 OR o.seen > o.down) AND (o.held > h.held OR o.held = h.held AND o.lane < h.lane))),
+	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = ?1 AND o.stem = h.stem AND o.lane != h.lane AND (o.down = 0 OR o.seen > o.down) AND (o.held > h.held OR o.held = h.held AND o.lane < h.lane))),
 reach(name) AS (
 	SELECT ?2
 	UNION SELECT stem FROM held
-	UNION SELECT r.lane FROM held CROSS JOIN lane_holds r ON r.drive = ?1 AND r.stem = held.stem WHERE r.down > 0 AND r.seen <= r.down AND r.successor = ''
-	UNION SELECT r.lane FROM reach CROSS JOIN lane_holds r ON r.drive = ?1 AND r.successor = reach.name WHERE r.successor != '' AND r.down > 0 AND r.seen <= r.down
+	UNION SELECT r.lane FROM held CROSS JOIN lane_holds r INDEXED BY lane_holds_stem ON r.drive = ?1 AND r.stem = held.stem WHERE r.down > 0 AND r.seen <= r.down AND r.successor = ''
+	UNION SELECT r.lane FROM reach CROSS JOIN lane_holds r INDEXED BY lane_holds_successor ON r.drive = ?1 AND r.successor = reach.name WHERE r.successor != '' AND r.down > 0 AND r.seen <= r.down
 )
 SELECT name FROM reach WHERE name != ?2 ORDER BY name`, drive, lane)
 	if err != nil {
@@ -298,7 +298,7 @@ func (s *Store) waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane stri
 	if err != nil || len(names) == 0 {
 		return "", nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT o.lane, o.held, o.down, `+liveOf("o")+` FROM lane_holds h CROSS JOIN lane_holds o ON o.drive = h.drive AND o.stem = h.stem WHERE h.drive = ? AND h.lane = ?
+	rows, err := tx.QueryContext(ctx, `SELECT o.lane, o.held, o.down, `+liveOf("o")+` FROM lane_holds h CROSS JOIN lane_holds o INDEXED BY lane_holds_stem ON o.drive = h.drive AND o.stem = h.stem WHERE h.drive = ? AND h.lane = ?
 UNION SELECT lane, held, down, `+liveSQL+` FROM lane_holds WHERE drive = ? AND lane IN (`+placeholders(len(names))+`)`,
 		append([]any{drive, lane, drive}, toAny(names)...)...)
 	if err != nil {

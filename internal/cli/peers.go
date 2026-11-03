@@ -712,7 +712,7 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 					registry, err = false, nil
 				}
 			}
-			if err == nil && !force && len(reading[t]) == 0 && !(registry && (reach.Started || t == reach.Stem && len(reach.Holders) > 0)) {
+			if err == nil && !force && len(reading[t]) == 0 && (!registry || !reach.Started && (t != reach.Stem || len(reach.Holders) == 0)) {
 				err = mistypedLane(ctx, st, drive, t)
 			}
 			if err == nil {
