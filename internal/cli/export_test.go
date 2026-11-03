@@ -9,3 +9,5 @@ func SetPostPatience(d time.Duration) func() {
 }
 
 var ChannelTools = channelTools
+
+var UntilStored = untilStored

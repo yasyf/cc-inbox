@@ -72,7 +72,7 @@ func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, 
 			if err == nil {
 				return drainUnsent(parent, cmd)
 			}
-			if !store.Busy(err) {
+			if !store.Busy(err) && !errors.Is(err, context.DeadlineExceeded) {
 				return err
 			}
 			cause = err
