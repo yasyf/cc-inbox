@@ -172,7 +172,6 @@ func TestAMechanismObligesAnOpenedOrABlocker(t *testing.T) {
 }
 
 func TestAThreadWhoseWakeExistsStopsFreely(t *testing.T) {
-	ctx := context.Background()
 	t.Run("nothing launched it", func(t *testing.T) {
 		st, _ := testutil.Store(t)
 		p := bindLane(t, st, "owner-relay")
@@ -206,7 +205,7 @@ func TestAThreadWhoseWakeExistsStopsFreely(t *testing.T) {
 		st, _ := testutil.Store(t)
 		launch(t, st, "sub-lane-1", "/briefs/sub.md")
 		p := bindLane(t, st, "sub-lane-1")
-		if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: store.Window{PID: 100, Started: 1}, Drive: "d", Reader: "sub-lane-1", Cursor: "c"}); err != nil {
+		if _, err := st.Subscribe(context.Background(), store.Subscription{Session: "s1", Window: store.Window{PID: 100, Started: 1}, Drive: "d", Reader: "sub-lane-1", Cursor: "c"}); err != nil {
 			t.Fatal(err)
 		}
 		if got := stopReason(t, st, p); got != "" {
