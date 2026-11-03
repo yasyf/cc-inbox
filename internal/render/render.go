@@ -72,7 +72,7 @@ func rest(r store.Record, brief, elide bool) string {
 	if len(to) > 0 {
 		fmt.Fprintf(&b, " -> %s", strings.Join(to, ","))
 	}
-	if r.Re != 0 {
+	if r.Re != 0 || r.ReNum != "" {
 		fmt.Fprintf(&b, " re %s", r.ReName())
 	}
 	if r.Topic != "" && !slices.Contains(words, r.Topic) {

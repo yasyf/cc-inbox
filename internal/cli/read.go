@@ -3,12 +3,14 @@ package cli
 import (
 	"cmp"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +19,8 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -62,6 +66,10 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 		return f.runSelected(ctx, cmd, st)
 	}
 	filter, err := f.rf.filterPeer(ctx, st, peer)
+	var older []store.Record
+	if errors.Is(err, store.ErrNoNumber) {
+		filter, older, err = f.rf.sinceFromHub(ctx, st, peer, err)
+	}
 	if err != nil {
 		return err
 	}
@@ -77,7 +85,7 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 	if err != nil {
 		return err
 	}
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Seed: f.seed, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(cmd, f.rf.json)}, cmd.OutOrStdout())
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Seed: f.seed, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(cmd, f.rf.json), Older: older}, cmd.OutOrStdout())
 	if err != nil || name == "" || !resumed || f.rf.limit > 0 {
 		return err
 	}
@@ -258,15 +266,15 @@ func newShowCmd() *cobra.Command {
 		Short: "Print records by seq, each once: the full line, then the rest of the text or body file the record names",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
-			seqs := make([]int64, len(args))
+			records := make([]store.Record, len(args))
 			for i, arg := range args {
-				seq, err := st.Resolve(cmd.Context(), arg)
+				r, err := showRecord(cmd.Context(), st, drive, arg)
 				if err != nil {
 					return fmt.Errorf("show: %w", err)
 				}
-				seqs[i] = seq
+				records[i] = r
 			}
-			return inbox.Show(cmd.Context(), st, seqs, drive, budget, asJSON, cmd.OutOrStdout())
+			return inbox.Show(cmd.Context(), st, records, drive, budget, asJSON, cmd.OutOrStdout())
 		}),
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "one JSON record per line, the body file not inlined")
@@ -315,4 +323,97 @@ func tailNotes(cmd *cobra.Command, asJSON bool) io.Writer {
 		return nil
 	}
 	return cmd.ErrOrStderr()
+}
+
+func showRecord(ctx context.Context, st *store.Store, drive, ref string) (store.Record, error) {
+	seq, err := st.Resolve(ctx, ref)
+	if errors.Is(err, store.ErrNoNumber) {
+		_, row, err := findOnHub(ctx, st, drive, ref, err)
+		if err != nil {
+			return store.Record{}, err
+		}
+		records, err := st.Unstored(ctx, []store.Row{row})
+		if err != nil {
+			return store.Record{}, err
+		}
+		return records[0], nil
+	}
+	if err != nil {
+		return store.Record{}, err
+	}
+	r, err := st.Get(ctx, seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return store.Record{}, fmt.Errorf("no record #%d", seq)
+	}
+	return r, err
+}
+
+func (f *readFlags) sinceFromHub(ctx context.Context, st *store.Store, peer store.PeerKey, missing error) (store.Filter, []store.Record, error) {
+	rest := *f
+	rest.since = ""
+	filter, err := rest.filterPeer(ctx, st, peer)
+	if err != nil {
+		return store.Filter{}, nil, err
+	}
+	hub, row, err := findOnHub(ctx, st, filter.Drive, f.since, missing)
+	if err != nil {
+		return store.Filter{}, nil, err
+	}
+	before, err := st.Oldest(ctx, filter.Drive, row.Origin)
+	if err != nil {
+		return store.Filter{}, nil, err
+	}
+	rows, err := hub.Range(ctx, filter.Drive, row.Origin, row.OriginSeq, before)
+	if err != nil {
+		return store.Filter{}, nil, err
+	}
+	unstored, err := st.Unstored(ctx, rows)
+	if err != nil {
+		return store.Filter{}, nil, err
+	}
+	older, err := st.Selected(ctx, filter, unstored)
+	if err != nil || len(older) == 0 {
+		return filter, nil, err
+	}
+	filter.After = older[0].Seq - 1
+	return filter, older, nil
+}
+
+func findOnHub(ctx context.Context, st *store.Store, drive, ref string, missing error) (*relay.Node, store.Row, error) {
+	drive, err := resolveDrive(ctx, st, drive)
+	if errors.Is(err, store.ErrNoDrive) {
+		return nil, store.Row{}, missing
+	}
+	if err != nil {
+		return nil, store.Row{}, err
+	}
+	configs, err := relay.Configs(st.HomeDir())
+	if err != nil {
+		return nil, store.Row{}, err
+	}
+	mesh := relay.Route(configs, drive)
+	i := slices.IndexFunc(configs, func(c relay.Config) bool { return c.Mesh == mesh })
+	if i < 0 {
+		return nil, store.Row{}, missing
+	}
+	id, err := node.Load(st.HomeDir())
+	if err != nil {
+		return nil, store.Row{}, err
+	}
+	hub, err := relay.Open(st.HomeDir(), st, id, configs[i])
+	if err != nil {
+		return nil, store.Row{}, err
+	}
+	num, err := store.ParseNumber(ref)
+	if err != nil {
+		return nil, store.Row{}, err
+	}
+	row, ok, err := hub.Find(ctx, drive, num)
+	if err != nil {
+		return nil, store.Row{}, err
+	}
+	if !ok {
+		return nil, store.Row{}, missing
+	}
+	return hub, row, nil
 }

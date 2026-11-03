@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"cmp"
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -41,6 +40,7 @@ type TailOptions struct {
 	Defer   bool
 	Compact bool
 	Reader  string
+	Older   []store.Record
 }
 
 // TailResult reports what a Tail printed. Ack holds the cursor moves a
@@ -89,6 +89,17 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if err != nil {
 		return TailResult{}, err
 	}
+	if len(opts.Older) > 0 {
+		older, olderFolded, err := lines(ctx, st, opts.Older, v)
+		if err != nil {
+			return TailResult{}, err
+		}
+		records, rendered, folded = slices.Concat(opts.Older, records), slices.Concat(older, rendered), slices.Concat(olderFolded, folded)
+		if opts.Limit > 0 && len(records) > opts.Limit {
+			from := len(records) - opts.Limit
+			records, rendered, folded = records[from:], rendered[from:], folded[from:]
+		}
+	}
 	skipped, err := skippedOf(ctx, st, records, opts.Open)
 	if err != nil {
 		return TailResult{}, err
@@ -104,12 +115,13 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			first--
 		}
 		records, rendered, folded, cut = records[first:], rendered[first:], folded[first:], first
-		if opts.Limit == 0 {
+		if opts.Limit == 0 && records[0].Seq > 0 {
 			older := f
 			older.Limit, older.Descending, older.Before = 0, false, records[0].Seq
 			if cut, err = st.Count(ctx, older); err != nil {
 				return TailResult{}, err
 			}
+			cut += len(opts.Older)
 		}
 	}
 	ahead, err := addressedAhead(ctx, st, f, opts, records, paged)
@@ -194,6 +206,11 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if res.More, err = st.Count(ctx, rest); err != nil {
 		return TailResult{}, err
 	}
+	for _, r := range opts.Older {
+		if r.Seq > res.Last {
+			res.More++
+		}
+	}
 	if sent := max(ahead.sent, t.sent); sent > res.Last {
 		early := ahead.filter
 		early.After, early.Before = res.Last, sent+1
@@ -205,6 +222,9 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	if res.More > 0 {
 		resume := fmt.Sprintf("--since %d", res.Last)
+		if res.Last < 1 {
+			resume = "--since " + all[index[res.Last]].Name()
+		}
 		if opts.Cursor != "" {
 			resume = cmp.Or(opts.Resume, "cci tail")
 		}
@@ -548,20 +568,11 @@ func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, 
 	return pages
 }
 
-func Show(ctx context.Context, st *store.Store, seqs []int64, drive string, budget int, asJSON bool, w io.Writer) error {
-	records := make([]store.Record, len(seqs))
-	for i, seq := range seqs {
-		r, err := st.Get(ctx, seq)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("show: no record #%d", seq)
-		}
-		if err != nil {
-			return err
-		}
+func Show(ctx context.Context, st *store.Store, records []store.Record, drive string, budget int, asJSON bool, w io.Writer) error {
+	for _, r := range records {
 		if drive != "" && r.Drive != drive {
-			return fmt.Errorf("show: #%d is on drive %s, not %s", seq, r.Drive, drive)
+			return fmt.Errorf("show: %s is on drive %s, not %s", r.Name(), r.Drive, drive)
 		}
-		records[i] = r
 	}
 	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON, Whole: true})
 	if err != nil {
@@ -583,11 +594,11 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, drive string, budg
 		if errors.Is(err, os.ErrNotExist) {
 			body = []byte(path + " is not on this machine")
 		} else if err != nil {
-			return fmt.Errorf("show #%d: %w", records[i].Seq, err)
+			return fmt.Errorf("show %s: %w", records[i].Name(), err)
 		}
 		body = BodyAfterText(body, records[i].Text)
 		if share > 0 && len(body) > share {
-			body = fmt.Appendf(body[:share:share], "\n... cut %d bytes of #%d; cci show %d reads it whole", len(body)-share, records[i].Seq, records[i].Seq)
+			body = fmt.Appendf(body[:share:share], "\n... cut %d bytes of %s; cci show %s reads it whole", len(body)-share, records[i].Name(), records[i].Name())
 		}
 		if len(body) == 0 {
 			continue

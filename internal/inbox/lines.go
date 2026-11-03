@@ -46,7 +46,7 @@ func Annotate(ctx context.Context, st openerReader, records []store.Record) erro
 	}
 	for i, r := range records {
 		switch {
-		case !r.Kind.Opens():
+		case !r.Kind.Opens(), r.Seq < 1:
 		case !r.Tracked():
 			records[i].Status = "imported"
 		case live[r.Seq]:

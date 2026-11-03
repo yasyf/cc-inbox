@@ -141,14 +141,31 @@ func (s *Store) Number(ctx context.Context, r Record) (string, error) {
 // ErrNoNumber is returned for a record number this store holds no record for.
 var ErrNoNumber = errors.New("no record has this number")
 
-// Resolve turns a record number as any node prints it, #N or #N@node, into
-// this store's seq for that record.
-func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
+// Number is a record number as any node prints it: #N names record N of an
+// owner node, and #N@tag record N of the node whose id starts with Tag.
+type Number struct {
+	Seq int64
+	Tag string
+}
+
+// ParseNumber reads a record number, #N or #N@node.
+func ParseNumber(ref string) (Number, error) {
 	digits, tag, tagged := strings.Cut(strings.TrimPrefix(ref, "#"), "@")
 	n, err := strconv.ParseInt(digits, 10, 64)
 	if err != nil || n < 0 || tagged && (tag == "" || n == 0) {
-		return 0, fmt.Errorf("%q is not a record number (#N or #N@node)", ref)
+		return Number{}, fmt.Errorf("%q is not a record number (#N or #N@node)", ref)
 	}
+	return Number{Seq: n, Tag: tag}, nil
+}
+
+// Resolve turns a record number as any node prints it, #N or #N@node, into
+// this store's seq for that record.
+func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
+	num, err := ParseNumber(ref)
+	if err != nil {
+		return 0, err
+	}
+	n, tag, tagged := num.Seq, num.Tag, num.Tag != ""
 	if tagged && strings.HasPrefix(s.Self(), tag) || !tagged && (s.owner || n == 0) {
 		if !tagged && n != 0 {
 			if err := s.unambiguous(ctx, ref, n); err != nil {
