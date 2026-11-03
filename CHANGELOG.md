@@ -32,6 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   binding's cursor follow the stem, and stored recipients stay as posted.
   `cci post` prints one line when no live lane reads a `--to` name or several
   running lanes share its stem, and `client.Draft.Notices` receives it.
+  The lane registry behind this is a projection: a new store has it, an
+  existing store gets it from `cci maintain-indexes`, and until then posts
+  and reads behave as before. `client.Stem` applies the same rule in Go.
 - A post's stand-down successors come from an indexed lane registry instead of
   a read of every stand-down record on the drive.
 - `lr.head` takes optional `title`, `change`, `plan`, `risk`, `blocks`, `group`
