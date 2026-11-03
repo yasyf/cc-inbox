@@ -200,20 +200,18 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload) error {
 }
 
 func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, relist bool, w io.Writer) error {
-	var sub store.Subscription
-	if k.Agent == "" {
-		found, ok, err := st.SessionSubscription(ctx, k.Session)
-		if err != nil {
-			return err
-		}
-		if ok && found.Drive == b.Drive {
-			sub, b.Lane = found, found.Reader
-		}
-	}
 	var tail bytes.Buffer
 	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
 	f := store.LaneMail(k, b)
-	f.Mute, f.ToKinds = sub.Mute, sub.ToKinds
+	if k.Agent == "" {
+		sub, ok, err := st.SessionSubscription(ctx, k.Session)
+		if err != nil {
+			return err
+		}
+		if ok && sub.Drive == b.Drive && store.SameLane(sub.Reader, b.Lane) {
+			f.Mute, f.ToKinds = sub.Mute, sub.ToKinds
+		}
+	}
 	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Width: recordWidth, Resume: "the next tool call", Open: true, Defer: true}, &tail)
 	if err != nil {
 		return err
