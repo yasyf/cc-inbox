@@ -442,7 +442,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		return readErr
 	}
 	if asJSON {
-		if matched > printed && notes != nil {
+		if matched > printed && limit >= 0 && notes != nil {
 			if _, err := fmt.Fprintf(notes, "... %d more matches; narrow with --kind, --lane or --since\n", matched-printed); err != nil {
 				return fmt.Errorf("write grep: %w", err)
 			}

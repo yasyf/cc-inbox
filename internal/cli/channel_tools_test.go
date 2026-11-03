@@ -94,8 +94,8 @@ func TestTheFindToolAnswersSeveralPullRequestsInOneCall(t *testing.T) {
 	mustTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "head", "text": "head one", "pr": []any{"owner/repo#7"}})
 	mustTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "head", "text": "head two", "pr": []any{"owner/repo#8"}})
 	out := mustTool(t, "find", map[string]any{"drive": "d", "prs": []any{"owner/repo#7", "owner/repo#8"}})
-	seven, eight := strings.Index(out, "pr owner/repo#7\n1 head desk repo#7 head one"), strings.Index(out, "pr owner/repo#8\n2 head desk repo#8 head two")
-	if seven < 0 || eight < seven {
+	seven, eight := strings.Index(out, "pr owner/repo#7\n"), strings.Index(out, "pr owner/repo#8\n")
+	if seven < 0 || eight < seven || !strings.Contains(out[seven:eight], "1 head desk repo#7 head one") || !strings.Contains(out[eight:], "2 head desk repo#8 head two") {
 		t.Errorf("find prs 7 8 = %q, want each pull request's records under its own header", out)
 	}
 }
