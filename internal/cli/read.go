@@ -32,6 +32,7 @@ func newTailCmd() *cobra.Command {
 type tailFlags struct {
 	rf     readFlags
 	cursor string
+	seed   string
 	all    bool
 	oldest bool
 	seqs   []string
@@ -49,6 +50,7 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	f.rf.registerWidth(cmd)
 	f.rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
 	cmd.Flags().StringVar(&f.cursor, "cursor", peer, "cursor name, read and advanced when --since is absent")
+	cmd.Flags().StringVar(&f.seed, "seed", "", "start a --cursor that does not exist yet where this cursor stands, or at the newest record when this one does not exist either, instead of an hour back")
 	cmd.Flags().BoolVar(&f.oldest, "oldest", false, "when the budget cuts a text --since window, keep its oldest records instead of its newest, as --json reads always do")
 	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")
 	_ = cmd.Flags().MarkHidden("seqs")
@@ -75,7 +77,7 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 	if err != nil {
 		return err
 	}
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(cmd, f.rf.json)}, cmd.OutOrStdout())
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Seed: f.seed, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(cmd, f.rf.json)}, cmd.OutOrStdout())
 	if err != nil || name == "" || !resumed || f.rf.limit > 0 {
 		return err
 	}

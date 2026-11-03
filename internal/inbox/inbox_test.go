@@ -74,6 +74,49 @@ func TestTailFreshCursorStartsAnHourBack(t *testing.T) {
 	}
 }
 
+func TestTailSeedStartsAFreshCursorWhereTheSeedStands(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	read := testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "already read"})
+	if err := st.SetCursor(ctx, "desk", "d", read.Seq); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "the assignment"})
+	opts := inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Cursor: "desk-wake", Seed: "desk"}
+	var first, second bytes.Buffer
+	if _, err := inbox.Tail(ctx, st, opts, &first); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(first.String(), "already read") || !strings.Contains(first.String(), "the assignment") {
+		t.Fatalf("first seeded tail:\n%s", first.String())
+	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "next"})
+	if _, err := inbox.Tail(ctx, st, opts, &second); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(second.String(), "the assignment") || !strings.Contains(second.String(), "next") {
+		t.Fatalf("second seeded tail:\n%s", second.String())
+	}
+}
+
+func TestTailSeedWithNoSeedCursorStartsAtTheNewestRecord(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "history"})
+	opts := inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Cursor: "desk-wake", Seed: "desk"}
+	var first, second bytes.Buffer
+	if _, err := inbox.Tail(ctx, st, opts, &first); err != nil || first.Len() != 0 {
+		t.Fatalf("first seeded tail printed %q (%v)", first.String(), err)
+	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "after the first wait"})
+	if _, err := inbox.Tail(ctx, st, opts, &second); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(second.String(), "history") || !strings.Contains(second.String(), "after the first wait") {
+		t.Fatalf("second seeded tail:\n%s", second.String())
+	}
+}
+
 func TestTailBudgetGovernsWholeRecords(t *testing.T) {
 	st, _ := testutil.Store(t)
 	text := strings.Repeat("y", 390)
