@@ -84,3 +84,31 @@ func TestPostValidArgumentsCreateStore(t *testing.T) {
 		t.Errorf("show = %q, %v; want stored summary", out, err)
 	}
 }
+
+func TestPostTakesKindsAsReadersPrintThem(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	for kind, want := range map[string]string{"DECIDE": `"kind":"decide"`, "status": `"kind":"state"`} {
+		if _, err := run(t, "post", "--drive", "test-drive", "--lane", "root", "--kind", kind, "--text", "x"); err != nil {
+			t.Fatalf("post --kind %s = %v", kind, err)
+		}
+		if out, err := run(t, "tail", "--drive", "test-drive", "--since", "0", "--json", "-n", "1"); err != nil || !strings.Contains(out, want) {
+			t.Errorf("post --kind %s stored %q, %v; want %s", kind, out, err, want)
+		}
+	}
+}
+
+func TestPostLongTextBesideAPathSpillsBoth(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	attached := filepath.Join(t.TempDir(), "diff.txt")
+	if err := os.WriteFile(attached, []byte("ATTACHED diff\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("a finding past the cap ", 20) + "TEXT END"
+	if _, err := run(t, "post", "--drive", "test-drive", "--lane", "root", "--kind", "report", "--text", long, "--path", attached); err != nil {
+		t.Fatalf("post --text <long> --path = %v; want the text spilled with the file", err)
+	}
+	out, err := run(t, "show", "1")
+	if err != nil || !strings.Contains(out, "TEXT END") || !strings.Contains(out, "ATTACHED diff") {
+		t.Errorf("show 1 = %q, %v; want the whole text and the attached file", out, err)
+	}
+}
