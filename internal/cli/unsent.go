@@ -167,6 +167,13 @@ func rebuiltArgs(cmd *cobra.Command, args []string) []string {
 	return append(append(out, "--"), args...)
 }
 
+func dropKept(path string) error {
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
 	if os.Getenv(unsentEnv) != "" {
 		return nil
@@ -191,6 +198,9 @@ func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
 drain:
 	for _, path := range kept {
 		raw, err := os.ReadFile(path) //nolint:gosec // G304: a post this cci home kept while its bus was down.
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
@@ -208,7 +218,7 @@ drain:
 		var exit *exec.ExitError
 		switch {
 		case err == nil:
-			if err := os.Remove(path); err != nil {
+			if err := dropKept(path); err != nil {
 				return err
 			}
 			stored++
@@ -218,7 +228,7 @@ drain:
 			if err := os.WriteFile(path+refusedExt, append(raw, "\n"+strings.TrimSpace(string(out))+"\n"...), 0o600); err != nil { //nolint:gosec // G703: path is a kept post this cci home globbed under its own unsent directory.
 				return err
 			}
-			if err := os.Remove(path); err != nil {
+			if err := dropKept(path); err != nil {
 				return err
 			}
 			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: the bus refused a post kept since %s: %s; it is at %s\n", post.At.Local().Format(time.Kitchen), strings.TrimSpace(string(out)), path+refusedExt); err != nil {
@@ -273,7 +283,7 @@ func drainWrites(ctx context.Context, cmd *cobra.Command, home string) (int, err
 				return stored, err
 			}
 		}
-		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := dropKept(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return stored, err
 		}
 	}
