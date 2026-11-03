@@ -109,13 +109,13 @@ func (d Draft) args() []string {
 		args = append(args, "--to", to)
 	}
 	if d.Re != 0 {
-		args = append(args, "--re", strconv.FormatInt(d.Re, 10))
+		args = append(args, "--re-seq", strconv.FormatInt(d.Re, 10))
 	}
 	if d.Body != nil {
 		args = append(args, "--body-file", "-")
 	}
 	if d.Resolves != 0 {
-		args = append(args, "--resolves", strconv.FormatInt(d.Resolves, 10))
+		args = append(args, "--resolves-seq", strconv.FormatInt(d.Resolves, 10))
 	}
 	if d.Stamp {
 		args = append(args, "--stamp")
