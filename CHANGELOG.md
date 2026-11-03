@@ -20,6 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   newer one, an unregistered name or a lane on another drive, is stored as typed,
   and a stand-down or an `--owned-by` decide keeps the lane it is about. A
   reply's default recipient is stored the same way.
+- A reader names a record's writer by the stem it holds: `cci tail`, `grep`,
+  `show`, `watch` and the compact lines print `meta-desk` for a record
+  `meta-desk-3` wrote while `meta-desk-3` is the stem's newest live lane, and
+  keep the number for an older lane, one beside a newer holder, or one whose
+  stem a live lane is named for. `--json` keeps `lane` exact and adds `stem`
+  when the writer holds it. One registry read per drive per page decides it.
+
 ### Removed
 
 - No clock in a post's text refuses it any more. A leading `H:MM AM/PM` label

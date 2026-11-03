@@ -2,6 +2,7 @@ package render
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -50,7 +51,7 @@ func fit(head string, r store.Record, width int) string {
 }
 
 func header(r store.Record, now time.Time) string {
-	return fmt.Sprintf("%s %s %s %s", r.Name(), Stamp(r.At, now), strings.ToUpper(string(r.Kind)), r.Lane)
+	return fmt.Sprintf("%s %s %s %s", r.Name(), Stamp(r.At, now), strings.ToUpper(string(r.Kind)), cmp.Or(r.Stem, r.Lane))
 }
 
 func rest(r store.Record, brief, elide bool) string {
