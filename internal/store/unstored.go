@@ -95,6 +95,10 @@ func (s *Store) Selected(ctx context.Context, f Filter, unstored []Record) ([]Re
 	if err != nil {
 		return nil, fmt.Errorf("encode unstored records: %w", err)
 	}
+	f, err = s.aliased(ctx, f)
+	if err != nil {
+		return nil, err
+	}
 	where, params := f.where(s.Self(), s.Now())
 	selected, err := s.db.QueryContext(ctx, unstoredRecords+where, append([]any{string(raw)}, params...)...)
 	if err != nil {

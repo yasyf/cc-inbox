@@ -213,6 +213,7 @@ INSERT INTO meta (key, value) SELECT 'compacted_through', MAX(seq) FROM records 
 ALTER TABLE records ADD COLUMN also_resolves_origin TEXT`,
 	`CREATE INDEX sessions_lane ON sessions(origin, drive, lane)`,
 	`ALTER TABLE sessions ADD COLUMN parent TEXT NOT NULL DEFAULT ''`,
+	laneHolds,
 }
 
 var (

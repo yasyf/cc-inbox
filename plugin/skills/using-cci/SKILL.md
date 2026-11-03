@@ -75,6 +75,18 @@ A thread cannot bind a lane another live thread holds until that lane stands
 down: its `cci post` is refused and root hears a `defect`. A numbered successor
 binding beside its live predecessor binds, and root hears the same `defect`.
 
+Address a numbered lane by its stem, the name without its trailing `-<n>`:
+`--to signal-valkey` reaches the stem's newest live lane, the one whose first
+post, thread binding or spawn record came last, or the successor a stand-down
+named. A running `signal-valkey-2` still reads what is addressed to it by name.
+Once it stands down, that mail reaches the successor it named, else the stem's
+newest live lane, and `cci post` prints a line naming the stem. The lane holding
+a stem reads, in its tail, hook mail and open asks, what was addressed to the
+stem and to its stood-down predecessors, so it never watches two names. When no
+live lane reads a `--to` name, or several running lanes share its stem,
+`cci post` says so on stderr and still stores the record; the first lane to
+register under the stem reads it.
+
 Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose
 needs the time, write `{at}`, which `cci post` replaces with the record's time

@@ -35,6 +35,7 @@ type Filter struct {
 	To             string
 	BroadcastFloor string
 	For            string
+	Aliases        []string
 	Addressed      string
 	Topics         []string
 	Stack          string
@@ -75,7 +76,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		}
 	}
 	if f.For != "" {
-		names := addressees(f.For)
+		names := f.addressees(f.For)
 		in := "(" + placeholders(len(names)) + ")"
 		broadcast := append([]string{"(recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all'))", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
 		addressed, kindParams := f.addressedKinds(addressedTo(in))
@@ -86,12 +87,12 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		params = append(params, selected...)
 	}
 	if f.Addressed != "" {
-		names := addressees(f.Addressed)
+		names := f.addressees(f.Addressed)
 		scoped = append(scoped, addressedTo("("+placeholders(len(names))+")"))
 		params = append(append(params, names...), names...)
 	}
 	if f.To != "" {
-		names := addressees(f.To)
+		names := f.addressees(f.To)
 		in := "(" + placeholders(len(names)) + ")"
 		all := "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all') AND lane NOT IN " + in
 		allParams := names
@@ -149,7 +150,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		params = append(params, kindArgs(f.Mute)...)
 	}
 	if len(f.FirstOnly) > 0 && f.To != "" {
-		names := addressees(f.To)
+		names := f.addressees(f.To)
 		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.FirstOnly))+") AND json_extract(recipients, '$[0]') NOT IN ("+placeholders(len(names))+"))")
 		params = append(append(params, kindArgs(f.FirstOnly)...), names...)
 	}
@@ -285,7 +286,7 @@ func (f Filter) readerAddresses() []any {
 	var out []any
 	reader := cmp.Or(f.To, f.For, f.Addressed)
 	if reader != "" && f.Drive != "" {
-		for _, n := range addressees(reader) {
+		for _, n := range f.addressees(reader) {
 			out = append(out, n.(string)+"@"+f.Drive)
 		}
 	}
@@ -334,11 +335,24 @@ func SameLane(a, b string) bool {
 	return a == b || RootName(a) && RootName(b)
 }
 
-func addressees(lane string) []any {
+func (f Filter) addressees(lane string) []any {
 	if RootName(lane) {
 		return rootNames
 	}
-	return []any{lane}
+	if lane != cmp.Or(f.To, f.For, f.Addressed) {
+		return []any{lane}
+	}
+	return append([]any{lane}, toAny(f.Aliases)...)
+}
+
+func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
+	reader := cmp.Or(f.To, f.For, f.Addressed)
+	if reader == "" || f.Drive == "" {
+		return f, nil
+	}
+	var err error
+	f.Aliases, err = s.Aliases(ctx, f.Drive, reader)
+	return f, err
 }
 
 func HookSource(reader string) string {
@@ -371,6 +385,10 @@ func (s *Store) QueryText(ctx context.Context, f Filter) ([]Record, error) {
 func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Record, error) {
 	if f.Drive == "" && f.Peer == "" {
 		return nil, ErrNoDrive
+	}
+	f, err := s.aliased(ctx, f)
+	if err != nil {
+		return nil, err
 	}
 	now := s.Now()
 	conn, err := s.rootAudienceConnectionAt(ctx, f, now)
@@ -446,6 +464,10 @@ func (s *Store) selectionColumnsAudienceAt(f Filter, projection string, rootAudi
 }
 
 func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
+	f, err := s.aliased(ctx, f)
+	if err != nil {
+		return 0, err
+	}
 	now := s.Now()
 	conn, err := s.rootAudienceConnectionAt(ctx, f, now)
 	if err != nil {
@@ -605,7 +627,7 @@ func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, lb LaneBinding) error 
 	if err := s.claimSession(ctx, tx, k.Session); err != nil {
 		return err
 	}
-	waiting, err := waitingFor(ctx, tx, k, drive, lane)
+	fresh, err := freshLane(ctx, tx, k, drive, lane)
 	if err != nil {
 		return err
 	}
@@ -618,6 +640,12 @@ ON CONFLICT (session, agent) DO UPDATE SET origin = excluded.origin, drive = exc
 	role = CASE WHEN sessions.root OR sessions.role NOT IN `+inferredRoles+` THEN sessions.role ELSE 'lane' END
 WHERE ? OR NOT sessions.root AND sessions.drive IN ('', excluded.drive) AND sessions.lane = ''`, k.Session, k.Agent, s.Self(), drive, lane, lb.Explicit); err != nil {
 		return fmt.Errorf("bind lane: %w", err)
+	}
+	waiting := int64(math.MaxInt64)
+	if fresh {
+		if waiting, err = waitingFor(ctx, tx, drive, lane); err != nil {
+			return err
+		}
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, MIN(?, COALESCE(
 	(SELECT MIN(seq) - 1 FROM records WHERE at >= COALESCE(NULLIF((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0), ?)),
@@ -638,15 +666,23 @@ ON CONFLICT (name, drive) DO NOTHING`, BroadcastCursor(k), drive, k.Session, k.A
 	return nil
 }
 
-func waitingFor(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string) (int64, error) {
-	var started bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)", LaneCursor(k), drive).Scan(&started); err != nil || started {
-		return math.MaxInt64, err
+func freshLane(ctx context.Context, tx *sql.Tx, k PeerKey, drive, lane string) (bool, error) {
+	var fresh bool
+	if err := tx.QueryRowContext(ctx, "SELECT NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?) AND NOT EXISTS (SELECT 1 FROM sessions WHERE drive = ? AND lane = ?) AND NOT EXISTS (SELECT 1 FROM records WHERE drive = ? AND lane = ?)",
+		LaneCursor(k), drive, drive, lane, drive, lane).Scan(&fresh); err != nil {
+		return false, fmt.Errorf("read whether lane %s started on %s: %w", lane, drive, err)
+	}
+	return fresh, nil
+}
+
+func waitingFor(ctx context.Context, tx *sql.Tx, drive, lane string) (int64, error) {
+	arms, params, err := waitingAliases(ctx, tx, drive, lane)
+	if err != nil {
+		return 0, err
 	}
 	waiting := int64(math.MaxInt64)
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MIN(r.seq) - 1, ?) FROM record_recipients a JOIN records r ON r.seq = a.source_seq
-WHERE a.address = ? AND r.drive = ? AND NOT EXISTS (SELECT 1 FROM sessions WHERE drive = ? AND lane = ?) AND NOT EXISTS (SELECT 1 FROM records WHERE drive = ? AND lane = ?)`,
-		waiting, lane, drive, drive, lane, drive, lane).Scan(&waiting); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MIN(r.seq) - 1, ?) FROM record_recipients a JOIN records r ON r.seq = a.source_seq WHERE r.drive = ? AND (a.address = ?"+arms+")",
+		append([]any{waiting, drive, lane}, params...)...).Scan(&waiting); err != nil {
 		return 0, fmt.Errorf("find records waiting for lane %s: %w", lane, err)
 	}
 	return waiting, nil
@@ -659,18 +695,6 @@ func (s *Store) Registered(ctx context.Context, drive, lane string) (bool, error
 		return false, fmt.Errorf("read lane %s on %s: %w", lane, drive, err)
 	}
 	return ok, nil
-}
-
-// Successors follows the stand-down records of drive from lane, each naming the
-// lane that took the last one over; standDown is the seq of lane's own newest
-// stand-down, 0 when it never stood down. A stand-down is its first --to lane's
-// own: the lanes it copies, a successor it names included, did not stand down.
-func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []string, standDown int64, err error) {
-	downs, err := s.StandDowns(ctx, drive)
-	if err != nil {
-		return nil, 0, err
-	}
-	return downs.Chain(lane), downs[lane].Seq, nil
 }
 
 // OwnedByAttr is the record attribute a --owned-by decide stores its owner lane under.

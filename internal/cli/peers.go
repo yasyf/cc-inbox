@@ -684,7 +684,7 @@ func newUnclaimCmd() *cobra.Command {
 	return cmd
 }
 
-func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []string, force bool, notices io.Writer) ([]string, error) {
+func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []string, kind kinds.Kind, force bool, notices io.Writer) ([]string, error) {
 	out := make([]string, len(to))
 	var reading map[string][]string
 	for i, t := range to {
@@ -705,11 +705,18 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 				}
 				reading, err = laneDrives(ctx, st, lanes)
 			}
-			if err == nil && !force && len(reading[t]) == 0 {
+			var reach store.Reach
+			if err == nil {
+				reach, err = st.Reach(ctx, drive, t)
+			}
+			if err == nil && !force && len(reading[t]) == 0 && !reach.Started && (t != reach.Stem || len(reach.Holders) == 0) {
 				err = mistypedLane(ctx, st, drive, t)
 			}
 			if err == nil {
 				out[i], err = routeLane(t, drive, reading[t], notices)
+			}
+			if err == nil && out[i] == t && kind != kinds.StandDown {
+				err = noticeReach(notices, t, reach)
 			}
 		}
 		if err != nil {
@@ -783,6 +790,34 @@ func routeLane(lane, drive string, reading []string, notices io.Writer) (string,
 	addr := lane + "@" + reading[0]
 	_, err := fmt.Fprintf(notices, "cci: --to %s: %s reads drive %s, not %s; addressed %s\n", lane, lane, reading[0], drive, addr)
 	return addr, err
+}
+
+func noticeReach(w io.Writer, to string, r store.Reach) error {
+	var line string
+	switch {
+	case to == r.Stem && len(r.Holders) > 1 && (!r.Started || !r.Down):
+		readers := []string{r.Holders[0]}
+		if r.Started && to != r.Holders[0] {
+			readers = []string{to, r.Holders[0]}
+		}
+		line = fmt.Sprintf("%s run under %s at once; this reaches %s", strings.Join(r.Holders, ", "), r.Stem, strings.Join(readers, " and "))
+	case r.Started && !r.Down:
+	case r.Down && r.Lane != "":
+		line = fmt.Sprintf("%s stood down, so this reaches %s; --to %s reaches whichever lane holds it", to, r.Lane, r.Stem)
+	case r.Down:
+		line = fmt.Sprintf("%s stood down and no live lane holds %s; the next lane to register as %s or %s-<n> reads this", to, r.Stem, r.Stem, r.Stem)
+	case to == r.Stem && len(r.Holders) == 0:
+		line = fmt.Sprintf("no lane holds %s; the first lane to register as %s or %s-<n> reads this", to, to, to)
+	case to != r.Stem && len(r.Holders) > 0:
+		line = fmt.Sprintf("no lane has registered as %s; %s holds %s, which --to %s reaches, and %s reads this once it registers", to, r.Holders[0], r.Stem, r.Stem, to)
+	case to != r.Stem:
+		line = fmt.Sprintf("no lane has registered as %s or holds %s; %s reads this once it registers", to, r.Stem, to)
+	}
+	if line == "" {
+		return nil
+	}
+	_, err := fmt.Fprintf(w, "cci: --to %s: %s\n", to, line)
+	return err
 }
 
 func mistypedLane(ctx context.Context, st *store.Store, drive, lane string) error {
