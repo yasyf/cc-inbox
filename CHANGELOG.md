@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `github.com/yasyf/cc-inbox/client`, a public Go package other modules import
+  to post and read records: `Post`, `Tail` and `Open` use the store and the rules
+  `cci` uses, so a Go tool never shells out to the binary.
 - `cci post --kind decide --owned-by <lane> --to <script lane>` records who
   owns a lane a script posts as, such as `stall-watch` or `desk-runner`. Later
   asks, decides and defects addressed to that lane also reach its owner and

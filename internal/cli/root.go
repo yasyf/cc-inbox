@@ -85,6 +85,11 @@ func rootCommand() *cobra.Command {
 
 var number = regexp.MustCompile(`^#?[0-9]+(@[0-9a-f]+)?$`)
 
+// OpenStore opens the store CCI_HOME names the way every cci command does.
+func OpenStore(ctx context.Context) (*store.Store, error) {
+	return openStore(ctx)
+}
+
 func openStore(ctx context.Context) (*store.Store, error) {
 	st, err := connectStore(ctx)
 	if !errors.Is(err, store.ErrNeedsInit) {
