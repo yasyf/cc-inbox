@@ -306,6 +306,21 @@ func TestResolveReachesAStemsNewestLaneAndAStoodDownLanesSuccessor(t *testing.T)
 	}
 }
 
+func TestGenerationsListsEveryLaneEverRegisteredUnderAStem(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "stand-down", Text: "desk-4 stood down", To: []string{"desk-4"}, Successor: "desk-5"})
+	for _, lane := range []string{"desk", "desk-tools-1"} {
+		post(t, client.Draft{Drive: "d", Lane: lane, Kind: "state", Text: lane + " up"})
+	}
+	post(t, client.Draft{Drive: "other", Lane: "desk-9", Kind: "state", Text: "desk-9 up"})
+
+	lanes, err := client.Generations(context.Background(), "d", "desk")
+
+	if err != nil || !slices.Equal(lanes, []string{"desk", "desk-4", "desk-5"}) {
+		t.Fatalf("Generations(desk) = %v, %v; want desk, the stood-down desk-4 and its successor desk-5", lanes, err)
+	}
+}
+
 func TestWhoReadsTheSessionsBoundToADriveAndNoOthers(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	ctx := context.Background()

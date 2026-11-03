@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   newer one, an unregistered name or a lane on another drive, is stored as typed,
   and a stand-down or an `--owned-by` decide keeps the lane it is about. A
   reply's default recipient is stored the same way.
+### Added
+
+- `client.Generations` lists every lane ever registered under a stem on a
+  drive, live or stood down, from the lane registry's stem index, so a launch
+  can number past them and never reuse a name.
 
 ### Removed
 

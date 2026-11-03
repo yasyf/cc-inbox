@@ -90,6 +90,17 @@ func Resolve(ctx context.Context, drive, name string) (Reach, error) {
 	return st.Reach(ctx, drive, name)
 }
 
+// Generations lists every lane registered under stem on drive, live or stood
+// down, so a launch can number past them and never reuse a name.
+func Generations(ctx context.Context, drive, stem string) ([]string, error) {
+	st, err := cli.OpenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = st.Close() }()
+	return st.Generations(ctx, drive, stem)
+}
+
 // Post stores d through cci post itself, so its recipient checks, reply routing,
 // text limits and the unsent queue a down bus falls back to all apply; the error
 // is the one cci post would exit on.
