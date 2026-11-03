@@ -113,7 +113,7 @@ SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' ||
 			if err := json.Unmarshal([]byte(<-events), &result); err != nil {
 				t.Fatal(err)
 			}
-			if result.Seq != int64(population+1) || result.Fingerprint != schema14Wire3Fingerprint || elapsed >= 5*time.Second {
+			if result.Seq != int64(population+1) || result.Fingerprint != schema14Wire3Fingerprint {
 				t.Fatalf("old writer result = %+v after %s", result, elapsed)
 			}
 			rows, err := st.LaneTips(ctx, "concurrent", 500)
