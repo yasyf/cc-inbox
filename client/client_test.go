@@ -158,3 +158,38 @@ func TestOpenReadsOnlyTheHoldsNothingHasLifted(t *testing.T) {
 		t.Fatalf("Open = %+v, want the one held record", open)
 	}
 }
+
+func TestATypedKindIsCheckedWithoutStoringAndItsEntryNamesItsFields(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	schema, ok := client.TypedSchema("grade")
+	if !ok || strings.Join(schema.Names(), ",") != "pr,head,grader,verdict" || strings.Join(schema.Identity, ",") != "pr,head,grader" {
+		t.Fatalf("TypedSchema = %+v, %v", schema, ok)
+	}
+	if _, ok := client.TypedSchema("evidence"); ok {
+		t.Fatal("evidence is no typed kind")
+	}
+	if kinds := client.TypedKinds(); len(kinds) != 12 || kinds[0] != "head" {
+		t.Fatalf("TypedKinds = %v", kinds)
+	}
+	err := client.CheckBody("grade", json.RawMessage(`{"pr":[1,2],"head":"`+head+`","grader":"finder","verdict":"clear"}`), nil)
+	if err == nil || !strings.HasPrefix(err.Error(), "a grade names one PR") {
+		t.Fatalf("CheckBody = %v", err)
+	}
+	records, err := client.Tail(context.Background(), client.Query{Drive: "d"})
+	if err != nil || len(records) != 0 {
+		t.Fatalf("Tail = %+v, %v", records, err)
+	}
+}
+
+func TestAnItemPostedToALaneByNameIsStored(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+
+	stored := post(t, client.Draft{
+		Drive: "d", Lane: "supervisor", Kind: "lr.item", Text: "item 3", To: []string{"lane-7"}, ID: "lr.item/3",
+		Body: json.RawMessage(`{"item":3,"action":"verdict","pr":45470,"head":"` + head + `","mover":"lane","deadline":"2026-10-31T06:20:00Z"}`),
+	})
+
+	if len(stored.To) != 1 || stored.To[0] != "lane-7" {
+		t.Fatalf("stored = %+v", stored)
+	}
+}
