@@ -4,6 +4,7 @@
 package harness
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -39,8 +40,12 @@ func (s Session) Address() string {
 
 // Alive reports whether the window's process still runs: the pid exists and
 // was created when the registry says it was, to the second. The registry
-// writes procStart as ANSIC in UTC.
+// writes procStart as ANSIC in UTC, or on Linux as the process's start time
+// in kernel ticks.
 func (s Session) Alive(procs Procs) bool {
+	if procs.startTicks(s.PID) == s.ProcStart && s.ProcStart != "" {
+		return true
+	}
 	started, err := time.ParseInLocation(time.ANSIC, s.ProcStart, time.UTC)
 	if err != nil {
 		return false
@@ -103,8 +108,9 @@ func Sessions(dir string) (map[string]Session, error) {
 type Procs map[int]created
 
 type created struct {
-	at int64
-	ok bool
+	at    int64
+	ok    bool
+	ticks string
 }
 
 // Alive reports whether pid exists and was created at the given millisecond
@@ -115,12 +121,30 @@ func (p Procs) Alive(pid int, started int64) bool {
 }
 
 func (p Procs) createTime(pid int) (int64, bool) {
+	c := p.read(pid)
+	return c.at, c.ok
+}
+
+func (p Procs) startTicks(pid int) string {
+	return p.read(pid).ticks
+}
+
+func (p Procs) read(pid int) created {
 	c, read := p[pid]
 	if !read {
 		c.at, c.ok = createTime(pid)
+		c.ticks = startTicks(pid)
 		p[pid] = c
 	}
-	return c.at, c.ok
+	return c
+}
+
+func startTicks(pid int) string {
+	stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)) //nolint:gosec // G304: the path holds only a numeric pid.
+	if err != nil {
+		return ""
+	}
+	return strings.Fields(string(stat[bytes.LastIndexByte(stat, ')')+1:]))[19]
 }
 
 func createTime(pid int) (int64, bool) {

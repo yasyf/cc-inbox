@@ -3,6 +3,7 @@ package harness_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,6 +65,27 @@ func TestAlive(t *testing.T) {
 	procs := harness.Procs{}
 	if !procs.Alive(os.Getpid(), created) || procs.Alive(os.Getpid(), created+1) || procs.Alive(0, 0) {
 		t.Fatal("Procs.Alive() does not match on the exact create time")
+	}
+}
+
+func TestAliveReadsLinuxRegistryTicks(t *testing.T) {
+	stat, err := os.ReadFile("/proc/self/stat")
+	if err != nil {
+		t.Skip("no /proc on this platform")
+	}
+	text := string(stat)
+	ticks := strings.Fields(text[strings.LastIndex(text, ")")+1:])[19]
+	if !(harness.Session{PID: os.Getpid(), ProcStart: ticks}).Alive(harness.Procs{}) {
+		t.Errorf("a live process with procStart %q reads as gone", ticks)
+	}
+	if (harness.Session{PID: os.Getpid(), ProcStart: ticks + "0"}).Alive(harness.Procs{}) {
+		t.Error("a reused pid with other ticks reads as alive")
+	}
+	if (harness.Session{PID: 1 << 30, ProcStart: ticks}).Alive(harness.Procs{}) {
+		t.Error("a gone process reads as alive")
+	}
+	if (harness.Session{PID: 1 << 30, ProcStart: ""}).Alive(harness.Procs{}) {
+		t.Error("a gone process with no procStart reads as alive")
 	}
 }
 
