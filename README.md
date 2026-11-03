@@ -222,9 +222,10 @@ cci tail --drive stack-demo --stack api/plat-usw2-prod --since 0
 #1
 #2
 #3
-#1 <time> DEFECT walker Wave cycle blocks this stack. stack:api/plat-usw2-prod target:api [RE #2] [RESOLVED #3]
-#2 <time> BLOCKED walker re #1 Platy cannot deploy this stack. stack:api/plat-usw2-prod target:api
-#3 <time> OPENED wave-fix Fix ready for review. pr#30440 stack:api/plat-usw2-prod target:api resolves #1
+@<time>
+1 defect walker stack:api/plat-usw2-prod target:api Wave cycle blocks this stack. [RE #2] [RESOLVED #3]
+2 blocked walker ^1 stack:api/plat-usw2-prod target:api Platy cannot deploy this stack.
+3 opened wave-fix x1 #30440 stack:api/plat-usw2-prod target:api Fix ready for review.
 ```
 
 The `opened` record explicitly resolves the defect. The deployment block stays
@@ -499,8 +500,14 @@ lane, and topic filters apply only to broadcasts; records addressed only to othe
 Stack, target, and PR filters apply to addressed records too. Each takes one
 value per read; when combined, all must match.
 
+Text `tail`, `grep` and `show` print one compact line per record:
+`<seq> <kind> <lane>[><to>] [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [stack:… target:… build:… ccn:…] [<url>] [+] <text>`,
+under an `@<clock>` line each time the minute changes. `+` marks a body that
+`cci show` prints. `watch`, `state` and text `digest` keep the long line,
+`#<seq> <time> <KIND> <lane> -> <to> re #<n> [<topic>] <text> <refs>`.
+
 Tail and watch text lines append reply marks after clipping, so the marks stay
-visible. Grep matches the whole rendered record line: sequence number, time,
+visible. Grep matches each record's long line: sequence number, time,
 kind, lane, recipients, topic, text, and rendered refs. It searches all matching
 records newest first, including expired records, and prints whole lines with
 reply marks within the byte budget. Patterns are case-insensitive regular

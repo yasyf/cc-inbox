@@ -115,7 +115,7 @@ record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `in
 Withdraw a go with `cci post --kind withdraw --re <go seq>`, one `--re` per go;
 `cci post` refuses a go withdrawal written as a sentence in any other kind.
 Repeat `--resolves`, or give a comma list, to close several at once: one record
-resolves every seq, and its line reads `resolves #<a>,#<b>,#<c>`.
+resolves every seq, and its line reads `x<a> x<b> x<c>`.
 
 Name a record by what it carries instead of typing its seq: `--re`, `--resolves`
 and `--pr` take an alias, and `cci find <alias>` prints the record it names.
@@ -285,8 +285,12 @@ Read filters `--stack`, `--target`, and `--pr` each take one value and combine
 with AND. JSON tail, grep, and watch reads add `status` to opener kinds: `open`,
 `closed`, or `imported`. Imported openers with a stack or target ref use `open`
 or `closed`; those without either ref use `imported` and remain untracked.
-Text tail and watch reads append reply marks after
-clipping; grep prints whole record lines with reply marks. Text tail cuts a
+Text `tail`, `grep` and `show` print one compact line per record,
+`<seq> <kind> <lane>[><to>] [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`,
+under an `@<clock>` line each time the minute changes; `+` marks a body that
+`cci show` prints. `watch` and `state` keep the long line. Text tail and watch
+reads append reply marks after clipping; grep prints whole record lines with
+reply marks, and its pattern matches each record's long line. Text tail cuts a
 record a later one resolved to 160 characters and says so in a trailer;
 `--all` prints those whole, and `cci show <seq>` prints one whole. These include
 `[ANSWERED #12]`,
