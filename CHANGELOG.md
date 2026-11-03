@@ -64,6 +64,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci post` refuses a clock later than the post time only when a past-tense
+  word before it claims it already happened today. A clock with an earlier date
+  beside it (`Nov 2`, `yesterday`, an ISO date) passes, and a bare clock with no
+  past-tense claim reads as yesterday's and is stored with a stderr warning.
+
 - A refused `cci post` files its `refused-post` blocker to the posting lane, no
   longer to root or the lane's owner. They get one only when the lane's retry is
   refused too, naming both refusals, or when the lane's turn ends with no stored
