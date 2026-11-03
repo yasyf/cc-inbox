@@ -303,7 +303,7 @@ func inboxTool() mcp.Tool {
 			args := []string{"tail", "--json", "--drive=" + drive, "--reader=" + in.Lane, "--since=" + since, "--budget=" + strconv.Itoa(jsonPerLineByte*cmp.Or(in.Budget, inboxBudget))}
 			args = appendEach(args, "--kind", in.Kinds)
 			args = appendEach(args, "--mute-kinds", in.Mute)
-			text, last, isErr := render(ctx, in.Lane, broadcastWidth, args)
+			text, last, isErr := renderWire(ctx, in.Lane, broadcastWidth, args)
 			if isErr || last == 0 {
 				return text, isErr
 			}
@@ -357,12 +357,12 @@ func findTool() mcp.Tool {
 			}
 			width := cmp.Or(in.Width, findWidth)
 			if len(in.PRs) == 0 {
-				text, _, isErr := render(ctx, "", width, args)
+				text, _, isErr := renderWire(ctx, "", width, args)
 				return text, isErr
 			}
 			var b strings.Builder
 			for _, pr := range in.PRs {
-				text, _, isErr := render(ctx, "", width, append(slices.Clone(args), "--pr="+pr))
+				text, _, isErr := renderWire(ctx, "", width, append(slices.Clone(args), "--pr="+pr))
 				if isErr {
 					return text, true
 				}
@@ -502,7 +502,7 @@ func passthrough(ctx context.Context, args []string) (string, bool) {
 	return strings.TrimSpace(out + errOut), false
 }
 
-func render(ctx context.Context, reader string, width int, args []string) (string, int64, bool) {
+func renderWire(ctx context.Context, reader string, width int, args []string) (string, int64, bool) {
 	out, errOut, err := runCCI(ctx, "", args...)
 	if err != nil {
 		text, isErr := failed(out, errOut, err)
