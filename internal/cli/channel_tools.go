@@ -72,7 +72,6 @@ type toolRecord struct {
 	PR       words             `json:"pr"`
 	Topic    string            `json:"topic"`
 	Attrs    map[string]string `json:"attrs"`
-	Stamp    bool              `json:"stamp"`
 }
 
 func (r toolRecord) args(lane, drive string) ([]string, string) {
@@ -97,9 +96,6 @@ func (r toolRecord) args(lane, drive string) ([]string, string) {
 	}
 	for _, k := range slices.Sorted(maps.Keys(r.Attrs)) {
 		args = append(args, "--attr="+k+"="+r.Attrs[k])
-	}
-	if r.Stamp {
-		args = append(args, "--stamp")
 	}
 	if r.Text != "" {
 		args = append(args, "--text="+r.Text)
@@ -170,7 +166,6 @@ func recordProps() map[string]any {
 		"pr":       list("pull requests: N, owner/repo#N or URL"),
 		"topic":    prop("string", "pairing key"),
 		"attrs":    map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
-		"stamp":    prop("boolean", "cci writes the leading H:MM AM/PM label from the post's own clock, replacing a typed one"),
 	}
 }
 

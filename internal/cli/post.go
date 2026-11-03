@@ -30,23 +30,12 @@ import (
 var (
 	typedStamp      = regexp.MustCompile(`^\s*R\d+[a-z]? \(([^()]+)\)`)
 	leadingLabel    = regexp.MustCompile(`^\s*((?:\S+\s+){0,4}?)(` + clockLabel + `)(:?)`)
-	anyLabel        = regexp.MustCompile(clockLabel)
-	datedAfter      = regexp.MustCompile(`^,?\s*(?:on\s+)?(?:(?i:yesterday)\b|(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,?\s+)?(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}\b)`)
-	datedBefore     = regexp.MustCompile(`(?:\b(?i:yesterday)|\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2}(?:,?\s+\d{4})?|\b\d{4}-\d{2}-\d{2})[,\s]*(?:at\s+)?$`)
 	proseWithdrawal = regexp.MustCompile(`(?i)\bwithdraw(?:s|n|ing)?:?\s+(?:the\s+|root\s+|my\s+)?go(?:s|\s+records?)?\b[^.;]*`)
 	seqRef          = regexp.MustCompile(`#(\d+)\b`)
 	notGoRef        = regexp.MustCompile(`(?i)\([^)]*\)|\b(?:on|for|of)\s+#\d+\b`)
 )
 
-const (
-	clockLabel = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
-	clockSkew  = 3 * time.Minute
-)
-
-var (
-	tenseWords = map[string]bool{"by": true, "until": true, "till": true, "before": true, "next": true, "eta": true, "due": true, "expected": true, "scheduled": true, "planned": true, "since": true}
-	pastWords  = map[string]bool{"was": true, "were": true, "did": true, "had": true, "read": true, "ran": true, "began": true, "came": true, "went": true, "got": true, "sent": true, "left": true, "saw": true, "said": true, "told": true, "wrote": true, "made": true, "took": true, "broke": true, "fell": true}
-)
+const clockLabel = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
 
 func newPostCmd() *cobra.Command {
 	var (
@@ -59,7 +48,7 @@ func newPostCmd() *cobra.Command {
 		successor, ownedBy      string
 		heads                   []store.Head
 		ttl                     time.Duration
-		asJSON, label, force    bool
+		asJSON, force           bool
 		pairwise                bool
 		re, resolves            []string
 		reSeqs, resolvesSeqs    []int64
@@ -129,7 +118,7 @@ func newPostCmd() *cobra.Command {
 						return errors.New("post -: stdin is empty")
 					}
 				}
-				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at, label); err != nil {
+				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at); err != nil {
 					return err
 				}
 			case r.Refs.Path != "":
@@ -296,7 +285,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, more than a minute off that time refuses the post unless --stamp is set; any other such time more than 3 minutes and less than 3 hours after the post refuses it unless a date follows the time or by, until, till, before, next, ETA, due, expected or since sits in the four words before it, and one 3 hours or more ahead is stored as typed with a warning on stderr; over 400 characters it spills to a file under $CCI_HOME/blobs, followed by the --path file when one is named, and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, is replaced with it too, with a hint on stderr; any other time is stored as typed; over 400 characters it spills to a file under $CCI_HOME/blobs, followed by the --path file when one is named, and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&ownedBy, "owned-by", "", "with --kind decide, the lane that owns the one --to lane, such as the lane that maintains a script posting as that lane: stored as fields.attrs.owned-by: later asks, decides and defects addressed to the owned lane reach its owner, and the owner's successors, too; the newest such decide wins")
 	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
@@ -331,8 +320,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&bodyFile, "body-file", "", "JSON body of at most 64 KiB, from a file or - for stdin")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
-	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space, or the whole text when no other is given; cci checks no time, {at} or withdrawal in them, and keeps checking the text's own words")
-	f.BoolVar(&label, "stamp", false, "cci writes the leading H:MM AM/PM label from the post's own clock: it replaces a typed leading label, or opens the text when it has none")
+	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space, or the whole text when no other is given; cci replaces no {at} and checks no withdrawal in them, and keeps checking the text's own words")
 	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
 	_ = cmd.MarkFlagRequired("kind")
 	return cmd
@@ -530,55 +518,17 @@ func printPosted(w io.Writer, got store.Record, dup, asJSON bool) error {
 	return err
 }
 
-func stamped(w io.Writer, text, lane string, at time.Time, label bool) (string, error) {
+func stamped(w io.Writer, text, lane string, at time.Time) (string, error) {
 	stamp := render.Stamp(at, at)
-	now := at.Truncate(time.Minute)
-	off := func(typed string) time.Duration {
-		c := importer.ParseClock(typed)
-		if c == nil {
-			return 0
-		}
-		return c.Latest(now.Add(12 * time.Hour)).Sub(now)
-	}
 	if m := typedStamp.FindStringSubmatchIndex(text); m != nil && importer.ParseClock(text[m[2]:m[3]]) != nil {
 		text = text[:m[2]] + stamp + text[m[3]:]
 	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil && labels(text[m[2]:m[3]], text[m[6]:m[7]], lane) {
-		typed := text[m[4]:m[5]]
-		if d := off(typed); !label && (d > time.Minute || d < -time.Minute) {
-			return "", fmt.Errorf("time label %s is not the post time %s: pass --stamp and cci writes the label, or drop it", typed, stamp)
-		}
-		text = text[:m[4]] + stamp + text[m[5]:]
-	} else if label {
-		text = stamp + " " + text
-	}
-	for _, m := range anyLabel.FindAllStringIndex(text, -1) {
-		typed := text[m[0]:m[1]]
-		d := off(typed)
-		if d <= clockSkew || datedAfter.MatchString(text[m[1]:]) || datedBefore.MatchString(text[:m[0]]) || lastWords(text[:m[0]], func(w string) bool { return tenseWords[w] }) {
-			continue
-		}
-		if lastWords(text[:m[0]], past) && now.Add(d).Day() == now.Day() {
-			return "", fmt.Errorf("time %s in the text is %d minutes after the post time %s, so it names something that has not happened yet: write the time it happened or the date beside it, or put by, until or next before a time still ahead", typed, int(d.Minutes()), stamp)
-		}
-		if _, err := fmt.Fprintf(w, "cci: time %s in the text is later than the post time %s; stored as typed\n", typed, stamp); err != nil {
+		if _, err := fmt.Fprintf(w, "cci: label %s became the post time %s; cci stamps every record, so leave the time out\n", text[m[4]:m[5]], stamp); err != nil {
 			return "", err
 		}
+		text = text[:m[4]] + stamp + text[m[5]:]
 	}
 	return strings.ReplaceAll(text, "{at}", stamp), nil
-}
-
-func lastWords(before string, match func(string) bool) bool {
-	words := strings.Fields(strings.ToLower(before))
-	for _, word := range words[max(len(words)-4, 0):] {
-		if match(strings.Trim(word, ".,;:()'\"")) {
-			return true
-		}
-	}
-	return false
-}
-
-func past(word string) bool {
-	return pastWords[word] || len(word) > 3 && strings.HasSuffix(word, "ed")
 }
 
 func labels(prefix, colon, lane string) bool {
