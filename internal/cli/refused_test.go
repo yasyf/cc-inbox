@@ -112,7 +112,7 @@ func TestALanesEndIsATypedRecordNeverASentence(t *testing.T) {
 		"WITHDRAWN journal-refuse-fix by root",
 	} {
 		for _, kind := range []string{"state", "report", "note"} {
-			if _, err := run(t, "post", "--drive", "d", "--lane", "journal-refuse-fix", "--kind", kind, "--stamp", "--text", text); err == nil || !strings.Contains(err.Error(), "--kind stopped") {
+			if _, err := run(t, "post", "--drive", "d", "--lane", "journal-refuse-fix", "--kind", kind, "--text", text); err == nil || !strings.Contains(err.Error(), "--kind stopped") {
 				t.Errorf("%s %q = %v; want it refused naming the typed record", kind, text, err)
 			}
 		}

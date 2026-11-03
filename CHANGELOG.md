@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- No clock in a post's text refuses it any more. A leading `H:MM AM/PM` label
+  off the post's own clock is replaced with that time and a one-line hint on
+  stderr, and any other clock is stored as typed without a future check.
+  `cci post --stamp`, the MCP `post` tool's `stamp` field and `client.Draft.Stamp`
+  are gone with the refusal they answered.
+
 ### Added
 
 - `cci post --quoted <words>` with no other text stores the words as the

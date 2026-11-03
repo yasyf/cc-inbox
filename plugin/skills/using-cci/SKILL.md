@@ -93,18 +93,11 @@ Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose
 needs the time, write `{at}`, which `cci post` replaces with the record's time
 in the form readers print, such as `10:52 AM`. A clock typed in a leading
-`R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way. A
-leading `H:MM AM/PM` label more than a minute off the post's own clock refuses
-the post; `cci post --stamp` writes that label from the clock, replacing a
-typed one or opening the text with it. A clock anywhere else more than 3
-minutes after the post refuses it only when a past-tense word, such as
-`happened`, `landed` or `was`, sits in the four words before it and the clock
-falls later today, since that claims something that has not happened yet. A
-clock with a date beside it (`Nov 2`, `yesterday`, `2026-11-02`), or with by,
-until, till, before, next, ETA, due, expected, scheduled, planned or since in
-the four words before it, as in `next state by 9:30 AM`, always passes. Any
-other clock later than the post reads as yesterday's and is stored as typed
-with a warning on stderr. A post that takes its
+`R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way, and
+so is a leading `H:MM AM/PM` label, with a hint on stderr. Any other clock is
+stored as typed; no clock refuses a post. Name an earlier record by its seq,
+never its time, and put a deadline in an attribute, such as
+`--attr due=9:30 AM`. A post that takes its
 text from a `--path` file stores the file's first line exactly as written, so
 the record's text equals that line. Leave clocks and `{at}` out of that line;
 the record's own time already dates it.

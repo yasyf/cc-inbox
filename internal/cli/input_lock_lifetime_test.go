@@ -48,8 +48,8 @@ func TestCommandInputDoesNotHoldStoreLocks(t *testing.T) {
 			kind: kinds.Owner,
 		},
 		{
-			name: "stamped post",
-			args: []string{"post", "--drive", "input-drive", "--lane", "input-lane", "--kind", "note", "--stamp", "--text", "-"},
+			name: "post from stdin",
+			args: []string{"post", "--drive", "input-drive", "--lane", "input-lane", "--kind", "note", "--text", "-"},
 			body: "input record\n",
 			lane: "input-lane",
 			kind: kinds.Note,

@@ -406,6 +406,9 @@ type posted struct {
 	Refs struct {
 		Path string `json:"path"`
 	} `json:"refs"`
+	Fields struct {
+		Attrs map[string]string `json:"attrs"`
+	} `json:"fields"`
 }
 
 func (p posted) stamp() string {
@@ -459,59 +462,30 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 	}
 }
 
-func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
-	t.Setenv("CCI_HOME", t.TempDir())
-	ahead, before := time.Now().Add(7*time.Minute).Format("3:04 PM"), time.Now().Add(-30*time.Minute).Format("3:04 PM")
-	yesterday, skewed := time.Now().Add(5*time.Hour).Format("3:04 PM"), time.Now().Add(2*time.Minute).Format("3:04 PM")
+func TestPostNeverRefusesAClockInItsText(t *testing.T) {
+	clock := func(d time.Duration) string { return time.Now().Add(d).Format("3:04 PM") }
+	label, before := clock(10*time.Minute), clock(-30*time.Minute)
+	hint := func(typed string) string {
+		return "cci: label " + typed + " became the post time {at}; cci stamps every record, so leave the time out"
+	}
+	round := " fidelity-desk-19 ending round: holds none; graded nothing since #223185. Share (PR mod 6 = 5) empty 7:31 to " + label + ": no fidelity: reader, FIDELITY-FAILED, CONTRACT-MISSING or FIDELITY-PENDING head waits, claimed or unclaimed."
 	for _, tt := range []struct {
-		name, text   string
-		stamp        bool
-		want, stderr string
-		refused      string
-		future       string
-		quoted       string
+		name, lane, kind, text string
+		attrs                  []string
+		want, stderr           string
 	}{
-		{name: "leading label ahead of the clock", text: ahead + ": live on dev", refused: ahead},
-		{name: "leading label before the clock", text: before + ": live on dev", refused: before},
-		{name: "label after a short heading", text: "board " + ahead + ": pulled the row", refused: ahead},
-		{name: "label after the lane's name", text: "root " + ahead + " count: 0 ungraded", refused: ahead},
-		{name: "stamped label ahead of the clock", text: ahead + ": live on dev", stamp: true, want: "{at}: live on dev"},
-		{name: "stamped label after the lane's name", text: "root " + before + " count: 0 ungraded", stamp: true, want: "root {at} count: 0 ungraded"},
-		{name: "stamped text without a label", text: "live on dev", stamp: true, want: "{at} live on dev"},
-		{name: "time in an opening clause read as yesterday's", text: "for his " + ahead + " ask", want: "for his " + ahead + " ask", stderr: "cci: time " + ahead + " in the text is later than the post time {at}; stored as typed"},
-		{name: "later time inside the text", text: "live on dev, read " + ahead, future: ahead},
-		{name: "plan for a time ahead", text: "live on dev; next state by " + ahead, want: "live on dev; next state by " + ahead},
-		{name: "time a date follows", text: "per the owner's " + ahead + " Oct 30 ask", want: "per the owner's " + ahead + " Oct 30 ask"},
-		{name: "time hours ahead read as yesterday's", text: "per the owner's " + yesterday + " ask", want: "per the owner's " + yesterday + " ask", stderr: "cci: time " + yesterday + " in the text is later than the post time {at}; stored as typed"},
-		{name: "time inside the clock skew", text: "live on dev, read " + skewed, want: "live on dev, read " + skewed},
-		{name: "time a sentence names since", text: "lane-x: reconciling. Landed since " + before + ": 45899", want: "lane-x: reconciling. Landed since " + before + ": 45899"},
-		{name: "relayed words naming a time ahead", text: "PAGE from ai-oncall:", quoted: "it pages the on-call at " + ahead, want: "PAGE from ai-oncall: it pages the on-call at " + ahead},
-		{name: "own time ahead beside relayed words", text: "read " + ahead, quoted: "it pages the on-call", future: ahead},
-		{name: "stamped text whose sentence names a time since", text: "lane-x: reconciling. Landed since " + before + ": 45899", stamp: true, want: "{at} lane-x: reconciling. Landed since " + before + ": 45899"},
+		{name: "leading label off the clock", lane: "fidelity-desk-19", kind: "state", text: label + round, want: "{at}" + round, stderr: hint(label)},
+		{name: "label after the lane's name", lane: "root", kind: "note", text: "root " + before + " count: 0 ungraded", want: "root {at} count: 0 ungraded", stderr: hint(before)},
+		{name: "past claim 299 minutes ahead", lane: "go-sweep-9", kind: "note", text: "the sweep landed at " + clock(299*time.Minute) + " with no new reds", want: "the sweep landed at " + clock(299*time.Minute) + " with no new reds"},
+		{name: "past claim 464 minutes ahead", lane: "supervisor", kind: "note", text: "the relaunch failed at " + clock(464*time.Minute) + ", so go-sweep-9 is still down", want: "the relaunch failed at " + clock(464*time.Minute) + ", so go-sweep-9 is still down"},
+		{name: "future deadline as an attr", lane: "root", kind: "note", text: "next state", attrs: []string{"--attr", "due=" + clock(90*time.Minute)}, want: "next state"},
+		{name: "no clock", lane: "root", kind: "note", text: "live on dev", want: "live on dev"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			args := []string{"post", "--json", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", tt.text}
-			if tt.stamp {
-				args = append(args, "--stamp")
-			}
-			if tt.quoted != "" {
-				args = append(args, "--quoted", tt.quoted)
-			}
-			out, err := run(t, args...)
-			if tt.future != "" {
-				if err == nil || !strings.Contains(err.Error(), "time "+tt.future+" in the text is ") || !strings.Contains(err.Error(), "has not happened yet") {
-					t.Fatalf("post %q = %q, %v; want a refusal naming %s as not happened yet", tt.text, out, err, tt.future)
-				}
-				return
-			}
-			if tt.refused != "" {
-				if err == nil || !strings.Contains(err.Error(), "time label "+tt.refused+" is not the post time") || strings.Contains(err.Error(), "\n") {
-					t.Fatalf("post %q = %q, %v; want a one-line refusal naming %s", tt.text, out, err, tt.refused)
-				}
-				return
-			}
+			t.Setenv("CCI_HOME", t.TempDir())
+			out, err := run(t, append([]string{"post", "--json", "--drive", "release-v3", "--lane", tt.lane, "--kind", tt.kind, "--text", tt.text}, tt.attrs...)...)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("post %q = %v", tt.text, err)
 			}
 			lines := strings.Split(strings.TrimSpace(out), "\n")
 			var got posted
@@ -521,6 +495,9 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 			want, note := strings.ReplaceAll(tt.want, "{at}", got.stamp()), strings.ReplaceAll(tt.stderr, "{at}", got.stamp())
 			if stderr := strings.Join(lines[:len(lines)-1], "\n"); got.Text != want || stderr != note {
 				t.Errorf("post %q stored %q with stderr %q, want %q with stderr %q", tt.text, got.Text, stderr, want, note)
+			}
+			if len(tt.attrs) > 0 && got.Fields.Attrs["due"] != strings.TrimPrefix(tt.attrs[1], "due=") {
+				t.Errorf("post %v stored attrs %v, want due as typed", tt.attrs, got.Fields.Attrs)
 			}
 		})
 	}
@@ -553,7 +530,7 @@ func TestPostRefusesAGoWithdrawalWrittenAsProse(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, err := post("--kind", "correction", "--stamp", "--text", "9:23 PM WITHDRAW gos #1 #2 (#46823 52dbea3, #46906 7ac70d2) this minute: the runner misread their bracket")
+	_, err := post("--kind", "correction", "--text", "9:23 PM WITHDRAW gos #1 #2 (#46823 52dbea3, #46906 7ac70d2) this minute: the runner misread their bracket")
 	if err == nil || !strings.Contains(err.Error(), "cci post --kind withdraw --re 1 --re 2 --text") {
 		t.Fatalf("prose withdrawal = %v, want a refusal naming cci post --kind withdraw --re 1 --re 2", err)
 	}
