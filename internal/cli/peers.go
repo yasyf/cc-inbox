@@ -139,7 +139,7 @@ func claimLane(ctx context.Context, st *store.Store, self store.PeerKey, window 
 	if err != nil {
 		return err
 	}
-	if err := refuseHeldLane(ctx, st, self, drive, lane, st.Now()); err != nil {
+	if err := refuseHeldLane(ctx, st, self, window, drive, lane, st.Now()); err != nil {
 		return err
 	}
 	return st.ClaimLane(ctx, self, drive, lane, time.UnixMilli(window.Started))

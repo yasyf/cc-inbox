@@ -264,7 +264,7 @@ func newPostCmd() *cobra.Command {
 				if err := refuseUnregistered(cmd.Context(), st, r.Drive, lane); err != nil {
 					return err
 				}
-				if err := refuseSecondBinder(cmd.Context(), st, self, r.Drive, lane, at); err != nil {
+				if err := refuseSecondBinder(cmd.Context(), st, self, window, r.Drive, lane, at); err != nil {
 					return err
 				}
 				bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
