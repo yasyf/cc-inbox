@@ -302,7 +302,7 @@ func TestGrepSinceTakesAClockTime(t *testing.T) {
 func TestPostTakesItsTextAsOneArgument(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	post := []string{"post", "--drive", "release-v3", "--lane", "root", "--kind", "go", "--to", "cci-fix-4"}
-	if out, err := run(t, append(post, "land the fix")...); err != nil || out != "#1\n" {
+	if out, err := run(t, append(post, "land the fix")...); err != nil || out != "cci: --to cci-fix-4: no lane has registered as cci-fix-4 or holds cci-fix; cci-fix-4 reads this once it registers\n#1\n" {
 		t.Fatalf("post with a text argument = %q, %v", out, err)
 	}
 	if out, err := run(t, "tail", "--drive", "release-v3", "--since", "0"); err != nil || !strings.Contains(out, "GO root -> cci-fix-4 land the fix") {
@@ -1051,7 +1051,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 		}
 	}
 	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "release-owner-4,desk,root,nobody", "--text", "GO promote")
-	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\n#4\n" {
+	if err != nil || out != "cci: --to release-owner-4: release-owner-4 reads drive drive-b, not drive-a; addressed release-owner-4@drive-b\ncci: --to nobody: no lane holds nobody; the first lane to register as nobody or nobody-<n> reads this\n#4\n" {
 		t.Fatalf("post to a lane reading another drive = %q, %v", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "walker", "--text", "x"); err == nil || !strings.Contains(err.Error(), "read drive-b, drive-c; address one as walker@<drive>") {
@@ -1634,7 +1634,8 @@ func TestPostReachesALaneThatHasNotStartedYet(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, to := range []string{"gate-fault-6", "n-enum-45414-1", "fresh-desk"} {
-		if out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "GO start "+to); err != nil || !strings.HasPrefix(out, "#") {
+		out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", to, "--text", "GO start "+to)
+		if lines := strings.Split(strings.TrimSpace(out), "\n"); err != nil || !strings.HasPrefix(lines[len(lines)-1], "#") || !strings.HasPrefix(out, "cci: --to "+to+": no lane has registered as "+to) && !strings.HasPrefix(out, "cci: --to "+to+": no lane holds "+to) {
 			t.Fatalf("post --to %s, a lane that has not started = %q, %v", to, out, err)
 		}
 	}
@@ -1873,8 +1874,9 @@ func TestPostReplyAddressesTheLaneThatWroteTheRecordItAnswers(t *testing.T) {
 	post := func(args ...string) store.Record {
 		t.Helper()
 		out, err := run(t, append([]string{"post", "--json"}, args...)...)
+		lines := strings.Split(strings.TrimSpace(out), "\n")
 		var got store.Record
-		if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &got) != nil {
+		if err != nil || json.Unmarshal([]byte(lines[len(lines)-1]), &got) != nil {
 			t.Fatalf("post %v = %q, %v", args, out, err)
 		}
 		return got

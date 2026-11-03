@@ -293,9 +293,14 @@ func owed(ctx context.Context, st *store.Store, drive, reader string) ([]store.R
 	if err != nil {
 		return nil, err
 	}
+	aliases, err := st.Aliases(ctx, drive, reader)
+	if err != nil {
+		return nil, err
+	}
+	names := append([]string{reader}, aliases...)
 	return slices.DeleteFunc(open, func(r store.Record) bool {
 		first, _, _ := strings.Cut(r.To[0], "@")
-		return !store.SameLane(first, reader) || store.SameLane(r.Lane, reader) || r.Kind == kinds.Decide && !strings.HasSuffix(strings.TrimSpace(r.Text), "?")
+		return !slices.ContainsFunc(names, func(name string) bool { return store.SameLane(first, name) }) || store.SameLane(r.Lane, reader) || r.Kind == kinds.Decide && !strings.HasSuffix(strings.TrimSpace(r.Text), "?")
 	}), nil
 }
 

@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the kinds a root acts on, so a `hold` or `report` addressed to root never
   reached a program that followed root through it. `client.Kinds` lists the
   kinds a lane can post.
+- A lane name ending `-<n>` answers under its stem, the name without that
+  suffix. `--to <stem>` reaches the stem's newest live lane: the one whose
+  first post, thread binding or spawn record came last, or the successor a
+  stand-down named. A stood-down lane's mail reaches the successor it named,
+  else the stem's newest live lane; a running numbered lane keeps the mail
+  addressed to it by name. Tails, watches, hook mail, open asks and a first
+  binding's cursor follow the stem, and stored recipients stay as posted.
+  `cci post` prints one line when no live lane reads a `--to` name or several
+  running lanes share its stem, and `client.Draft.Notices` receives it.
+  The lane registry behind this is a projection: a new store has it, an
+  existing store gets it from `cci maintain-indexes`, and until then posts
+  and reads behave as before. `client.Stem` applies the same rule in Go.
+- A post's stand-down successors come from an indexed lane registry instead of
+  a read of every stand-down record on the drive.
 - `lr.head` takes optional `title`, `change`, `plan`, `risk`, `blocks`, `group`
   and `summary` text, the words the owner's merge board shows for a PR.
 - `github.com/yasyf/cc-inbox/client`, a public Go package other modules import

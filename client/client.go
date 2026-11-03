@@ -60,6 +60,15 @@ type Draft struct {
 	// Force addresses each To lane as written, for a sender that takes the name
 	// from a registry rather than from a person's typing.
 	Force bool
+	// Notices receives the lines cci post writes to stderr, such as a --to stem
+	// no lane holds or a stood-down lane whose mail reaches another; nil drops them.
+	Notices io.Writer
+}
+
+// Stem is the name a lane answers under, the lane without a trailing -<n>:
+// cci delivers a post to the stem to the newest live lane registered under it.
+func Stem(lane string) string {
+	return store.Stem(lane)
 }
 
 // Post stores d through cci post itself, so its recipient checks, reply routing,
@@ -72,6 +81,9 @@ func Post(ctx context.Context, d Draft) (Record, error) {
 	root.SetIn(bytes.NewReader(d.Body))
 	root.SetOut(&out)
 	root.SetErr(io.Discard)
+	if d.Notices != nil {
+		root.SetErr(d.Notices)
+	}
 	if err := root.ExecuteContext(ctx); err != nil {
 		return Record{}, err
 	}
