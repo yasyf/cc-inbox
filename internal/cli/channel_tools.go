@@ -525,6 +525,9 @@ func renderWire(ctx context.Context, reader string, width int, args []string) (s
 		if reader != "" && slices.Contains(r.To, reader) {
 			clip = 0
 		}
+		if reader != "" {
+			r.To = nil
+		}
 		b.WriteString(w.Line(r, clip) + "\n")
 		last = max(last, r.Seq)
 	}

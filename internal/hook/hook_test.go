@@ -190,7 +190,7 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := hookContext(t, &out, "PostToolUse")
-	for _, want := range []string{"stopped root>lane-x abandon this item", "owner root>lane-x,lane-y owner ruling"} {
+	for _, want := range []string{"stopped root abandon this item", "owner root owner ruling"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("additionalContext lacks %q: %q", want, got)
 		}
@@ -208,7 +208,7 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUseFailure"}, noWindow, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := hookContext(t, &out, "PostToolUseFailure"); !strings.Contains(got, "defect root>lane-x 🛑") {
+	if got := hookContext(t, &out, "PostToolUseFailure"); !strings.Contains(got, "defect root 🛑") {
 		t.Fatalf("an oversized record stalled delivery: %q", got)
 	}
 	out.Reset()
@@ -216,7 +216,7 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1", Source: "compact"}, store.Window{}, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := hookContext(t, &out, "SessionStart"); !strings.Contains(got, "hold root>lane-x hold the apply") || strings.Contains(got, "open asks") {
+	if got := hookContext(t, &out, "SessionStart"); !strings.Contains(got, "hold root hold the apply") || strings.Contains(got, "open asks") {
 		t.Fatalf("SessionStart additionalContext = %q", got)
 	}
 }
@@ -267,7 +267,7 @@ func TestLaneCursorSurvivesOtherReadsAndLateImports(t *testing.T) {
 	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "stopped root>lane-x abandon this item") {
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "stopped root abandon this item") {
 		t.Fatalf("additionalContext = %q", got)
 	}
 	if err := st.Bind(ctx, store.PeerKey{Session: "s1"}, "d", true); err != nil {
@@ -420,14 +420,14 @@ func TestPostToolUseAnnouncesAgentsAndDeliversTheirLanes(t *testing.T) {
 	if err := hook.PostToolUse(ctx, st, api, window, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "go root>api ship api") || strings.Contains(got, "ship web") {
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "go root ship api") || strings.Contains(got, "ship web") {
 		t.Fatalf("api agent's delivery = %q", got)
 	}
 	out.Reset()
 	if err := hook.PostToolUse(ctx, st, web, window, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "go root>web ship web") || strings.Contains(got, "ship api") {
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "go root ship web") || strings.Contains(got, "ship api") {
 		t.Fatalf("web agent's delivery = %q", got)
 	}
 	if err := hook.SubagentStop(ctx, st, api, io.Discard); err != nil {
@@ -491,7 +491,7 @@ func TestASuccessorTeammateReadsFromItsSpawnAndNothingClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := hookContext(t, &out, "PostToolUse")
-	for _, want := range []string{"before its first tool call", "defect root>lane-x for the successor"} {
+	for _, want := range []string{"before its first tool call", "defect root for the successor"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("successor's delivery = %q, want %q", got, want)
 		}
@@ -566,7 +566,7 @@ func TestPostToolUseLeadsWithTheOpenAsksBehindABacklog(t *testing.T) {
 		testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: fmt.Sprintf("ask %d", i)})
 	}
 	testutil.Post(t, st, store.Record{Kind: kinds.Decide, To: []string{"root@d"}, Text: "merge it now?"})
-	for i := range 40 {
+	for i := range 200 {
 		testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.State, To: []string{"root"}, Text: fmt.Sprintf("backlog %d", i)})
 	}
 	clock.Advance(3 * time.Minute)
@@ -582,7 +582,7 @@ func TestPostToolUseLeadsWithTheOpenAsksBehindABacklog(t *testing.T) {
 		t.Fatalf("the newest open ask does not lead: %q", got)
 	}
 	open, replay, ok := strings.Cut(got, "cci records addressed to root; act on each:\n")
-	if !ok || strings.Contains(replay, "backlog 39") || strings.Contains(replay, "which branch?") {
+	if !ok || strings.Contains(replay, "backlog 199") || strings.Contains(replay, "which branch?") {
 		t.Fatalf("cursor replay changed: %q", got)
 	}
 	if !strings.Contains(open, "merge it now?") || !strings.Contains(open, "ask 2") || strings.Contains(open, "ask 1 ") || !strings.Contains(open, "... 2 older open asks") {

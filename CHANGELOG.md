@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A running daemon renews a delegated instance's delegation within two hours of
   its expiry with the service key the join kept, so a long-lived instance does
   not lose the relay at its expiry.
+- `cci subscribe --batch-kinds` holds those addressed kinds off a window until
+  one channel tag carries them together, at most every five minutes and at once
+  ahead of any other record.
+- `cci tail --to <lane> --mail` reads the bound thread's mail through the hook's
+  cursor, so a wait and the `PostToolUse` hook deliver a record once.
 - `lr.head` takes optional `title`, `change`, `plan`, `risk`, `blocks`, `group`
   and `summary` text, the words the owner's merge board shows for a PR.
 - `github.com/yasyf/cc-inbox/client`, a public Go package other modules import

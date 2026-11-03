@@ -96,7 +96,7 @@ func TestTheInboxToolReturnsOnlyNewRecordsAndCutsBroadcasts(t *testing.T) {
 	mustTool(t, "post", map[string]any{"drive": "d", "lane": "root", "kind": "note", "text": long, "to": []string{"api"}})
 	mustTool(t, "post", map[string]any{"drive": "d", "lane": "root", "kind": "report", "text": long, "to": []string{"all"}})
 	first := mustTool(t, "inbox", map[string]any{"drive": "d", "lane": "api", "kinds": []string{"report"}})
-	if strings.Count(first, "END") != 1 || !strings.Contains(first, "1 note root>api") || !strings.Contains(first, "2 report root>all") {
+	if strings.Count(first, "END") != 1 || !strings.Contains(first, "1 note root ") || !strings.Contains(first, "2 report root ") {
 		t.Errorf("first inbox = %q, want the go whole and the broadcast cut", first)
 	}
 	if again := mustTool(t, "inbox", map[string]any{"drive": "d", "lane": "api"}); again != "none" {

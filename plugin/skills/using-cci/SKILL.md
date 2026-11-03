@@ -517,6 +517,12 @@ copy to root stay in `cci tail` and `cci digest`, and the root's `PostToolUse`
 hook holds them back too. Other readers get every addressed kind unless they
 name `--to-kind`. `cci watch --reader root` applies the same default.
 
+`--batch-kinds report,note` holds those addressed kinds off a window until one
+tag carries them together, at most every five minutes and at once ahead of any
+other record, so they never wake it alone. `cci tail --to <lane> --mail`, from
+the thread bound as that lane, reads its mail through the hook's cursor, so a
+wait and the hook deliver a record once. A delivered line names no recipients;
+`cci show <seq>` does.
 `--mute-kinds state,review,note` keeps those kinds off the channel and out of
 the root's hook delivery, even when addressed to the root; `cci tail` still
 reads them. An `urgent` record repeating its lane's `urgent` topic within 30

@@ -67,6 +67,7 @@ type view struct {
 	Untagged bool
 	Whole    bool
 	Now      time.Time
+	Unnamed  bool
 }
 
 func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
@@ -114,17 +115,21 @@ func textLines(records []store.Record, replies map[int64][]store.Record, v view,
 		return render.Brief(r, now, width)
 	}
 	for i, r := range records {
+		shown := r
+		if v.Unnamed || v.Compact && v.Reader != "" {
+			shown.To = nil
+		}
 		if v.Compact {
 			width := compactWidth(r, v)
 			if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) {
 				width, folded[i] = v.Fold, true
 			}
-			out[i] = wire.Line(r, width) + marks(r.Seq, replies[r.Seq])
+			out[i] = wire.Line(shown, width) + marks(r.Seq, replies[r.Seq])
 			continue
 		}
-		text := line(r, v.Width)
+		text := line(shown, v.Width)
 		if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) && utf8.RuneCountInString(text) > v.Fold {
-			text, folded[i] = line(r, v.Fold), true
+			text, folded[i] = line(shown, v.Fold), true
 		}
 		out[i] = text + marks(r.Seq, replies[r.Seq])
 	}

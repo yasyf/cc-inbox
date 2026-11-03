@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
+	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -2076,5 +2077,57 @@ func TestReadsTakeTheFlagsLanesReachFor(t *testing.T) {
 	}
 	if out, err := run(t, "tail", "--drive", "d", "--since", "2000-01-01"); err != nil || !strings.Contains(out, "needle") {
 		t.Errorf("tail --since 2000-01-01 = %q, %v; want the record posted after that date", out, err)
+	}
+}
+
+func TestTailMailAndTheHookDeliverARecordOnce(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	k := store.PeerKey{Session: "session-1"}
+	if err := st.BindLane(ctx, k, "d", "api", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetCursor(ctx, store.LaneCursor(k), "d", 0); err != nil {
+		t.Fatal(err)
+	}
+	hookReads := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "session-1", Event: "PostToolUse"}, func() (store.Window, error) { return store.Window{PID: 1}, nil }, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	post := func(text string) {
+		t.Helper()
+		if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "api,web", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait := []string{"tail", "--drive", "d", "--to", "api", "--cursor", "api-wake", "--seed", "api", "--mail"}
+	post("the wait reads this")
+	out, err := run(t, wait...)
+	if err != nil || !strings.Contains(out, "the wait reads this") || strings.Contains(out, "web") {
+		t.Fatalf("tail --mail = %q, %v", out, err)
+	}
+	if got := hookReads(); got != "" {
+		t.Fatalf("hook redelivered what the wait printed: %q", got)
+	}
+	post("the hook reads this")
+	if got := hookReads(); !strings.Contains(got, "the hook reads this") || strings.Contains(got, "web") {
+		t.Fatalf("hook = %q", got)
+	}
+	if out, err = run(t, wait...); err != nil || out != "" {
+		t.Fatalf("tail --mail redelivered what the hook injected: %q, %v", out, err)
+	}
+	if out, err = run(t, "tail", "--drive", "d", "--to", "web", "--since", "0", "--mail"); err != nil || !strings.Contains(out, "the wait reads this") {
+		t.Fatalf("tail --mail of another lane = %q, %v, want its ordinary read", out, err)
 	}
 }

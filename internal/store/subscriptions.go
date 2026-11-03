@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -30,6 +31,7 @@ type Subscription struct {
 	Kinds   []kinds.Kind `json:"kinds"`
 	Mute    []kinds.Kind `json:"mute,omitempty"`
 	ToKinds []kinds.Kind `json:"to_kinds,omitempty"`
+	Batch   []kinds.Kind `json:"batch,omitempty"`
 	Cursor  string       `json:"cursor"`
 	At      time.Time    `json:"at"`
 }
@@ -46,7 +48,36 @@ func DefaultToKinds(reader string) []kinds.Kind {
 }
 
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Mute, ToKinds: s.ToKinds, RepeatWindow: UrgentRepeat}
+	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.held(), ToKinds: s.ToKinds, RepeatWindow: UrgentRepeat}
+}
+
+func (s Subscription) held() []kinds.Kind {
+	return slices.Concat(s.Mute, s.Batch)
+}
+
+// BatchFilter selects what the channel delivers together, never on arrival:
+// the records addressed to the reader of a batch kind.
+func (s Subscription) BatchFilter() Filter {
+	return Filter{Drive: s.Drive, Addressed: s.Reader, Kinds: s.Batch, Mute: s.Mute}
+}
+
+func (s Subscription) BatchCursor() string {
+	return s.Cursor + "-batch"
+}
+
+// WindowMail is what the hook delivers to the thread k bound as b: its lane's
+// mail, less what its window's subscription keeps off that thread.
+func (s *Store) WindowMail(ctx context.Context, k PeerKey, b Binding) (Filter, error) {
+	f := LaneMail(k, b)
+	if k.Agent != "" {
+		return f, nil
+	}
+	sub, ok, err := s.SessionSubscription(ctx, k.Session)
+	if err != nil || !ok || sub.Drive != b.Drive || !SameLane(sub.Reader, b.Lane) {
+		return f, err
+	}
+	f.Mute, f.ToKinds = sub.held(), sub.ToKinds
+	return f, nil
 }
 
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {
@@ -64,6 +95,9 @@ func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, 
 			return Subscription{}, err
 		}
 	}
+	if err := s.seedBatchCursor(ctx, sub); err != nil {
+		return Subscription{}, err
+	}
 	return sub, s.lockSubscriptions(func() error {
 		all, err := s.subscriptions()
 		if err != nil {
@@ -78,6 +112,21 @@ func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, 
 		}
 		return s.writeSubscription(sub)
 	})
+}
+
+func (s *Store) seedBatchCursor(ctx context.Context, sub Subscription) error {
+	if len(sub.Batch) == 0 {
+		return nil
+	}
+	_, ok, err := s.Cursor(ctx, sub.BatchCursor(), sub.Drive)
+	if err != nil || ok {
+		return err
+	}
+	from, _, err := s.Cursor(ctx, sub.Cursor, sub.Drive)
+	if err != nil {
+		return err
+	}
+	return s.SetCursor(ctx, sub.BatchCursor(), sub.Drive, from)
 }
 
 func (s *Store) Subscription(_ context.Context, w Window) (Subscription, bool, error) {
