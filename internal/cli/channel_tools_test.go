@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 )
@@ -50,6 +51,20 @@ func TestThePostToolPostsStructuredRecordsInOneCall(t *testing.T) {
 	}
 	if text, isErr := callTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "nonsense", "text": "x"}); !isErr || !strings.Contains(text, "nonsense") {
 		t.Errorf("post with an unknown kind = %q, %v; want cci's refusal", text, isErr)
+	}
+}
+
+func TestThePostToolStampsALeadingLabel(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	stale := time.Now().Add(-2 * time.Hour).Format("3:04 PM")
+	post := map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": stale + ": merged"}
+	if text, isErr := callTool(t, "post", post); !isErr || !strings.Contains(text, "--stamp") {
+		t.Fatalf("post labelled %s = %q, %v; want cci's refusal naming --stamp", stale, text, isErr)
+	}
+	post["stamp"] = true
+	seq := mustTool(t, "post", post)
+	if out := mustTool(t, "read", map[string]any{"seqs": []any{seq}}); strings.Contains(out, stale) || !strings.Contains(out, ": merged") {
+		t.Errorf("read %s = %q, want cci's own label in place of %s", seq, out, stale)
 	}
 }
 

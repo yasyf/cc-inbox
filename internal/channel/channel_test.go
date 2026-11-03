@@ -380,43 +380,52 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 }
 
 func TestAChannelReexecutesANewerInstallResumedOnItsStdio(t *testing.T) {
-	st, _ := testutil.Store(t)
-	installed := make(chan version.Install, 1)
-	argvs := make(chan []string, 8)
-	newerInstall = func() (version.Install, bool, error) {
-		select {
-		case newer := <-installed:
-			return newer, true, nil
-		default:
-			return version.Install{}, false, nil
-		}
-	}
-	execve = func(_ string, argv []string, _ []string) error {
-		argvs <- argv
-		return nil
-	}
-	t.Cleanup(func() { newerInstall, execve = defaultNewerInstall, syscall.Exec })
-	s := open(t, st)
-	s.initialized()
-	subscribe(t, st)
-	time.Sleep(50 * time.Millisecond)
+	for _, subscribed := range []bool{true, false} {
+		t.Run(fmt.Sprintf("subscribed=%v", subscribed), func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			installed := make(chan version.Install, 1)
+			argvs := make(chan []string, 8)
+			newerInstall = func() (version.Install, bool, error) {
+				select {
+				case newer := <-installed:
+					return newer, true, nil
+				default:
+					return version.Install{}, false, nil
+				}
+			}
+			execve = func(_ string, argv []string, _ []string) error {
+				argvs <- argv
+				return nil
+			}
+			t.Cleanup(func() { newerInstall, execve = defaultNewerInstall, syscall.Exec })
+			s := open(t, st)
+			s.initialized()
+			if subscribed {
+				subscribe(t, st)
+			}
+			time.Sleep(50 * time.Millisecond)
 
-	installed <- version.Install{Path: "/opt/cci/0.46.0/cci", Version: "0.46.0"}
+			installed <- version.Install{Path: "/opt/cci/0.46.0/cci", Version: "0.46.0"}
 
-	select {
-	case argv := <-argvs:
-		if want := []string{"/opt/cci/0.46.0/cci", "channel", "--resumed"}; !slices.Equal(argv, want) {
-			t.Fatalf("exec argv = %q, want %q", argv, want)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the channel never re-executed the newer install")
+			select {
+			case argv := <-argvs:
+				if want := []string{"/opt/cci/0.46.0/cci", "channel", "--resumed"}; !slices.Equal(argv, want) {
+					t.Fatalf("exec argv = %q, want %q", argv, want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the channel never re-executed the newer install")
+			}
+			s.close()
+		})
 	}
-	s.close()
 }
 
-func TestAResumedChannelStreamsWithoutAnotherHandshake(t *testing.T) {
+func TestAResumedChannelAnnouncesItsToolsThenStreamsWithoutAnotherHandshake(t *testing.T) {
 	st, _ := testutil.Store(t)
 	s := start(t, st, true)
+	if f := s.next(); f.Method != "notifications/tools/list_changed" || len(f.ID) != 0 {
+		t.Fatalf("first frame = %+v, want notifications/tools/list_changed so Claude Code lists the newer build's tools", f)
+	}
 	subscribe(t, st)
 	time.Sleep(50 * time.Millisecond)
 
