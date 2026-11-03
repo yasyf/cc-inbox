@@ -297,6 +297,19 @@ func (s *Store) Generations(ctx context.Context, drive, stem string) ([]string, 
 	rows, err := s.db.QueryContext(ctx, "SELECT lane FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? ORDER BY lane", drive, stem)
 	if err != nil {
 		return nil, fmt.Errorf("read the generations of %s on %s: %w", stem, drive, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var lane string
+		if err := rows.Scan(&lane); err != nil {
+			return nil, fmt.Errorf("scan the generations of %s on %s: %w", stem, drive, err)
+		}
+		out = append(out, lane)
+	}
+	return out, rows.Err()
+}
+
 // Holding returns which of lanes on drive hold their stem: a numbered lane that
 // is the stem's newest live registration, with no live lane named the stem
 // itself, so mail to the stem reaches it. One query reads every lane's own row
@@ -319,7 +332,6 @@ func (s *Store) Holding(ctx context.Context, drive string, lanes []string) ([]st
 	for rows.Next() {
 		var lane string
 		if err := rows.Scan(&lane); err != nil {
-			return nil, fmt.Errorf("scan the generations of %s on %s: %w", stem, drive, err)
 			return nil, fmt.Errorf("scan which lanes hold their stem on %s: %w", drive, err)
 		}
 		out = append(out, lane)
