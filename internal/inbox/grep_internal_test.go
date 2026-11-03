@@ -199,10 +199,10 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 	if gotErr == nil || wantErr == nil || gotErr.Error() != wantErr.Error() || !strings.Contains(gotErr.Error(), fmt.Sprintf("decode refs of #%d:", reply.Seq)) {
 		t.Fatalf("selected annotation errors got %v, want %v", gotErr, wantErr)
 	}
-	if got.String() != want.String() || strings.Count(got.String(), "\n") != 500 {
-		t.Fatalf("annotation error prefixes got %d lines, paged %d lines", strings.Count(got.String(), "\n"), strings.Count(want.String(), "\n"))
+	if got.String() != want.String() || strings.Count(got.String(), "REVIEW history ") != 500 {
+		t.Fatalf("annotation error prefixes got %d records, paged %d records", strings.Count(got.String(), "REVIEW history "), strings.Count(want.String(), "REVIEW history "))
 	}
-	t.Logf("same_selected_annotation_error=true candidate_prefix_lines=%d paged_prefix_lines=%d", strings.Count(got.String(), "\n"), strings.Count(want.String(), "\n"))
+	t.Logf("same_selected_annotation_error=true candidate_prefix_lines=%d paged_prefix_lines=%d", strings.Count(got.String(), "REVIEW history "), strings.Count(want.String(), "REVIEW history "))
 }
 
 func TestGrepReplyMetadataErrorAttribution(t *testing.T) {
@@ -251,7 +251,7 @@ SELECT 'd', 'reviewer', 'note', n, 'REVIEW history ' || n, 'post', 'history-' ||
 				t.Fatal("corrupt selected reply did not return an error")
 			}
 			wantLines := tt.wantLines
-			if got := strings.Count(out.String(), "\n"); got != wantLines {
+			if got := strings.Count(out.String(), "REVIEW history "); got != wantLines {
 				t.Fatalf("corruption prefix has %d lines, want %d: %v", got, wantLines, err)
 			}
 			t.Logf("prefix_lines=%d error=%v", wantLines, err)

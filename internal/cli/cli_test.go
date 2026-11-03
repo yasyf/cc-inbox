@@ -986,7 +986,7 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
 	out, err := run(t, "tail", "--since", "0", "--reader", "root")
-	if err != nil || !strings.Contains(out, "ask root>peer:bbbb2222 take #34363?") || !strings.Contains(out, "go root>root@drive-b GO") || len(recordLines(out)) != 2 {
+	if err != nil || !strings.Contains(out, "ask root>peer:bbbb2222 x1 x2 take #34363?") || !strings.Contains(out, "go root>root@drive-b GO") || len(recordLines(out)) != 2 {
 		t.Fatalf("b tail = %q, %v", out, err)
 	}
 	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "3", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#5\n" {
@@ -1459,7 +1459,7 @@ func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
 		t.Fatal(err)
 	}
 	short, end := strings.Index(out, "2 note root short note"), strings.Index(out, "THE END")
-	if short < 0 || end < 0 || short > strings.Index(out, "1 note root a long finding") {
+	if short < 0 || end < 0 || short > strings.Index(out, "1 note root + a long finding") {
 		t.Errorf("show #2 1 = %q, want #2 first, then #1 with its text through THE END", out)
 	}
 	if _, err := run(t, "show", "9"); err == nil || !strings.Contains(err.Error(), "no record #9") {
