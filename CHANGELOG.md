@@ -37,6 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   successor, and the result names the stem's live holders. `client.Reach` and
   `client.ErrNoLaneRegistry` come with it, so a program in another module
   resolves a stem without a second resolver.
+- `cci post --re`, `--resolves` and `--pr` take an alias: `t:<topic>`,
+  `ccn:<id or text prefix>`, `card:<id>`, `pr#N`, or `last:<kind>[:<lane>]`.
+  An alias resolves when the record is posted, to its one open record or else
+  its one record, and a miss or a tie is refused with the candidates named.
+  The record keeps the seq and the alias, and `tail`, `show`, `watch` and the
+  channel print it as `^<seq>(<alias>)`. `cci find <alias>` prints the record an
+  alias names. Lookups go through the `record_ref_keys` index (topic, ccn id
+  and text, pull request, card id) and the new `records_drive_kind_lane` index,
+  so they cost the same at any log size; an existing store gets both from
+  `cci maintain-indexes`.
 - `cci post --quoted <words>` with no other text stores the words as the
   record's text, unchecked for times and `{at}`, so an `owner` record keeps the
   owner's words exactly as he wrote them.

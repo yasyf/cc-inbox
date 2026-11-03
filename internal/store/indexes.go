@@ -19,6 +19,7 @@ type namedIndex struct {
 var physicalIndexes = [...]namedIndex{
 	{"records_drive_lane", "CREATE INDEX records_drive_lane ON records(drive, lane)"},
 	{"records_urgent_repeat", "CREATE INDEX records_urgent_repeat ON records(drive, lane, kind, topic, seq, at)"},
+	{"records_drive_kind_lane", "CREATE INDEX records_drive_kind_lane ON records(drive, kind, lane, seq)"},
 	{"records_drive_lane_score", "CREATE INDEX records_drive_lane_score ON records(drive, lane, (at * 1000000 + seq) DESC, seq ASC) WHERE kind != 'digest'"},
 	{"sessions_drive_lane", "CREATE INDEX sessions_drive_lane ON sessions(drive, lane)"},
 	{"sessions_origin_lane", "CREATE INDEX sessions_origin_lane ON sessions(origin, lane)"},
@@ -160,6 +161,10 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	refsInstalled, err := projectionInstalled(ctx, s.db, refKeyObjects[:], "alias index")
+	if err != nil {
+		return report, err
+	}
 	incidents, err := incidentProjectionInstalled(ctx, s.db)
 	if err != nil {
 		return report, err
@@ -169,8 +174,8 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !incidents {
-		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, incidents); err != nil {
+	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !refsInstalled || !incidents {
+		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, refsInstalled, incidents); err != nil {
 			return report, err
 		}
 		if !installed {
@@ -190,6 +195,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !holdsInstalled {
 			for _, object := range laneHoldObjects {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !refsInstalled {
+			for _, object := range refKeyObjects {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}
@@ -225,7 +235,7 @@ func lockMaintenance(home string) (*os.File, error) {
 	return lock, nil
 }
 
-func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, incidents bool) error {
+func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, incidents bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin projection maintenance: %w", err)
@@ -248,6 +258,11 @@ func (s *Store) installProjections(ctx context.Context, memberships, closers, ro
 	}
 	if !holds {
 		if err := installProjection(ctx, tx, laneHoldObjects[:], "lane registry"); err != nil {
+			return err
+		}
+	}
+	if !refs {
+		if err := installProjection(ctx, tx, refKeyObjects[:], "alias index"); err != nil {
 			return err
 		}
 	}

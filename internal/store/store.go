@@ -286,22 +286,24 @@ func (r Record) Name() string {
 	return r.Num
 }
 
-// ReName names the record r answers.
+// ReName names the record r answers, followed by the alias it was given as.
 func (r Record) ReName() string {
-	if r.ReNum == "" {
-		return fmt.Sprintf("#%d", r.Re)
+	name := r.ReNum
+	if name == "" {
+		name = fmt.Sprintf("#%d", r.Re)
 	}
-	return r.ReNum
+	return withAlias(name, r.Fields.Attrs[ReAliasAttr])
 }
 
-// CloseNames names the records r resolves.
+// CloseNames names the records r resolves, each followed by the alias it was given as.
 func (r Record) CloseNames() []string {
-	if r.CloseNums != nil {
-		return r.CloseNums
-	}
 	var out []string
-	for _, seq := range r.Closes() {
-		out = append(out, fmt.Sprintf("#%d", seq))
+	for i, seq := range r.Closes() {
+		name := fmt.Sprintf("#%d", seq)
+		if r.CloseNums != nil {
+			name = r.CloseNums[i]
+		}
+		out = append(out, withAlias(name, r.Fields.Attrs[ResolvesAliasAttr(i)]))
 	}
 	return out
 }
@@ -657,6 +659,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
+		return err
+	}
+	if err := installProjection(ctx, tx, refKeyObjects[:], "alias index"); err != nil {
 		return err
 	}
 	if err := installProjection(ctx, tx, laneHoldObjects[:], "lane registry"); err != nil {

@@ -82,7 +82,7 @@ func TestPhysicalIndexesAllowOldAndNewStoreOpen(t *testing.T) {
 			}
 			wantCreated, wantMemberships := 0, 0
 			if first == "old" {
-				wantCreated, wantMemberships = len(physicalIndexes), len(recordMemberships)+len(closerMemberships)+len(rootAudienceObjects)+len(laneHoldObjects)
+				wantCreated, wantMemberships = len(physicalIndexes), len(recordMemberships)+len(closerMemberships)+len(rootAudienceObjects)+len(laneHoldObjects)+len(refKeyObjects)
 			}
 			if len(report.Created) != wantCreated || len(report.Memberships) != wantMemberships {
 				t.Fatalf("maintenance report = %+v, want %d indexes and %d membership objects", report, wantCreated, wantMemberships)
