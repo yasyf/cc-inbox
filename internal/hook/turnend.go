@@ -138,7 +138,7 @@ func openWork(b store.Binding, newest store.Record, found bool) string {
 	}
 	return strings.Join([]string{
 		lead + " Post the one record that is true, then stop:",
-		post + " --kind done --text '<what it delivered>'   # finished; a PR still open keeps the lane parked until it lands",
+		post + " --kind done --text '<what it delivered>'   # finished, with no PR of yours open; done retires the lane, so with one open post blocked --pr <n> below",
 		post + " --kind landed --pr <n> --text '<what merged>'   # merged; it ends the turn once no PR, ask or blocker of yours is open",
 		post + " --kind stopped --text '<why>'   # ended on purpose; it gets no successor",
 		post + " --kind blocked --pr <n> | --target <target> | --lane-ref <lane> --text '<what you wait on>'   # the supervisor resumes you when that lands, releases or ends",
