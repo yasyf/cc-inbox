@@ -16,7 +16,8 @@ var numberedLane = regexp.MustCompile(`^(.+)-([1-9]\d*)$`)
 
 // refuseSecondBinder refuses self binding lane on drive while another live
 // thread holds it, and tells root once by a defect record. A numbered
-// successor binding beside its live predecessor binds, and root hears it too.
+// successor binding beside its live predecessor binds, and hears how to take
+// the predecessor over once its handoff is posted.
 func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey, drive, lane string, at time.Time) error {
 	if b, ok, err := st.Binding(ctx, self); err != nil || ok && (b.Root || b.Lane != "" || b.Drive != drive) {
 		return err
@@ -41,11 +42,11 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, dr
 			continue
 		}
 		seen := st.Now().Sub(holder.SeenAt).Round(time.Minute)
-		text := fmt.Sprintf("%s bound while its predecessor %s, thread %s %s, is live, seen %s ago, and never stood down: stand %s down if %s replaces it", lane, held, holder.Name, holder.Key(), seen, held, lane)
+		to, text := []string{lane}, fmt.Sprintf("%s bound while its predecessor %s, thread %s %s, is live, seen %s ago, and has not stood down: once %s posts its handoff, read it and run `lr request stand-down %s --successor %s --by %s --last-read <the handoff's seq>`", lane, held, holder.Name, holder.Key(), seen, held, held, lane, lane)
 		if held == lane {
-			text = fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, holder.Name, holder.Key(), seen, lane)
+			to, text = []string{"root"}, fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, holder.Name, holder.Key(), seen, lane)
 		}
-		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
+		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: to, Text: text, Source: "post"}, 0, at)
 		if err != nil {
 			return err
 		}

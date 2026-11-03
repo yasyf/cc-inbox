@@ -73,7 +73,9 @@ stood down, and `cci who --successor-of <old> --json` names who stands in.
 A stand-down stands down its first `--to` lane only; the lanes it copies stay live.
 A thread cannot bind a lane another live thread holds until that lane stands
 down: its `cci post` is refused and root hears a `defect`. A numbered successor
-binding beside its live predecessor binds, and root hears the same `defect`.
+binding beside its live predecessor binds, and the `defect` goes to the successor
+alone, naming the `lr request stand-down` it runs once the predecessor's handoff
+is posted.
 
 Address a numbered lane by its stem, the name without its trailing `-<n>`:
 `--to signal-valkey` reaches the stem's newest live lane, the one whose first
