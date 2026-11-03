@@ -380,14 +380,14 @@ func (f *readFlags) sinceFromHub(ctx context.Context, st *store.Store, peer stor
 }
 
 func findOnHub(ctx context.Context, st *store.Store, drive, ref string, missing error) (*relay.Node, store.Row, error) {
-	drive, err := resolveDrive(ctx, st, drive)
-	if errors.Is(err, store.ErrNoDrive) {
-		return nil, store.Row{}, missing
-	}
+	configs, err := relay.Configs(st.HomeDir())
 	if err != nil {
 		return nil, store.Row{}, err
 	}
-	configs, err := relay.Configs(st.HomeDir())
+	drive, err = resolveDrive(ctx, st, drive)
+	if errors.Is(err, store.ErrNoDrive) {
+		drive, err = relayDrive(configs, missing)
+	}
 	if err != nil {
 		return nil, store.Row{}, err
 	}
@@ -416,4 +416,26 @@ func findOnHub(ctx context.Context, st *store.Store, drive, ref string, missing 
 		return nil, store.Row{}, missing
 	}
 	return hub, row, nil
+}
+
+func relayDrive(configs []relay.Config, missing error) (string, error) {
+	var drives []string
+	for _, c := range configs {
+		named := c.Routes
+		if c.Delegation != nil {
+			named = slices.Concat(named, c.Delegation.Drives)
+		}
+		for _, d := range named {
+			if !strings.HasSuffix(d, "*") && !slices.Contains(drives, d) {
+				drives = append(drives, d)
+			}
+		}
+	}
+	switch len(drives) {
+	case 0:
+		return "", missing
+	case 1:
+		return drives[0], nil
+	}
+	return "", fmt.Errorf("this node's relay carries drives %s; pass --drive", strings.Join(drives, ", "))
 }

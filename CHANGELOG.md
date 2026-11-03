@@ -144,6 +144,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci show` with no `--drive`, on a node joined to a relay and bound to no
+  drive, reads through on the one drive its relay carries, and names the
+  drives when it carries several.
+- A reply that reaches a replica for a record posted before the replica
+  joined no longer waits forever: the relay pull reads the record it answers
+  from the relay's log and stores both.
 - On a node joined to a relay, `cci show` of a record the store lacks, such as
   one a Sprite replica missed because it was posted before the Sprite joined,
   reads it from the relay's log, body included, and prints it without storing

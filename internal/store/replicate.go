@@ -354,6 +354,40 @@ func (s *Store) release(ctx context.Context, tx *sql.Tx, arrived Pointer, a *App
 	return nil
 }
 
+// Wait names a record a held row needs before it can be stored, and the
+// drive the held row is on.
+type Wait struct {
+	Drive string
+	Pointer
+}
+
+// Awaiting returns the records that rows, among those Apply holds in pending,
+// still wait for.
+func (s *Store) Awaiting(ctx context.Context, rows []Row) ([]Wait, error) {
+	ids := make([]Pointer, len(rows))
+	for i, r := range rows {
+		ids[i] = Pointer{Origin: r.Origin, Seq: r.OriginSeq}
+	}
+	raw, err := json.Marshal(ids)
+	if err != nil {
+		return nil, fmt.Errorf("encode held rows: %w", err)
+	}
+	held, err := s.db.QueryContext(ctx, "SELECT DISTINCT json_extract(p.row, '$.drive'), p.wait_origin, p.wait_seq FROM json_each(?) j JOIN pending p ON p.origin = json_extract(j.value, '$.origin') AND p.origin_seq = json_extract(j.value, '$.seq')", string(raw))
+	if err != nil {
+		return nil, fmt.Errorf("read held rows: %w", err)
+	}
+	defer func() { _ = held.Close() }()
+	var out []Wait
+	for held.Next() {
+		var w Wait
+		if err := held.Scan(&w.Drive, &w.Origin, &w.Seq); err != nil {
+			return nil, fmt.Errorf("scan held row: %w", err)
+		}
+		out = append(out, w)
+	}
+	return out, held.Err()
+}
+
 func (s *Store) target(ctx context.Context, tx *sql.Tx, p *Pointer) (int64, *Pointer, error) {
 	if p == nil {
 		return 0, nil, nil

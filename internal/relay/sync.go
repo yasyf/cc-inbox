@@ -646,11 +646,37 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 	if err != nil {
 		return applied, err
 	}
+	if err := n.fillAwaited(ctx, rows); err != nil {
+		return applied, err
+	}
 	acks = append(acks, rowAcks...)
 	if len(acks) == 0 {
 		return applied, nil
 	}
 	return applied, n.client().Call(ctx, http.MethodPost, "/v1/ack", ackRequest{Mesh: n.Config.Mesh, Receipts: acks, Tap: n.Config.Tap}, nil)
+}
+
+func (n *Node) fillAwaited(ctx context.Context, rows []store.Row) error {
+	for len(rows) > 0 {
+		waits, err := n.Store.Awaiting(ctx, rows)
+		if err != nil {
+			return err
+		}
+		rows = nil
+		for _, w := range waits {
+			row, ok, err := n.Find(ctx, w.Drive, store.Number{Seq: w.Seq, Tag: w.Origin})
+			if err != nil {
+				return err
+			}
+			if ok {
+				rows = append(rows, row)
+			}
+		}
+		if _, err := n.Store.Apply(ctx, rows, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (n *Node) open(e e2e.Envelope, keys map[uint64]e2e.GroupKey, members map[string]e2e.Member) (store.Row, error) {
