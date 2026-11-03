@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `client.Resolve` reaches a lane name as `cci post --to` does, through the
+  same lane registry: a stem gives its newest live lane, a stood-down lane its
+  successor, and the result names the stem's live holders. `client.Reach` and
+  `client.ErrNoLaneRegistry` come with it, so a program in another module
+  resolves a stem without a second resolver.
 - `cci post --quoted <words>` with no other text stores the words as the
   record's text, unchecked for times and `{at}`, so an `owner` record keeps the
   owner's words exactly as he wrote them.

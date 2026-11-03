@@ -69,6 +69,27 @@ func Stem(lane string) string {
 	return store.Stem(lane)
 }
 
+// Reach says who reads mail addressed to one lane name: Lane is the lane it
+// reaches now, "" when none does, and Holders are the stem's live lanes,
+// newest registration first.
+type Reach = store.Reach
+
+// ErrNoLaneRegistry is what Resolve returns on a store whose lane registry cci
+// maintain-indexes has not installed yet; cci post then addresses a name as typed.
+var ErrNoLaneRegistry = store.ErrNoLaneRegistry
+
+// Resolve reaches name on drive as cci post --to does: a live lane reads its own
+// mail, a stood-down one passes it to the successor it named, else to its stem's
+// newest live lane, and a stem reaches that lane. Each hop is one indexed lookup.
+func Resolve(ctx context.Context, drive, name string) (Reach, error) {
+	st, err := cli.OpenStore(ctx)
+	if err != nil {
+		return Reach{}, err
+	}
+	defer func() { _ = st.Close() }()
+	return st.Reach(ctx, drive, name)
+}
+
 // Post stores d through cci post itself, so its recipient checks, reply routing,
 // text limits and the unsent queue a down bus falls back to all apply; the error
 // is the one cci post would exit on.
