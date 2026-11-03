@@ -58,7 +58,11 @@ type pullRequestEvent struct {
 		Merged    bool      `json:"merged"`
 		MergeSHA  string    `json:"merge_commit_sha"`
 		UpdatedAt time.Time `json:"updated_at"`
-		Head      struct {
+		User      user      `json:"user"`
+		Labels    []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		Head struct {
 			Ref string `json:"ref"`
 			SHA string `json:"sha"`
 		} `json:"head"`
@@ -146,7 +150,14 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		}
 		r.At, r.PRs, r.URL, r.Outcome, r.Commit = e.PullRequest.UpdatedAt, []string{pr}, e.PullRequest.HTMLURL, outcome, e.PullRequest.Head.SHA
 		r.Topic = "pull_request"
-		r.Attrs = map[string]string{"base": e.PullRequest.Base.Ref, "branch": e.PullRequest.Head.Ref, "draft": fmt.Sprint(e.PullRequest.Draft)}
+		labels := make([]string, 0, len(e.PullRequest.Labels))
+		for _, l := range e.PullRequest.Labels {
+			labels = append(labels, l.Name)
+		}
+		r.Attrs = map[string]string{
+			"author": e.PullRequest.User.Login, "base": e.PullRequest.Base.Ref, "branch": e.PullRequest.Head.Ref,
+			"draft": fmt.Sprint(e.PullRequest.Draft), "labels": strings.Join(labels, ","),
+		}
 		r.Text = fmt.Sprintf("%s %s at %s onto %s", pr, outcome, short(e.PullRequest.Head.SHA), e.PullRequest.Base.Ref)
 		if outcome == "merged" {
 			r.Attrs["merge"] = e.PullRequest.MergeSHA
@@ -190,7 +201,7 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		}
 		r.At, r.URL, r.Outcome, r.Commit = c.CompletedAt, c.DetailsURL, c.Conclusion, c.HeadSHA
 		r.Topic = "check"
-		r.Attrs = map[string]string{"check": c.Name, "id": fmt.Sprint(c.ID)}
+		r.Attrs = map[string]string{"check": c.Name, "id": fmt.Sprint(c.ID), "repo": e.Repository.FullName}
 		r.Text = fmt.Sprintf("%s %s %s %s", e.Repository.FullName, short(c.HeadSHA), c.Name, c.Conclusion)
 		return r, true, nil
 	case "status":
