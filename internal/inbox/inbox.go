@@ -379,7 +379,7 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 	return a, nil
 }
 
-func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget int, asJSON bool, w, notes io.Writer) error {
+func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget, width int, asJSON bool, w, notes io.Writer) error {
 	query := st.QueryText
 	if asJSON {
 		query = st.Query
@@ -424,7 +424,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		}
 		f.Before = records[len(records)-1].Seq
 	}
-	for _, page := range grepPages(ctx, st, selected, asJSON, now) {
+	for _, page := range grepPages(ctx, st, selected, asJSON, width, now) {
 		if b.Full() {
 			break
 		}
@@ -468,7 +468,7 @@ type grepPage struct {
 	err   error
 }
 
-func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, asJSON bool, now time.Time) []grepPage {
+func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, asJSON bool, width int, now time.Time) []grepPage {
 	pages := make([]grepPage, len(selected))
 	if len(selected) == 0 {
 		return pages
@@ -518,7 +518,7 @@ func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, 
 	for page, records := range selected {
 		pages[page].err = replies[page].Err
 		if replies[page].Err == nil {
-			pages[page].lines, _ = textLines(records, replies[page].Replies, view{Whole: true}, now)
+			pages[page].lines, _ = textLines(records, replies[page].Replies, view{Whole: true, Width: width}, now)
 		}
 	}
 	return pages
