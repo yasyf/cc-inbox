@@ -114,7 +114,7 @@ func newRelayJoinCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&instance, "instance", false, "join as an instance delegated by the service key in $CCI_SERVICE_KEY, which the join keeps in the mesh's service.pem so later calls and the daemon need no key in their environment (CI jobs sharing one service identity)")
 	cmd.Flags().StringSliceVar(&drives, "drive", nil, "drives the instance may write (exact or trailing *); required with --instance")
 	cmd.Flags().StringSliceVar(&kinds, "kind", nil, "kinds the instance may write (default: the service's scope)")
-	cmd.Flags().DurationVar(&ttl, "ttl", 6*time.Hour, "how long the instance delegation lasts")
+	cmd.Flags().DurationVar(&ttl, "ttl", 6*time.Hour, "how long the first instance delegation lasts; a running daemon renews it near its expiry with the kept key")
 	cmd.Flags().StringSliceVar(&services, "service", nil, "pin a service node by its base64 X9.63 public key before joining, so its records and delegated instances verify")
 	cmd.Flags().StringSliceVar(&owners, "owner", nil, "pin an owner node by its base64 X9.63 public key before joining (a fresh node has no other way to trust group-key wraps)")
 	_ = cmd.MarkFlagRequired("url")
@@ -331,7 +331,7 @@ func newRelaySyncCmd() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:   "sync",
-		Short: "Backfill a drive from the relay's log: every origin, verified, decrypted and applied idempotently",
+		Short: "Backfill a drive from the relay's log: every origin, verified, decrypted and applied idempotently, resuming from a cursor per origin",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			nodes, _, err := relayNodes(st, mesh)

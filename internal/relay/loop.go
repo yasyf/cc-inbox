@@ -133,6 +133,9 @@ func (l *Loop) pushing(ctx context.Context, mesh string) {
 }
 
 func (l *Loop) pull(ctx context.Context, n *Node, _ []Config) error {
+	if err := n.Renew(ctx); err != nil {
+		slog.Warn("relay delegation renewal failed", "mesh", n.Config.Mesh, "err", err)
+	}
 	_, err := n.Pull(ctx, PullWait, l.onControl)
 	return err
 }

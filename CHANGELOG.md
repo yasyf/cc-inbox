@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci relay sync` resumes from a cursor per origin, so a restart reads only
+  what it has not read, and it stays behind a record it could not read yet.
+- A running daemon renews a delegated instance's delegation within two hours of
+  its expiry with the service key the join kept, so a long-lived instance does
+  not lose the relay at its expiry.
 - `lr.head` takes optional `title`, `change`, `plan`, `risk`, `blocks`, `group`
   and `summary` text, the words the owner's merge board shows for a PR.
 - `github.com/yasyf/cc-inbox/client`, a public Go package other modules import

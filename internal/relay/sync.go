@@ -23,9 +23,11 @@ import (
 )
 
 const (
-	pushBatch = 25
-	pullMax   = 10
-	logPage   = 100
+	pushBatch    = 25
+	pullMax      = 10
+	logPage      = 100
+	instanceLife = 24 * time.Hour
+	renewWithin  = 2 * time.Hour
 )
 
 var ErrEpochTaken = errors.New("relay: another owner rotated to this epoch first")
@@ -117,11 +119,36 @@ func (n *Node) Delegate(drives, kinds []string, ttl time.Duration) error {
 	return nil
 }
 
+// Renew signs this instance a fresh delegation with the service key it kept
+// and joins with it, once the one it holds is within renewWithin of expiring
+// or past it, so a long-lived instance never loses the relay at its expiry.
+func (n *Node) Renew(ctx context.Context) error {
+	held := n.Config.Delegation
+	if held == nil {
+		return nil
+	}
+	expires, err := time.Parse(time.RFC3339Nano, held.Expires)
+	if err != nil {
+		return fmt.Errorf("relay: delegation expiry %q: %w", held.Expires, err)
+	}
+	if time.Until(expires) > renewWithin {
+		return nil
+	}
+	d, err := e2e.Delegate(n.Service, n.Config.Mesh, n.Identity.PublicKey(), held.Drives, held.Kinds, time.Now().Add(instanceLife))
+	if err != nil {
+		return err
+	}
+	n.Config.Delegation = &d
+	return n.Join(ctx)
+}
+
 func (n *Node) client() Client {
 	return Client{Config: n.Config, Identity: n.Identity, HTTP: n.HTTP}
 }
 
 func Peer(mesh string) string { return "relay:" + mesh }
+
+const syncCursor = "relay-sync:"
 
 func (n *Node) Join(ctx context.Context) error {
 	var rk relayKey
@@ -413,9 +440,17 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 		return total, err
 	}
 	for _, origin := range origins {
-		for after, more := int64(0), true; more; {
-			var rows []store.Row
-			if rows, after, more, err = l.page(ctx, drive, origin, after, logPage); err != nil {
+		cursor := syncCursor + n.Config.Mesh + ":" + origin
+		after, _, err := n.Store.Cursor(ctx, cursor, drive)
+		if err != nil {
+			return total, err
+		}
+		for more, readable := true, true; more; {
+			var (
+				rows []store.Row
+				read bool
+			)
+			if rows, after, more, read, err = l.page(ctx, drive, origin, after, logPage); err != nil {
 				return total, err
 			}
 			a, err := n.Store.Apply(ctx, rows, nil)
@@ -426,6 +461,11 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 			total.Duplicate += a.Duplicate
 			total.Buffered += a.Buffered
 			total.Released += a.Released
+			if readable = readable && read; readable {
+				if err := n.Store.SetCursor(ctx, cursor, drive, after); err != nil {
+					return total, err
+				}
+			}
 		}
 	}
 	return total, nil
@@ -446,7 +486,7 @@ func (n *Node) Find(ctx context.Context, drive string, num store.Number) (store.
 		if num.Tag == "" && l.members[origin].Tier != e2e.TierOwner || num.Tag != "" && !strings.HasPrefix(origin, num.Tag) {
 			continue
 		}
-		rows, _, _, err := l.page(ctx, drive, origin, num.Seq-1, 1)
+		rows, _, _, _, err := l.page(ctx, drive, origin, num.Seq-1, 1)
 		if err != nil {
 			return store.Row{}, false, err
 		}
@@ -471,7 +511,7 @@ func (n *Node) Range(ctx context.Context, drive, origin string, after, before in
 			limit = int(min(int64(limit), before-after-1))
 		}
 		var rows []store.Row
-		if rows, after, more, err = l.page(ctx, drive, origin, after, limit); err != nil {
+		if rows, after, more, _, err = l.page(ctx, drive, origin, after, limit); err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
@@ -521,7 +561,7 @@ func (n *Node) logReader(ctx context.Context) (logReader, error) {
 	return logReader{n: n, keys: keys, members: members}, nil
 }
 
-func (l logReader) page(ctx context.Context, drive, origin string, after int64, limit int) ([]store.Row, int64, bool, error) {
+func (l logReader) page(ctx context.Context, drive, origin string, after int64, limit int) ([]store.Row, int64, bool, bool, error) {
 	var lr struct {
 		Envelopes []e2e.Envelope `json:"envelopes"`
 		More      bool           `json:"more"`
@@ -531,7 +571,7 @@ func (l logReader) page(ctx context.Context, drive, origin string, after int64, 
 		"after": {strconv.FormatInt(after, 10)}, "limit": {strconv.Itoa(limit)},
 	}
 	if err := l.n.client().Call(ctx, http.MethodGet, "/v1/log?"+q.Encode(), nil, &lr); err != nil {
-		return nil, after, false, err
+		return nil, after, false, false, err
 	}
 	var rows []store.Row
 	for _, e := range lr.Envelopes {
@@ -543,7 +583,7 @@ func (l logReader) page(ctx context.Context, drive, origin string, after int64, 
 		}
 		rows = append(rows, r)
 	}
-	return rows, after, lr.More && len(lr.Envelopes) > 0, nil
+	return rows, after, lr.More && len(lr.Envelopes) > 0, len(rows) == len(lr.Envelopes), nil
 }
 
 func accounted(envs []e2e.Envelope, pr pushResponse) error {
