@@ -596,7 +596,8 @@ func (s *Store) MovesLane(ctx context.Context, sub Subscription) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return !ok || b.Drive != sub.Drive || !SameLane(b.Lane, sub.Reader) && !(b.Root && RootName(sub.Reader)), nil
+	stays := ok && b.Drive == sub.Drive && (SameLane(b.Lane, sub.Reader) || b.Root && RootName(sub.Reader))
+	return !stays, nil
 }
 
 func (s *Store) bindLane(ctx context.Context, tx *sql.Tx, lb LaneBinding) error {
