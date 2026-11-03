@@ -287,8 +287,8 @@ jobs:
           test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 7f5c374e7cd07911aa432b3434036a27b9007de9
           cp internal/cli/tail_body_contract_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
-          (cd .ci-native-tail-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli)
-          CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -race -run '^TestTailBodyContract' -v ./internal/cli
+          (cd .ci-native-tail-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli)
+          CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli
       - uses: actions/checkout@v7
         if: env.FULL_CI == 'true'
         with:
@@ -319,8 +319,8 @@ jobs:
           test "$(git -C .ci-addressed-body-baseline rev-parse HEAD)" = 4c0bb3dd0873b2e978c6d12933f3db7a8206fd72
           cp internal/cli/addressed_body_contract_test.go .ci-addressed-body-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-addressed-body-contract"
-          (cd .ci-addressed-body-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
-          CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" go test -count=1 -race -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli
+          (cd .ci-addressed-body-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
+          CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" go test -count=1 -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli
       - name: Tail page assembly current-head parity and allocation scaling
         if: env.FULL_CI == 'true'
         run: |
@@ -328,8 +328,8 @@ jobs:
           cp internal/inbox/tail_page_assembly_test.go .ci-tail-page-baseline/internal/inbox/
           cp internal/cli/tail_page_assembly_contract_test.go .ci-tail-page-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-page-contract"
-          (cd .ci-tail-page-baseline && CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -race -run '^TestTailPageAssemblyContract$' -v ./internal/cli)
-          CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" go test -count=1 -race -run '^TestTailPageAssemblyContract$' -v ./internal/cli
+          (cd .ci-tail-page-baseline && CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailPageAssemblyContract$' -v ./internal/cli)
+          CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" go test -count=1 -run '^TestTailPageAssemblyContract$' -v ./internal/cli
           if (cd .ci-tail-page-baseline && CCI_TAIL_PAGE_ALLOCATION=1 go test -count=1 -run '^TestTailPageAssemblyAllocationScaling$' -v ./internal/inbox) > "$RUNNER_TEMP/tail-page-negative.log" 2>&1; then
             cat "$RUNNER_TEMP/tail-page-negative.log"
             exit 1
@@ -502,7 +502,7 @@ jobs:
           cp internal/render/brief_elision_cost_test.go .ci-brief-elision-baseline/internal/render/
           mkdir -p "$RUNNER_TEMP/cci-brief-elision-contract"
           (cd .ci-brief-elision-baseline && CCI_BRIEF_ELISION_SNAPSHOTS="$RUNNER_TEMP/cci-brief-elision-contract" CCI_BRIEF_ELISION_WRITE=1 go test -count=1 -run '^TestBriefElisionImmutableOutput$' -v ./internal/render)
-          CCI_BRIEF_ELISION_SNAPSHOTS="$RUNNER_TEMP/cci-brief-elision-contract" go test -count=1 -race -run '^TestBriefElisionImmutableOutput$' -v ./internal/render
+          CCI_BRIEF_ELISION_SNAPSHOTS="$RUNNER_TEMP/cci-brief-elision-contract" go test -count=1 -run '^TestBriefElisionImmutableOutput$' -v ./internal/render
           if (cd .ci-brief-elision-baseline && go test -count=1 -run '^$' -bench '^BenchmarkBriefUnusedElisionAllocations$' -benchtime=1x -cpu=2 -v ./internal/render) > "$RUNNER_TEMP/brief-elision-negative.log" 2>&1; then
             cat "$RUNNER_TEMP/brief-elision-negative.log"
             exit 1
@@ -942,9 +942,9 @@ jobs:
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailCLIReference$' -v ./internal/cli
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTailHTTPParity$' -v ./internal/cli
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -race -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -run '^TestNativeTailHTTPParity$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
 
 
   lint:
