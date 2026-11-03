@@ -11,8 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No clock in a post's text refuses it any more. A leading `H:MM AM/PM` label
   off the post's own clock is replaced with that time and a one-line hint on
   stderr, and any other clock is stored as typed without a future check.
-  `cci post --stamp`, the MCP `post` tool's `stamp` field and `client.Draft.Stamp`
-  are gone with the refusal they answered.
+  The MCP `post` tool's `stamp` field and `client.Draft.Stamp` are gone with the
+  refusal they answered. `cci post --stamp` stays as a hidden flag that does
+  nothing, since live lanes' briefs still pass it.
 
 ### Added
 

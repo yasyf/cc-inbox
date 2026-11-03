@@ -462,6 +462,13 @@ func TestPostStampsTextWithTheRecordsOwnTime(t *testing.T) {
 	}
 }
 
+func TestPostStillTakesTheRetiredStampFlag(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "note", "--stamp", "--text", "live on dev"); err != nil {
+		t.Fatalf("post --stamp refused: %v", err)
+	}
+}
+
 func TestPostNeverRefusesAClockInItsText(t *testing.T) {
 	clock := func(d time.Duration) string { return time.Now().Add(d).Format("3:04 PM") }
 	label, before := clock(10*time.Minute), clock(-30*time.Minute)
