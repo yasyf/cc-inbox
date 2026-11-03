@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `lr.head` takes optional `title`, `change`, `plan`, `risk`, `blocks`, `group`
+  and `summary` text, the words the owner's merge board shows for a PR.
 - `github.com/yasyf/cc-inbox/client`, a public Go package other modules import
   to post and read records: `Post`, `Tail` and `Open` use the store and the rules
   `cci` uses, so a Go tool never shells out to the binary.

@@ -142,3 +142,17 @@ func TestSchemaNamesRequiredFieldsThenOptional(t *testing.T) {
 		t.Fatalf("Names = %s, want %s", got, want)
 	}
 }
+
+func TestAHeadCarriesItsBoardWordsAsOptionalText(t *testing.T) {
+	words := map[string]any{"pr": 1, "head": head, "lane": "lane-7", "title": "t", "change": "c", "plan": "p", "risk": "r", "blocks": "b", "group": "g", "summary": "s"}
+	if err := kinds.CheckBody(kinds.Kind("lr.head"), body(t, words), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := kinds.CheckBody(kinds.Kind("lr.head"), body(t, map[string]any{"pr": 1, "head": head, "lane": "lane-7"}), nil); err != nil {
+		t.Fatal(err)
+	}
+	words["risk"] = "  "
+	if err := kinds.CheckBody(kinds.Kind("lr.head"), body(t, words), nil); err == nil || !strings.HasPrefix(err.Error(), "head.risk must be non-empty text") {
+		t.Fatalf("a blank risk: %v", err)
+	}
+}
