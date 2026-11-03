@@ -18,7 +18,10 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const pageRows = 500
+const (
+	pageRows    = 500
+	typedPrefix = "lr."
+)
 
 // Record is one stored record, the value cci tail --json prints.
 type Record = store.Record
@@ -140,4 +143,23 @@ func Open(ctx context.Context, drive string, names ...string) ([]Record, error) 
 		seqs = append(seqs, r.Seq)
 	}
 	return st.OpenAmong(ctx, drive, seqs)
+}
+
+// Schema is one typed kind's table entry: its fields, identity and audience.
+type Schema = kinds.Schema
+
+// TypedSchema returns the entry of the typed kind lr.<name> and whether it exists.
+func TypedSchema(name string) (Schema, bool) {
+	return kinds.Typed(kinds.Kind(typedPrefix + name))
+}
+
+// TypedKinds lists the names of the typed kinds in table order.
+func TypedKinds() []string {
+	return kinds.TypedNames()
+}
+
+// CheckBody returns the error Post would refuse the typed kind lr.<name> with, its
+// corrected command included, and stores nothing.
+func CheckBody(name string, body json.RawMessage, to []string) error {
+	return kinds.CheckBody(kinds.Kind(typedPrefix+name), body, to)
 }

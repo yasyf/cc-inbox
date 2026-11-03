@@ -29,6 +29,7 @@ const typedNamespace = "lr."
 var (
 	typed      map[string]Schema
 	typedOrder []string
+	typedRoles = []string{"supervisor", "lane", "pool", "owner", "root"}
 	shaText    = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	timeText   = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$`)
 )
@@ -95,8 +96,9 @@ func TypedNames() []string {
 }
 
 // CheckBody refuses a typed kind's body that is missing, has a field missing, extra or of the
-// wrong shape, names several PRs, or is addressed to an audience the kind never reaches; the
-// error carries the corrected command. An untyped kind passes.
+// wrong shape, names several PRs, or is addressed to an audience the kind never reaches, where
+// a kind that reaches lane reaches any lane by name but never a role such as root; the error
+// carries the corrected command. An untyped kind passes.
 func CheckBody(k Kind, body json.RawMessage, to []string) error {
 	s, ok := Typed(k)
 	if !ok {
@@ -155,7 +157,7 @@ func CheckBody(k Kind, body json.RawMessage, to []string) error {
 		panic(err)
 	}
 	for _, lane := range to {
-		if !slices.Contains(audience, lane) {
+		if !slices.Contains(audience, lane) && (!slices.Contains(audience, "lane") || slices.Contains(typedRoles, lane)) {
 			msg := fmt.Sprintf("a %s record never reaches %s; it goes to %s", name, lane, strings.Join(audience, ", "))
 			if lane == "root" {
 				msg += "; to tell root, post an escalation, an ask or a decision"
@@ -164,6 +166,11 @@ func CheckBody(k Kind, body json.RawMessage, to []string) error {
 		}
 	}
 	return nil
+}
+
+// Names lists the kind's required fields in table order, then its optional fields.
+func (s Schema) Names() []string {
+	return append(slices.Clone(s.order), optionalNames(s)...)
 }
 
 func (s Schema) accepts(given []string) bool {

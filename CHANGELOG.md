@@ -129,6 +129,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A typed kind whose audience includes `lane`, such as `lr.item` and `lr.note`,
+  reaches any lane by name again, and never a role such as `root`. The store
+  refused every `lr.item` addressed to a lane.
 - `cci who` reads only the registry rows its flags select, checks each
   process once however many rows name it, and reads a drive's stand-downs in
   one query, so `cci who --drive <d> --all --json` on a registry of 19,000

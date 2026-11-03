@@ -119,3 +119,26 @@ func TestATypedKindNeedsABody(t *testing.T) {
 		t.Fatalf("CheckBody = %v", err)
 	}
 }
+
+func TestAnItemReachesALaneByNameButNeverARole(t *testing.T) {
+	item := body(t, map[string]any{"item": 3, "action": "verdict", "pr": 45470, "head": head, "mover": "lane", "deadline": "2026-10-31T06:20:00Z"})
+	if err := kinds.CheckBody(kinds.Kind("lr.item"), item, []string{"lane-7"}); err != nil {
+		t.Fatalf("item to a lane: %v", err)
+	}
+	for _, role := range []string{"root", "supervisor"} {
+		if err := kinds.CheckBody(kinds.Kind("lr.item"), item, []string{role}); err == nil || !strings.Contains(err.Error(), "never reaches "+role) {
+			t.Errorf("item to %s: %v", role, err)
+		}
+	}
+	state := body(t, map[string]any{"lane": "lane-7"})
+	if err := kinds.CheckBody(kinds.Kind("lr.state"), state, []string{"lane-7"}); err == nil || !strings.Contains(err.Error(), "never reaches lane-7") {
+		t.Errorf("state to a lane: %v", err)
+	}
+}
+
+func TestSchemaNamesRequiredFieldsThenOptional(t *testing.T) {
+	tap, _ := kinds.Typed(kinds.Kind("lr.tap"))
+	if got, want := strings.Join(tap.Names(), ","), "pr,head,by,value,condition,rule"; got != want {
+		t.Fatalf("Names = %s, want %s", got, want)
+	}
+}
