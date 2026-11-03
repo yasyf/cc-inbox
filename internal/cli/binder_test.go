@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,12 @@ func TestAHolderInTheSameWindowIsNotASecondBinderAfterARestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
+	window, err := windowOf(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
 	holder := store.PeerKey{Session: "d50e80e8-resumed"}
-	if _, err := st.Announce(ctx, store.Peer{Session: holder.Session, PID: 4242, PIDStarted: 99}); err != nil {
+	if _, err := st.Announce(ctx, store.Peer{Session: holder.Session, PID: window.PID, PIDStarted: window.Started}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.BindLane(ctx, holder, "d", "owner-relay", time.Now()); err != nil {
@@ -25,10 +30,10 @@ func TestAHolderInTheSameWindowIsNotASecondBinderAfterARestart(t *testing.T) {
 	}
 	mcpServer := store.PeerKey{Session: "ce184f34-mcp-server"}
 
-	if err := refuseHeldLane(ctx, st, mcpServer, store.Window{PID: 4242, Started: 99}, "d", "owner-relay", st.Now()); err != nil {
+	if err := refuseHeldLane(ctx, st, mcpServer, window, "d", "owner-relay", st.Now()); err != nil {
 		t.Fatalf("the holder's own window was refused: %v", err)
 	}
-	err = refuseHeldLane(ctx, st, mcpServer, store.Window{PID: 4242, Started: 100}, "d", "owner-relay", st.Now())
+	err = refuseHeldLane(ctx, st, mcpServer, store.Window{PID: window.PID, Started: window.Started + 1}, "d", "owner-relay", st.Now())
 	if err == nil || !strings.Contains(err.Error(), "is held by live thread") {
 		t.Fatalf("a reused pid in another window = %v, want it refused", err)
 	}
