@@ -46,32 +46,37 @@ type Record struct {
 	Attrs   map[string]string
 }
 
-// Post seals r and pushes it, failing unless the relay accepts it.
-func (w Writer) Post(ctx context.Context, r Record) error {
-	kind, err := kinds.Parse(r.Kind)
-	if err != nil {
-		return err
-	}
+// Post seals records under one group key read and pushes them in one call, in
+// order, failing unless the relay accepts every one.
+func (w Writer) Post(ctx context.Context, records ...Record) error {
 	key, err := w.groupKey(ctx)
 	if err != nil {
 		return err
 	}
 	now := w.Now()
-	rec := row{
-		Origin: w.Key.ID(), OriginSeq: now.UnixMicro(), ID: r.ID, Drive: r.Drive, Lane: w.Lane, Kind: string(kind), At: r.At.UTC(),
-		Text: r.Text, Topic: r.Topic, To: r.To, Refs: refs{URL: r.URL, PRs: r.PRs},
-		Fields: fields{Attrs: r.Attrs, Outcome: r.Outcome, Commit: r.Commit}, Source: "service",
-	}
-	pt, err := json.Marshal(rec)
-	if err != nil {
-		return err
-	}
-	env, err := e2e.Seal(key, w.Key, e2e.Envelope{
-		Mesh: w.Mesh, Drive: rec.Drive, OriginSeq: rec.OriginSeq, Tier: e2e.TierService,
-		KindClass: rec.Kind, TS: rec.At.Format(time.RFC3339Nano),
-	}, pt)
-	if err != nil {
-		return err
+	envelopes := make([]e2e.Envelope, 0, len(records))
+	for i, r := range records {
+		kind, err := kinds.Parse(r.Kind)
+		if err != nil {
+			return err
+		}
+		rec := row{
+			Origin: w.Key.ID(), OriginSeq: now.UnixMicro() + int64(i), ID: r.ID, Drive: r.Drive, Lane: w.Lane, Kind: string(kind), At: r.At.UTC(),
+			Text: r.Text, Topic: r.Topic, To: r.To, Refs: refs{URL: r.URL, PRs: r.PRs},
+			Fields: fields{Attrs: r.Attrs, Outcome: r.Outcome, Commit: r.Commit}, Source: "service",
+		}
+		pt, err := json.Marshal(rec)
+		if err != nil {
+			return err
+		}
+		env, err := e2e.Seal(key, w.Key, e2e.Envelope{
+			Mesh: w.Mesh, Drive: rec.Drive, OriginSeq: rec.OriginSeq, Tier: e2e.TierService,
+			KindClass: rec.Kind, TS: rec.At.Format(time.RFC3339Nano),
+		}, pt)
+		if err != nil {
+			return err
+		}
+		envelopes = append(envelopes, env)
 	}
 	var pushed struct {
 		Accepted []struct {
@@ -81,14 +86,14 @@ func (w Writer) Post(ctx context.Context, r Record) error {
 			Reason string `json:"reason"`
 		} `json:"rejected"`
 	}
-	if err := w.call(ctx, http.MethodPost, "/v1/push", map[string]any{"mesh": w.Mesh, "envelopes": []e2e.Envelope{env}}, &pushed); err != nil {
+	if err := w.call(ctx, http.MethodPost, "/v1/push", map[string]any{"mesh": w.Mesh, "envelopes": envelopes}, &pushed); err != nil {
 		return err
 	}
 	if len(pushed.Rejected) > 0 {
-		return fmt.Errorf("relay refused %s on %s: %s", rec.Kind, rec.Drive, pushed.Rejected[0].Reason)
+		return fmt.Errorf("relay refused %d of %d records: %s", len(pushed.Rejected), len(records), pushed.Rejected[0].Reason)
 	}
-	if len(pushed.Accepted) != 1 {
-		return errors.New("relay answered the push without accepting the record")
+	if len(pushed.Accepted) != len(records) {
+		return fmt.Errorf("relay accepted %d of %d records", len(pushed.Accepted), len(records))
 	}
 	return nil
 }

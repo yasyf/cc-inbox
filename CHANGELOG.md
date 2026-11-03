@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `repo`, as a status record does, since a check run need not name a pull
   request.
 
+- `service.Writer.Post` takes any number of records and seals them under one
+  group key read and one push, so a receiver relaying a batch makes two relay
+  calls instead of two per record.
+
 - `client.Resolve` reaches a lane name as `cci post --to` does, through the
   same lane registry: a stem gives its newest live lane, a stood-down lane its
   successor, and the result names the stem's live holders. `client.Reach` and
