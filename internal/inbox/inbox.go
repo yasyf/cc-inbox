@@ -28,6 +28,7 @@ const (
 type TailOptions struct {
 	Filter  store.Filter
 	Cursor  string
+	Seed    string
 	Limit   int
 	Budget  int
 	Width   int
@@ -54,13 +55,21 @@ type TailResult struct {
 
 func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (TailResult, error) {
 	f := opts.Filter
+	seeded := false
 	if opts.Cursor != "" {
 		seq, ok, err := st.Cursor(ctx, opts.Cursor, f.Drive)
 		if err != nil {
 			return TailResult{}, err
 		}
 		f.After = seq
-		if !ok {
+		switch {
+		case ok:
+		case opts.Seed != "":
+			if f.After, err = seedOf(ctx, st, opts.Seed, f.Drive); err != nil {
+				return TailResult{}, err
+			}
+			seeded = true
+		default:
 			f.Since = st.Now().Add(-FreshCursor)
 		}
 		if f.Peer != "" {
@@ -205,7 +214,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		}
 		trailer(fmt.Sprintf("... %s%d more; resume with %s", upTo, res.More, resume), true)
 	}
-	if opts.Cursor != "" && res.Last != f.After {
+	if opts.Cursor != "" && (res.Last != f.After || seeded) {
 		res.Ack = append(res.Ack, store.CursorMove{Name: opts.Cursor, Drive: f.Drive, Seq: res.Last})
 	}
 	if t.sent > ahead.sent {
@@ -314,6 +323,14 @@ func (t *tailRun) mark(r store.Record, folded bool) {
 	if folded {
 		t.shortened++
 	}
+}
+
+func seedOf(ctx context.Context, st *store.Store, seed, drive string) (int64, error) {
+	seq, ok, err := st.Cursor(ctx, seed, drive)
+	if err != nil || ok {
+		return seq, err
+	}
+	return st.MaxSeq(ctx)
 }
 
 func addressedCursor(cursor string) string {
