@@ -57,8 +57,10 @@ every other stop and prints the commands. The records that end a turn are
 `blocker` or `blocked`. To wait on an event, post `blocked` with `--pr`,
 `--target`, `--lane-ref`, or a `card-` id in the text; that event wakes the lane.
 A second stop with nothing new posted writes the blocker for the lane.
-A refused `cci post` stores a `blocker` holding the refusal and the refused
-words, and the lane's next stored post closes it. A new lane's first post needs
+A refused `cci post` stores a `blocker` to the posting lane holding the refusal
+and the refused words, and the lane's next stored post closes it. Root, or the
+lane's owner, hears of it only when the lane's next attempt is refused too,
+in one blocker naming both, or when the lane ends its turn with no stored post. A new lane's first post needs
 a `spawn` record naming it, or `CLAUDE_LONG_RUNNING_LANE` set to its name.
 A lane that has not started yet is addressed like any other and reads the
 record once it binds. `cci post` refuses only a never-seen bare `--to` lane

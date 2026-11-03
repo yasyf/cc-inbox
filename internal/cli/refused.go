@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -74,13 +75,20 @@ func leaveBlocker(ctx context.Context, st *store.Store, drive, lane, kind, words
 	if err != nil {
 		return cause
 	}
-	to, err := st.Escalation(ctx, onDrive, lane)
+	open, err := st.OpenRefusals(ctx, onDrive, lane)
 	if err != nil {
 		return errors.Join(cause, err)
 	}
+	to, text := []string{lane}, fmt.Sprintf("post refused: %v. It said: %s %s", cause, kind, words)
+	if first, again := store.Unescalated(open, lane); again {
+		if to, err = st.Escalation(ctx, onDrive, lane); err != nil {
+			return errors.Join(cause, err)
+		}
+		text = fmt.Sprintf("%s was refused again after it retried. First #%d: %s Then: %s", lane, first.Seq, render.Clip(first.Text, store.MaxText/2), text)
+	}
 	at := st.Now()
 	key := fnv.New64a()
-	_, _ = fmt.Fprintf(key, "%s\x00%s\x00%d", cause, words, at.Truncate(time.Hour).Unix())
+	_, _ = fmt.Fprintf(key, "%s\x00%s\x00%s\x00%d", cause, words, strings.Join(to, ","), at.Truncate(time.Hour).Unix())
 	posted, _, err := st.PostAt(ctx, store.Record{
 		ID:     fmt.Sprintf("refused:%s:%016x", lane, key.Sum64()),
 		Drive:  onDrive,
@@ -88,7 +96,7 @@ func leaveBlocker(ctx context.Context, st *store.Store, drive, lane, kind, words
 		Kind:   kinds.Blocker,
 		Topic:  store.RefusedPostTopic,
 		To:     to,
-		Text:   store.Clip(fmt.Sprintf("post refused: %v. It said: %s %s", cause, kind, words)),
+		Text:   store.Clip(text),
 		Source: "post",
 	}, 0, at)
 	if err != nil {

@@ -239,6 +239,9 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload, w io.Writer) 
 			if err != nil || refused {
 				return err
 			}
+			if err := escalateRefusal(ctx, st, b); err != nil {
+				return err
+			}
 		}
 	}
 	return st.Retire(ctx, p.Key())
@@ -360,7 +363,8 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 }
 
 // Stop holds a lane's thread until its turn can end: first on an overdue ask
-// addressed to it, then on a turn with open work and no typed record.
+// addressed to it, then on a turn with open work and no typed record. A turn
+// that ends escalates the refusal the lane never followed with a stored post.
 func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 	b, ok, err := st.Binding(ctx, p.Key())
 	if err != nil || !ok || b.Lane == "" {
@@ -370,8 +374,11 @@ func Stop(ctx context.Context, st *store.Store, p Payload, w io.Writer) error {
 	if err != nil || nudged {
 		return err
 	}
-	_, err = endTurn(ctx, st, p, b, w)
-	return err
+	refused, err := endTurn(ctx, st, p, b, w)
+	if err != nil || refused {
+		return err
+	}
+	return escalateRefusal(ctx, st, b)
 }
 
 // nudgeOverdue blocks the stop once per record, about the newest open ask,

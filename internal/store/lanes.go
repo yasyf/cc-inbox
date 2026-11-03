@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
@@ -72,8 +73,9 @@ func (s *Store) Escalation(ctx context.Context, drive, lane string) ([]string, e
 	return []string{"root"}, nil
 }
 
-// OpenRefusals returns the blockers lane's refused posts left open on drive.
-func (s *Store) OpenRefusals(ctx context.Context, drive, lane string) ([]int64, error) {
+// OpenRefusals returns the blockers lane's refused posts left open on drive,
+// oldest first.
+func (s *Store) OpenRefusals(ctx context.Context, drive, lane string) ([]Record, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT seq FROM records WHERE drive = ? AND lane = ? AND kind = ? AND topic = ? ORDER BY seq DESC LIMIT ?", drive, lane, string(kinds.Blocker), RefusedPostTopic, refusalsRead)
 	if err != nil {
 		return nil, fmt.Errorf("read the refusals of %s on %s: %w", lane, drive, err)
@@ -90,25 +92,26 @@ func (s *Store) OpenRefusals(ctx context.Context, drive, lane string) ([]int64, 
 	if err := rows.Err(); err != nil || len(seqs) == 0 {
 		return nil, err
 	}
-	open, err := s.OpenAmong(ctx, drive, seqs)
-	if err != nil {
-		return nil, err
-	}
-	seqs = seqs[:0]
-	for _, r := range open {
-		seqs = append(seqs, r.Seq)
-	}
-	return seqs, nil
+	return s.OpenAmong(ctx, drive, seqs)
 }
 
-// Resolving returns r closing seqs as well as whatever it already closes.
-func (r Record) Resolving(seqs []int64) Record {
-	for _, seq := range seqs {
+// Unescalated returns the first of lane's open refusals when every one of them
+// went only to lane, so nobody else has heard of them yet.
+func Unescalated(open []Record, lane string) (Record, bool) {
+	if len(open) == 0 || slices.ContainsFunc(open, func(r Record) bool { return !slices.Equal(r.To, []string{lane}) }) {
+		return Record{}, false
+	}
+	return open[0], true
+}
+
+// Resolving returns r closing open as well as whatever it already closes.
+func (r Record) Resolving(open []Record) Record {
+	for _, o := range open {
 		if r.Resolves == 0 {
-			r.Resolves = seq
+			r.Resolves = o.Seq
 			continue
 		}
-		r.AlsoResolves = append(r.AlsoResolves, seq)
+		r.AlsoResolves = append(r.AlsoResolves, o.Seq)
 	}
 	return r
 }
