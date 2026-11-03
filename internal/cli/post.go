@@ -39,8 +39,8 @@ var (
 )
 
 const (
-	clockLabel   = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
-	clockSkew    = 3 * time.Minute
+	clockLabel = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
+	clockSkew  = 3 * time.Minute
 )
 
 var (
