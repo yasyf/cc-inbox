@@ -442,6 +442,11 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		return readErr
 	}
 	if asJSON {
+		if matched > printed && limit >= 0 && notes != nil {
+			if _, err := fmt.Fprintf(notes, "... %d more matches; narrow with --kind, --lane or --since\n", matched-printed); err != nil {
+				return fmt.Errorf("write grep: %w", err)
+			}
+		}
 		return nil
 	}
 	if matched == 0 {
@@ -561,7 +566,7 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, drive string, budg
 		} else if err != nil {
 			return fmt.Errorf("show #%d: %w", records[i].Seq, err)
 		}
-		body = bodyAfterText(body, records[i].Text)
+		body = BodyAfterText(body, records[i].Text)
 		if share > 0 && len(body) > share {
 			body = fmt.Appendf(body[:share:share], "\n... cut %d bytes of #%d; cci show %d reads it whole", len(body)-share, records[i].Seq, records[i].Seq)
 		}
@@ -578,7 +583,7 @@ func Show(ctx context.Context, st *store.Store, seqs []int64, drive string, budg
 	return nil
 }
 
-func bodyAfterText(body []byte, text string) []byte {
+func BodyAfterText(body []byte, text string) []byte {
 	cut, spilled := strings.CutSuffix(text, "…")
 	rest, ok := bytes.CutPrefix(body, []byte(cut))
 	if !ok || cut == "" {

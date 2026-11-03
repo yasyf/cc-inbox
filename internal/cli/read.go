@@ -234,7 +234,7 @@ func newGrepCmd() *cobra.Command {
 				return err
 			}
 			f.IncludeExpired = true
-			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.width, rf.json, cmd.OutOrStdout(), tailNotes(cmd, false))
+			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.width, rf.json, cmd.OutOrStdout(), tailNotes(cmd, rf.json))
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)

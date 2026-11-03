@@ -8,4 +8,4 @@ func SetPostPatience(d time.Duration) func() {
 	return func() { postPatience = was }
 }
 
-var PostTool = postTool
+var ChannelTools = channelTools
