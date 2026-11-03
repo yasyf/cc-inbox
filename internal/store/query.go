@@ -51,6 +51,7 @@ type Filter struct {
 	IncludeExpired bool
 	Descending     bool
 	Limit          int
+	Contains       []string
 }
 
 // where renders the filter. Records in the drive pass the selectors;
@@ -132,6 +133,20 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		clauses = append(clauses, "origin = ?")
 		params = append(params, f.Origin)
 	}
+	if len(f.Contains) > 0 {
+		var holds []string
+		for _, word := range f.Contains {
+			columns := renderedColumns
+			if strings.Trim(word, "0123456789") == "" {
+				columns = renderedNumberColumns
+			}
+			for _, column := range columns {
+				holds = append(holds, column+" LIKE ?")
+				params = append(params, "%"+word+"%")
+			}
+		}
+		clauses = append(clauses, "("+strings.Join(holds, " OR ")+")")
+	}
 	for _, ref := range []struct {
 		path  string
 		value any
@@ -182,6 +197,11 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	}
 	return strings.Join(clauses, " AND "), params
 }
+
+var (
+	renderedColumns       = []string{"text", "lane", "topic", "kind", "recipients", "refs", "origin"}
+	renderedNumberColumns = slices.Concat(renderedColumns, []string{"seq", "origin_seq", "re_origin_seq", "resolves_origin_seq", "COALESCE(also_resolves, '')"})
+)
 
 func (f Filter) bounded(self string, now time.Time) (string, []any) {
 	return f.boundedAudience(self, now, false)
@@ -916,28 +936,27 @@ ON CONFLICT (path) DO UPDATE SET drive = excluded.drive, lane = excluded.lane, o
 	return nil
 }
 
-func (s *Store) CountBy(ctx context.Context, f Filter, column string) (map[string]int, error) {
-	if column != "kind" && column != "lane" {
-		panic("CountBy column must be kind or lane, got " + column)
-	}
+// Tally counts the records f passes by kind and by lane, in one read.
+func (s *Store) Tally(ctx context.Context, f Filter) (byKind, byLane map[string]int, err error) {
 	where, params := f.where(s.Self(), s.Now())
-	rows, err := s.db.QueryContext(ctx, "SELECT "+column+", COUNT(*) FROM records WHERE "+where+" GROUP BY "+column, params...)
+	rows, err := s.db.QueryContext(ctx, "SELECT kind, lane, COUNT(*) FROM records WHERE "+where+" GROUP BY kind, lane", params...)
 	if err != nil {
-		return nil, fmt.Errorf("count by %s: %w", column, err)
+		return nil, nil, fmt.Errorf("tally records: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	out := map[string]int{}
+	byKind, byLane = map[string]int{}, map[string]int{}
 	for rows.Next() {
 		var (
-			key string
-			n   int
+			kind, lane string
+			n          int
 		)
-		if err := rows.Scan(&key, &n); err != nil {
-			return nil, fmt.Errorf("scan count: %w", err)
+		if err := rows.Scan(&kind, &lane, &n); err != nil {
+			return nil, nil, fmt.Errorf("scan tally: %w", err)
 		}
-		out[key] = n
+		byKind[kind] += n
+		byLane[lane] += n
 	}
-	return out, rows.Err()
+	return byKind, byLane, rows.Err()
 }
 
 // LaneTips returns up to n non-digest lane winners in drive, ordered by newest sequence.

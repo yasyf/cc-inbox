@@ -41,24 +41,18 @@ func Digest(ctx context.Context, st *store.Store, drive string, since time.Time)
 	f := store.Filter{Drive: drive, Since: since}
 	v := DigestView{Drive: drive, Since: since}
 	var err error
-	if v.Kinds, err = st.CountBy(ctx, f, "kind"); err != nil {
-		return DigestView{}, err
-	}
-	if v.Lanes, err = st.CountBy(ctx, f, "lane"); err != nil {
+	if v.Kinds, v.Lanes, err = st.Tally(ctx, f); err != nil {
 		return DigestView{}, err
 	}
 	for _, n := range v.Kinds {
 		v.Total += n
 	}
-	open, err := st.OpenItems(ctx, drive)
+	open, untracked, older, err := st.OpenSince(ctx, drive, since)
 	if err != nil {
 		return DigestView{}, err
 	}
+	v.OlderOpen, v.Untracked = older, untracked
 	for _, r := range open {
-		if r.At.Before(since) {
-			v.OlderOpen++
-			continue
-		}
 		switch r.Kind {
 		case kinds.Hold:
 			v.Holds = append(v.Holds, r)
@@ -70,15 +64,6 @@ func Digest(ctx context.Context, st *store.Store, drive string, since time.Time)
 			v.Defects = append(v.Defects, r)
 		default:
 			v.Asks = append(v.Asks, r)
-		}
-	}
-	untracked, err := st.UntrackedHolds(ctx, drive)
-	if err != nil {
-		return DigestView{}, err
-	}
-	for _, r := range untracked {
-		if !r.At.Before(since) {
-			v.Untracked = append(v.Untracked, r)
 		}
 	}
 	if v.Latest, err = st.LatestPerLane(ctx, f, latestLanes); err != nil {

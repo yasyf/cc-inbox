@@ -430,6 +430,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	var readErr error
 	f.Descending = true
 	f.Limit = pageRows
+	f.Contains = requiredWords(pattern.String())
 	now := st.Now()
 	for {
 		records, err := query(ctx, f)
