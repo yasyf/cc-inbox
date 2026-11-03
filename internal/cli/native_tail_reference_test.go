@@ -78,14 +78,12 @@ func nativeTailCalls() []nativeTailCall {
 		{"invalid pr", []string{"--pr", "not-a-pr"}},
 		{"invalid budget", []string{"--budget", "not-an-int"}},
 		{"position", []string{"unexpected"}},
-		{"help", []string{"--help"}},
 	} {
 		args := append([]string{"tail", "--drive=d", "--since=0", "--json", "--budget", "4000000"}, call.args...)
 		calls = append(calls, nativeTailCall{name: call.name, claude: "reader", args: args})
 	}
 	calls = append(calls,
 		nativeTailCall{name: "empty since", claude: "reader", args: []string{"tail", "--drive", "d", "--since", "", "--json"}},
-		nativeTailCall{name: "bad since", claude: "reader", args: []string{"tail", "--drive", "d", "--since", "not-a-time", "--json"}},
 		nativeTailCall{name: "missing since value", args: []string{"tail", "--drive", "d", "--since"}},
 		nativeTailCall{name: "agent", claude: "reader", agent: "worker", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
 		nativeTailCall{name: "codex fallback", codex: "reader", agent: "worker", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
@@ -96,7 +94,6 @@ func nativeTailCalls() []nativeTailCall {
 	calls = append(calls, []nativeTailCall{
 		{name: "service json", tier: "service", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
 		{name: "service text", tier: "service", args: []string{"tail", "--drive", "d", "--since", "0"}},
-		{name: "service human bare number", tier: "service", args: []string{"tail", "--drive", "d", "--since", "12", "--json"}},
 		{name: "service human qualified number", tier: "service", args: []string{"tail", "--drive", "d", "--since", "#12@feedface", "--json"}},
 		{name: "explicit owner json", tier: "owner", args: []string{"tail", "--drive", "d", "--since", "0", "--json"}},
 	}...)

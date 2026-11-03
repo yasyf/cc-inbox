@@ -278,35 +278,50 @@ func (index *BoardIndex) reconcile(ctx context.Context, scope *boardScope, encod
 		return nil
 	}
 	affected := map[[2]int64]bool{}
+	opened := map[string][]int64{}
+	var matches [3]map[int64]bool
+	if cold {
+		for category, filter := range scope.spec.Filters {
+			matches[category] = boardColdMatches(ctx, tx, index.store, filter)
+		}
+		if _, err := tx.ExecContext(ctx, boardColdEffectsSQL, scope.id, scope.id, scope.id, scope.id, scope.id); err != nil {
+			return err
+		}
+	}
 	for _, seq := range changed {
-		if err := boardChangedEffects(ctx, tx, scope, seq, affected); err != nil {
-			return err
-		}
-		old, err := tx.QueryContext(ctx, "SELECT path FROM board_query_rows WHERE scope=? AND "+everyBoardCategory+" AND seq=? AND path!=''", scope.id, seq)
-		if err != nil {
-			return err
-		}
-		for old.Next() {
-			var path string
-			if err := old.Scan(&path); err != nil {
-				_ = old.Close()
+		if !cold {
+			if err := boardChangedEffects(ctx, tx, scope, seq, affected); err != nil {
 				return err
 			}
-			dirty[path] = true
-		}
-		if err := errors.Join(old.Err(), old.Close()); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_keys WHERE scope=? AND seq=?", scope.id, seq); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_rows WHERE scope=? AND "+everyBoardCategory+" AND seq=?", scope.id, seq); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_openers WHERE scope=? AND "+everyBoardCategory+" AND seq=?", scope.id, seq); err != nil {
-			return err
+			old, err := tx.QueryContext(ctx, "SELECT path FROM board_query_rows WHERE scope=? AND "+everyBoardCategory+" AND seq=? AND path!=''", scope.id, seq)
+			if err != nil {
+				return err
+			}
+			for old.Next() {
+				var path string
+				if err := old.Scan(&path); err != nil {
+					_ = old.Close()
+					return err
+				}
+				dirty[path] = true
+			}
+			if err := errors.Join(old.Err(), old.Close()); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_keys WHERE scope=? AND seq=?", scope.id, seq); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_rows WHERE scope=? AND "+everyBoardCategory+" AND seq=?", scope.id, seq); err != nil {
+				return err
+			}
+			if _, err := tx.ExecContext(ctx, "DELETE FROM board_query_openers WHERE scope=? AND "+everyBoardCategory+" AND seq=?", scope.id, seq); err != nil {
+				return err
+			}
 		}
 		for category, filter := range scope.spec.Filters {
+			if cold && matches[category] != nil && !matches[category][seq] {
+				continue
+			}
 			filter.IncludeExpired = true
 			where, params := filter.where(index.store.Self(), index.store.Now())
 			params = append([]any{seq}, params...)
@@ -352,12 +367,20 @@ func (index *BoardIndex) reconcile(ctx context.Context, scope *boardScope, encod
 				return err
 			}
 			affected[[2]int64{int64(category), seq}] = true
+			if seqs := opened[record.Drive]; len(seqs) == 0 || seqs[len(seqs)-1] != seq {
+				opened[record.Drive] = append(seqs, seq)
+			}
 			if err := boardPutKeys(ctx, tx, scope, category, record, nil); err != nil {
 				return err
 			}
 		}
 	}
-	if err := boardAnnotateErrors(ctx, tx, index.store, scope, affected); err != nil {
+	if cold {
+		err = boardAnnotateColdErrors(ctx, tx, index.store, scope, opened)
+	} else {
+		err = boardAnnotateErrors(ctx, tx, index.store, scope, affected)
+	}
+	if err != nil {
 		return err
 	}
 	paths := make([]string, 0, len(dirty))
