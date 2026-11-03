@@ -297,6 +297,9 @@ func newPostCmd() *cobra.Command {
 	f.Int64SliceVar(&resolvesSeqs, "resolves-seq", nil, "internal store sequences this record resolves")
 	_ = f.MarkHidden("re-seq")
 	_ = f.MarkHidden("resolves-seq")
+	// TODO: delete once no live brief passes --stamp; every record is stamped now, and refusing it stopped lanes' holds mid-incident.
+	f.Bool("stamp", false, "ignored: cci stamps every record")
+	_ = f.MarkHidden("stamp")
 	cmd.MarkFlagsMutuallyExclusive("re", "re-seq")
 	cmd.MarkFlagsMutuallyExclusive("resolves", "resolves-seq")
 	f.BoolVar(&pairwise, "pairwise", false, "pair equal non-empty --re and --resolves lists in order, posting one record per pair")
