@@ -49,16 +49,37 @@ func launchedLane(ctx context.Context, st *store.Store, k store.PeerKey, b store
 	return launched == 1, st.SetCursor(ctx, name, b.Drive, launched)
 }
 
+func landedClear(ctx context.Context, st *store.Store, r store.Record) (bool, error) {
+	waits, err := st.Query(ctx, store.Filter{Drive: r.Drive, Lanes: []string{r.Lane}, Kinds: waitsOnSome, IncludeExpired: true})
+	if err != nil {
+		return false, err
+	}
+	seqs := make([]int64, len(waits))
+	for i, w := range waits {
+		seqs[i] = w.Seq
+	}
+	open, err := st.OpenAmong(ctx, r.Drive, seqs)
+	if err != nil || len(open) > 0 {
+		return false, err
+	}
+	pr, err := st.OpenPR(ctx, r.Drive, r.Lane)
+	return !pr, err
+}
+
 func standing(brief string) bool {
 	text, err := os.ReadFile(brief) //nolint:gosec // G304: the path is the brief the lane's own spawn record names.
 	return err == nil && standingDuty.Match(text)
 }
 
 // settled reports whether r ends a turn: the lane finished, stopped or handed
-// off, or it waits on an ask, blocker or blocked record nobody closed yet.
+// off, it waits on an ask, blocker or blocked record nobody closed yet, or it
+// landed with no PR, ask or blocker of its own still open.
 func settled(ctx context.Context, st *store.Store, r store.Record) (bool, error) {
 	if slices.Contains(endsWork, r.Kind) {
 		return true, nil
+	}
+	if r.Kind == kinds.Landed {
+		return landedClear(ctx, st, r)
 	}
 	if !slices.Contains(waitsOnSome, r.Kind) {
 		return false, nil
@@ -100,10 +121,10 @@ func endTurn(ctx context.Context, st *store.Store, p Payload, b store.Binding, w
 	if seen && refused == newest.Seq {
 		return false, unsettledBlocker(ctx, st, p, b, newest)
 	}
-	if err := json.NewEncoder(w).Encode(map[string]string{"decision": "block", "reason": openWork(b, newest, found)}); err != nil {
+	if err := st.SetCursor(ctx, cursor, b.Drive, newest.Seq); err != nil {
 		return false, err
 	}
-	return true, st.SetCursor(ctx, cursor, b.Drive, newest.Seq)
+	return true, json.NewEncoder(w).Encode(map[string]string{"decision": "block", "reason": openWork(b, newest, found)})
 }
 
 func openWork(b store.Binding, newest store.Record, found bool) string {
@@ -118,6 +139,7 @@ func openWork(b store.Binding, newest store.Record, found bool) string {
 	return strings.Join([]string{
 		lead + " Post the one record that is true, then stop:",
 		post + " --kind done --text '<what it delivered>'   # finished; a PR still open keeps the lane parked until it lands",
+		post + " --kind landed --pr <n> --text '<what merged>'   # merged; it ends the turn once no PR, ask or blocker of yours is open",
 		post + " --kind stopped --text '<why>'   # ended on purpose; it gets no successor",
 		post + " --kind blocked --pr <n> | --target <target> | --lane-ref <lane> --text '<what you wait on>'   # the supervisor resumes you when that lands, releases or ends",
 		post + " --kind ask --to <who> --text '<question>'   # the answer resumes you",

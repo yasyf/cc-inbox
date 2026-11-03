@@ -133,6 +133,45 @@ func TestATurnEndsOnATypedRecord(t *testing.T) {
 	}
 }
 
+func TestALandedLaneEndsUnlessItsOwnWorkIsOpen(t *testing.T) {
+	pr := func(n int) store.Refs { return store.Refs{PRs: []store.PR{{Number: n}}} }
+	for name, tc := range map[string]struct {
+		before []store.Record
+		held   bool
+	}{
+		"nothing open":    {before: []store.Record{{Kind: kinds.Opened, Refs: pr(41), Text: "opened #41"}}},
+		"another PR open": {before: []store.Record{{Kind: kinds.Opened, Refs: pr(41), Text: "opened #41"}, {Kind: kinds.Opened, Refs: pr(42), Text: "opened #42"}}, held: true},
+		"its ask open":    {before: []store.Record{{Kind: kinds.Opened, Refs: pr(41), Text: "opened #41"}, {Kind: kinds.Ask, To: []string{"meta-desk-2"}, Text: "tag it?"}}, held: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			launch(t, st, quietLane, "/briefs/fix-lane-1.md")
+			p := bindLane(t, st, quietLane)
+			for _, r := range tc.before {
+				r.Lane = quietLane
+				testutil.Post(t, st, r)
+			}
+			testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Landed, To: []string{"meta-desk-2"}, Refs: pr(41), Text: "landed #41"})
+			if got := stopReason(t, st, p); (got != "") != tc.held {
+				t.Fatalf("stop = %q; want held %v", got, tc.held)
+			}
+		})
+	}
+}
+
+func TestAStopOnAStoreItCannotReadPasses(t *testing.T) {
+	st, _ := testutil.Store(t)
+	launch(t, st, quietLane, "/briefs/fix-lane-1.md")
+	p := bindLane(t, st, quietLane)
+	testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Report, Text: "working"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var out bytes.Buffer
+	if err := hook.Stop(ctx, st, p, &out); err != nil || out.Len() != 0 {
+		t.Fatalf("stop = %q, %v; want it to pass", out.String(), err)
+	}
+}
+
 func TestAnAnsweredWaitNoLongerEndsATurn(t *testing.T) {
 	st, _ := testutil.Store(t)
 	launch(t, st, quietLane, "/briefs/fix-lane-1.md")

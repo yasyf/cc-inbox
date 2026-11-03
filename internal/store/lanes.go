@@ -26,6 +26,19 @@ func (s *Store) NewestOfLane(ctx context.Context, drive, lane string) (Record, b
 	return s.newest(ctx, "drive = ? AND lane = ? AND kind NOT IN (?, ?, ?) AND NOT (kind = ? AND json_extract(refs, '$.ccn') IS NOT NULL)", drive, lane, string(kinds.Claim), string(kinds.Peer), string(kinds.Digest), string(kinds.Handoff))
 }
 
+// OpenPR reports whether lane opened a PR on drive that it has not posted
+// landed for since.
+func (s *Store) OpenPR(ctx context.Context, drive, lane string) (bool, error) {
+	var open bool
+	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM records o, json_each(o.refs, '$.prs') p WHERE o.drive = ? AND o.lane = ? AND o.kind = ?
+AND NOT EXISTS (SELECT 1 FROM records l, json_each(l.refs, '$.prs') q WHERE l.drive = o.drive AND l.lane = o.lane AND l.kind = ? AND l.seq > o.seq AND q.value = p.value))`,
+		drive, lane, string(kinds.Opened), string(kinds.Landed)).Scan(&open)
+	if err != nil {
+		return false, fmt.Errorf("read the open PRs of %s on %s: %w", lane, drive, err)
+	}
+	return open, nil
+}
+
 func (s *Store) newest(ctx context.Context, where string, args ...any) (Record, bool, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+columns+" FROM records WHERE "+where+" ORDER BY seq DESC LIMIT 1", args...)
 	if err != nil {

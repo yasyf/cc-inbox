@@ -178,6 +178,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci hook stop` lets a launched lane end its turn on `landed` once it has no
+  open PR, ask or blocker of its own, so a helper whose last record is `landed`
+  stops without a refusal. A stop that cannot read the store passes with a
+  warning instead of failing the hook.
+
 - `cci show` with no `--drive`, on a node joined to a relay and bound to no
   drive, reads through on the one drive its relay carries, and names the
   drives when it carries several.
