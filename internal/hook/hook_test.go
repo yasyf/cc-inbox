@@ -221,6 +221,30 @@ func TestPostToolUseDeliversEveryKindAddressedToTheLane(t *testing.T) {
 	}
 }
 
+func TestPostToolUseDeliversToTheSubscriptionReaderNotTheLaneTheSessionPostedAs(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	started := clock.Now()
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "lane-a", Kind: kinds.Stopped, To: []string{"root"}, Text: "for the coordinator"})
+	testutil.Post(t, st, store.Record{Lane: "lane-a", Kind: kinds.Stopped, To: []string{"owner-relay"}, Text: "for the relay"})
+	k := store.PeerKey{Session: "s1"}
+	if err := st.BindLane(ctx, k, "d", "root", started); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: store.Window{PID: 100, Started: 1}, Drive: "d", Reader: "owner-relay", Cursor: "relay-watch"}); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "cci records addressed to owner-relay; act on each") || !strings.Contains(got, "STOPPED lane-a -> owner-relay for the relay") || strings.Contains(got, "for the coordinator") {
+		t.Fatalf("additionalContext = %q; want only the record addressed to the subscription's reader owner-relay", got)
+	}
+}
+
 func TestPostToolUseDeliversBroadcastKindsOnlyToTheirFirstAddressee(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()

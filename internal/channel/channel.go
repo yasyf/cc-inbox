@@ -198,9 +198,10 @@ func hookMail(ctx context.Context, st *store.Store, sub store.Subscription, chan
 	}
 	k := store.PeerKey{Session: sub.Session}
 	b, ok, err := st.Binding(ctx, k)
-	if err != nil || !ok || b.Lane == "" || b.Drive != sub.Drive || !store.SameLane(b.Lane, sub.Reader) {
+	if err != nil || !ok || b.Lane == "" || b.Drive != sub.Drive {
 		return laneMail{}, false, err
 	}
+	b.Lane = sub.Reader
 	start, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive)
 	if err != nil {
 		return laneMail{}, false, err
