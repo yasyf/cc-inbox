@@ -60,7 +60,7 @@ CASE WHEN n=1 THEN ? ELSE '{"payload":"tiny"}' END,
 					t.Fatalf("Body projection changed query plan: full=%v text=%v", fullPlan, textPlan)
 				}
 				plan := strings.Join(textPlan, "\n")
-				for _, index := range []string{"records_drive_kind", "record_recipients_address", "record_json_errors_field"} {
+				for _, index := range []string{"records_drive_lane", "record_recipients_address", "record_json_errors_field"} {
 					if !strings.Contains(plan, index) {
 						t.Fatalf("Tail plan lacks %s: %s", index, plan)
 					}

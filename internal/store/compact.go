@@ -105,7 +105,7 @@ func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([
 	if err != nil {
 		return nil, err
 	}
-	closers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Closers(), IncludeExpired: true})
+	closers, err := s.closureRows(ctx, drive, kinds.Closers())
 	if err != nil {
 		return nil, err
 	}
@@ -154,11 +154,91 @@ func incidentTargets(r Record) []int64 {
 }
 
 func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
-	openers, err := s.Query(ctx, Filter{Drive: drive, Kinds: kinds.Openers(), IncludeExpired: true})
+	openers, err := s.closureRows(ctx, drive, kinds.Openers())
 	if err != nil {
 		return nil, err
 	}
-	return s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !keep(o) }))
+	open, err := s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !keep(o) }))
+	if err != nil {
+		return nil, err
+	}
+	seqs := make([]int64, len(open))
+	for i, o := range open {
+		seqs[i] = o.Seq
+	}
+	return s.RecordsAmong(ctx, drive, seqs)
+}
+
+// OpenSince is what a digest shows of drive's open items: the whole records
+// opened since since, tracked and untracked holds apart, and how many tracked
+// ones are older, read from one pass over the drive's openers and closers.
+func (s *Store) OpenSince(ctx context.Context, drive string, since time.Time) (open, untracked []Record, older int, err error) {
+	openers, err := s.closureRows(ctx, drive, kinds.Openers())
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	unclosed, err := s.unclosed(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() && o.Kind != kinds.Hold }))
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	var seqs []int64
+	for _, o := range unclosed {
+		switch {
+		case !o.At.Before(since):
+			seqs = append(seqs, o.Seq)
+		case o.Tracked():
+			older++
+		}
+	}
+	recent, err := s.RecordsAmong(ctx, drive, seqs)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	for _, r := range recent {
+		if r.Tracked() {
+			open = append(open, r)
+		} else {
+			untracked = append(untracked, r)
+		}
+	}
+	return open, untracked, older, nil
+}
+
+const closureColumns = "seq, kind, at, topic, re, resolves, COALESCE(also_resolves, ''), refs, source"
+
+// closureRows reads drive's records of ks in seq order, with only the columns
+// that open or close an item, for reads that touch every opener and closer.
+func (s *Store) closureRows(ctx context.Context, drive string, ks []kinds.Kind) ([]Record, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+closureColumns+" FROM records WHERE drive = ? AND kind IN ("+placeholders(len(ks))+") ORDER BY seq", append([]any{drive}, kindArgs(ks)...)...)
+	if err != nil {
+		return nil, fmt.Errorf("read closure rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []Record
+	for rows.Next() {
+		var (
+			r               Record
+			kind, also, ref string
+			at              int64
+		)
+		if err := rows.Scan(&r.Seq, &kind, &at, &r.Topic, &r.Re, &r.Resolves, &also, &ref, &r.Source); err != nil {
+			return nil, fmt.Errorf("scan closure row: %w", err)
+		}
+		r.Kind = kinds.Kind(kind)
+		r.At = time.UnixMilli(at).UTC()
+		if also != "" {
+			if err := json.Unmarshal([]byte(also), &r.AlsoResolves); err != nil {
+				return nil, fmt.Errorf("decode also_resolves of #%d: %w", r.Seq, err)
+			}
+		}
+		if strings.Contains(ref, `"stacks"`) || strings.Contains(ref, `"targets"`) {
+			if err := json.Unmarshal([]byte(ref), &r.Refs); err != nil {
+				return nil, fmt.Errorf("decode refs of #%d: %w", r.Seq, err)
+			}
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 type closerIndex struct {
