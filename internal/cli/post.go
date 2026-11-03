@@ -73,7 +73,7 @@ func newPostCmd() *cobra.Command {
 				return fmt.Errorf("post takes its text as one quoted argument or --text; got %d arguments", len(args))
 			case len(args) == 1 && cmd.Flags().Changed("text"):
 				return fmt.Errorf("post takes its text once: as an argument or --text, not both")
-			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path") && !cmd.Flags().Changed("head"):
+			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path") && !cmd.Flags().Changed("head") && !cmd.Flags().Changed("quoted"):
 				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
 			}
 			if !cmd.Flags().Changed("kind") {
@@ -150,7 +150,11 @@ func newPostCmd() *cobra.Command {
 			if err := refuseProseEnd(k, text, lane); err != nil {
 				return err
 			}
-			if quoted != "" {
+			switch {
+			case quoted == "":
+			case text == "":
+				text = quoted
+			default:
 				text += " " + quoted
 			}
 			if len(heads) > 0 {
@@ -327,7 +331,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&bodyFile, "body-file", "", "JSON body of at most 64 KiB, from a file or - for stdin")
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
-	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space; cci checks no time, {at} or withdrawal in them, and keeps checking the text's own words")
+	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space, or the whole text when no other is given; cci checks no time, {at} or withdrawal in them, and keeps checking the text's own words")
 	f.BoolVar(&label, "stamp", false, "cci writes the leading H:MM AM/PM label from the post's own clock: it replaces a typed leading label, or opens the text when it has none")
 	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
 	_ = cmd.MarkFlagRequired("kind")

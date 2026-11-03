@@ -73,6 +73,9 @@ type view struct {
 func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
 	out := make([]string, len(records))
 	folded := make([]bool, len(records))
+	if err := Expand(ctx, st, records); err != nil {
+		return nil, nil, err
+	}
 	if v.JSON {
 		if err := Annotate(ctx, st, records); err != nil {
 			return nil, nil, err

@@ -526,6 +526,23 @@ func TestPostRefusesALeadingTimeLabelOffTheClockUnlessStamped(t *testing.T) {
 	}
 }
 
+func TestPostWithOnlyQuotedWordsStoresThemAsTheTextUnchecked(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	words := "run it at " + time.Now().Add(7*time.Minute).Format("3:04 PM") + ", not {at}"
+	out, err := run(t, "post", "--json", "--drive", "release-v3", "--lane", "owner-relay", "--kind", "owner", "--id", "owner:m47", "--quoted", words)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var got posted
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &got); err != nil {
+		t.Fatalf("post --json = %q: %v", out, err)
+	}
+	if got.Text != words {
+		t.Fatalf("post --quoted stored %q, want his words %q unchanged", got.Text, words)
+	}
+}
+
 func TestPostRefusesAGoWithdrawalWrittenAsProse(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	post := func(args ...string) (string, error) {
