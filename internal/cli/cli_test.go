@@ -2001,31 +2001,39 @@ func TestASecondThreadCannotBindALiveLane(t *testing.T) {
 			t.Setenv(name, "")
 		}
 	}
-	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--kind", "defect", "--json")
+	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--kind", "defect", "--kind", "stand-down", "--json")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var got []string
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		var r struct {
-			To   []string `json:"to"`
-			Text string   `json:"text"`
+			Kind   string   `json:"kind"`
+			Lane   string   `json:"lane"`
+			To     []string `json:"to"`
+			Text   string   `json:"text"`
+			Fields struct {
+				Attrs map[string]string `json:"attrs"`
+			} `json:"fields"`
 		}
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			t.Fatalf("%q: %v", line, err)
 		}
-		for _, head := range []string{"second binder of p8a-step7 refused", "p8a-step7-2 bound while its predecessor p8a-step7,"} {
+		for _, head := range []string{"second binder of p8a-step7 refused", "p8a-step7 stood down for p8a-step7-2, which registered under p8a-step7 while p8a-step7, thread p8a-step7 48c3b7bf-holder/ap8a-step7, was live"} {
 			if strings.HasPrefix(r.Text, head) {
-				got = append(got, head+" to "+strings.Join(r.To, ","))
+				got = append(got, fmt.Sprintf("%s by %s to %s successor %q: %s", r.Kind, r.Lane, strings.Join(r.To, ","), r.Fields.Attrs["successor"], head))
 			}
 		}
 	}
 	slices.Sort(got)
-	if want := []string{"p8a-step7-2 bound while its predecessor p8a-step7, to p8a-step7-2", "second binder of p8a-step7 refused to root"}; !slices.Equal(got, want) {
-		t.Fatalf("defects = %q, want %q: the refusal reaches root and the successor's notice reaches the successor alone", got, want)
+	if want := []string{
+		`defect by p8a-step7 to root successor "": second binder of p8a-step7 refused`,
+		`stand-down by registry to p8a-step7,p8a-step7-2 successor "p8a-step7-2": p8a-step7 stood down for p8a-step7-2, which registered under p8a-step7 while p8a-step7, thread p8a-step7 48c3b7bf-holder/ap8a-step7, was live`,
+	}; !slices.Equal(got, want) {
+		t.Fatalf("records = %q, want %q: the refusal reaches root, and the successor's registration stands its live predecessor down for it", got, want)
 	}
-	if !strings.Contains(out, "lr request stand-down p8a-step7 --successor p8a-step7-2 --by p8a-step7-2 --last-read") {
-		t.Fatalf("the successor's notice = %s; want the command that takes the predecessor over", out)
+	if out, err := run(t, "who", "--all", "--lane", "p8a-step7"); err != nil || !strings.Contains(out, " stood-down successor=p8a-step7-2 ") {
+		t.Fatalf("who --lane p8a-step7 = %s, %v; want it stood down for p8a-step7-2", out, err)
 	}
 	if out, err := run(t, "who", "--all", "--lane", "p8a-step7", "--json"); err != nil || strings.Contains(out, "019a3c3e-duplicate") {
 		t.Fatalf("who --lane p8a-step7 = %s, %v; want the refused thread unbound", out, err)
