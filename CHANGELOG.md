@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A numbered lane that registers while its live predecessor holds the stem
+  stands that predecessor down for itself at once: cci posts the
+  `stand-down --successor` as lane `registry`, so mail to either name reaches
+  the successor with no `lr request stand-down` step. The predecessor posts its
+  handoff and stops. A second thread binding the same lane is still refused, and
+  root still hears that `defect`.
+
 ### Removed
 
 - No clock in a post's text refuses it any more. A leading `H:MM AM/PM` label
