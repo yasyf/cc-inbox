@@ -234,6 +234,9 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 			}
 		}
 		if err := held.flush(watchCtx); err != nil {
+			if watchCtx.Err() != nil {
+				return errStale
+			}
 			return err
 		}
 		meta := map[string]string{"seq": strconv.FormatInt(r.Seq, 10), "kind": string(r.Kind), "lane": r.Lane}

@@ -566,7 +566,7 @@ func TestPostToolUseLeadsWithTheOpenAsksBehindABacklog(t *testing.T) {
 		testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: fmt.Sprintf("ask %d", i)})
 	}
 	testutil.Post(t, st, store.Record{Kind: kinds.Decide, To: []string{"root@d"}, Text: "merge it now?"})
-	for i := range 40 {
+	for i := range 200 {
 		testutil.Post(t, st, store.Record{Lane: "lane-b", Kind: kinds.State, To: []string{"root"}, Text: fmt.Sprintf("backlog %d", i)})
 	}
 	clock.Advance(3 * time.Minute)
@@ -582,7 +582,7 @@ func TestPostToolUseLeadsWithTheOpenAsksBehindABacklog(t *testing.T) {
 		t.Fatalf("the newest open ask does not lead: %q", got)
 	}
 	open, replay, ok := strings.Cut(got, "cci records addressed to root; act on each:\n")
-	if !ok || strings.Contains(replay, "backlog 39") || strings.Contains(replay, "which branch?") {
+	if !ok || strings.Contains(replay, "backlog 199") || strings.Contains(replay, "which branch?") {
 		t.Fatalf("cursor replay changed: %q", got)
 	}
 	if !strings.Contains(open, "merge it now?") || !strings.Contains(open, "ask 2") || strings.Contains(open, "ask 1 ") || !strings.Contains(open, "... 2 older open asks") {
