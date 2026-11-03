@@ -139,6 +139,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On a node joined to a relay, `cci show` of a record the store lacks, such as
+  one a Sprite replica missed because it was posted before the Sprite joined,
+  reads it from the relay's log, body included, and prints it without storing
+  it. `cci tail --since` from such a record reads that origin's records from
+  the relay up to the store's first record of it, then the store's own, as one
+  list under the usual filters and budget. A number no relay holds keeps its
+  error.
+
 - A typed kind whose audience includes `lane`, such as `lr.item` and `lr.note`,
   reaches any lane by name again, and never a role such as `root`. The store
   refused every `lr.item` addressed to a lane.

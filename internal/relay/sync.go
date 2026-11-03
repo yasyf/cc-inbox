@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 const (
 	pushBatch = 25
 	pullMax   = 10
+	logPage   = 100
 )
 
 var ErrEpochTaken = errors.New("relay: another owner rotated to this epoch first")
@@ -402,49 +404,19 @@ func (n *Node) pushBatch(ctx context.Context, configs []Config, batch []store.Ro
 
 func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 	var total store.Applied
-	var oo struct {
-		Origins []struct {
-			Origin string `json:"origin"`
-		} `json:"origins"`
-	}
-	q := url.Values{"mesh": {n.Config.Mesh}, "drive": {drive}}
-	if err := n.client().Call(ctx, http.MethodGet, "/v1/log/origins?"+q.Encode(), nil, &oo); err != nil {
-		return total, err
-	}
-	if err := n.RefreshKeys(ctx); err != nil {
-		return total, err
-	}
-	members, err := n.Members(ctx)
+	origins, err := n.origins(ctx, drive)
 	if err != nil {
 		return total, err
 	}
-	keys, err := n.Keyring.Keys(n.Config.Mesh, n.keyHolder(), members)
+	l, err := n.logReader(ctx)
 	if err != nil {
-		slog.Warn("relay keyring holds an unusable wrap", "mesh", n.Config.Mesh, "err", err)
+		return total, err
 	}
-	for _, o := range oo.Origins {
-		var after int64
-		for {
-			var lr struct {
-				Envelopes []e2e.Envelope `json:"envelopes"`
-				More      bool           `json:"more"`
-			}
-			lq := url.Values{
-				"mesh": {n.Config.Mesh}, "drive": {drive}, "origin": {o.Origin},
-				"after": {strconv.FormatInt(after, 10)}, "limit": {"100"},
-			}
-			if err := n.client().Call(ctx, http.MethodGet, "/v1/log?"+lq.Encode(), nil, &lr); err != nil {
-				return total, err
-			}
+	for _, origin := range origins {
+		for after, more := int64(0), true; more; {
 			var rows []store.Row
-			for _, e := range lr.Envelopes {
-				after = max(after, e.OriginSeq)
-				r, err := n.open(e, keys, members)
-				if err != nil {
-					slog.Warn("relay log record skipped", "mesh", n.Config.Mesh, "drive", drive, "err", err)
-					continue
-				}
-				rows = append(rows, r)
+			if rows, after, more, err = l.page(ctx, drive, origin, after, logPage); err != nil {
+				return total, err
 			}
 			a, err := n.Store.Apply(ctx, rows, nil)
 			if err != nil {
@@ -454,12 +426,124 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 			total.Duplicate += a.Duplicate
 			total.Buffered += a.Buffered
 			total.Released += a.Released
-			if !lr.More || len(lr.Envelopes) == 0 {
-				break
-			}
 		}
 	}
 	return total, nil
+}
+
+// Find reads the record num names on drive from the relay's log: an owner's
+// record for a bare number, else the record of the origin num's tag starts.
+func (n *Node) Find(ctx context.Context, drive string, num store.Number) (store.Row, bool, error) {
+	origins, err := n.origins(ctx, drive)
+	if err != nil {
+		return store.Row{}, false, err
+	}
+	l, err := n.logReader(ctx)
+	if err != nil {
+		return store.Row{}, false, err
+	}
+	for _, origin := range origins {
+		if num.Tag == "" && l.members[origin].Tier != e2e.TierOwner || num.Tag != "" && !strings.HasPrefix(origin, num.Tag) {
+			continue
+		}
+		rows, _, _, err := l.page(ctx, drive, origin, num.Seq-1, 1)
+		if err != nil {
+			return store.Row{}, false, err
+		}
+		if len(rows) == 1 && rows[0].OriginSeq == num.Seq {
+			return rows[0], true, nil
+		}
+	}
+	return store.Row{}, false, nil
+}
+
+// Range reads origin's records on drive from the relay's log, oldest first,
+// from origin_seq after up to before, or to the log's end when before is 0.
+func (n *Node) Range(ctx context.Context, drive, origin string, after, before int64) ([]store.Row, error) {
+	l, err := n.logReader(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var out []store.Row
+	for more := true; more && (before == 0 || after < before-1); {
+		limit := logPage
+		if before > 0 {
+			limit = int(min(int64(limit), before-after-1))
+		}
+		var rows []store.Row
+		if rows, after, more, err = l.page(ctx, drive, origin, after, limit); err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if before == 0 || r.OriginSeq < before {
+				out = append(out, r)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (n *Node) origins(ctx context.Context, drive string) ([]string, error) {
+	var oo struct {
+		Origins []struct {
+			Origin string `json:"origin"`
+		} `json:"origins"`
+	}
+	q := url.Values{"mesh": {n.Config.Mesh}, "drive": {drive}}
+	if err := n.client().Call(ctx, http.MethodGet, "/v1/log/origins?"+q.Encode(), nil, &oo); err != nil {
+		return nil, err
+	}
+	out := make([]string, len(oo.Origins))
+	for i, o := range oo.Origins {
+		out[i] = o.Origin
+	}
+	return out, nil
+}
+
+type logReader struct {
+	n       *Node
+	keys    map[uint64]e2e.GroupKey
+	members map[string]e2e.Member
+}
+
+func (n *Node) logReader(ctx context.Context) (logReader, error) {
+	if err := n.RefreshKeys(ctx); err != nil {
+		return logReader{}, err
+	}
+	members, err := n.Members(ctx)
+	if err != nil {
+		return logReader{}, err
+	}
+	keys, err := n.Keyring.Keys(n.Config.Mesh, n.keyHolder(), members)
+	if err != nil {
+		slog.Warn("relay keyring holds an unusable wrap", "mesh", n.Config.Mesh, "err", err)
+	}
+	return logReader{n: n, keys: keys, members: members}, nil
+}
+
+func (l logReader) page(ctx context.Context, drive, origin string, after int64, limit int) ([]store.Row, int64, bool, error) {
+	var lr struct {
+		Envelopes []e2e.Envelope `json:"envelopes"`
+		More      bool           `json:"more"`
+	}
+	q := url.Values{
+		"mesh": {l.n.Config.Mesh}, "drive": {drive}, "origin": {origin},
+		"after": {strconv.FormatInt(after, 10)}, "limit": {strconv.Itoa(limit)},
+	}
+	if err := l.n.client().Call(ctx, http.MethodGet, "/v1/log?"+q.Encode(), nil, &lr); err != nil {
+		return nil, after, false, err
+	}
+	var rows []store.Row
+	for _, e := range lr.Envelopes {
+		after = max(after, e.OriginSeq)
+		r, err := l.n.open(e, l.keys, l.members)
+		if err != nil {
+			slog.Warn("relay log record skipped", "mesh", l.n.Config.Mesh, "drive", drive, "err", err)
+			continue
+		}
+		rows = append(rows, r)
+	}
+	return rows, after, lr.More && len(lr.Envelopes) > 0, nil
 }
 
 func accounted(envs []e2e.Envelope, pr pushResponse) error {

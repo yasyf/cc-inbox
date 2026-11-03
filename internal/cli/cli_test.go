@@ -1490,7 +1490,7 @@ func TestShowPrintsEachRecordsTextOnceWithinItsBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(out, "LAST WORD") || !strings.Contains(out, "cci show 2 reads it whole") {
+	if strings.Contains(out, "LAST WORD") || !strings.Contains(out, "cci show #2 reads it whole") {
 		t.Errorf("show 1 2 --budget 200 = %q, want #2's body cut with the show that reads it whole", out)
 	}
 	if _, err := run(t, "show", "1", "--drive", "other"); err == nil || !strings.Contains(err.Error(), "#1 is on drive release-v3") {
