@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -351,8 +352,44 @@ func TestSyncBackfillsADriveFromTheLog(t *testing.T) {
 	if err != nil || got.Inserted != 3 {
 		t.Fatalf("sync = %+v, %v; want 3 inserted", got, err)
 	}
-	if again, err := late.node.Sync(context.Background(), "d"); err != nil || again.Inserted != 0 || again.Duplicate != 3 {
-		t.Fatalf("second sync = %+v, %v; want 3 duplicates", again, err)
+	if again, err := late.node.Sync(context.Background(), "d"); err != nil || again.Inserted != 0 || again.Duplicate != 0 {
+		t.Fatalf("second sync = %+v, %v; want nothing read past its cursor", again, err)
+	}
+	for i := range 2 {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("after the restart %d", i)})
+	}
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := relay.Open(late.st.HomeDir(), late.st, late.id, mustConfig(t, late))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed, err := restarted.Sync(context.Background(), "d"); err != nil || resumed.Inserted != 2 || resumed.Duplicate != 0 {
+		t.Fatalf("sync after a restart = %+v, %v; want only the 2 new records", resumed, err)
+	}
+}
+
+func TestSyncDoesNotMovePastARecordItCouldNotReadYet(t *testing.T) {
+	srv, a, _, _ := mesh(t)
+	for i := range 3 {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("note %d", i)})
+	}
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a)
+	join(t, srv, late)
+	if early, err := late.node.Sync(context.Background(), "d"); err != nil || early.Inserted != 0 {
+		t.Fatalf("sync before the group key = %+v, %v; want nothing readable", early, err)
+	}
+	if err := a.node.Share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := late.node.Sync(context.Background(), "d"); err != nil || got.Inserted != 3 {
+		t.Fatalf("sync once the key arrived = %+v, %v; want the 3 records the cursor stayed behind", got, err)
 	}
 }
 
@@ -519,5 +556,24 @@ func TestDelegatedInstanceReopensWithoutTheServiceKeyInItsEnvironment(t *testing
 	}
 	if got := pull(t, a); got.Inserted != 1 {
 		t.Fatalf("owner inserted %d instance records, want 1", got.Inserted)
+	}
+	first := reopened.Config.Delegation.Expires
+	if err := reopened.Renew(context.Background()); err != nil {
+		t.Fatalf("renew near expiry without $%s: %v", relay.ServiceKeyEnv, err)
+	}
+	renewed := mustConfig(t, job).Delegation
+	if renewed.Expires == first || !slices.Equal(renewed.Drives, []string{"page:*"}) {
+		t.Fatalf("renewed delegation = %+v; want a later expiry on the same drives", renewed)
+	}
+	if err := reopened.Renew(context.Background()); err != nil || mustConfig(t, job).Delegation.Expires != renewed.Expires {
+		t.Fatalf("a fresh delegation renewed again: %v", err)
+	}
+	testutil.Post(t, st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "after the renewal"})
+	again, err := relay.Open(st.HomeDir(), st, id, mustConfig(t, job))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := again.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 {
+		t.Fatalf("push on the renewed delegation = %+v, %v; want 1", res, err)
 	}
 }
