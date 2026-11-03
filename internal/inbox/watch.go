@@ -11,8 +11,6 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-// feedRetry is how long a watch whose feed went away reads the store itself
-// before it tries the feed again.
 const feedRetry = 10 * time.Second
 
 var errWatchStopped = errors.New("watch stopped")
