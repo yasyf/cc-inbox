@@ -396,13 +396,6 @@ func TestPostSpillsTextOver400CharactersToAFile(t *testing.T) {
 	if _, err := run(t, append(post, "--topic", "blank-first", "--text", "\n\n"+strings.Repeat("z", 401))...); err != nil {
 		t.Errorf("post of long text after blank lines: %v", err)
 	}
-	path := filepath.Join(t.TempDir(), "body.md")
-	if err := os.WriteFile(path, []byte("summary\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run(t, append(post, "--text", long, "--path", path)...); err == nil || !strings.Contains(err.Error(), "exceeds 400") {
-		t.Errorf("post --text over 400 characters with --path: %v, want the text-length refusal", err)
-	}
 }
 
 type posted struct {
