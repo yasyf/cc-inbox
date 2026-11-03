@@ -28,6 +28,10 @@ const (
 // Record is one stored record, the value cci tail --json prints.
 type Record = store.Record
 
+// BusDown is the error Post returns when the store did not take a post. With
+// Path set, the next post that reaches the bus stores the copy kept there.
+type BusDown = cli.BusDown
+
 // Draft is one record to post. Kind is a cci kind or a dotted service kind such
 // as lr.grade; Body, when set, is a JSON value of at most 64 KiB; a repost of an
 // ID already in the drive returns the stored record.
