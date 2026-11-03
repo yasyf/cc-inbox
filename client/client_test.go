@@ -246,3 +246,18 @@ func TestWhoReadsTheSessionsBoundToADriveAndNoOthers(t *testing.T) {
 		t.Fatalf("rows = %+v", rows)
 	}
 }
+
+func TestAResolvesClosesItsOpener(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	blocker := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "blocker", Text: "LANDED-NOT-LIVE sand", To: []string{"root"}})
+
+	post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "note", Text: "outlived", Resolves: blocker.Seq})
+
+	open, err := client.Open(context.Background(), "d", "blocker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("open = %+v", open)
+	}
+}

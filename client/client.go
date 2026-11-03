@@ -42,6 +42,8 @@ type Draft struct {
 	PRs   []string
 	Re    int64
 	Body  json.RawMessage
+	// Resolves closes the opener with this seq.
+	Resolves int64
 	// Stamp has cci write the leading time label from the post's own clock.
 	Stamp bool
 	// Successor names who takes over the one To lane of a stand-down record.
@@ -90,6 +92,9 @@ func (d Draft) args() []string {
 	}
 	if d.Body != nil {
 		args = append(args, "--body-file", "-")
+	}
+	if d.Resolves != 0 {
+		args = append(args, "--resolves", strconv.FormatInt(d.Resolves, 10))
 	}
 	if d.Stamp {
 		args = append(args, "--stamp")
