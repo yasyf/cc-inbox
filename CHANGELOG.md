@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci post --quoted <words>` with no other text stores the words as the
+  record's text, unchecked for times and `{at}`, so an `owner` record keeps the
+  owner's words exactly as he wrote them.
 - A record's text that names an owner record, `owner:m<N>` or `slack:<ts>`,
   reads with that record's text quoted after the first mention of each id, in
   `tail`, `show`, `watch`, the hooks and the channel, and in `--json`. One
