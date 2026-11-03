@@ -89,8 +89,8 @@ func newReplica(t *testing.T, before, after []store.Record) replica {
 	if err := spriteNode.RefreshKeys(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := spriteNode.Pull(ctx, 0, nil); err != nil || got.Inserted != len(after) {
-		t.Fatalf("sprite pull = %+v, %v; want the %d records posted after it joined", got, err, len(after))
+	if _, err := spriteNode.Pull(ctx, 0, nil); err != nil {
+		t.Fatal(err)
 	}
 	t.Setenv("CCI_HOME", sprite.HomeDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
@@ -183,5 +183,49 @@ func TestShowAndTailOnAReplicaKeepTheErrorForANumberNoHubHolds(t *testing.T) {
 		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "#99: no record has this number") {
 			t.Errorf("%v on the replica = %v; want #99: no record has this number", args, err)
 		}
+	}
+}
+
+func routed(t *testing.T, st *store.Store, routes ...string) {
+	t.Helper()
+	cfg, _, err := relay.LoadConfig(st.HomeDir(), relay.DefaultMesh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Routes = routes
+	if err := relay.SaveConfig(st.HomeDir(), cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBareShowOnAReplicaReadsThroughTheDriveItsRelayCarries(t *testing.T) {
+	r := newReplica(t, []store.Record{{Lane: "root", Kind: kinds.Decision, Text: "older than the sprite"}}, []store.Record{{Lane: "root", Kind: kinds.Decision, Text: "newer"}})
+	t.Setenv("CLAUDE_LONG_RUNNING_DRIVE", "")
+	routed(t, r.sprite, "d")
+
+	if out, err := run(t, "show", "#1"); err != nil || !strings.Contains(out, "older than the sprite") {
+		t.Fatalf("bare show #1 on a replica routed to d = %q, %v; want the hub's #1", out, err)
+	}
+	routed(t, r.sprite, "d", "e")
+	if _, err := run(t, "show", "#1"); err == nil || !strings.Contains(err.Error(), "carries drives d, e; pass --drive") {
+		t.Errorf("bare show #1 on a replica routed to d and e = %v; want it to name both drives", err)
+	}
+}
+
+func TestAReplyToARecordOlderThanTheReplicaArrivesWithItsTarget(t *testing.T) {
+	r := newReplica(t,
+		[]store.Record{{Lane: "root", Kind: kinds.Decide, Text: "ship the relay?"}},
+		[]store.Record{{Lane: "root", Kind: kinds.Go, Text: "go", Re: 1}})
+
+	records, err := r.sprite.Query(context.Background(), store.Filter{Drive: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, rec := range records {
+		got[rec.Text] = rec.ReNum
+	}
+	if _, ok := got["ship the relay?"]; !ok || got["go"] != "#1" {
+		t.Fatalf("replica holds %v; want the go answering #1 and #1 itself, fetched from the hub", got)
 	}
 }
