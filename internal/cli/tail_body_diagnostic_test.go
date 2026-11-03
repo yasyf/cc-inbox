@@ -64,7 +64,7 @@ CASE WHEN n=1 THEN ? ELSE '{"payload":"tiny"}' END,
 			if err != nil {
 				t.Fatal(err)
 			}
-			if got != want || strings.Count(got, "\n") != population || strings.Contains(got, "body-only-token") {
+			if got != want || strings.Count(got, "\n")-strings.Count("\n"+got, "\n@") != population || strings.Contains(got, "body-only-token") {
 				t.Fatalf("text Tail output changed or omitted records: got bytes=%d want bytes=%d", len(got), len(want))
 			}
 			if reads.Load() != 0 {

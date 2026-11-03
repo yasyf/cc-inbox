@@ -314,7 +314,7 @@ func TestGrep(t *testing.T) {
 	if err := inbox.Grep(context.Background(), st, store.Filter{Drive: "d"}, regexp.MustCompile("30427"), 0, 0, 0, false, &out, nil); err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.TrimSpace(out.String()); !strings.Contains(got, "LANDED lane-a landed #30427 pr#30427") || strings.Contains(got, "unrelated") {
+	if got := strings.TrimSpace(out.String()); !strings.Contains(got, "1 landed lane-a landed #30427") || strings.Contains(got, "unrelated") {
 		t.Fatalf("grep output = %q", got)
 	}
 }

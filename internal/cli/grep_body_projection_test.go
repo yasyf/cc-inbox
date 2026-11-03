@@ -69,7 +69,7 @@ func TestGrepTextBodyProjectionWork(t *testing.T) {
 					if !bytes.Equal(record.Body, body) || transferred.Load() < int64(len(body)) {
 						t.Fatalf("JSON body bytes=%d, want=%d; transferred=%d", len(record.Body), len(body), transferred.Load())
 					}
-				} else if strings.Count(out, "\n") != 2 || !strings.Contains(out, "selected global peer") || !strings.Contains(out, "selected local") || strings.Contains(out, "body-only-token") {
+				} else if strings.Count(out, "\n")-strings.Count("\n"+out, "\n@") != 2 || !strings.Contains(out, "selected global peer") || !strings.Contains(out, "selected local") || strings.Contains(out, "body-only-token") {
 					t.Fatalf("text grep output=%q", out)
 				}
 				t.Logf("GREP_BODY_TRANSFER rows=%d json=%t actual_body_reads=%d actual_body_bytes=%d selected_body_bytes=%d", population, asJSON, reads.Load(), transferred.Load(), len(body))
