@@ -105,7 +105,7 @@ func TestNamedRefsNameOneRecordOrRefuseWithCandidates(t *testing.T) {
 		}
 	}
 
-	var asks []int64
+	asks := make([]int64, 0, 2)
 	for i := range 2 {
 		r, _, err := st.Post(t.Context(), Record{Drive: "d", Lane: "lane-a", Kind: kinds.Ask, Text: fmt.Sprintf("deploy stack %d now?", i), Topic: "deploy", Source: "post"}, 0)
 		if err != nil {

@@ -29,15 +29,15 @@ func ResolvesAliasAttr(i int) string {
 var ErrNoRefIndex = errors.New("this store has no alias index yet; cci maintain-indexes installs it")
 
 func refKeyRows(where string) string {
-	return `WITH RECURSIVE src AS MATERIALIZED (
-SELECT drive, seq, topic, text, CASE WHEN json_error_position(refs) = 0 THEN refs ELSE '{}' END AS refs FROM records WHERE ` + where + `
+	return `WITH RECURSIVE src(drive, seq, topic, line, refs) AS MATERIALIZED (
+SELECT drive, seq, topic, text, CASE WHEN json_error_position(refs) = 0 THEN refs ELSE '{}' END FROM records WHERE ` + where + `
 ), cards(drive, seq, rest) AS (
-SELECT drive, seq, substr(text, instr(text, 'card-') + 5) FROM src WHERE instr(text, 'card-') > 0
+SELECT drive, seq, substr(line, instr(line, 'card-') + 5) FROM src WHERE instr(line, 'card-') > 0
 UNION ALL SELECT drive, seq, substr(rest, instr(rest, 'card-') + 5) FROM cards WHERE instr(rest, 'card-') > 0
 )
 SELECT drive, 'topic', topic, seq FROM src WHERE topic != ''
 UNION ALL SELECT drive, 'ccn', json_extract(refs, '$.ccn'), seq FROM src WHERE json_type(refs, '$.ccn') = 'text'
-UNION ALL SELECT drive, 'ccn-text', text, seq FROM src WHERE json_type(refs, '$.ccn') = 'text'
+UNION ALL SELECT drive, 'ccn-text', line, seq FROM src WHERE json_type(refs, '$.ccn') = 'text'
 UNION ALL SELECT s.drive, 'pr', CASE j.type WHEN 'integer' THEN CAST(j.value AS TEXT) ELSE substr(j.value, instr(j.value, '#') + 1) END, s.seq FROM src s, json_each(s.refs, '$.prs') j
 UNION ALL SELECT drive, 'card', key, seq FROM (SELECT drive, seq, rtrim(substr(rest, 1, length(rest) - length(ltrim(rest, '` + refCardChars + `'))), '-') AS key FROM cards) WHERE key != ''`
 }

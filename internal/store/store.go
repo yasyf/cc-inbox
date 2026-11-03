@@ -297,13 +297,14 @@ func (r Record) ReName() string {
 
 // CloseNames names the records r resolves, each followed by the alias it was given as.
 func (r Record) CloseNames() []string {
-	var out []string
-	for i, seq := range r.Closes() {
-		name := fmt.Sprintf("#%d", seq)
+	closes := r.Closes()
+	out := make([]string, len(closes))
+	for i, seq := range closes {
+		out[i] = fmt.Sprintf("#%d", seq)
 		if r.CloseNums != nil {
-			name = r.CloseNums[i]
+			out[i] = r.CloseNums[i]
 		}
-		out = append(out, withAlias(name, r.Fields.Attrs[ResolvesAliasAttr(i)]))
+		out[i] = withAlias(out[i], r.Fields.Attrs[ResolvesAliasAttr(i)])
 	}
 	return out
 }
