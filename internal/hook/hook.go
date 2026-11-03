@@ -115,6 +115,9 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 		if err := st.Repoint(ctx, p.SessionID, window); err != nil {
 			return err
 		}
+		if err := keepSubscribedLane(ctx, st, p, window); err != nil {
+			return err
+		}
 	}
 	b, ok, err := st.Binding(ctx, p.Key())
 	if err != nil || !ok {
@@ -135,6 +138,28 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 		return err
 	}
 	return acknowledge(ctx, st, w, "SessionStart", out.String(), res.Ack)
+}
+
+// keepSubscribedLane binds a root thread with no lane, such as the one a
+// /clear starts, to the lane its window's subscription reads, so the window
+// keeps the lane cci subscribe --reader claimed for it.
+func keepSubscribedLane(ctx context.Context, st *store.Store, p Payload, window store.Window) error {
+	if p.AgentID != "" {
+		return nil
+	}
+	sub, ok, err := st.Subscription(ctx, window)
+	if err != nil || !ok {
+		return err
+	}
+	b, bound, err := st.Binding(ctx, p.Key())
+	if err != nil || bound && b.Lane != "" {
+		return err
+	}
+	moves, err := st.MovesLane(ctx, sub)
+	if err != nil || !moves {
+		return err
+	}
+	return st.ClaimLane(ctx, p.Key(), sub.Drive, sub.Reader, time.UnixMilli(window.Started))
 }
 
 // PostToolUse marks the thread active and delivers its lane's records, or,
