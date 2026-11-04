@@ -23,7 +23,6 @@ import (
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
-	"github.com/yasyf/cc-inbox/internal/mesh"
 	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/pairing"
 	"github.com/yasyf/cc-inbox/internal/relay"
@@ -37,7 +36,6 @@ const (
 	Label           daemonkit.Label  = "com.yasyf.cc-inbox"
 	Schema          daemonkit.Schema = "cci.v1"
 	Addr                             = "127.0.0.1:7377"
-	ImportInterval                   = time.Second
 	hotWindowFollow                  = time.Second
 	hotWindowPace                    = 5 * time.Millisecond
 	schedulerProcs                   = 4
@@ -88,13 +86,12 @@ type Product struct {
 }
 
 type Runtime struct {
-	home                string
-	ln                  net.Listener
-	mu                  sync.Mutex
-	failed              error
-	refreshRegistration func(context.Context, string, string) error
-	reads               func(context.Context, *store.Store) (ReadAPI, error)
-	commands            func(context.Context, net.Listener, *store.Store, string) error
+	home     string
+	ln       net.Listener
+	mu       sync.Mutex
+	failed   error
+	reads    func(context.Context, *store.Store) (ReadAPI, error)
+	commands func(context.Context, net.Listener, *store.Store, string) error
 }
 
 // ServeCommands has the daemon run clients' commands over $CCI_HOME/cci.sock.
@@ -108,7 +105,7 @@ type ReadAPI interface {
 }
 
 func New(home string, ln net.Listener, reads func(context.Context, *store.Store) (ReadAPI, error)) *Runtime {
-	return &Runtime{home: home, ln: ln, refreshRegistration: mesh.RefreshRegistration, reads: reads}
+	return &Runtime{home: home, ln: ln, reads: reads}
 }
 
 func (r *Runtime) Err() error {
@@ -140,9 +137,6 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	}
 	if m, ok := st.Migrated(); ok {
 		recordMigration(c.Context, st, m)
-	}
-	if err := r.refreshRegistration(c.Context, r.home, st.SchemaFingerprint()); err != nil {
-		slog.Warn("cci daemon cannot refresh mesh registration", "err", err)
 	}
 	reads, err := r.reads(c.Context, st)
 	if err != nil {
@@ -183,11 +177,6 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	var loops sync.WaitGroup
 	loops.Go(func() {
 		p.drainPrompts(syncCtx)
-	})
-	loops.Go(func() {
-		if err := superviseMesh(syncCtx, c, r.home); err != nil {
-			r.fail(c, err)
-		}
 	})
 	loops.Go(func() {
 		loop := relay.NewLoop(r.home, st, id)
@@ -363,39 +352,6 @@ func maintainIndexes(ctx context.Context, home string) {
 		case <-ctx.Done():
 			return
 		case <-time.After(maintainRetry):
-		}
-	}
-}
-
-func superviseMesh(ctx context.Context, c daemonkit.Ctx, home string) error {
-	tick := time.NewTicker(ImportInterval)
-	defer tick.Stop()
-	var exited <-chan daemonkit.Exit
-	for {
-		if exited == nil {
-			enabled, err := mesh.Enabled(home)
-			if err != nil {
-				return err
-			}
-			if enabled {
-				child, err := mesh.StartHelper(ctx, c)
-				if err != nil && ctx.Err() == nil {
-					return err
-				}
-				if child != nil {
-					exited = child.Done()
-				}
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case exit := <-exited:
-			if ctx.Err() != nil {
-				return nil
-			}
-			return fmt.Errorf("mesh helper exited: code=%d signal=%v", exit.Code, exit.Signal)
-		case <-tick.C:
 		}
 	}
 }
