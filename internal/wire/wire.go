@@ -123,8 +123,23 @@ func Stream(argv []string) bool {
 	return len(argv) > 2 && argv[1] == "embed" && argv[2] == "follow" || len(argv) > 1 && (argv[1] == "watch" || argv[1] == "channel")
 }
 
-func outlivesDaemon(argv []string) bool {
-	return Stream(argv) && !slices.ContainsFunc(argv, func(arg string) bool { return arg == "--for" || strings.HasPrefix(arg, "--for=") })
+func forWhatIsLeft(argv []string, started time.Time) []string {
+	left := func(given string) string {
+		bound, err := time.ParseDuration(given)
+		if err != nil {
+			return given
+		}
+		return max(bound-time.Since(started), time.Millisecond).String()
+	}
+	out := slices.Clone(argv)
+	for i, arg := range out {
+		if given, ok := strings.CutPrefix(arg, "--for="); ok {
+			out[i] = "--for=" + left(given)
+		} else if arg == "--for" && i+1 < len(out) {
+			out[i+1] = left(out[i+1])
+		}
+	}
+	return out
 }
 
 // Relay runs this process's command in the daemon and reports its exit code. It
@@ -158,13 +173,14 @@ func Relay(version string) (int, bool) {
 	}
 	pump := &stdinPump{in: os.Stdin, needs: make(chan struct{}, 1)}
 	go pump.run()
+	started, first := time.Now(), request.Argv
 	for {
 		code, ok, lost := exchange(conn, request, pump, os.Stdout, os.Stderr)
 		_ = conn.Close()
-		if !lost || !outlivesDaemon(request.Argv) {
+		if !lost || !Stream(request.Argv) {
 			return code, ok
 		}
-		request.Argv = resumed(request.Argv)
+		request.Argv = forWhatIsLeft(resumed(first), started)
 		os.Args = request.Argv
 		if conn = redial(socket); conn == nil {
 			return 0, false
@@ -173,7 +189,7 @@ func Relay(version string) (int, bool) {
 }
 
 func resumable(argv []string) []string {
-	if argv[1] != "watch" || !outlivesDaemon(argv) || slices.ContainsFunc(argv, func(arg string) bool { return arg == "--cursor" || strings.HasPrefix(arg, "--cursor=") }) {
+	if argv[1] != "watch" || !Stream(argv) || slices.ContainsFunc(argv, func(arg string) bool { return arg == "--cursor" || strings.HasPrefix(arg, "--cursor=") }) {
 		return argv
 	}
 	return append(slices.Clone(argv), fmt.Sprintf("--cursor=%s%d-%d", WatchCursorPrefix, os.Getpid(), time.Now().UnixNano()))
@@ -279,7 +295,7 @@ func exchange(conn io.ReadWriter, request Request, pump *stdinPump, stdout, stde
 			if !spoke {
 				return 0, false, true
 			}
-			if outlivesDaemon(request.Argv) {
+			if Stream(request.Argv) {
 				return 0, true, true
 			}
 			_, _ = fmt.Fprintln(stderr, "cci: the daemon went away:", err)
