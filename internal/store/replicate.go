@@ -154,16 +154,19 @@ func pathBody(path string) (string, error) {
 		return "", fmt.Errorf("read body file %s: %w", path, err)
 	}
 	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return "", fmt.Errorf("read body file %s: %w", path, err)
+	}
+	if info.IsDir() {
+		return "", nil
+	}
 	raw, err := io.ReadAll(io.LimitReader(file, MaxBody+1))
 	if err != nil {
 		return "", fmt.Errorf("read body file %s: %w", path, err)
 	}
 	if len(raw) <= MaxBody {
 		return string(raw), nil
-	}
-	info, err := file.Stat()
-	if err != nil {
-		return "", fmt.Errorf("read body file %s: %w", path, err)
 	}
 	cut := raw[:MaxBody]
 	if line := bytes.LastIndexByte(cut, '\n'); line > 0 {
