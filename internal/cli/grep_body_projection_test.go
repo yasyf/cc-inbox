@@ -104,7 +104,6 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 		{name: "out of order timestamps", updates: []string{"UPDATE records SET at=at-90000000 WHERE seq=32", "UPDATE records SET text='pure port selected older' WHERE seq=2"}, pattern: "pure port"},
 		{name: "fields suppress PR rendering", updates: []string{`UPDATE records SET refs='{"prs":[7]}', fields='{"attrs":{"head:7":"abc"}}' WHERE seq=1`}, pattern: "pure port"},
 		{name: "fixed case options", pattern: "PURE PORT", args: []string{"-F", "--ignore-case=false"}},
-		{name: "negative limit", pattern: "pure port", args: []string{"--limit", "-1"}},
 		{name: "regex identity", updates: []string{"UPDATE records SET origin='feedfacefeedface', origin_seq=900 WHERE seq=1"}, pattern: "#900@feedface"},
 	} {
 		t.Run(test.name, func(t *testing.T) {

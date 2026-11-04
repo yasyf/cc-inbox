@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf8"
@@ -338,6 +339,9 @@ type Store struct {
 	feed   Feed
 	moved  *Migration
 	Now    func() time.Time
+
+	sinceFloorsMu sync.Mutex
+	sinceFloors   map[int64]int64
 }
 
 // Migration is the schema upgrade an initializer ran on a store that already

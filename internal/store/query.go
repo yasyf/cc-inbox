@@ -22,6 +22,11 @@ type Follow struct {
 	Kinds []kinds.Kind `json:"kinds"`
 }
 
+const (
+	sinceFloorStep = 5 * time.Minute
+	sinceFloorsMax = 4096
+)
+
 type Filter struct {
 	Drive          string
 	Follow         []Follow
@@ -512,14 +517,34 @@ func (s *Store) BoundSince(ctx context.Context, f Filter) (Filter, error) {
 	if f.Since.IsZero() {
 		return f, nil
 	}
-	var first sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", f.Since.UnixMilli()).Scan(&first); err != nil {
+	first, err := s.firstSince(ctx, f.Since.Truncate(sinceFloorStep).UnixMilli())
+	if err != nil {
 		return f, fmt.Errorf("bound since: %w", err)
 	}
-	if first.Valid {
-		f.After = max(f.After, first.Int64-1)
-	}
+	f.After = max(f.After, first-1)
 	return f, nil
+}
+
+// firstSince remembers each answer because later records only take higher seqs,
+// so a floor stays right, and the range it reads costs tens of milliseconds.
+func (s *Store) firstSince(ctx context.Context, at int64) (int64, error) {
+	s.sinceFloorsMu.Lock()
+	first, known := s.sinceFloors[at]
+	s.sinceFloorsMu.Unlock()
+	if known {
+		return first, nil
+	}
+	var found sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", at).Scan(&found); err != nil || !found.Valid {
+		return 0, err
+	}
+	s.sinceFloorsMu.Lock()
+	defer s.sinceFloorsMu.Unlock()
+	if s.sinceFloors == nil || len(s.sinceFloors) >= sinceFloorsMax {
+		s.sinceFloors = map[int64]int64{}
+	}
+	s.sinceFloors[at] = found.Int64
+	return found.Int64, nil
 }
 
 func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
