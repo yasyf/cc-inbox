@@ -152,7 +152,7 @@ func unsettledBlocker(ctx context.Context, st *store.Store, p Payload, b store.B
 	if err != nil {
 		return err
 	}
-	text := fmt.Sprintf("%s ended its turn twice with open work and no record saying who resumes it; its last words: %s", b.Lane, render.Clip(strings.Join(strings.Fields(p.LastMessage), " "), openWidth))
+	text := fmt.Sprintf("%s ended its turn twice with open work and no record saying who resumes it; its last words: %s", b.Lane, render.Clip(store.WithoutCredentials(strings.Join(strings.Fields(p.LastMessage), " ")), openWidth))
 	_, _, err = st.PostAt(ctx, store.Record{ID: fmt.Sprintf("turn-end:%s:%d", b.Lane, newest.Seq), Drive: b.Drive, Lane: b.Lane, Kind: kinds.Blocker, To: to, Text: store.Clip(text), Source: "post"}, 0, st.Now())
 	return err
 }
@@ -198,7 +198,7 @@ func StopFailure(ctx context.Context, st *store.Store, p Payload) error {
 		return err
 	}
 	at := st.Now()
-	text := fmt.Sprintf("%s's turn died on an API error: %s; its last words: %s", b.Lane, p.Error, render.Clip(strings.Join(strings.Fields(p.LastMessage), " "), openWidth))
+	text := fmt.Sprintf("%s's turn died on an API error: %s; its last words: %s", b.Lane, p.Error, render.Clip(store.WithoutCredentials(strings.Join(strings.Fields(p.LastMessage), " ")), openWidth))
 	_, _, err = st.PostAt(ctx, store.Record{ID: fmt.Sprintf("turn-died:%s:%d", b.Lane, at.Unix()/60), Drive: b.Drive, Lane: b.Lane, Kind: kinds.Blocker, To: to, Text: store.Clip(text), Fields: store.Fields{Attrs: map[string]string{"turn": TurnDied}}, Source: "post"}, 0, at)
 	return err
 }

@@ -83,7 +83,7 @@ func (f *headsFlag) String() string {
 	}
 	keys := make([]string, len(*f.heads))
 	for i, head := range *f.heads {
-		keys[i] = head.PR.String() + "=" + head.Commit
+		keys[i] = head.PR.String() + "=" + head.Commit + " " + head.Note
 	}
 	return "[" + strings.Join(keys, ",") + "]"
 }

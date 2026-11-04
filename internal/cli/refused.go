@@ -79,7 +79,7 @@ func leaveBlocker(ctx context.Context, st *store.Store, drive, lane, kind, words
 	if err != nil {
 		return errors.Join(cause, err)
 	}
-	to, text := []string{lane}, fmt.Sprintf("post refused: %v. It said: %s %s", cause, kind, words)
+	to, text := []string{lane}, store.WithoutCredentials(fmt.Sprintf("post refused: %v. It said: %s %s", cause, kind, words))
 	if first, again := store.Unescalated(open, lane); again {
 		if to, err = st.Escalation(ctx, onDrive, lane); err != nil {
 			return errors.Join(cause, err)
