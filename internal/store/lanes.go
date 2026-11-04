@@ -3,15 +3,12 @@ package store
 import (
 	"context"
 	"fmt"
-	"slices"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
 
 // RefusedPostTopic is the topic of the blocker a refused post leaves behind.
 const RefusedPostTopic = "refused-post"
-
-const refusalsRead = 8
 
 // LaneSpawn reads the newest record that launched lane on drive: a spawn
 // record naming it, or the state record a launcher posts on topic spawn:<lane>.
@@ -84,47 +81,4 @@ func (s *Store) Escalation(ctx context.Context, drive, lane string) ([]string, e
 		return []string{owner}, nil
 	}
 	return []string{"root"}, nil
-}
-
-// OpenRefusals returns the blockers lane's refused posts left open on drive,
-// oldest first.
-func (s *Store) OpenRefusals(ctx context.Context, drive, lane string) ([]Record, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT seq FROM records WHERE drive = ? AND lane = ? AND kind = ? AND topic = ? ORDER BY seq DESC LIMIT ?", drive, lane, string(kinds.Blocker), RefusedPostTopic, refusalsRead)
-	if err != nil {
-		return nil, fmt.Errorf("read the refusals of %s on %s: %w", lane, drive, err)
-	}
-	defer func() { _ = rows.Close() }()
-	var seqs []int64
-	for rows.Next() {
-		var seq int64
-		if err := rows.Scan(&seq); err != nil {
-			return nil, err
-		}
-		seqs = append(seqs, seq)
-	}
-	if err := rows.Err(); err != nil || len(seqs) == 0 {
-		return nil, err
-	}
-	return s.OpenAmong(ctx, drive, seqs)
-}
-
-// Unescalated returns the first of lane's open refusals when every one of them
-// went only to lane, so nobody else has heard of them yet.
-func Unescalated(open []Record, lane string) (Record, bool) {
-	if len(open) == 0 || slices.ContainsFunc(open, func(r Record) bool { return !slices.Equal(r.To, []string{lane}) }) {
-		return Record{}, false
-	}
-	return open[0], true
-}
-
-// Resolving returns r closing open as well as whatever it already closes.
-func (r Record) Resolving(open []Record) Record {
-	for _, o := range open {
-		if r.Resolves == 0 {
-			r.Resolves = o.Seq
-			continue
-		}
-		r.AlsoResolves = append(r.AlsoResolves, o.Seq)
-	}
-	return r
 }

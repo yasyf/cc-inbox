@@ -44,21 +44,6 @@ func TestOnlyALaunchedLaneIsRegistered(t *testing.T) {
 	}
 }
 
-func TestOpenRefusalsCloseOnTheLanesNextRecord(t *testing.T) {
-	ctx := context.Background()
-	st, _ := testutil.Store(t)
-	refused := testutil.Post(t, st, store.Record{Lane: "fix-lane-1", Kind: kinds.Blocker, Topic: store.RefusedPostTopic, To: []string{"root"}, Text: "post refused"})
-	testutil.Post(t, st, store.Record{Lane: "other-lane", Kind: kinds.Blocker, Topic: store.RefusedPostTopic, To: []string{"root"}, Text: "post refused"})
-	open, err := st.OpenRefusals(ctx, "d", "fix-lane-1")
-	if err != nil || len(open) != 1 || open[0].Seq != refused.Seq {
-		t.Fatalf("OpenRefusals = %v, %v; want only the lane's own", open, err)
-	}
-	testutil.Post(t, st, store.Record{Lane: "fix-lane-1", Kind: kinds.Note, Text: "went through"}.Resolving(open))
-	if open, err := st.OpenRefusals(ctx, "d", "fix-lane-1"); err != nil || len(open) != 0 {
-		t.Fatalf("after its next record OpenRefusals = %v, %v", open, err)
-	}
-}
-
 func TestNewestOfLaneSkipsClaimsAndRotations(t *testing.T) {
 	ctx := context.Background()
 	st, _ := testutil.Store(t)

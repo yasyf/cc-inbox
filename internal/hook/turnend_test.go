@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -208,23 +207,6 @@ func TestAMechanismObligesAnOpenedOrABlocker(t *testing.T) {
 	testutil.Post(t, st, store.Record{Lane: "inc-liam-load-fix", Kind: kinds.Blocker, To: []string{"root"}, Text: "no quota to fix it"})
 	if got := stopReason(t, st, p); got != "" {
 		t.Fatalf("after its blocker = %q", got)
-	}
-}
-
-func TestATurnEndingOnItsOwnRefusalTellsRootOnce(t *testing.T) {
-	st, _ := testutil.Store(t)
-	launch(t, st, quietLane, "/briefs/fix-lane-1.md")
-	p := bindLane(t, st, quietLane)
-	refused := testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Blocker, Topic: store.RefusedPostTopic, To: []string{quietLane}, Text: "post refused: names a time not yet come"})
-
-	for range 2 {
-		if got := stopReason(t, st, p); got != "" {
-			t.Fatalf("stop = %q; want the turn to end", got)
-		}
-	}
-	got := blockersToRoot(t, st)
-	if len(got) != 1 || got[0].Topic != store.RefusedPostTopic || !strings.Contains(got[0].Text, fmt.Sprintf("#%d", refused.Seq)) || !strings.Contains(got[0].Text, "names a time not yet come") {
-		t.Fatalf("root's blockers = %+v; want one naming the refusal", got)
 	}
 }
 

@@ -267,11 +267,7 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload, w io.Writer) 
 			return err
 		}
 		if err == nil && store.SameLane(peer.AgentName, b.Lane) {
-			refused, err := endTurn(ctx, st, p, b, w)
-			if err != nil || refused {
-				return err
-			}
-			if err := escalateRefusal(ctx, st, b); err != nil {
+			if refused, err := endTurn(ctx, st, p, b, w); err != nil || refused {
 				return err
 			}
 		}
@@ -419,11 +415,8 @@ func holdStop(ctx context.Context, st *store.Store, p Payload, w io.Writer) erro
 	if err != nil || nudged {
 		return err
 	}
-	refused, err := endTurn(ctx, st, p, b, w)
-	if err != nil || refused {
-		return err
-	}
-	return escalateRefusal(ctx, st, b)
+	_, err = endTurn(ctx, st, p, b, w)
+	return err
 }
 
 // nudgeOverdue blocks the stop once per record, about the newest open ask,

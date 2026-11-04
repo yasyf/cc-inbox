@@ -16,6 +16,7 @@ import (
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -242,7 +243,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 	}
 	var accepted, rejected []result
 	for _, e := range req.Envelopes {
-		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) || caller.keysFrom != "" && e.Delegation == nil {
+		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) || caller.keysFrom != "" && e.Delegation == nil || e.Tier == e2e.TierOwner && strings.Contains(e.KindClass, ".") {
 			rejected = append(rejected, result{OriginSeq: e.OriginSeq, Reason: "forbidden"})
 			continue
 		}
