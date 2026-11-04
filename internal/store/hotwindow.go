@@ -472,7 +472,7 @@ func (w *MemWindow) Answer(ctx context.Context, s *Store, f Filter) ([]Record, b
 // ParityDigest sums what a replay may have changed: every cursor and every record.
 func (s *Store) ParityDigest(ctx context.Context) (string, string, error) {
 	var cursors, records string
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) || ':' || COALESCE(SUM(seq), 0) FROM cursors").Scan(&cursors)
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) || ':' || COALESCE(SUM(seq % 1000000007), 0) FROM cursors").Scan(&cursors)
 	if err != nil {
 		return "", "", fmt.Errorf("sum the cursors: %w", err)
 	}
