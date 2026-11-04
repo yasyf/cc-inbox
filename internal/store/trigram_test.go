@@ -24,23 +24,25 @@ func TestTrigramsNarrowAGrepWithoutLosingARecord(t *testing.T) {
 		t.Fatal("trigrams not ready after the fill")
 	}
 	after := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "MERGE:49638 again"})
-	if !st.TrigramsNarrow(t.Context(), []string{"merge:49638"}) {
-		t.Fatal("a rare word does not narrow")
-	}
-	if st.TrigramsNarrow(t.Context(), []string{"12345"}) {
+	if st.TrigramsNarrow(t.Context(), []string{"12345"}, nil) != "" {
 		t.Fatal("a word that may name a number column narrowed")
 	}
 	for _, tt := range []struct {
-		name  string
-		words []string
-		want  []int64
+		name        string
+		either, all []string
+		want        []int64
 	}{
-		{"one word", []string{"merge:49638"}, []int64{inText.Seq, inTopic.Seq, after.Seq}},
-		{"either word", []string{"merge:49638", "nothing"}, []int64{inText.Seq, inTopic.Seq, inTopic.Seq + 1, after.Seq}},
-		{"no word", []string{"absent-word"}, nil},
+		{"one word", []string{"merge:49638"}, nil, []int64{inText.Seq, inTopic.Seq, after.Seq}},
+		{"either word", []string{"merge:49638", "nothing"}, nil, []int64{inText.Seq, inTopic.Seq, inTopic.Seq + 1, after.Seq}},
+		{"every word", nil, []string{"merge:49638", "again"}, []int64{after.Seq}},
+		{"no word", []string{"absent-word"}, nil, nil},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			records, err := st.Query(t.Context(), store.Filter{Drive: "d", Contains: tt.words, Indexed: true})
+			match := st.TrigramsNarrow(t.Context(), tt.either, tt.all)
+			if match == "" {
+				t.Fatal("no match expression")
+			}
+			records, err := st.Query(t.Context(), store.Filter{Drive: "d", Trigrams: match})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -74,7 +76,7 @@ func TestTrigramsForgetACollectedRecord(t *testing.T) {
 	if exists(t, st, gone.Seq) {
 		t.Fatal("record not collected")
 	}
-	records, err := st.Query(t.Context(), store.Filter{Drive: "d", Contains: []string{"collect-me-word"}, Indexed: true})
+	records, err := st.Query(t.Context(), store.Filter{Drive: "d", Trigrams: st.TrigramsNarrow(t.Context(), []string{"collect-me-word"}, nil)})
 	if err != nil || len(records) != 0 {
 		t.Fatalf("records = %+v, %v", records, err)
 	}

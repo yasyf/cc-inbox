@@ -25,11 +25,17 @@ func TestRequiredWordsNeverDropAMatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := st.IndexTrigrams(ctx, func(context.Context) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
 	now := st.Now()
 	for _, tt := range []struct {
 		pattern string
 		pruned  bool
 	}{
+		{"(?i)review .*plan.*991d899", true},
+		{"finder-desk.*sess_01abc", true},
+		{"(?i)finder:? (ok|missing)", true},
 		{"(?i)991D899", true},
 		{"49333", true},
 		{"12345", true},
@@ -73,6 +79,17 @@ func TestRequiredWordsNeverDropAMatch(t *testing.T) {
 			}
 			if got := matching(pruned); !slices.Equal(got, want) {
 				t.Fatalf("pattern %q with words %v matched %v, want %v", tt.pattern, words, got, want)
+			}
+			trigrams := st.TrigramsNarrow(ctx, words, everyWord(pattern.String()))
+			if trigrams == "" {
+				return
+			}
+			narrowed, err := st.QueryText(ctx, store.Filter{Drive: "d", Trigrams: trigrams})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := matching(narrowed); !slices.Equal(got, want) {
+				t.Fatalf("pattern %q with trigrams %q matched %v, want %v", tt.pattern, trigrams, got, want)
 			}
 		})
 	}

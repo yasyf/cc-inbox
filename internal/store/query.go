@@ -52,7 +52,7 @@ type Filter struct {
 	Descending     bool
 	Limit          int
 	Contains       []string
-	Indexed        bool
+	Trigrams       string
 }
 
 // where renders the filter. Records in the drive pass the selectors;
@@ -134,9 +134,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		clauses = append(clauses, "origin = ?")
 		params = append(params, f.Origin)
 	}
-	if match, ok := trigramMatch(f.Contains); ok && f.Indexed {
+	if f.Trigrams != "" {
 		clauses = append(clauses, "seq IN (SELECT rowid FROM record_trigrams WHERE record_trigrams MATCH ?)")
-		params = append(params, match)
+		params = append(params, f.Trigrams)
 	}
 	if len(f.Contains) > 0 {
 		holds := make([]string, 0, len(renderedColumns)*len(f.Contains))
@@ -492,7 +492,7 @@ func (s *Store) selectionColumnsAudienceAt(f Filter, projection string, rootAudi
 	} else {
 		where, params = f.where(s.Self(), now)
 		arms, candidates := f.candidateArmsAudience(s.Self(), rootAudience)
-		if len(arms) > 0 {
+		if len(arms) > 0 && f.Trigrams == "" {
 			// LIMIT -1 prevents flattening from moving validation ahead of the ordered candidate stream.
 			from = "(" + strings.Join(arms, " UNION ") + " ORDER BY candidate_seq " + order + " LIMIT -1) c CROSS JOIN records ON records.seq = c.candidate_seq"
 			ordered = "c.candidate_seq"

@@ -434,7 +434,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	f.Descending = true
 	f.Limit = pageRows
 	f.Contains = requiredWords(pattern.String())
-	f.Indexed = st.TrigramsNarrow(ctx, f.Contains)
+	f.Trigrams = st.TrigramsNarrow(ctx, f.Contains, everyWord(pattern.String()))
 	now := st.Now()
 	for {
 		records, err := query(ctx, f)
