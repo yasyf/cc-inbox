@@ -145,15 +145,16 @@ func Post(ctx context.Context, d Draft) (Record, error) {
 			return Record{}, daemonError(code, notices.String())
 		}
 		if d.Notices != nil {
-			if _, err := d.Notices.Write(notices.Bytes()); err != nil {
-				return Record{}, err
-			}
+			_, _ = d.Notices.Write(notices.Bytes())
 		}
 		var stored Record
 		if err := json.Unmarshal(answer.Bytes(), &stored); err != nil {
 			return Record{}, fmt.Errorf("cci post printed %q: %w", answer.String(), err)
 		}
 		return stored, nil
+	}
+	if errors.Is(err, errLostCall) {
+		return Record{}, &BusDown{Cause: store.ErrUnconfirmed, Path: "the daemon's unsent queue"}
 	}
 	if !errors.Is(err, errNoDaemon) {
 		return Record{}, err
@@ -308,15 +309,7 @@ type Watch struct {
 // it, until ctx ends or emit fails. Unlike cci watch --reader root it never
 // narrows the kinds addressed to the reader, so a hold addressed to root arrives.
 func Follow(ctx context.Context, w Watch, emit func(Record) error) error {
-	c := cli.EmbedCall{Op: "follow", Drive: w.Drive, Reader: w.Reader, After: w.After, Kinds: w.Kinds}
-	if _, err := daemonCall[int64](ctx, cli.EmbedCall{Op: "head"}); !errors.Is(err, errNoDaemon) {
-		return daemonFollow(ctx, c, emit)
-	}
-	st, err := sharedStore(ctx)
-	if err != nil {
-		return err
-	}
-	return cli.EmbedFollow(ctx, st, c, cli.SelfPeer(ctx).String(), emit)
+	return daemonFollow(ctx, cli.EmbedCall{Op: "follow", Drive: w.Drive, Reader: w.Reader, After: w.After, Kinds: w.Kinds}, emit)
 }
 
 // Kinds lists the kinds a lane can post, every fixed kind but those only cci writes.

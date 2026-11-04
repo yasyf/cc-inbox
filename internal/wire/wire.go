@@ -117,11 +117,6 @@ func dial(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "cci-daemon"), nil //nolint:gosec // G115: a file descriptor fits in uintptr.
 }
 
-// Dial connects to the daemon's socket.
-func Dial(socket string) (*os.File, error) {
-	return dial(socket)
-}
-
 // Stream reports whether argv runs until its client leaves, so any release's
 // client may ask for it.
 func Stream(argv []string) bool {
@@ -202,10 +197,18 @@ func redial(socket string) *os.File {
 
 // Exchange sends request over conn and plays the daemon's reply onto the streams.
 func Exchange(conn io.ReadWriter, request Request, stdin io.Reader, stdout, stderr io.Writer) (int, bool) {
+	code, ok, _ := ExchangeOutcome(conn, request, stdin, stdout, stderr)
+	return code, ok
+}
+
+// ExchangeOutcome is Exchange that also says whether the connection was lost, so
+// a caller can tell a daemon that declined the request from one that may have
+// run it.
+func ExchangeOutcome(conn io.ReadWriter, request Request, stdin io.Reader, stdout, stderr io.Writer) (code int, ran, lost bool) {
 	pump := &stdinPump{in: stdin, needs: make(chan struct{}, 1)}
 	go pump.run()
-	code, ok, _ := exchange(conn, request, pump, stdout, stderr)
-	return code, ok
+	defer close(pump.needs)
+	return exchange(conn, request, pump, stdout, stderr)
 }
 
 type stdinPump struct {

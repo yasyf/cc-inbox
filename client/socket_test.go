@@ -116,7 +116,7 @@ func TestTheClientReadsAndWritesThroughTheDaemonAndAloneAlike(t *testing.T) {
 	}
 }
 
-func TestFollowThroughTheDaemonDeliversPastTheDaemonGoingAway(t *testing.T) {
+func TestFollowRunsOnTheDaemon(t *testing.T) {
 	ln, stop := daemonHome(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
