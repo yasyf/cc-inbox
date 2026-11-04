@@ -153,11 +153,13 @@ func TestCollectSparesWhatARecordArrivingDuringThePassNames(t *testing.T) {
 	clock.Advance(store.HotWindow + time.Hour)
 	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newest"})
 	var reply store.Record
-	res, err := st.Collect(t.Context(), func(context.Context) error {
-		if reply.Seq == 0 {
-			reply = testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "late reply", Re: first.Seq})
+	res, err := st.Collect(t.Context(), func(ctx context.Context) error {
+		if reply.Seq != 0 {
+			return nil
 		}
-		return nil
+		var err error
+		reply, _, err = st.Post(ctx, store.Record{Drive: "d", Lane: "a", Kind: kinds.Note, Text: "late reply", Re: first.Seq}, 0)
+		return err
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -394,6 +396,41 @@ func TestCollectArchivesEveryRecordItDeletes(t *testing.T) {
 	}
 	if line["text"] != "keep a copy of this" || line["seq"] != float64(note.Seq) {
 		t.Fatalf("archived line = %v", line)
+	}
+}
+
+func TestCollectArchivesABlobWithItsRecord(t *testing.T) {
+	st, clock := testutil.Store(t)
+	body := strings.Repeat("word ", store.MaxText)
+	excerpt, path, err := st.Fit(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: excerpt, Refs: store.Refs{Path: path}})
+	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newer"})
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	paths, err := filepath.Glob(filepath.Join(st.HomeDir(), "archive", "d-*.jsonl.gz"))
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("segments = %v, %v", paths, err)
+	}
+	f, err := os.Open(paths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var line map[string]any
+	if err := json.NewDecoder(gz).Decode(&line); err != nil {
+		t.Fatal(err)
+	}
+	if line["blob"] != body {
+		t.Fatalf("archived blob = %.40v, want the body", line["blob"])
 	}
 }
 
