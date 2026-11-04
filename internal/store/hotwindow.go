@@ -21,7 +21,9 @@ const (
 	hotWindowSpan  = 36 * time.Hour
 	hotWindowBatch = 1000
 	hotWindowTrim  = 2000
+	hotWindowAge   = 10 * time.Minute
 	hotWindowFile  = "window.on"
+	hotWindowConns = 8
 )
 
 var (
@@ -65,14 +67,16 @@ type MemWindow struct {
 	source   *Store
 	mem      *Store
 	observer *ChangeVersion
+	pin      *sql.Conn
 	columns  []string
 	insert   string
 
-	mu        sync.Mutex
+	mu        sync.RWMutex
 	version   int64
 	head      int64
 	mutations int64
 	inserted  int
+	trimmed   time.Time
 	stale     atomic.Bool
 	floor     atomic.Int64
 	belowAt   atomic.Int64
@@ -121,8 +125,19 @@ func (s *Store) openHotWindow(ctx context.Context) (*MemWindow, error) {
 		return nil, fmt.Errorf("open hot window: %w", err)
 	}
 	w := &MemWindow{source: s, mem: &Store{db: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now, floors: &sinceFloors{}, window: &hotWindowSlot{}}}
+	db.SetMaxOpenConns(hotWindowConns)
+	if w.pin, err = db.Conn(ctx); err != nil {
+		return nil, errors.Join(fmt.Errorf("pin the hot window: %w", err), db.Close())
+	}
 	if err := w.copySchema(ctx); err != nil {
 		return nil, errors.Join(err, db.Close())
+	}
+	tip, err := s.RecordTip(ctx)
+	if err != nil {
+		return nil, errors.Join(err, db.Close())
+	}
+	if !tip.Exact {
+		return nil, errors.Join(errors.New("hot window: the store does not count changes to its records yet"), db.Close())
 	}
 	if w.observer, err = s.OpenChangeVersion(ctx); err != nil {
 		return nil, errors.Join(err, db.Close())
@@ -139,7 +154,7 @@ func (w *MemWindow) Close() error {
 	if w.observer != nil {
 		closing = w.observer.Close()
 	}
-	return errors.Join(closing, w.mem.db.Close())
+	return errors.Join(closing, w.pin.Close(), w.mem.db.Close())
 }
 
 func (w *MemWindow) copySchema(ctx context.Context) error {
@@ -247,20 +262,29 @@ func (w *MemWindow) catchUp(ctx context.Context) error {
 			break
 		}
 	}
+	if err := w.trim(ctx); err != nil {
+		w.stale.Store(true)
+		return err
+	}
 	w.version = version
-	return w.trim(ctx)
+	return nil
 }
 
 func (w *MemWindow) catchUpBatch(ctx context.Context) (bool, error) {
+	snapshot, err := w.observer.connection.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return false, fmt.Errorf("begin hot window read: %w", err)
+	}
+	defer func() { _ = snapshot.Rollback() }()
 	var mutations int64
-	if err := w.observer.connection.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM meta WHERE key = ?), 0)", recordMutationsKey).Scan(&mutations); err != nil {
+	if err := snapshot.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM meta WHERE key = ?), 0)", recordMutationsKey).Scan(&mutations); err != nil {
 		return false, fmt.Errorf("read record mutations: %w", err)
 	}
 	if mutations != w.mutations {
 		w.stale.Store(true)
 		return false, errHotWindowStale
 	}
-	rows, err := w.readRows(ctx, "seq > ? ORDER BY seq LIMIT ?", w.head, hotWindowBatch)
+	rows, err := w.readRows(ctx, snapshot, "seq > ? ORDER BY seq LIMIT ?", w.head, hotWindowBatch)
 	if err != nil || len(rows) == 0 {
 		return false, err
 	}
@@ -273,7 +297,7 @@ func (w *MemWindow) catchUpBatch(ctx context.Context) (bool, error) {
 	floor := w.floor.Load()
 	for _, row := range rows {
 		if re, _ := row[reAt].(int64); re > 0 && re < floor {
-			if err := w.keepParent(ctx, tx, re); err != nil {
+			if err := w.keepParent(ctx, snapshot, tx, re); err != nil {
 				return false, err
 			}
 		}
@@ -289,8 +313,8 @@ func (w *MemWindow) catchUpBatch(ctx context.Context) (bool, error) {
 	return len(rows) == hotWindowBatch, nil
 }
 
-func (w *MemWindow) keepParent(ctx context.Context, tx *sql.Tx, seq int64) error {
-	rows, err := w.readRows(ctx, "seq = ?", seq)
+func (w *MemWindow) keepParent(ctx context.Context, snapshot, tx *sql.Tx, seq int64) error {
+	rows, err := w.readRows(ctx, snapshot, "seq = ?", seq)
 	if err != nil {
 		return err
 	}
@@ -302,8 +326,8 @@ func (w *MemWindow) keepParent(ctx context.Context, tx *sql.Tx, seq int64) error
 	return nil
 }
 
-func (w *MemWindow) readRows(ctx context.Context, where string, params ...any) ([][]any, error) {
-	rows, err := w.observer.connection.QueryContext(ctx, "SELECT "+strings.Join(w.columns, ", ")+" FROM records WHERE "+where, params...)
+func (w *MemWindow) readRows(ctx context.Context, snapshot *sql.Tx, where string, params ...any) ([][]any, error) {
+	rows, err := snapshot.QueryContext(ctx, "SELECT "+strings.Join(w.columns, ", ")+" FROM records WHERE "+where, params...)
 	if err != nil {
 		return nil, fmt.Errorf("read records for the hot window: %w", err)
 	}
@@ -324,31 +348,41 @@ func (w *MemWindow) readRows(ctx context.Context, where string, params ...any) (
 }
 
 func (w *MemWindow) trim(ctx context.Context) error {
-	if w.inserted < hotWindowTrim && w.bytes.Load() != 0 {
+	now := w.source.Now()
+	if w.inserted < hotWindowTrim && w.bytes.Load() != 0 && now.Sub(w.trimmed) < hotWindowAge {
 		return nil
 	}
-	w.inserted = 0
+	w.inserted, w.trimmed = 0, now
+	var aged sql.NullInt64
+	if err := w.mem.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE seq >= ? AND at >= ?", w.floor.Load(), now.Add(-hotWindowSpan).UnixMilli()).Scan(&aged); err != nil {
+		return fmt.Errorf("find the hot window's oldest record: %w", err)
+	}
+	if aged.Valid && aged.Int64 > w.floor.Load() {
+		if err := w.dropBelow(ctx, aged.Int64); err != nil {
+			return err
+		}
+	}
 	for {
 		used, err := w.usedBytes(ctx)
 		if err != nil {
 			return err
 		}
 		w.bytes.Store(used)
-		if used <= HotWindowBytes {
-			return nil
-		}
 		floor := w.floor.Load()
-		if floor > w.head {
+		if used <= HotWindowBytes || floor > w.head {
 			return nil
 		}
-		next := min(floor+hotWindowTrim, w.head+1)
-		if _, err := w.mem.db.ExecContext(ctx, "DELETE FROM records WHERE seq < ? AND seq NOT IN (SELECT re FROM records WHERE seq >= ?)", next, next); err != nil {
-			return fmt.Errorf("trim the hot window: %w", err)
-		}
-		if err := w.moveFloor(ctx, next); err != nil {
+		if err := w.dropBelow(ctx, min(floor+hotWindowTrim, w.head+1)); err != nil {
 			return err
 		}
 	}
+}
+
+func (w *MemWindow) dropBelow(ctx context.Context, floor int64) error {
+	if _, err := w.mem.db.ExecContext(ctx, "DELETE FROM records WHERE seq < ? AND seq NOT IN (SELECT re FROM records WHERE seq >= ?)", floor, floor); err != nil {
+		return fmt.Errorf("trim the hot window: %w", err)
+	}
+	return w.moveFloor(ctx, floor)
 }
 
 func (w *MemWindow) usedBytes(ctx context.Context) (int64, error) {
@@ -362,9 +396,9 @@ func (w *MemWindow) usedBytes(ctx context.Context) (int64, error) {
 
 // Stats reports what the window holds and how often it answered.
 func (w *MemWindow) Stats() HotWindowStats {
-	w.mu.Lock()
+	w.mu.RLock()
 	head := w.head
-	w.mu.Unlock()
+	w.mu.RUnlock()
 	return HotWindowStats{Floor: w.floor.Load(), Head: head, Bytes: w.bytes.Load(), Hits: w.hits.Load(), Misses: w.misses.Load(), Failures: w.failures.Load()}
 }
 
@@ -379,8 +413,22 @@ func (w *MemWindow) CatchUp(ctx context.Context) error {
 }
 
 func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection string, now time.Time) ([]Record, bool) {
+	if f.BroadcastFloor != "" {
+		after, _, err := s.Cursor(ctx, f.BroadcastFloor, f.Drive)
+		if err != nil {
+			w.failures.Add(1)
+			return nil, false
+		}
+		f.broadcastAfter = &after
+	}
 	if err := w.catchUp(ctx); err != nil {
 		w.failures.Add(1)
+		return nil, false
+	}
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.stale.Load() {
+		w.misses.Add(1)
 		return nil, false
 	}
 	floor := w.floor.Load()
@@ -392,14 +440,6 @@ func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection s
 	}
 	f.Trigrams = ""
 	f.After = max(f.After, floor-1)
-	if f.BroadcastFloor != "" {
-		after, _, err := s.Cursor(ctx, f.BroadcastFloor, f.Drive)
-		if err != nil {
-			w.failures.Add(1)
-			return nil, false
-		}
-		f.broadcastAfter = &after
-	}
 	out, err := w.mem.selected(ctx, f, projection, now)
 	if err != nil {
 		w.failures.Add(1)

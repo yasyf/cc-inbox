@@ -490,7 +490,7 @@ ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)`, through); e
 			return fmt.Errorf("delete folded records: %w", err)
 		}
 	}
-	return nil
+	return countRecordsDeleted(ctx, tx)
 }
 
 func digestText(day string, counts map[string]int) string {

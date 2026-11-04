@@ -695,6 +695,9 @@ ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)`, through); e
 	if _, err := tx.ExecContext(ctx, "DELETE FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids)); err != nil {
 		return 0, fmt.Errorf("delete forgotten records: %w", err)
 	}
+	if err := countRecordsDeleted(ctx, tx); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit forget: %w", err)
 	}

@@ -113,3 +113,29 @@ func TestHotWindowSwitch(t *testing.T) {
 		t.Fatalf("turn off twice: %v", err)
 	}
 }
+
+func TestHotWindowGoesStaleWhenCollectionDeletesRecords(t *testing.T) {
+	st, clock := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "first"})
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "second"})
+	window, err := st.BuildHotWindow(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = window.Close() })
+	clock.Advance(30 * 24 * time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newest"})
+	collected, err := st.Collect(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if collected.Archived == 0 {
+		t.Fatalf("collected = %+v, want old records deleted", collected)
+	}
+	if err := window.CatchUp(t.Context()); err == nil || !window.Stale() {
+		t.Fatalf("catch up = %v, stale = %t; want the window invalid", err, window.Stale())
+	}
+	if _, answered, err := window.Answer(t.Context(), st, store.Filter{Drive: "d", Descending: true, Limit: 1}); err != nil || answered {
+		t.Fatalf("a stale window answered = %t, %v", answered, err)
+	}
+}
