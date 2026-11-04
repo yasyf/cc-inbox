@@ -196,7 +196,7 @@ func TestRotationLocksOutDroppedMember(t *testing.T) {
 func TestAnOwnerNeverOffersTheRelayADottedKind(t *testing.T) {
 	srv, a, _, _ := mesh(t)
 	before := len(srv.Pushes)
-	testutil.Post(t, a.st, store.Record{Kind: kinds.Kind("lr.note"), Body: []byte(`{}`), Text: "stays here"})
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Kind("lr.note"), Body: []byte(`{"text":"stays here"}`), Text: "stays here"})
 	res, err := a.node.Push(context.Background(), configs(t, a))
 	if err != nil || res.Pushed != 0 || len(res.Rejected) != 0 {
 		t.Fatalf("push = %+v, %v; want nothing pushed and nothing refused", res, err)

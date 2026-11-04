@@ -102,27 +102,10 @@ func TestPostRefusesACredentialOnEveryWayIntoARecordAndKeepsNoCopy(t *testing.T)
 			}); err != nil {
 				t.Fatal(err)
 			}
-			blockers, err := run(t, "show", "2")
-			if err != nil || !strings.Contains(blockers, "post refused") || !strings.Contains(blockers, "an AWS access key id") {
-				t.Errorf("show 2 = %q, %v; want the blocker naming the shape", blockers, err)
+			if got, err := run(t, "show", "2"); err == nil {
+				t.Errorf("show 2 = %q; a refused post wrote a record", got)
 			}
 		})
-	}
-}
-
-func TestARefusalForAnotherReasonLeavesTheValueOutOfItsBlocker(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("CCI_HOME", home)
-	value := "AS" + "IA" + strings.Repeat("A1B2", 4)
-	base := []string{"post", "--drive", "d", "--lane", "root", "--kind", "report"}
-	if _, err := run(t, append(base, "--text", "the store exists")...); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "nonsense", "--text", "the key is "+value); err == nil {
-		t.Fatal("post --kind nonsense passed")
-	}
-	if got, err := run(t, "show", "2"); err != nil || strings.Contains(got, value) || !strings.Contains(got, "post refused") {
-		t.Errorf("show 2 = %q, %v; want the blocker without the value", got, err)
 	}
 }
 

@@ -131,7 +131,7 @@ ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 	if err := definitions.Err(); err != nil {
 		t.Fatal(err)
 	}
-	return &Store{db: db, node: production.node}
+	return &Store{db: db, node: production.node, window: &hotWindowSlot{}}
 }
 
 func assertRegisteredPlan(t *testing.T, st *Store) {
