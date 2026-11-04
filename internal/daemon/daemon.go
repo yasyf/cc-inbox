@@ -44,9 +44,8 @@ const (
 	// itself, such as a migration that held every client open.
 	MaintenanceDrive = "cci"
 	maintainRetry    = time.Minute
-	collectInterval  = 10 * time.Minute
+	collectInterval  = 24 * time.Hour
 	collectPause     = time.Second
-	sweepInterval    = 24 * time.Hour
 )
 
 func Definition() (daemonkit.Daemon, error) {
@@ -222,7 +221,6 @@ func collect(ctx context.Context, st *store.Store) {
 			return nil
 		}
 	}
-	var swept time.Time
 	for {
 		if err := pause(ctx); err != nil {
 			return
@@ -234,15 +232,12 @@ func collect(ctx context.Context, st *store.Store) {
 		if res.Archived > 0 || res.Sessions > 0 || res.Vacuumed || len(res.Skipped) > 0 {
 			slog.Info("cci daemon collected the store", "archived", res.Archived, "sessions", res.Sessions, "claims", res.Claims, "vacuumed", res.Vacuumed, "freed_pages", res.Freed, "skipped", res.Skipped)
 		}
-		if time.Since(swept) >= sweepInterval {
-			swept = time.Now()
-			blobs, archives, err := st.SweepFiles(ctx)
-			if err != nil && ctx.Err() == nil {
-				slog.Warn("cci daemon could not sweep the store's files", "err", err)
-			}
-			if blobs > 0 || archives > 0 {
-				slog.Info("cci daemon swept the store's files", "blobs", blobs, "archives", archives)
-			}
+		blobs, archives, err := st.SweepFiles(ctx)
+		if err != nil && ctx.Err() == nil {
+			slog.Warn("cci daemon could not sweep the store's files", "err", err)
+		}
+		if blobs > 0 || archives > 0 {
+			slog.Info("cci daemon swept the store's files", "blobs", blobs, "archives", archives)
 		}
 		select {
 		case <-ctx.Done():

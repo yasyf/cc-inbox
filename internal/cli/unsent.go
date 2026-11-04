@@ -21,7 +21,7 @@ import (
 
 const (
 	unsentEnv   = "CCI_UNSENT"
-	unsentDir   = "unsent"
+	unsentDir   = store.UnsentDir
 	refusedExt  = ".refused"
 	writeExt    = ".write"
 	drainBound  = 30 * time.Second

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -126,6 +127,112 @@ func TestCollectKeepsAnIncidentAndItsUpdates(t *testing.T) {
 	}
 }
 
+func TestCollectKeepsAParentAFreshReplyNames(t *testing.T) {
+	st, clock := testutil.Store(t)
+	parent := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "root says"})
+	sibling := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "old reply", Re: parent.Seq})
+	clock.Advance(store.HotWindow + time.Hour)
+	reply := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "fresh reply", Re: parent.Seq})
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, st, parent.Seq) || !exists(t, st, sibling.Seq) || !exists(t, st, reply.Seq) {
+		t.Fatalf("parent %t, old reply %t, fresh reply %t, want all kept", exists(t, st, parent.Seq), exists(t, st, sibling.Seq), exists(t, st, reply.Seq))
+	}
+}
+
+func TestCollectSparesWhatARecordArrivingDuringThePassNames(t *testing.T) {
+	st, clock := testutil.Store(t)
+	var last store.Record
+	for i := range 1001 {
+		last = testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "note " + strconv.Itoa(i)})
+	}
+	clock.Advance(store.HotWindow + time.Hour)
+	var reply store.Record
+	res, err := st.Collect(t.Context(), func(context.Context) error {
+		if reply.Seq == 0 {
+			reply = testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "late reply", Re: last.Seq})
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, st, last.Seq) || res.Archived != 1000 {
+		t.Fatalf("named record kept = %t, archived = %d", exists(t, st, last.Seq), res.Archived)
+	}
+}
+
+func TestCollectKeepsALandedWhileItsOpenedStays(t *testing.T) {
+	st, clock := testutil.Store(t)
+	pr := store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 7}}}
+	opened := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Opened, Text: "opened", Refs: pr})
+	landed := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Landed, Text: "landed", Refs: pr})
+	clock.Advance(store.HotWindow + time.Hour)
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, st, opened.Seq) || !exists(t, st, landed.Seq) {
+		t.Fatalf("opened kept = %t, landed kept = %t", exists(t, st, opened.Seq), exists(t, st, landed.Seq))
+	}
+	stillOpen, err := st.OpenPR(t.Context(), "d", "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stillOpen {
+		t.Fatal("collecting reopened a landed PR")
+	}
+}
+
+func TestCollectKeepsTheNewestSpawnOfEachLane(t *testing.T) {
+	st, clock := testutil.Store(t)
+	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn x", Refs: store.Refs{Lanes: []string{"x"}}})
+	second := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn y", Refs: store.Refs{Lanes: []string{"y"}}})
+	clock.Advance(store.HotWindow + time.Hour)
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, st, first.Seq) || !exists(t, st, second.Seq) {
+		t.Fatalf("spawn x kept = %t, spawn y kept = %t", exists(t, st, first.Seq), exists(t, st, second.Seq))
+	}
+}
+
+func TestCollectAdvancesCompactedThroughForLocalRecords(t *testing.T) {
+	st, clock := testutil.Store(t)
+	note := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "local"})
+	clock.Advance(store.HotWindow + time.Hour)
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+filepath.Join(st.HomeDir(), store.DBFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var through int64
+	if err := db.QueryRowContext(t.Context(), "SELECT value FROM meta WHERE key = 'compacted_through'").Scan(&through); err != nil {
+		t.Fatal(err)
+	}
+	if through != note.Seq {
+		t.Fatalf("compacted_through = %d, want %d", through, note.Seq)
+	}
+}
+
+func TestCollectPublishesASegmentPerPass(t *testing.T) {
+	st, clock := testutil.Store(t)
+	for _, text := range []string{"first pass", "second pass"} {
+		testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: text})
+		clock.Advance(store.HotWindow + time.Hour)
+		if _, err := st.Collect(t.Context(), noPause); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths, err := filepath.Glob(filepath.Join(st.HomeDir(), "archive", "d-*.jsonl.gz"))
+	if err != nil || len(paths) != 2 {
+		t.Fatalf("segments = %v, %v", paths, err)
+	}
+}
+
 func TestCollectKeepsTheNewestHeadForThirtyDays(t *testing.T) {
 	st, clock := testutil.Store(t)
 	older := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Head, Text: "older", Topic: "t"})
@@ -171,8 +278,10 @@ func TestCollectDoesNotLetAForeignRowReturn(t *testing.T) {
 
 func TestCollectReturnsSpaceToTheFileSystem(t *testing.T) {
 	st, clock := testutil.Store(t)
-	for range 600 {
-		testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: strings.Repeat("padding ", 40)})
+	for i := range 600 {
+		if posted := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: strings.Repeat("padding ", 40) + strconv.Itoa(i)}); posted.Seq != int64(i+1) {
+			t.Fatalf("post %d landed at #%d", i, posted.Seq)
+		}
 	}
 	clock.Advance(store.HotWindow + time.Hour)
 	res, err := st.Collect(t.Context(), noPause)
@@ -250,8 +359,26 @@ func TestCollectLeavesWhatAPeerHasNotAcknowledged(t *testing.T) {
 
 func TestSweepFilesKeepsNamedAndFreshBlobs(t *testing.T) {
 	st, clock := testutil.Store(t)
-	long := strings.Repeat("word ", store.MaxText)
-	named := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Decide, Text: long})
+	excerpt, path, err := st.Fit(strings.Repeat("word ", store.MaxText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	named := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Decide, Text: excerpt, Refs: store.Refs{Path: path}})
+	queuedBody, queuedPath, err := st.Fit(strings.Repeat("queued ", store.MaxText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue := filepath.Join(st.HomeDir(), store.UnsentDir)
+	if err := os.MkdirAll(queue, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	write, err := json.Marshal(store.Write{Records: []store.Record{{Text: queuedBody, Refs: store.Refs{Path: queuedPath}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(queue, "1.write"), write, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	dir := filepath.Join(st.HomeDir(), "blobs")
 	orphan := filepath.Join(dir, "orphan.txt")
 	if err := os.WriteFile(orphan, []byte("x"), 0o600); err != nil {
@@ -261,8 +388,10 @@ func TestSweepFilesKeepsNamedAndFreshBlobs(t *testing.T) {
 	if err := os.Chtimes(orphan, old, old); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(named.Refs.Path, old, old); err != nil {
-		t.Fatal(err)
+	for _, blob := range []string{named.Refs.Path, queuedPath} {
+		if err := os.Chtimes(blob, old, old); err != nil {
+			t.Fatal(err)
+		}
 	}
 	blobs, _, err := st.SweepFiles(t.Context())
 	if err != nil {
@@ -276,5 +405,8 @@ func TestSweepFilesKeepsNamedAndFreshBlobs(t *testing.T) {
 	}
 	if _, err := os.Stat(named.Refs.Path); err != nil {
 		t.Errorf("named blob removed: %v", err)
+	}
+	if _, err := os.Stat(queuedPath); err != nil {
+		t.Errorf("queued blob removed: %v", err)
 	}
 }
