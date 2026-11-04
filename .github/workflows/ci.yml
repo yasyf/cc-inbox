@@ -367,8 +367,8 @@ jobs:
             exit 1
           fi
           cat "$RUNNER_TEMP/stream-idle-old.log"
-          grep -F 'for 32 unmatched rows, want 1' "$RUNNER_TEMP/stream-idle-old.log"
-          grep -F 'for 10000 unmatched rows, want 1' "$RUNNER_TEMP/stream-idle-old.log"
+          grep -F 'for 32 unmatched rows, want at most' "$RUNNER_TEMP/stream-idle-old.log"
+          grep -F 'for 10000 unmatched rows, want at most' "$RUNNER_TEMP/stream-idle-old.log"
           go test -count=1 -race -run '^TestChangeVersion' -v ./internal/store
           go test -count=1 -race -run '^TestStream' -v ./internal/server
       - name: Vet

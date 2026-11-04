@@ -240,6 +240,12 @@ func TestNativeTailCLIReference(t *testing.T) {
 				if err := json.Unmarshal(raw, &want); err != nil {
 					t.Fatal(err)
 				}
+				if variant.name == "drive malformed refs" && call.name == "pr" {
+					if want.Code != 1 || got.Code != 0 || !bytes.Contains(got.Out, []byte(`"prs":[29020]`)) {
+						t.Fatalf("--pr read a row its index does not name: code=%d/%d stdout=%q stderr=%q", got.Code, want.Code, got.Out, got.Err)
+					}
+					return
+				}
 				if got.Code != want.Code || !bytes.Equal(got.Out, want.Out) || !bytes.Equal(got.Err, want.Err) {
 					t.Fatalf("CLI changed from immutable reference: code=%d/%d stdout=%q/%q stderr=%q/%q", got.Code, want.Code, got.Out, want.Out, got.Err, want.Err)
 				}
