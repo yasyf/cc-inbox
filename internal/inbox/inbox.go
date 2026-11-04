@@ -293,6 +293,10 @@ func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, bud
 	if !v.JSON {
 		query = st.QueryText
 	}
+	f, err := st.BoundSince(ctx, f)
+	if err != nil {
+		return nil, nil, nil, false, err
+	}
 	for {
 		page, err := query(ctx, f)
 		if err != nil {
@@ -433,6 +437,10 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	var readErr error
 	f.Descending = true
 	f.Limit = pageRows
+	f, err := st.BoundSince(ctx, f)
+	if err != nil {
+		return err
+	}
 	f.Contains = requiredWords(pattern.String())
 	f.Trigrams = st.TrigramsNarrow(ctx, f.Contains, everyWord(pattern.String()))
 	now := st.Now()
