@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A record addressed to a lane now leads a capped page of its mail, whoever wrote
+  it, after root's own orders. A stand-down from the supervisor no longer waits
+  behind a replica's backlog of broadcasts.
+- A lane's hook, `--mail` and `lr wait` feed no alias mail from before its
+  predecessor's newest own record. An order sent while no one held the alias, or
+  to one nobody ever held, still arrives, and `cci tail --since` reads the rest.
 - A lane on a fresh Sprite no longer replays every old broadcast. The relay
   fills a new store with records numbered in arrival order, so a floor made of
   record numbers read them all as new. A lane now also hears a broadcast only

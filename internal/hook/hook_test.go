@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -289,6 +290,55 @@ func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.
 	got := hookContext(t, &out, "PostToolUse")
 	if !strings.Contains(got, "owner pick since this lane") || strings.Contains(got, "owner pick from before this lane") {
 		t.Fatalf("additionalContext = %q; want only the broadcast written since the lane started", got)
+	}
+}
+
+func TestALanesHookFeedsNoAliasMailItsPredecessorCouldHaveRead(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	note := func(lane, to, text string) {
+		t.Helper()
+		clock.Advance(time.Minute)
+		testutil.Post(t, st, store.Record{Lane: lane, Kind: kinds.Note, To: []string{to}, Text: text})
+	}
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "desk-1", Kind: kinds.State, Text: "desk-1 up"})
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "desk-1", Kind: kinds.State, Text: "desk-1 still working"})
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.StandDown, To: []string{"desk-1"}, Text: "desk-1 stands down"})
+	note("root", "desk", "an order while no one held desk")
+	note("root", "worker", "an order before any worker registered")
+	clock.Advance(time.Minute)
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "desk-2", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s2"}, "d", "worker-1", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(-10 * time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"desk"}, Text: "an order desk-1 read"})
+	clock.Advance(20 * time.Minute)
+	note("root", "desk", "an order for desk-2")
+
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if strings.Contains(got, "an order desk-1 read") || !strings.Contains(got, "an order while no one held desk") || !strings.Contains(got, "an order for desk-2") {
+		t.Fatalf("desk-2's hook = %q; want no mail from before desk-1's last post, and the rest", got)
+	}
+	older, err := st.Query(ctx, store.Filter{Drive: "d", To: "desk-2", Kinds: []kinds.Kind{kinds.Note}})
+	if err != nil || !slices.ContainsFunc(older, func(r store.Record) bool { return r.Text == "an order desk-1 read" }) {
+		t.Fatalf("a read past the hook = %+v, %v; want the older mail still readable", older, err)
+	}
+	out.Reset()
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s2", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "an order before any worker registered") {
+		t.Fatalf("worker-1's hook = %q; want the order sent to a stem nobody ever held", got)
 	}
 }
 
