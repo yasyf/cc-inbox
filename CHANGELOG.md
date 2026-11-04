@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A lane holding a stem receives records addressed to that stem again when an
+  older cci's refused post had registered the stem as a lane. `cci
+  maintain-indexes`, which the daemon runs at start, drops the row a refused
+  post alone left, so `cci tail --to`, `cci watch`, hook delivery and `lr wait`
+  read the stem as the numbered lane's alias.
+- `Reach` and `Holding` name the same holder as delivery. A stem reaches its
+  newest live registration, even when a lane named the stem itself is older and
+  live, so `client.Resolve` and a reader's stem labels no longer name the old
+  lane.
+
 ### Changed
 
 - `cci tail`, `cci grep` and `cci show` print the compact line the hook and the
