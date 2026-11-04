@@ -177,6 +177,7 @@ func newDaemonCmd() *cobra.Command {
 			rt := daemon.New(home, ln, func(ctx context.Context, st *store.Store) (daemon.ReadAPI, error) {
 				return NativeReadHandler(ctx, st, home)
 			})
+			rt.ServeCommands(ServeCommands)
 			_, err = daemonkit.Serve(cmd.Context(), d, rt.Start)
 			return cmp.Or(err, rt.Err())
 		},
@@ -195,7 +196,7 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				window, windowErr := thisWindow()
+				window, windowErr := thisWindow(cmd.Context())
 				if err := hook.SessionStart(cmd.Context(), st, p, window, cmd.OutOrStdout()); err != nil {
 					return err
 				}
@@ -213,7 +214,7 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				window, err := thisWindow()
+				window, err := thisWindow(cmd.Context())
 				if err != nil {
 					return err
 				}
@@ -229,7 +230,7 @@ func newHookCmd() *cobra.Command {
 				if err != nil {
 					return err
 				}
-				return hook.PostToolUse(cmd.Context(), st, p, thisWindow, cmd.OutOrStdout())
+				return hook.PostToolUse(cmd.Context(), st, p, func() (store.Window, error) { return thisWindow(cmd.Context()) }, cmd.OutOrStdout())
 			}),
 		},
 		&cobra.Command{

@@ -85,7 +85,7 @@ func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, 
 }
 
 func keepUnsent(cmd *cobra.Command, args []string, cause error) error {
-	if os.Getenv(unsentEnv) != "" {
+	if getenv(cmd.Context(), unsentEnv) != "" {
 		return &BusDown{Cause: cause}
 	}
 	for _, name := range []string{"lane", "drive"} {
@@ -102,7 +102,7 @@ func keepUnsent(cmd *cobra.Command, args []string, cause error) error {
 	if err != nil {
 		return errors.Join(&BusDown{Cause: cause}, err)
 	}
-	dir, err := os.Getwd()
+	dir, err := getwd(cmd.Context())
 	if err != nil {
 		return errors.Join(&BusDown{Cause: cause}, err)
 	}
@@ -175,7 +175,7 @@ func dropKept(path string) error {
 }
 
 func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
-	if os.Getenv(unsentEnv) != "" {
+	if getenv(ctx, unsentEnv) != "" {
 		return nil
 	}
 	home, err := store.Home()

@@ -2,17 +2,16 @@ package cli
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
 	"github.com/spf13/cobra"
-	"github.com/yasyf/cc-interact/procs"
 
 	"github.com/yasyf/cc-inbox/internal/channel"
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -47,7 +46,7 @@ the channel carries those together in one tag, at most every five minutes and
 at once ahead of any other record, and the PostToolUse hook leaves them to it.`,
 		Args: cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, session, err := thisSession()
+			window, session, err := thisSession(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -133,7 +132,7 @@ func newUnsubscribeCmd() *cobra.Command {
 		Short: "Stop delivering records over this session's cci channel",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, _, err := thisSession()
+			window, _, err := thisSession(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -159,7 +158,7 @@ func newChannelCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, err := thisWindow()
+			window, err := thisWindow(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -175,20 +174,20 @@ var (
 	errAgentChannel = errors.New("a subagent or teammate cannot subscribe or unsubscribe (" + agentEnv + " is set): the channel belongs to the Claude Code window and delivers only to its main thread, so this would replace the root's subscription; the PostToolUse hook already delivers records addressed to your lane, and cci tail --reader <lane> reads them")
 )
 
-func thisSession() (store.Window, string, error) {
-	if os.Getenv(agentEnv) != "" {
+func thisSession(ctx context.Context) (store.Window, string, error) {
+	if getenv(ctx, agentEnv) != "" {
 		return store.Window{}, "", errAgentChannel
 	}
-	window, err := thisWindow()
-	session := os.Getenv(sessionEnv)
+	window, err := thisWindow(ctx)
+	session := getenv(ctx, sessionEnv)
 	if err != nil || session == "" {
 		return store.Window{}, "", errors.Join(errNoSession, err)
 	}
 	return window, session, nil
 }
 
-func thisWindow() (store.Window, error) {
-	pid := procs.ClaudePID()
+func thisWindow(ctx context.Context) (store.Window, error) {
+	pid := claudePID(ctx)
 	if pid == 0 {
 		return store.Window{}, errNoSession
 	}

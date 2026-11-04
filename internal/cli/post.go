@@ -260,7 +260,7 @@ func newPostCmd() *cobra.Command {
 				}
 			}
 			var bind *store.LaneBinding
-			if self, window, err := peerIdentity(); os.Getenv(unsentEnv) == "" && err == nil && window.PID != 0 {
+			if self, window, err := peerIdentity(cmd.Context()); getenv(cmd.Context(), unsentEnv) == "" && err == nil && window.PID != 0 {
 				if err := refuseUnregistered(cmd.Context(), st, r.Drive, lane); err != nil {
 					return err
 				}
@@ -279,7 +279,7 @@ func newPostCmd() *cobra.Command {
 			}
 			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
 			if errors.Is(err, store.ErrUnconfirmed) {
-				if os.Getenv(unsentEnv) != "" {
+				if getenv(cmd.Context(), unsentEnv) != "" {
 					return &BusDown{Cause: err}
 				}
 				return keepWrite(store.Write{Bind: bind, Records: records, TTL: ttl, At: at}, err)
@@ -349,7 +349,7 @@ func newPostCmd() *cobra.Command {
 var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and was spawned with no name, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")
 
 func threadLane(ctx context.Context, st *store.Store) (string, error) {
-	self := SelfPeer()
+	self := selfPeer(ctx)
 	if self.Session == "" {
 		return "", errNoLane
 	}
@@ -694,6 +694,7 @@ func keepPath(cmd *cobra.Command, st *store.Store, path string) (string, error) 
 	if path == "-" {
 		body, err = io.ReadAll(cmd.InOrStdin())
 	} else {
+		path = callerPath(cmd.Context(), path)
 		info, statErr := os.Stat(path)
 		if statErr != nil {
 			return "", fmt.Errorf("--path: %w", statErr)

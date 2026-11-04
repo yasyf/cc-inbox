@@ -572,6 +572,11 @@ func (s *Store) MoveCursors(ctx context.Context, moves []CursorMove) error {
 	if len(moves) == 0 {
 		return nil
 	}
+	if s.beforeCursorMove != nil {
+		if err := s.beforeCursorMove(ctx); err != nil {
+			return err
+		}
+	}
 	_, err := s.Commit(ctx, Write{Cursors: moves})
 	return err
 }

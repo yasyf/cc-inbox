@@ -26,9 +26,13 @@ import (
 )
 
 func newTailCmd() *cobra.Command {
-	cmd, flags := tailCommand(SelfPeer().String())
+	cmd, flags := tailCommand("")
 	cmd.RunE = withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-		return flags.run(cmd.Context(), cmd, st, SelfPeer())
+		self := selfPeer(cmd.Context())
+		if !cmd.Flags().Changed("cursor") {
+			flags.cursor = self.String()
+		}
+		return flags.run(cmd.Context(), cmd, st, self)
 	})
 	return cmd
 }
@@ -164,7 +168,7 @@ func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *sto
 }
 
 func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, start, last int64) error {
-	self := SelfPeer()
+	self := selfPeer(ctx)
 	b, bound, err := st.Binding(ctx, self)
 	if err != nil || !bound || b.Lane == "" || !store.SameLane(b.Lane, f.For) || b.Drive != f.Drive {
 		return err
@@ -376,6 +380,12 @@ func newStateCmd() *cobra.Command {
 
 func tailNotes(cmd *cobra.Command, asJSON bool) io.Writer {
 	if asJSON {
+		return cmd.ErrOrStderr()
+	}
+	if inv := invoked(cmd.Context()); inv != nil {
+		if inv.stdoutChar {
+			return nil
+		}
 		return cmd.ErrOrStderr()
 	}
 	out, ok := cmd.OutOrStdout().(*os.File)
