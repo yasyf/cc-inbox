@@ -128,8 +128,8 @@ func TestThePostToolPassesFlagsTheCLITakes(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	args := map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "once", "id": "k1", "target": []string{"plat"}, "attrs": map[string]string{"step": "one"}}
 	first := mustTool(t, "post", args)
-	if second := mustTool(t, "post", args); second != first {
-		t.Errorf("a repost with the same id = %q, want the first record %q", second, first)
+	if second := mustTool(t, "post", args); second != first+" (duplicate)" {
+		t.Errorf("a repost with the same id = %q, want the first record %q marked a duplicate", second, first)
 	}
 	if out := mustTool(t, "read", map[string]any{"seqs": []any{first}}); !strings.Contains(out, "once") {
 		t.Errorf("read %s = %q", first, out)
