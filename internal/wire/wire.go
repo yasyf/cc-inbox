@@ -49,6 +49,7 @@ type Request struct {
 	Cwd        string   `json:"cwd"`
 	PID        int      `json:"pid"`
 	StdoutChar bool     `json:"stdout_char"`
+	Embedder   bool     `json:"embedder,omitempty"`
 }
 
 // Relayed reports whether argv is a command the daemon runs: a read or a post
@@ -58,7 +59,7 @@ func Relayed(argv []string) bool {
 		return false
 	}
 	switch argv[1] {
-	case "post", "tail", "grep", "show", "digest", "watch", "channel", "window":
+	case "post", "tail", "grep", "show", "digest", "watch", "channel", "window", "embed":
 	case "hook":
 		if len(argv) < 3 || !slices.Contains([]string{"post-tool-use", "stop", "subagent-stop", "prompt"}, argv[2]) {
 			return false
@@ -116,10 +117,15 @@ func dial(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "cci-daemon"), nil //nolint:gosec // G115: a file descriptor fits in uintptr.
 }
 
+// Dial connects to the daemon's socket.
+func Dial(socket string) (*os.File, error) {
+	return dial(socket)
+}
+
 // Stream reports whether argv runs until its client leaves, so any release's
 // client may ask for it.
 func Stream(argv []string) bool {
-	return len(argv) > 1 && (argv[1] == "watch" || argv[1] == "channel")
+	return len(argv) > 2 && argv[1] == "embed" && argv[2] == "follow" || len(argv) > 1 && (argv[1] == "watch" || argv[1] == "channel")
 }
 
 func outlivesDaemon(argv []string) bool {

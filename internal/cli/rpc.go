@@ -150,7 +150,7 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	if err := json.Unmarshal(payload, &request); err != nil || kind != wire.FrameRequest {
 		return errors.Join(fmt.Errorf("bad request frame %q", kind), err)
 	}
-	if !wire.Relayed(request.Argv) || request.Version != version.String() && !wire.Stream(request.Argv) {
+	if !wire.Relayed(request.Argv) || request.Version != version.String() && !wire.Stream(request.Argv) && !request.Embedder {
 		return wire.WriteFrame(conn, wire.FrameFallback, nil)
 	}
 	captureCommand(home, request)
