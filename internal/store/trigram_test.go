@@ -103,6 +103,18 @@ func TestBoundSinceKeepsEveryRecordInTheWindow(t *testing.T) {
 	if len(records) != 2 || records[0].Seq != first.Seq || records[1].Seq != last.Seq {
 		t.Fatalf("records = %v", records)
 	}
+	newer := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newer than the remembered floor"})
+	again, err := st.BoundSince(t.Context(), store.Filter{Drive: "d", Since: since})
+	if err != nil {
+		t.Fatal(err)
+	}
+	records, err = st.Query(t.Context(), again)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 3 || records[2].Seq != newer.Seq {
+		t.Fatalf("records after a remembered floor = %v", records)
+	}
 	later, err := st.BoundSince(t.Context(), store.Filter{Drive: "d", Since: since, After: last.Seq})
 	if err != nil {
 		t.Fatal(err)
