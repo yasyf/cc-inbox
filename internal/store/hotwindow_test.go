@@ -86,7 +86,7 @@ func TestHotWindowLeavesWhatItCannotProveToTheStore(t *testing.T) {
 		}
 	}
 	st.ServeHotWindow(window)
-	records, err := st.Query(t.Context(), store.Filter{Drive: "d"})
+	records, err := st.Query(t.Context(), store.Filter{Drive: "d", IncludeExpired: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestHotWindowLeavesWhatItCannotProveToTheStore(t *testing.T) {
 
 func TestHotWindowBoundsSinceAndKnowsWhatItCovers(t *testing.T) {
 	st, clock := testutil.Store(t)
-	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "below the floor"})
+	below := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "below the floor"})
 	clock.Advance(72 * time.Hour)
 	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "first in the window"})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "second in the window"})
@@ -121,7 +121,8 @@ func TestHotWindowBoundsSinceAndKnowsWhatItCovers(t *testing.T) {
 	}{
 		{"a since inside the window", store.Filter{Drive: "d", Since: first.At}, true},
 		{"a cursor at the floor", store.Filter{Drive: "d", After: first.Seq - 1}, true},
-		{"a since below the floor", store.Filter{Drive: "d", Since: first.At.Add(-71 * time.Hour)}, false},
+		{"a since past the newest record below the floor", store.Filter{Drive: "d", Since: below.At.Add(time.Hour)}, true},
+		{"a since at the newest record below the floor", store.Filter{Drive: "d", Since: below.At}, false},
 		{"the whole drive", store.Filter{Drive: "d"}, false},
 	}
 	for _, tt := range tests {

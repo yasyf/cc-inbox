@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `client.Follow` returns nil again when its context ends, on the daemon as on
+  the store, and `client.Open` reads the same empty list through either.
 - A lane holding a stem receives records addressed to that stem again when an
   older cci's refused post had registered the stem as a lane. `cci
   maintain-indexes`, which the daemon runs at start, drops the row a refused

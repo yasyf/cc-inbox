@@ -67,7 +67,7 @@ func daemonHome(t *testing.T) (*countingListener, func()) {
 func TestTheClientReadsAndWritesThroughTheDaemonAndAloneAlike(t *testing.T) {
 	ln, stop := daemonHome(t)
 	ctx := t.Context()
-	ask, err := client.Post(ctx, client.Draft{Drive: "d", Lane: "root", Kind: "ask", Text: "ship it?", To: []string{"root"}})
+	ask, err := client.Post(ctx, client.Draft{Drive: "d", Lane: "worker", Kind: "ask", Text: "ship it?", To: []string{"root"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,13 +124,18 @@ func TestFollowRunsOnTheDaemon(t *testing.T) {
 	ln, stop := daemonHome(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
-	first, err := client.Post(ctx, client.Draft{Drive: "d", Lane: "worker", Kind: "note", Text: "before", To: []string{"root"}})
+	start, err := client.Post(ctx, client.Draft{Drive: "d", Lane: "worker", Kind: "note", Text: "before the watch", To: []string{"root"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := client.Post(ctx, client.Draft{Drive: "d", Lane: "worker", Kind: "note", Text: "after its start", To: []string{"root"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	seen := make(chan client.Record, 4)
+	followed := make(chan error, 1)
 	go func() {
-		_ = client.Follow(ctx, client.Watch{Drive: "d", Reader: "root", After: first.Seq - 1}, func(r client.Record) error {
+		followed <- client.Follow(ctx, client.Watch{Drive: "d", Reader: "root", After: start.Seq}, func(r client.Record) error {
 			seen <- r
 			return nil
 		})
@@ -143,8 +148,12 @@ func TestFollowRunsOnTheDaemon(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal("nothing followed")
 	}
-	if ln.accepted.Load() < 2 {
+	if ln.accepted.Load() < 3 {
 		t.Fatalf("accepted = %d; want the follow on the daemon", ln.accepted.Load())
+	}
+	cancel()
+	if err := <-followed; err != nil {
+		t.Fatalf("Follow ended by its context = %v, want nil", err)
 	}
 	stop()
 }

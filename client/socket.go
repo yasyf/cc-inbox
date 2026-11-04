@@ -177,7 +177,7 @@ func daemonFollow(ctx context.Context, c cli.EmbedCall, emit func(Record) error)
 		code, err := daemonRead(ctx, []string{"embed", "follow"}, bytes.NewReader(in), out, &stderr)
 		switch {
 		case ctx.Err() != nil:
-			return ctx.Err()
+			return nil
 		case out.err != nil:
 			return out.err
 		case errors.Is(err, errNoDaemon):
@@ -192,7 +192,7 @@ func daemonFollow(ctx context.Context, c cli.EmbedCall, emit func(Record) error)
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil
 		case <-time.After(followRedial):
 		}
 	}
@@ -232,7 +232,7 @@ func followStore(ctx context.Context, c cli.EmbedCall, emit func(Record) error) 
 	bounded, cancel := context.WithTimeout(ctx, followLocal)
 	defer cancel()
 	err = cli.EmbedFollow(bounded, st, c, cli.SelfPeer(ctx).String(), emit)
-	if bounded.Err() != nil && ctx.Err() == nil {
+	if bounded.Err() != nil {
 		return nil
 	}
 	return err
