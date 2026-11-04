@@ -91,6 +91,9 @@ func markStarted(roots version.Roots) {
 		if path, err = filepath.EvalSymlinks(exe); err != nil {
 			fail(err)
 		}
+		if filepath.Base(path) == "cci-core" {
+			path = filepath.Join(filepath.Dir(path), "cci")
+		}
 	}
 	if err := roots.MarkStarted(path); err != nil {
 		fail(err)

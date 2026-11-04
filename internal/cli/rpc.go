@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/yasyf/cc-interact/procs"
 
@@ -22,7 +25,12 @@ import (
 	"github.com/yasyf/cc-inbox/internal/wire"
 )
 
-const replyBufferBytes = 64 << 10
+const (
+	replyBufferBytes = 64 << 10
+	replyFrameBytes  = 1 << 20
+	inputFrames      = 4
+	requestPatience  = 5 * time.Second
+)
 
 type invocationKey struct{}
 
@@ -111,6 +119,7 @@ func ServeCommands(ctx context.Context, ln net.Listener, st *store.Store, home s
 			defer func() {
 				if r := recover(); r != nil {
 					slog.Error("cci daemon: a command panicked", "panic", r)
+					_ = conn.SetWriteDeadline(time.Now().Add(requestPatience))
 					_ = wire.WriteFrame(conn, wire.FrameStderr, []byte("cci: the daemon failed this command\n"))
 					_ = wire.WriteFrame(conn, wire.FrameExit, wire.ExitPayload(1))
 				}
@@ -123,9 +132,18 @@ func ServeCommands(ctx context.Context, ln net.Listener, st *store.Store, home s
 }
 
 func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home string) error {
+	ctx, cancel := context.WithCancel(parent)
+	defer cancel()
+	defer context.AfterFunc(ctx, func() { _ = conn.Close() })()
+	if err := conn.SetReadDeadline(time.Now().Add(requestPatience)); err != nil {
+		return err
+	}
 	r := bufio.NewReader(conn)
 	kind, payload, err := wire.ReadFrame(r)
 	if err != nil {
+		return err
+	}
+	if err := conn.SetReadDeadline(time.Time{}); err != nil {
 		return err
 	}
 	var request wire.Request
@@ -135,9 +153,7 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	if !wire.Relayed(request.Argv) || request.Version != version.String() && !wire.Stream(request.Argv) {
 		return wire.WriteFrame(conn, wire.FrameFallback, nil)
 	}
-	ctx, cancel := context.WithCancel(parent)
-	defer cancel()
-	replies := &replyStream{conn: conn, acks: make(chan struct{}, 1), input: make(chan []byte, 1), gone: ctx.Done(), unbuffered: wire.Stream(request.Argv)}
+	replies := &replyStream{conn: conn, acks: make(chan struct{}, 1), input: make(chan []byte, inputFrames), gone: ctx.Done(), lines: wire.Stream(request.Argv)}
 	go replies.readClient(r, cancel)
 	view := *st
 	if err := configureStoreOwner(&view, home); err != nil {
@@ -147,7 +163,7 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	root := NewRootCmd()
 	root.SetArgs(request.Argv[1:])
 	root.SetOut(replies)
-	root.SetErr(&stderrStream{conn: conn})
+	root.SetErr(replies.stderr())
 	root.SetIn(&inputStream{replies: replies})
 	err = root.ExecuteContext(channel.Hosted(context.WithValue(ctx, invocationKey{}, &invocation{
 		env: requestEnv(request.Env), cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
@@ -158,11 +174,11 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	code := 0
 	if err != nil {
 		code = ExitCode(err)
-		if werr := wire.WriteFrame(conn, wire.FrameStderr, []byte("cci: "+err.Error()+"\n")); werr != nil {
+		if werr := replies.writeFrame(wire.FrameStderr, []byte("cci: "+err.Error()+"\n")); werr != nil {
 			return werr
 		}
 	}
-	return wire.WriteFrame(conn, wire.FrameExit, wire.ExitPayload(code))
+	return replies.writeFrame(wire.FrameExit, wire.ExitPayload(code))
 }
 
 // ExitCode is the process exit code of a command's error.
@@ -174,14 +190,20 @@ func ExitCode(err error) int {
 }
 
 type replyStream struct {
-	conn  net.Conn
-	mu    sync.Mutex
-	buf   []byte
-	acks  chan struct{}
-	input chan []byte
-	gone  <-chan struct{}
+	conn    net.Conn
+	writing sync.Mutex
+	mu      sync.Mutex
+	buf     []byte
+	acks    chan struct{}
+	input   chan []byte
+	gone    <-chan struct{}
+	lines   bool
+}
 
-	unbuffered bool
+func (s *replyStream) writeFrame(kind byte, payload []byte) error {
+	s.writing.Lock()
+	defer s.writing.Unlock()
+	return wire.WriteFrame(s.conn, kind, payload)
 }
 
 func (s *replyStream) readClient(r io.Reader, cancel context.CancelFunc) {
@@ -193,19 +215,28 @@ func (s *replyStream) readClient(r io.Reader, cancel context.CancelFunc) {
 		}
 		switch kind {
 		case wire.FrameAck:
-			s.acks <- struct{}{}
+			select {
+			case s.acks <- struct{}{}:
+			case <-s.gone:
+				return
+			}
 		case wire.FrameStdin:
-			s.input <- payload
+			select {
+			case s.input <- payload:
+			case <-s.gone:
+				return
+			}
 		}
 	}
 }
 
 // Write holds p until the next flush; a command's output reaches the client
-// before any cursor moves past it.
+// before any cursor moves past it. A stream flushes at each complete line, so a
+// lost connection never splits one.
 func (s *replyStream) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	s.buf = append(s.buf, p...)
-	full := s.unbuffered || len(s.buf) >= replyBufferBytes
+	full := len(s.buf) >= replyBufferBytes || s.lines && bytes.HasSuffix(s.buf, []byte{'\n'})
 	s.mu.Unlock()
 	if full {
 		if err := s.Flush(context.Background()); err != nil {
@@ -215,32 +246,39 @@ func (s *replyStream) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Flush returns once the client has written everything held so far.
-func (s *replyStream) Flush(context.Context) error {
+// Flush returns once the client has written everything held so far, or ctx ends.
+func (s *replyStream) Flush(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if len(s.buf) == 0 {
-		return nil
-	}
-	if err := wire.WriteFrame(s.conn, wire.FrameStdout, s.buf); err != nil {
-		return err
+	for frame := range slices.Chunk(s.buf, replyFrameBytes) {
+		if err := s.writeFrame(wire.FrameStdout, frame); err != nil {
+			return err
+		}
+		select {
+		case <-s.acks:
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.gone:
+			return errors.New("the client went away before its output was written")
+		}
 	}
 	s.buf = s.buf[:0]
-	select {
-	case <-s.acks:
-		return nil
-	case <-s.gone:
-		return errors.New("the client went away before its output was written")
-	}
+	return nil
+}
+
+func (s *replyStream) stderr() io.Writer {
+	return stderrStream{s}
 }
 
 type stderrStream struct {
-	conn net.Conn
+	replies *replyStream
 }
 
-func (s *stderrStream) Write(p []byte) (int, error) {
-	if err := wire.WriteFrame(s.conn, wire.FrameStderr, p); err != nil {
-		return 0, err
+func (s stderrStream) Write(p []byte) (int, error) {
+	for frame := range slices.Chunk(p, replyFrameBytes) {
+		if err := s.replies.writeFrame(wire.FrameStderr, frame); err != nil {
+			return 0, err
+		}
 	}
 	return len(p), nil
 }
@@ -252,7 +290,7 @@ type inputStream struct {
 
 func (s *inputStream) Read(p []byte) (int, error) {
 	if len(s.rest) == 0 {
-		if err := wire.WriteFrame(s.replies.conn, wire.FrameNeedIn, nil); err != nil {
+		if err := s.replies.writeFrame(wire.FrameNeedIn, nil); err != nil {
 			return 0, err
 		}
 		select {

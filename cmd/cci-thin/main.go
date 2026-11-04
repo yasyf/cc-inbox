@@ -24,7 +24,11 @@ func main() {
 	if exe, err = filepath.EvalSymlinks(exe); err != nil {
 		fail(err)
 	}
-	fail(syscall.Exec(filepath.Join(filepath.Dir(exe), "cci-core"), os.Args, os.Environ())) //nolint:gosec // G204: the program released beside this one.
+	core := filepath.Join(filepath.Dir(exe), "cci-core")
+	if err := os.Chmod(core, 0o755); err != nil { //nolint:gosec // G302: binrun extracts every archive member but the entry point 0600.
+		fail(err)
+	}
+	fail(syscall.Exec(core, os.Args, os.Environ())) //nolint:gosec // G204: the program released beside this one.
 }
 
 func fail(err error) {

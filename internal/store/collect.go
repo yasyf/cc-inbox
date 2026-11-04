@@ -16,7 +16,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -709,8 +711,8 @@ func (s *Store) forgetSessions(ctx context.Context, cutoff int64) (sessions, cla
 	if err != nil {
 		return 0, 0, fmt.Errorf("delete idle sessions: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM cursors WHERE name LIKE 'watch-%' AND seq < (SELECT COALESCE(MIN(seq), 0) FROM records WHERE at >= ?)", cutoff); err != nil {
-		return 0, 0, fmt.Errorf("delete abandoned watch cursors: %w", err)
+	if err := forgetDeadWatches(ctx, tx); err != nil {
+		return 0, 0, err
 	}
 	dropped, err := tx.ExecContext(ctx, "DELETE FROM claims WHERE at < ? AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.session = claims.session)", cutoff)
 	if err != nil {
@@ -728,6 +730,39 @@ func (s *Store) forgetSessions(ctx context.Context, cutoff int64) (sessions, cla
 		return 0, 0, fmt.Errorf("count orphaned claims: %w", err)
 	}
 	return int(s64), int(c64), nil
+}
+
+// forgetDeadWatches deletes the cursors of watch clients that have exited. A
+// client names its cursor watch-<pid>-<nanos>.
+func forgetDeadWatches(ctx context.Context, tx *sql.Tx) error {
+	rows, err := tx.QueryContext(ctx, "SELECT DISTINCT name FROM cursors WHERE name LIKE 'watch-%'")
+	if err != nil {
+		return fmt.Errorf("read watch cursors: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var dead []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return fmt.Errorf("scan watch cursor: %w", err)
+		}
+		pid, _, _ := strings.Cut(strings.TrimPrefix(name, "watch-"), "-")
+		if n, err := strconv.Atoi(pid); err == nil && errors.Is(syscall.Kill(n, 0), syscall.ESRCH) {
+			dead = append(dead, name)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, name := range dead {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM cursors WHERE name = ?", name); err != nil {
+			return fmt.Errorf("delete watch cursor: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Store) returnSpace(ctx context.Context, pause func(context.Context) error) (vacuumed bool, freed int, err error) {

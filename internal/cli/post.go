@@ -725,7 +725,7 @@ func readBody(cmd *cobra.Command, path string) (json.RawMessage, error) {
 	if path == "-" {
 		raw, err = io.ReadAll(io.LimitReader(cmd.InOrStdin(), store.MaxBody+1))
 	} else {
-		raw, err = os.ReadFile(path) //nolint:gosec // G304: the caller names its own body file.
+		raw, err = os.ReadFile(callerPath(cmd.Context(), path)) //nolint:gosec // G304: the caller names its own body file.
 	}
 	if err != nil {
 		return nil, fmt.Errorf("--body-file: %w", err)

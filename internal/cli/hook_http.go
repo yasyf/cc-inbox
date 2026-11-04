@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/yasyf/cc-inbox/internal/hook"
@@ -18,21 +20,30 @@ import (
 // drain a session's mail.
 const HookHeader = "X-Cci-Hook"
 
+// HookHomeHeader carries a session's CCI_HOME. The daemon reads one store, so a
+// hook from a session on another gets an empty answer and that session's mail
+// waits for cci tail.
+const HookHomeHeader = "X-Cci-Home"
+
 type hookReply struct {
 	w    http.ResponseWriter
 	held bytes.Buffer
+	sent bool
 }
 
 func (r *hookReply) Write(p []byte) (int, error) {
 	return r.held.Write(p)
 }
 
-// flush hands what is held to Claude Code, so a cursor moves only past mail whose
-// response was written.
+// flush hands the whole response to Claude Code, with its length, so a cursor
+// moves only past mail in a response that is complete on the socket. A hook writes
+// one JSON document before it moves a cursor, so nothing follows it.
 func (r *hookReply) flush(context.Context) error {
-	if r.held.Len() == 0 {
+	if r.held.Len() == 0 || r.sent {
 		return nil
 	}
+	r.sent = true
+	r.w.Header().Set("Content-Length", strconv.Itoa(r.held.Len()))
 	if strings.HasPrefix(r.held.String(), "{") {
 		r.w.Header().Set("Content-Type", "application/json")
 	} else {
@@ -55,6 +66,10 @@ func HookHandler(st *store.Store, home string) http.Handler {
 	mux.HandleFunc("POST /v1/hook/{event}", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get(HookHeader) == "" {
 			http.Error(w, "missing "+HookHeader, http.StatusForbidden)
+			return
+		}
+		if asked := r.Header.Get(HookHomeHeader); asked != "" && filepath.Clean(asked) != filepath.Clean(home) {
+			w.WriteHeader(http.StatusOK)
 			return
 		}
 		p, err := hook.Read(r.Body)

@@ -239,7 +239,11 @@ func AnnounceAgent(ctx context.Context, st *store.Store, p Payload, window func(
 	if found && existing.PID == win.PID && existing.PIDStarted == win.Started && !existing.Superseded && (existing.AgentName != "" || agent.Name == "") {
 		return st.SetParent(ctx, p.Key(), agent.Parent)
 	}
-	o := peers.Options{Session: p.SessionID, Agent: p.AgentID, AgentName: agent.Name, Window: win, Cwd: p.Cwd, Spawned: agent.Spawned}
+	var env map[string]string
+	if parent, err := st.Peer(ctx, store.PeerKey{Session: p.SessionID}); err == nil {
+		env = parent.Env
+	}
+	o := peers.Options{Env: env, Session: p.SessionID, Agent: p.AgentID, AgentName: agent.Name, Window: win, Cwd: p.Cwd, Spawned: agent.Spawned}
 	if agent.Workflow {
 		o.Role = peers.RoleWorkflow
 	}

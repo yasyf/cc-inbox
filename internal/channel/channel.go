@@ -329,7 +329,7 @@ func untilChanged(ctx context.Context, st *store.Store, sub store.Subscription, 
 			stop()
 			return err
 		}
-		if tick%releaseTicks == 0 {
+		if tick%releaseTicks == 0 && !hosted(ctx) {
 			if err := newerRelease(); err != nil {
 				stop()
 				return err
