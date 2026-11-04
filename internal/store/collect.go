@@ -288,6 +288,23 @@ func (s *Store) collectable(ctx context.Context, w collectWindow, head int64) ([
 		}
 		k.keepClosers(r.drive, r.opens)
 	}
+	var outside []int64
+	for _, r := range k.aged {
+		for _, target := range r.targets() {
+			if _, aged := k.aged[target]; !aged && target != 0 {
+				outside = append(outside, target)
+			}
+		}
+	}
+	live, err := s.liveAmong(ctx, outside)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, r := range k.aged {
+		if slices.ContainsFunc(r.targets(), func(target int64) bool { return live[target] }) {
+			k.keep(r.seq)
+		}
+	}
 	k.spread()
 	doomed := make([]collectRow, 0, len(k.aged)-len(k.kept))
 	for _, seq := range slices.Sorted(maps.Keys(k.aged)) {
@@ -320,6 +337,27 @@ AND json_extract(l.refs, '$.targets') IS json_extract(r.refs, '$.targets') AND j
 		superseded[seq] = true
 	}
 	return superseded, rows.Err()
+}
+
+func (s *Store) liveAmong(ctx context.Context, seqs []int64) (map[int64]bool, error) {
+	ids, err := json.Marshal(seqs)
+	if err != nil {
+		return nil, fmt.Errorf("encode retained targets: %w", err)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT seq FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids))
+	if err != nil {
+		return nil, fmt.Errorf("read retained targets: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	live := map[int64]bool{}
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, fmt.Errorf("scan retained target: %w", err)
+		}
+		live[seq] = true
+	}
+	return live, rows.Err()
 }
 
 func (s *Store) openAmong(ctx context.Context, drive string) (map[int64]bool, error) {
