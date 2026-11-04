@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -525,12 +526,17 @@ func (s *Store) BoundSince(ctx context.Context, f Filter) (Filter, error) {
 	return f, nil
 }
 
-// firstSince remembers each answer because later records only take higher seqs,
+// sinceFloors remembers each answer because later records only take higher seqs,
 // so a floor stays right, and the range it reads costs tens of milliseconds.
+type sinceFloors struct {
+	mu     sync.Mutex
+	floors map[int64]int64
+}
+
 func (s *Store) firstSince(ctx context.Context, at int64) (int64, error) {
-	s.sinceFloorsMu.Lock()
-	first, known := s.sinceFloors[at]
-	s.sinceFloorsMu.Unlock()
+	s.floors.mu.Lock()
+	first, known := s.floors.floors[at]
+	s.floors.mu.Unlock()
 	if known {
 		return first, nil
 	}
@@ -538,12 +544,12 @@ func (s *Store) firstSince(ctx context.Context, at int64) (int64, error) {
 	if err := s.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", at).Scan(&found); err != nil || !found.Valid {
 		return 0, err
 	}
-	s.sinceFloorsMu.Lock()
-	defer s.sinceFloorsMu.Unlock()
-	if s.sinceFloors == nil || len(s.sinceFloors) >= sinceFloorsMax {
-		s.sinceFloors = map[int64]int64{}
+	s.floors.mu.Lock()
+	defer s.floors.mu.Unlock()
+	if s.floors.floors == nil || len(s.floors.floors) >= sinceFloorsMax {
+		s.floors.floors = map[int64]int64{}
 	}
-	s.sinceFloors[at] = found.Int64
+	s.floors.floors[at] = found.Int64
 	return found.Int64, nil
 }
 
