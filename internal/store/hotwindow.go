@@ -385,7 +385,8 @@ func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection s
 	}
 	floor := w.floor.Load()
 	whole := f.After >= floor-1 || !f.Since.IsZero() && f.Since.UnixMilli() > w.belowAt.Load()
-	if !whole && !(f.Descending && f.Limit > 0) || f.Before > 0 && f.Before <= floor {
+	paged := f.Descending && f.Limit > 0
+	if !whole && !paged || f.Before > 0 && f.Before <= floor {
 		w.misses.Add(1)
 		return nil, false
 	}

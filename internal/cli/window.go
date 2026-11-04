@@ -88,7 +88,7 @@ type capturedRequest struct {
 }
 
 func capture(home string, entry capturedRequest) {
-	destination, err := os.ReadFile(filepath.Join(home, captureFile))
+	destination, err := os.ReadFile(filepath.Join(home, captureFile)) //nolint:gosec // G304: home is the store's own directory.
 	if err != nil {
 		return
 	}
@@ -150,7 +150,7 @@ func replay(ctx context.Context, st *store.Store, home string, entry capturedReq
 		}
 		run = runHookEvent(hosted, &view, entry.Hook, p, &stdout)
 	} else {
-		root := NewRootCmd()
+		root := NewRootCmd() //nolint:contextcheck // the tree takes ctx from ExecuteContext below.
 		root.SetArgs(entry.Argv[1:])
 		root.SetOut(&stdout)
 		root.SetErr(&stderr)
@@ -209,6 +209,7 @@ func newWindowParityCmd() *cobra.Command {
 }
 
 func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, traffic, report string) error {
+	say := func(format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
 	plain, err := store.Open(ctx, plainHome)
 	if err != nil {
 		return err
@@ -226,7 +227,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	}
 	defer func() { _ = window.Close() }()
 	windowed.ServeHotWindow(window)
-	fmt.Fprintf(w, "window built in %s: %+v\n", time.Since(built).Round(time.Millisecond), window.Stats())
+	say("window built in %s: %+v\n", time.Since(built).Round(time.Millisecond), window.Stats())
 	file, err := os.Open(traffic) //nolint:gosec // G304: the owner names the capture to replay.
 	if err != nil {
 		return err
@@ -287,13 +288,13 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		fmt.Fprintf(w, "%-34s same=%d different=%d\n", name, classes[name].same, classes[name].different)
+		say("%-34s same=%d different=%d\n", name, classes[name].same, classes[name].different)
 	}
 	matrix, mismatches, err := windowMatrix(ctx, windowed, window, differences)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(w, "streams skipped=%d\nreader matrix compared=%d different=%d\nwindow %+v\n", skipped, matrix, mismatches, window.Stats())
+	say("streams skipped=%d\nreader matrix compared=%d different=%d\nwindow %+v\n", skipped, matrix, mismatches, window.Stats())
 	if different+mismatches > 0 {
 		return fmt.Errorf("%d requests and %d reader filters differ; see %s", different, mismatches, report)
 	}
