@@ -5,6 +5,7 @@ package harness
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,10 +59,22 @@ func (s Session) Alive(procs Procs) bool {
 	return delta > -time.Second.Milliseconds() && delta < 2*time.Second.Milliseconds()
 }
 
-// Dir is the registry directory: $CLAUDE_CONFIG_DIR/sessions or ~/.claude/sessions.
-func Dir() (string, error) {
-	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
-		return filepath.Join(d, "sessions"), nil
+type configDirKey struct{}
+
+// WithConfigDir has Dir read dir, the caller's CLAUDE_CONFIG_DIR, in place of
+// this process's: a daemon answering a client reads the client's registry.
+func WithConfigDir(ctx context.Context, dir string) context.Context {
+	return context.WithValue(ctx, configDirKey{}, dir)
+}
+
+// Dir is the registry directory: <config dir>/sessions or ~/.claude/sessions.
+func Dir(ctx context.Context) (string, error) {
+	configDir, given := ctx.Value(configDirKey{}).(string)
+	if !given {
+		configDir = os.Getenv("CLAUDE_CONFIG_DIR")
+	}
+	if configDir != "" {
+		return filepath.Join(configDir, "sessions"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

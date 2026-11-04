@@ -20,6 +20,7 @@ import (
 	"github.com/yasyf/cc-interact/procs"
 
 	"github.com/yasyf/cc-inbox/internal/channel"
+	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
 	"github.com/yasyf/cc-inbox/internal/wire"
@@ -166,8 +167,9 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	root.SetOut(replies)
 	root.SetErr(replies.stderr())
 	root.SetIn(&inputStream{replies: replies})
-	err = root.ExecuteContext(channel.Hosted(context.WithValue(ctx, invocationKey{}, &invocation{
-		env: requestEnv(request.Env), cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
+	env := requestEnv(request.Env)
+	err = root.ExecuteContext(channel.Hosted(context.WithValue(harness.WithConfigDir(ctx, env["CLAUDE_CONFIG_DIR"]), invocationKey{}, &invocation{
+		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
 	})))
 	if flushed := replies.Flush(ctx); flushed != nil {
 		return flushed
