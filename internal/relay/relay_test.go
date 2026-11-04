@@ -405,6 +405,36 @@ func TestSyncReadsALongSparseLogWithoutAHoleAndInOrder(t *testing.T) {
 	}
 }
 
+type unconfirmedCursors struct{}
+
+func (unconfirmedCursors) Commit(_ context.Context, w store.Write) (store.Written, error) {
+	if len(w.Cursors) > 0 {
+		return store.Written{}, store.ErrUnconfirmed
+	}
+	return store.Written{}, store.ErrUnrouted
+}
+
+func TestSyncFinishesWhenItsCursorWriteIsUnconfirmed(t *testing.T) {
+	srv, a, _, _ := mesh(t)
+	for i := range 3 {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("note %d", i)})
+	}
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a)
+	join(t, srv, late)
+	if err := a.node.Share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	late.st.WriteThrough(unconfirmedCursors{})
+	if got, err := late.node.Sync(context.Background(), "d"); err != nil || got.Inserted != 3 {
+		t.Fatalf("sync = %+v, %v; want 3 inserted despite the cursor write", got, err)
+	}
+}
+
 func TestSyncDoesNotMovePastARecordItCouldNotReadYet(t *testing.T) {
 	srv, a, _, _ := mesh(t)
 	for i := range 3 {
