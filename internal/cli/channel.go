@@ -94,7 +94,7 @@ at once ahead of any other record, and the PostToolUse hook leaves them to it.`,
 				return err
 			}
 			if moves {
-				if err := refuseHeldLane(cmd.Context(), st, self, d, reader, st.Now()); err != nil {
+				if err := refuseHeldLane(cmd.Context(), st, self, window, d, reader, st.Now()); err != nil {
 					return err
 				}
 			}

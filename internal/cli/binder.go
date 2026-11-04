@@ -18,23 +18,24 @@ var numberedLane = regexp.MustCompile(`^(.+)-([1-9]\d*)$`)
 // thread holds it, and tells root once by a defect record. A numbered
 // successor binding beside its live predecessor binds, and the predecessor
 // stands down for it.
-func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey, drive, lane string, at time.Time) error {
+func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window, drive, lane string, at time.Time) error {
 	if b, ok, err := st.Binding(ctx, self); err != nil || ok && (b.Root || b.Lane != "" || b.Drive != drive) {
 		return err
 	}
-	return refuseHeldLane(ctx, st, self, drive, lane, at)
+	return refuseHeldLane(ctx, st, self, window, drive, lane, at)
 }
 
 // refuseHeldLane refuses self taking lane on drive from another live thread
 // that never stood down, whatever self is bound to now, as refuseSecondBinder
-// refuses an unbound thread's first post.
-func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, drive, lane string, at time.Time) error {
+// refuses an unbound thread's first post. A holder in self's own window is no
+// other thread: a resumed session's MCP server keeps a session id of its own.
+func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window, drive, lane string, at time.Time) error {
 	owner, _, _, err := st.Owner(ctx, self)
 	if err != nil {
 		return err
 	}
 	for _, held := range append([]string{lane}, predecessors(lane)...) {
-		holder, ok, err := liveHolder(ctx, st, self, owner, drive, held)
+		holder, ok, err := liveHolder(ctx, st, self, owner, window, drive, held)
 		if err != nil {
 			return err
 		}
@@ -59,7 +60,7 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, dr
 	return nil
 }
 
-func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey, drive, lane string) (peers.View, bool, error) {
+func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey, window store.Window, drive, lane string) (peers.View, bool, error) {
 	if _, standDown, err := st.Successors(ctx, drive, lane); err != nil || standDown != 0 {
 		return peers.View{}, false, err
 	}
@@ -68,7 +69,8 @@ func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey,
 		return peers.View{}, false, err
 	}
 	for _, v := range views {
-		if v.Drive == drive && v.Lane == lane && v.Key() != self && v.Key() != owner && st.Now().Sub(v.SeenAt) < peers.StaleAfter {
+		sameWindow := window.PID != 0 && v.PID == window.PID && v.PIDStarted == window.Started
+		if v.Drive == drive && v.Lane == lane && v.Key() != self && v.Key() != owner && !sameWindow && st.Now().Sub(v.SeenAt) < peers.StaleAfter {
 			return v, true, nil
 		}
 	}
