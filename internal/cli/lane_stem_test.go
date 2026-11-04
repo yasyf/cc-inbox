@@ -107,7 +107,7 @@ func TestAReaderNamesAWriterByTheStemItHoldsAndAnOlderLaneByItsNumber(t *testing
 		t.Fatal(err)
 	}
 	alone, err := run(t, "tail", "--drive", "d", "--since", "0")
-	if err != nil || !strings.Contains(alone, "STATE sv first word") {
+	if err != nil || !strings.Contains(alone, "state sv first word") {
 		t.Fatalf("tail with sv-2 alone = %q, %v; want sv-2 named by its stem", alone, err)
 	}
 
@@ -115,7 +115,7 @@ func TestAReaderNamesAWriterByTheStemItHoldsAndAnOlderLaneByItsNumber(t *testing
 		t.Fatal(err)
 	}
 	both, err := run(t, "tail", "--drive", "d", "--since", "0")
-	if err != nil || !strings.Contains(both, "STATE sv-2 first word") || !strings.Contains(both, "STATE sv second word") {
+	if err != nil || !strings.Contains(both, "state sv-2 first word") || !strings.Contains(both, "state sv second word") {
 		t.Fatalf("tail with sv-3 newer = %q, %v; want sv-2 by its number and sv-3 by the stem", both, err)
 	}
 	asJSON, err := run(t, "tail", "--drive", "d", "--since", "0", "--json")

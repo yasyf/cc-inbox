@@ -258,9 +258,10 @@ jobs:
             grep -F "GREP_BODY_TRANSFER_BOUND_EXCEEDED rows=$history json=false reads=$history want=0" "$RUNNER_TEMP/grep-body-old.log"
           done
           test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
-          (cd .ci-compact-line-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-old" ./cmd/cci)
+          (cd .ci-audience-current491 && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-old" ./cmd/cci)
+          (cd .ci-compact-line-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-parity" ./cmd/cci)
           go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-current" ./cmd/cci
-          CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
+          CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_PARITY_CLI="$RUNNER_TEMP/cci-grep-body-parity" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
       - uses: actions/checkout@v7
         if: env.FULL_CI == 'true'
         with:
