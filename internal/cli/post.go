@@ -55,11 +55,15 @@ func newPostCmd() *cobra.Command {
 		re, resolves, namedPRs  []string
 		reSeqs, resolvesSeqs    []int64
 		named                   = map[int64]string{}
+		batch                   string
 	)
 	cmd := &cobra.Command{
 		Use:   "post [TEXT]",
 		Short: "Append one record",
 		Args: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed(batchFlag) {
+				return batchOnly(cmd, args)
+			}
 			switch {
 			case len(args) > 1:
 				return fmt.Errorf("post takes its text as one quoted argument or --text; got %d arguments", len(args))
@@ -74,7 +78,7 @@ func newPostCmd() *cobra.Command {
 				return err
 			}
 			if !cmd.Flags().Changed("kind") {
-				return nil
+				return errors.New(`required flag(s) "kind" not set`)
 			}
 			var err error
 			if parsedKind, err = kinds.Parse(kind); err != nil {
@@ -96,7 +100,7 @@ func newPostCmd() *cobra.Command {
 			}
 			return nil
 		},
-		RunE: untilStored(withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+		RunE: orBatch(&batch, &lane, &drive, untilStored(withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			at := st.Now()
 			var (
 				err      error
@@ -300,9 +304,10 @@ func newPostCmd() *cobra.Command {
 				}
 			}
 			return nil
-		})),
+		}))),
 	}
 	f := cmd.Flags()
+	f.StringVar(&batch, batchFlag, "", "post each record of a JSON list, from a file or - for stdin: each an object of this command's flags by name, text and to and re among them, plus body for its full text; --lane and --drive are each record's default. Every record is tried, each prints as one post does, and a refusal prints its position and exits 1 once the rest are posted")
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
@@ -346,8 +351,77 @@ func newPostCmd() *cobra.Command {
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space, or the whole text when no other is given; cci replaces no {at} and checks no withdrawal in them, and keeps checking the text's own words")
 	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
-	_ = cmd.MarkFlagRequired("kind")
 	return cmd
+}
+
+const batchFlag = "batch"
+
+func batchOnly(cmd *cobra.Command, args []string) error {
+	if len(args) > 0 {
+		return errors.New("--batch takes its text from the list, not an argument")
+	}
+	var other []string
+	cmd.Flags().Visit(func(f *pflag.Flag) {
+		if f.Name != batchFlag && f.Name != "lane" && f.Name != "drive" {
+			other = append(other, "--"+f.Name)
+		}
+	})
+	if len(other) > 0 {
+		return fmt.Errorf("--batch takes only --lane and --drive; %s belongs in the list", strings.Join(other, " "))
+	}
+	return nil
+}
+
+func orBatch(batch, lane, drive *string, post func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
+	return func(cmd *cobra.Command, args []string) error {
+		if *batch == "" {
+			return post(cmd, args)
+		}
+		return postBatch(cmd, *batch, *lane, *drive)
+	}
+}
+
+func postBatch(cmd *cobra.Command, path, lane, drive string) error {
+	raw, err := readBatch(cmd, path)
+	if err != nil {
+		return err
+	}
+	var records []toolRecord
+	if err := json.Unmarshal(raw, &records); err != nil {
+		return fmt.Errorf("--batch: not a JSON list of records: %w", err)
+	}
+	if len(records) == 0 {
+		return errors.New("--batch: the list is empty")
+	}
+	refused := 0
+	for i, record := range records {
+		args, stdin, err := record.args(lane, drive)
+		var out, errOut string
+		if err == nil {
+			out, errOut, err = runCCI(cmd.Context(), stdin, args...)
+		}
+		_, _ = io.WriteString(cmd.OutOrStdout(), out)
+		_, _ = io.WriteString(cmd.ErrOrStderr(), errOut)
+		if err != nil {
+			refused++
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "cci: --batch record %d: %s\n", i+1, err)
+		}
+	}
+	if refused > 0 {
+		return fmt.Errorf("--batch: %d of %d records refused, and the rest posted", refused, len(records))
+	}
+	return nil
+}
+
+func readBatch(cmd *cobra.Command, path string) ([]byte, error) {
+	if path == "-" {
+		return io.ReadAll(cmd.InOrStdin())
+	}
+	raw, err := os.ReadFile(callerPath(cmd.Context(), path)) //nolint:gosec // G304: the caller names its own batch file.
+	if err != nil {
+		return nil, fmt.Errorf("--batch: %w", err)
+	}
+	return raw, nil
 }
 
 var errNoLane = errors.New("post needs --lane: this thread is bound to no lane and was spawned with no name, and a post never defaults to root, so the root passes --lane root; after one post with --lane, later posts default to it")

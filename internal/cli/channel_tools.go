@@ -79,7 +79,7 @@ func (r toolRecord) args(lane, drive string) ([]string, string, error) {
 			continue
 		}
 		name := flagOf(key)
-		if flags.Lookup(name) == nil {
+		if flags.Lookup(name) == nil || name == batchFlag {
 			return nil, "", fmt.Errorf("post: no field %s", key)
 		}
 		flagArgs, err := flagValues(name, r[key])
@@ -202,7 +202,7 @@ func recordProps() map[string]any {
 	}
 	newPostCmd().Flags().VisitAll(func(f *pflag.Flag) {
 		field := fieldOf(f.Name)
-		if _, named := props[field]; named || f.Name == "help" || f.Name == "json" {
+		if _, named := props[field]; named || f.Name == "help" || f.Name == "json" || f.Name == batchFlag {
 			return
 		}
 		switch f.Value.Type() {

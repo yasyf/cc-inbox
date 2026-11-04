@@ -30,7 +30,9 @@ use them rather than Bash. Each takes `lane`, defaults to the session's drive,
 and returns compact lines: `<seq> <kind> <lane>><to> [^re] [x<closed>] [#pr]
 [+] <text>`, under an `@<clock>` line when the minute changes; `+` means a body
 waits for `read`. The `post` tool takes every `cci post` flag as a field, a dash
-becoming an underscore (`owned_by`), with `attrs` for `--attr`.
+becoming an underscore (`owned_by`), with `attrs` for `--attr`. In a shell,
+`cci post --batch file.json` posts a JSON list of those same objects, so no text
+meets shell quoting; every record is tried and a refusal exits 1 naming its place.
 
 A session launched with the server whose server stops gets a blocker from its
 lane to `meta-desk` on its next tool call, and inside Orca
@@ -287,6 +289,7 @@ Read a stack's problems and fixes, or search records about a target or PR:
 cci tail --drive demo --stack api/plat-usw2-prod --since 0 --json
 cci grep 'Platy' --drive demo --target api
 cci tail --drive demo --pr 30440 --since 0
+cci tail --drive demo --lane-prefix desk- --per-lane 2 --since 0
 ```
 
 Read filters `--stack`, `--target`, and `--pr` each take one value and combine

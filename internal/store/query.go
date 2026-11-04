@@ -436,6 +436,39 @@ func (s *Store) QueryText(ctx context.Context, f Filter) ([]Record, error) {
 	return s.query(ctx, f, textColumns)
 }
 
+// LanesWithPrefix names the drive's lanes starting with any prefix, sorted. It
+// steps from lane to lane through records_drive_lane, so its cost follows the
+// lanes it names and not their records.
+func (s *Store) LanesWithPrefix(ctx context.Context, drive string, prefixes []string) ([]string, error) {
+	var names []string
+	for _, prefix := range prefixes {
+		if prefix == "" {
+			return nil, errors.New("a lane prefix is not empty")
+		}
+		end := prefix[:len(prefix)-1] + string([]byte{prefix[len(prefix)-1] + 1})
+		rows, err := s.db.QueryContext(ctx, `WITH RECURSIVE named(lane) AS (
+SELECT (SELECT MIN(lane) FROM records WHERE drive = ?1 AND lane >= ?2 AND lane < ?3)
+UNION ALL SELECT (SELECT MIN(lane) FROM records WHERE drive = ?1 AND lane > named.lane AND lane < ?3) FROM named WHERE named.lane IS NOT NULL
+) SELECT lane FROM named WHERE lane IS NOT NULL`, drive, prefix, end)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var lane string
+			if err := rows.Scan(&lane); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			names = append(names, lane)
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return nil, err
+		}
+	}
+	slices.Sort(names)
+	return slices.Compact(names), nil
+}
+
 func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Record, error) {
 	if f.Drive == "" && f.Peer == "" {
 		return nil, ErrNoDrive
