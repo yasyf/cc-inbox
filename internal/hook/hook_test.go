@@ -271,6 +271,27 @@ func TestPostToolUseDeliversBroadcastKindsOnlyToTheirFirstAddressee(t *testing.T
 	}
 }
 
+func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "lane-x", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(-time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"all"}, Text: "owner pick from before this lane"})
+	clock.Advance(time.Hour + time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"all"}, Text: "owner pick since this lane"})
+
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "owner pick since this lane") || strings.Contains(got, "owner pick from before this lane") {
+		t.Fatalf("additionalContext = %q; want only the broadcast written since the lane started", got)
+	}
+}
+
 func TestLaneCursorSurvivesOtherReadsAndLateImports(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
