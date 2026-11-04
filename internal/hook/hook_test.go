@@ -153,6 +153,30 @@ func TestSessionStartRepointsSubscription(t *testing.T) {
 	}
 }
 
+func TestSessionStartSaysTheSubscriptionCameBack(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	launched := store.Window{PID: 100, Started: 1}
+	resumed := store.Window{PID: 200, Started: 2}
+	if _, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: launched, Drive: "d", Reader: "owner-relay", Cursor: "channel-s1"}); err != nil {
+		t.Fatal(err)
+	}
+	var back bytes.Buffer
+	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1"}, resumed, &back); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &back, "SessionStart"); !strings.Contains(got, "subscription back") || !strings.Contains(got, "owner-relay") {
+		t.Fatalf("context = %q, want the reader that came back", got)
+	}
+	var again bytes.Buffer
+	if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: "s1"}, resumed, &again); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &again, "SessionStart"); strings.Contains(got, "subscription back") {
+		t.Fatalf("a compaction in the same window said %q, want nothing", got)
+	}
+}
+
 func hookContext(t *testing.T, out *bytes.Buffer, event string) string {
 	t.Helper()
 	if out.Len() == 0 {

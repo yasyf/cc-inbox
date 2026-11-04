@@ -114,8 +114,10 @@ func Read(r io.Reader) (Payload, error) {
 }
 
 func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.Window, w io.Writer) error {
+	note := ""
 	if window.PID != 0 {
-		if err := st.Repoint(ctx, p.SessionID, window); err != nil {
+		var err error
+		if note, err = repoint(ctx, st, p.SessionID, window); err != nil {
 			return err
 		}
 		if err := keepSubscribedLane(ctx, st, p, window); err != nil {
@@ -123,13 +125,20 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 		}
 	}
 	b, ok, err := st.Binding(ctx, p.Key())
-	if err != nil || !ok {
+	if err != nil {
 		return err
 	}
+	if !ok {
+		if note == "" {
+			return nil
+		}
+		return additionalContext(w, "SessionStart", note)
+	}
 	if b.Lane != "" {
-		return deliver(ctx, st, p.Key(), b, "SessionStart", true, w)
+		return deliver(ctx, st, p.Key(), b, "SessionStart", true, note, w)
 	}
 	var out bytes.Buffer
+	out.WriteString(note)
 	v, err := inbox.Digest(ctx, st, b.Drive, st.Now().Add(-inbox.DigestWindow))
 	if err != nil {
 		return err
@@ -141,6 +150,24 @@ func SessionStart(ctx context.Context, st *store.Store, p Payload, window store.
 		return err
 	}
 	return acknowledge(ctx, st, w, "SessionStart", out.String(), res.Ack)
+}
+
+// repoint moves the session's subscription onto this window and returns the line
+// that tells a resumed session it came back, or "" when nothing moved here.
+func repoint(ctx context.Context, st *store.Store, session string, window store.Window) (string, error) {
+	_, had, err := st.Subscription(ctx, window)
+	if err != nil {
+		return "", err
+	}
+	if err := st.Repoint(ctx, session, window); err != nil {
+		return "", err
+	}
+	sub, has, err := st.Subscription(ctx, window)
+	if err != nil || had || !has {
+		return "", err
+	}
+	return fmt.Sprintf("cci brought this window's subscription back after the restart: reader %s on drive %s, cursor %s, every filter as it was. "+
+		"Run no cci subscribe: it would replace those filters.\n", sub.Reader, sub.Drive, sub.Cursor), nil
 }
 
 // keepSubscribedLane binds a root thread with no lane, such as the one a
@@ -185,9 +212,9 @@ func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() 
 	case err != nil:
 		return err
 	case ok && b.Lane != "":
-		return deliver(ctx, st, p.Key(), b, p.Event, false, w)
+		return deliver(ctx, st, p.Key(), b, p.Event, false, "", w)
 	case p.AgentID != "":
-		return deliver(ctx, st, p.Key(), store.Binding{}, p.Event, false, w)
+		return deliver(ctx, st, p.Key(), store.Binding{}, p.Event, false, "", w)
 	}
 	return nil
 }
@@ -248,7 +275,7 @@ func SubagentStop(ctx context.Context, st *store.Store, p Payload, w io.Writer) 
 	return st.Retire(ctx, p.Key())
 }
 
-func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, relist bool, w io.Writer) error {
+func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Binding, event string, relist bool, note string, w io.Writer) error {
 	var tail bytes.Buffer
 	tail.WriteString("cci records addressed to " + cmp.Or(b.Lane, store.PeerAddress(k.String())) + "; act on each:\n")
 	f, err := st.WindowMail(ctx, k, b)
@@ -263,9 +290,13 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 		if relist {
 			res.Ack = append(res.Ack, store.CursorMove{Name: openAsksCursor(k), Drive: b.Drive, Seq: -1, Exact: true})
 		}
+		if note != "" {
+			return acknowledge(ctx, st, w, event, note, res.Ack)
+		}
 		return st.MoveCursors(ctx, res.Ack)
 	}
 	var out bytes.Buffer
+	out.WriteString(note)
 	ack := res.Ack
 	if b.Lane != "" {
 		open, err := owed(ctx, st, b.Drive, b.Lane)
