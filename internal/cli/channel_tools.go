@@ -248,7 +248,7 @@ func postTool() mcp.Tool {
 			}
 			seqs := make([]string, 0, len(records))
 			for i, r := range records {
-				args, stdin, err := r.args(in.text("lane"), in.text("drive"))
+				args, stdin, err := r.args(in.text("lane"), in.text("drive")) //nolint:contextcheck // args only reads the post command's flag table.
 				if err != nil {
 					return strings.TrimSpace(fmt.Sprintf("posted %s\nrecord %d: %s", strings.Join(seqs, " "), i+1, err)), true
 				}
