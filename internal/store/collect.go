@@ -3,6 +3,8 @@ package store
 import (
 	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,16 +24,17 @@ const (
 	// HotWindow is how long a record that nothing open depends on stays in the store.
 	HotWindow = 14 * 24 * time.Hour
 
-	expiredGrace    = 72 * time.Hour
-	sessionWindow   = 30 * 24 * time.Hour
-	pinnedWindow    = 30 * 24 * time.Hour
-	archiveWindow   = 180 * 24 * time.Hour
-	blobGrace       = time.Hour
-	collectBatch    = 1000
-	vacuumFreeRatio = 4
-	vacuumPages     = 2048
-	archiveDir      = "archive"
-	blobDir         = "blobs"
+	expiredGrace     = 72 * time.Hour
+	sessionWindow    = 30 * 24 * time.Hour
+	pinnedWindow     = 30 * 24 * time.Hour
+	archiveWindow    = 180 * 24 * time.Hour
+	blobGrace        = time.Hour
+	collectBatch     = 1000
+	vacuumFreeRatio  = 4
+	vacuumPages      = 2048
+	archiveNameBytes = 120
+	archiveDir       = "archive"
+	blobDir          = "blobs"
 )
 
 // Collected reports one Collect pass.
@@ -60,7 +63,7 @@ func (s *Store) Collect(ctx context.Context, pause func(context.Context) error) 
 		return res, err
 	}
 	pinned := now.Add(-pinnedWindow).UnixMilli()
-	pass := &collectPass{open: map[string]map[int64]bool{}, skipped: map[string]bool{}}
+	pass := &collectPass{open: map[string]map[int64]bool{}, keys: map[string]map[string][]int64{}, gone: map[int64]bool{}, skipped: map[string]bool{}}
 	var after int64
 	for {
 		rows, err := s.collectCandidates(ctx, after, hot, expired)
@@ -100,6 +103,8 @@ var newestStays = []kinds.Kind{kinds.Head, kinds.Contract, kinds.Opened, kinds.S
 
 type collectPass struct {
 	open    map[string]map[int64]bool
+	keys    map[string]map[string][]int64
+	gone    map[int64]bool
 	skipped map[string]bool
 }
 
@@ -108,6 +113,7 @@ type collectRow struct {
 	drive, kind, origin   string
 	also                  []int64
 	path                  string
+	closes                []string
 	expired               bool
 	columns               map[string]any
 }
@@ -158,11 +164,12 @@ func newCollectRow(columns map[string]any, hot int64) collectRow {
 	if json.Unmarshal([]byte(text("also_resolves")), &row.also) != nil {
 		row.also = nil
 	}
-	var refs struct {
-		Path string `json:"path"`
-	}
+	var refs Refs
 	if json.Unmarshal([]byte(text("refs")), &refs) == nil {
 		row.path = refs.Path
+	}
+	if slices.Contains(kinds.Closers(), kinds.Kind(row.kind)) {
+		row.closes = closureKeys(text("topic"), refs)
 	}
 	return row
 }
@@ -172,6 +179,26 @@ func (r collectRow) pinned(window int64) bool {
 		return kinds.Kind(r.kind).Spec().Latest
 	}
 	return r.at >= window && slices.Contains(newestStays, kinds.Kind(r.kind))
+}
+
+func closureKeys(topic string, refs Refs) []string {
+	var keys []string
+	if topic != "" {
+		keys = append(keys, "topic:"+topic)
+	}
+	for _, stack := range refs.Stacks {
+		keys = append(keys, "stack:"+stack)
+	}
+	for _, target := range refs.Targets {
+		keys = append(keys, "target:"+target)
+	}
+	return keys
+}
+
+func (p *collectPass) closesLiveOpener(r collectRow) bool {
+	return slices.ContainsFunc(r.closes, func(key string) bool {
+		return slices.ContainsFunc(p.keys[r.drive][key], func(seq int64) bool { return !p.gone[seq] })
+	})
 }
 
 func (s *Store) collectable(ctx context.Context, pass *collectPass, rows []collectRow, window, floor int64, held bool) ([]collectRow, error) {
@@ -199,13 +226,15 @@ func (s *Store) collectable(ctx context.Context, pass *collectPass, rows []colle
 	var doomed []collectRow
 	for _, r := range rows {
 		switch {
-		case r.kind == string(kinds.Digest), pass.skipped[r.drive], pass.open[r.drive][r.seq]:
+		case r.kind == string(kinds.Digest), r.kind == string(kinds.Incident), pass.skipped[r.drive], pass.open[r.drive][r.seq]:
+		case pass.closesLiveOpener(r):
 		case held && r.seq > floor:
 		case r.pinned(window) && !replaced[r.seq]:
 		case live[r.re], live[r.resolves], slices.ContainsFunc(r.also, func(seq int64) bool { return live[seq] }):
 		default:
 			doomed = append(doomed, r)
 			delete(live, r.seq)
+			pass.gone[r.seq] = true
 		}
 	}
 	return doomed, nil
@@ -255,6 +284,13 @@ func (s *Store) readOpen(ctx context.Context, pass *collectPass, drive string) e
 		seqs[o.Seq] = true
 	}
 	pass.open[drive] = seqs
+	keys := map[string][]int64{}
+	for _, o := range openers {
+		for _, key := range closureKeys(o.Topic, o.Refs) {
+			keys[key] = append(keys[key], o.Seq)
+		}
+	}
+	pass.keys[drive] = keys
 	return nil
 }
 
@@ -282,8 +318,7 @@ func (s *Store) liveAmong(ctx context.Context, seqs []int64) (map[int64]bool, er
 func (s *Store) archive(rows []collectRow) error {
 	lines := map[string][]collectRow{}
 	for _, r := range rows {
-		month := time.UnixMilli(r.at).UTC().Format("2006-01")
-		name := url.PathEscape(r.drive) + "-" + month + ".jsonl.gz"
+		name := archiveName(r.drive) + "-" + time.UnixMilli(r.at).UTC().Format("2006-01") + ".jsonl.gz"
 		lines[name] = append(lines[name], r)
 	}
 	if len(lines) == 0 {
@@ -299,6 +334,15 @@ func (s *Store) archive(rows []collectRow) error {
 		}
 	}
 	return nil
+}
+
+func archiveName(drive string) string {
+	name := url.PathEscape(drive)
+	if len(name) <= archiveNameBytes {
+		return name
+	}
+	sum := sha256.Sum256([]byte(drive))
+	return name[:archiveNameBytes] + "-" + hex.EncodeToString(sum[:8])
 }
 
 func (s *Store) appendArchive(path string, rows []collectRow) error {

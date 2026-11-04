@@ -84,6 +84,48 @@ func TestCollectDeletesOnlyWhatNothingDependsOn(t *testing.T) {
 	}
 }
 
+func TestCollectKeepsACloserOfAnOpenerThatStays(t *testing.T) {
+	st, clock := testutil.Store(t)
+	lift := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Lift, Text: "lift", Topic: "stack-a"})
+	clock.Advance(store.HotWindow + time.Hour)
+	hold := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Hold, Text: "later hold", Topic: "stack-a"})
+	before, err := st.OpenItems(t.Context(), "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	after, err := st.OpenItems(t.Context(), "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after) != len(before) || !exists(t, st, lift.Seq) || !exists(t, st, hold.Seq) {
+		t.Fatalf("open items %d then %d; lift kept %t, hold kept %t", len(before), len(after), exists(t, st, lift.Seq), exists(t, st, hold.Seq))
+	}
+}
+
+func TestCollectKeepsAnIncidentAndItsUpdates(t *testing.T) {
+	st, clock := testutil.Store(t)
+	first := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Incident, Text: "down"})
+	update := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Incident, Text: "still down", Re: first.Seq})
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.FixLive, Text: "fixed", Re: first.Seq})
+	clock.Advance(store.HotWindow + time.Hour)
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, st, first.Seq) || !exists(t, st, update.Seq) {
+		t.Fatalf("incident kept = %t, update kept = %t", exists(t, st, first.Seq), exists(t, st, update.Seq))
+	}
+	open, err := st.OpenItems(t.Context(), "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("open items = %+v, want none", open)
+	}
+}
+
 func TestCollectKeepsTheNewestHeadForThirtyDays(t *testing.T) {
 	st, clock := testutil.Store(t)
 	older := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Head, Text: "older", Topic: "t"})
@@ -158,6 +200,12 @@ func TestCollectReturnsSpaceToTheFileSystem(t *testing.T) {
 func TestCollectArchivesEveryRecordItDeletes(t *testing.T) {
 	st, clock := testutil.Store(t)
 	note := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "keep a copy of this"})
+	clock.Advance(store.HotWindow + time.Hour)
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	long := strings.Repeat("a long drive name ", 40)
+	testutil.Post(t, st, store.Record{Drive: long, Lane: "a", Kind: kinds.Note, Text: "from a drive named past a file name's limit"})
 	clock.Advance(store.HotWindow + time.Hour)
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
