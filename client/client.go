@@ -319,8 +319,9 @@ type Watch struct {
 }
 
 // Follow calls emit with each record w selects, oldest first, as the store takes
-// it, until ctx ends or emit fails. Unlike cci watch --reader root it never
-// narrows the kinds addressed to the reader, so a hold addressed to root arrives.
+// it, until ctx ends, when it returns nil, or emit fails, when it returns that
+// error. Unlike cci watch --reader root it never narrows the kinds addressed to
+// the reader, so a hold addressed to root arrives.
 func Follow(ctx context.Context, w Watch, emit func(Record) error) error {
 	return daemonFollow(ctx, cli.EmbedCall{Op: "follow", Drive: w.Drive, Reader: w.Reader, After: w.After, Kinds: w.Kinds}, emit)
 }

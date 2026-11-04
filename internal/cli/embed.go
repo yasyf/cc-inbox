@@ -40,6 +40,9 @@ type EmbedRecord struct {
 
 // EmbedRecords wraps records for the wire.
 func EmbedRecords(records []store.Record) []EmbedRecord {
+	if records == nil {
+		return nil
+	}
 	out := make([]EmbedRecord, len(records))
 	for i, r := range records {
 		out[i] = EmbedRecord{Record: r, ReNum: r.ReNum, CloseNums: r.CloseNums}
