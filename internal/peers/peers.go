@@ -25,8 +25,11 @@ import (
 // StaleAfter is how long a peer with no process to check stays live after its last hook call.
 const StaleAfter = 15 * time.Minute
 
+// OrcaBinDirEnv names the directory holding the orca CLI in a session Orca launched.
+const OrcaBinDirEnv = "ORCA_CLI_BIN_DIR"
+
 // IdentityEnv names the environment variables an announce copies into the peer's env.
-var IdentityEnv = []string{"ORCA_TERMINAL_HANDLE", "ORCA_LAUNCH_RUN", "CLAUDE_LONG_RUNNING_DRIVE", "CODEX_THREAD_ID"}
+var IdentityEnv = []string{"ORCA_TERMINAL_HANDLE", OrcaBinDirEnv, "ORCA_LAUNCH_RUN", "CLAUDE_LONG_RUNNING_DRIVE", "CODEX_THREAD_ID"}
 
 const (
 	RoleRoot     = "root"

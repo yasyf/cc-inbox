@@ -36,8 +36,9 @@ const (
 const Resumed = "resumed"
 
 var (
-	idle     = 5 * time.Second
-	interval = time.Second
+	idle      = 5 * time.Second
+	beatEvery = 15 * time.Second
+	interval  = time.Second
 
 	batchWindow = 5 * time.Minute
 
@@ -100,7 +101,13 @@ func Serve(ctx context.Context, st *store.Store, window store.Window, channeled,
 		defer close(done)
 		select {
 		case <-initialized:
+			beating := make(chan struct{})
+			go func() {
+				defer close(beating)
+				beat(streamCtx, st, window)
+			}()
 			Stream(streamCtx, st, window, channeled, srv.Notify)
+			<-beating
 		case <-streamCtx.Done():
 		}
 	}()
@@ -128,6 +135,15 @@ func untilInitialized(in io.Reader, out io.Writer, initialized chan<- struct{}) 
 		}
 	}
 	return sc.Err()
+}
+
+func beat(ctx context.Context, st *store.Store, window store.Window) {
+	for ctx.Err() == nil {
+		if err := st.BeatChannel(window); err != nil {
+			slog.Warn("cci channel: beat", "pid", window.PID, "err", err)
+		}
+		sleep(ctx, beatEvery)
+	}
 }
 
 func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, notify func(method string, params any) error) {

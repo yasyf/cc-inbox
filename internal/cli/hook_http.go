@@ -8,10 +8,16 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
+	"github.com/shirou/gopsutil/v4/process"
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -117,7 +123,11 @@ func httpHook(event string) bool {
 func runHookEvent(ctx context.Context, st *store.Store, event string, p hook.Payload, w io.Writer) error {
 	switch event {
 	case "post-tool-use":
-		return hook.PostToolUse(ctx, st, p, func() (store.Window, error) { return parentWindow(ctx, st, p) }, w)
+		note, err := hook.NoticeChannel(ctx, st, p, wiredForChannel, startReconnect)
+		if err != nil {
+			slog.Warn("cci daemon: the channel check failed", "session", p.SessionID, "err", err)
+		}
+		return hook.PostToolUseNoted(ctx, st, p, note, func() (store.Window, error) { return parentWindow(ctx, st, p) }, w)
 	case "stop":
 		return hook.Stop(ctx, st, p, w)
 	default:
@@ -131,4 +141,36 @@ func parentWindow(ctx context.Context, st *store.Store, p hook.Payload) (store.W
 		return store.Window{}, nil //nolint:nilerr // a session the registry has not seen yet has no window to name.
 	}
 	return store.Window{PID: parent.PID, Started: parent.PIDStarted}, nil
+}
+
+// wiredForChannel reports whether the Claude Code process pid should have the
+// channel server: its hook is running, so the plugin is on, and only
+// --strict-mcp-config keeps a plugin's server from starting.
+func wiredForChannel(pid int) bool {
+	p, err := process.NewProcess(int32(pid)) //nolint:gosec // G115: OS pids fit in int32.
+	if err != nil {
+		return false
+	}
+	args, err := p.CmdlineSlice()
+	if err != nil || len(args) == 0 {
+		return false
+	}
+	return filepath.Base(args[0]) == "claude" && !slices.Contains(args, "--strict-mcp-config")
+}
+
+const reconnectPause = 30 * time.Second
+
+func startReconnect(orcaDir, terminal string) {
+	self, err := os.Executable()
+	if err != nil {
+		slog.Warn("cci daemon: start a reconnect", "err", err)
+		return
+	}
+	cmd := exec.Command(self, "hook", "type-reconnect", filepath.Join(orcaDir, "orca"), terminal) //nolint:gosec // G204: this binary, with the orca path and terminal the session announced.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := cmd.Start(); err != nil {
+		slog.Warn("cci daemon: start a reconnect", "err", err)
+		return
+	}
+	go func() { _ = cmd.Wait() }()
 }

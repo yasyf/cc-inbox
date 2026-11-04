@@ -620,3 +620,20 @@ func TestARecipientListNeverReachesARecipientAndOwnRepliesNeverEcho(t *testing.T
 		t.Fatalf("hook delivered %q, want the record with no recipients", got)
 	}
 }
+
+func TestARunningChannelStampsItsWindow(t *testing.T) {
+	st, _ := testutil.Store(t)
+	s := start(t, st, true)
+	defer s.close()
+	if f := s.next(); f.Method != "notifications/tools/list_changed" {
+		t.Fatalf("first frame = %+v", f)
+	}
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if _, ok, err := st.ChannelBeat(window); err != nil {
+			t.Fatal(err)
+		} else if ok {
+			return
+		}
+	}
+	t.Fatal("the channel never stamped its window")
+}
