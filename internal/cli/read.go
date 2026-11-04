@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"database/sql"
@@ -45,6 +46,9 @@ type tailFlags struct {
 	oldest bool
 	mail   bool
 	seqs   []string
+
+	lanePrefixes []string
+	perLane      int
 }
 
 func tailCommand(peer string) (*cobra.Command, *tailFlags) {
@@ -64,12 +68,23 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	cmd.Flags().BoolVar(&f.mail, "mail", false, "when this thread is bound as --to, read its lane mail through the cursor the PostToolUse hook advances, so a record reaches the window once")
 	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")
 	_ = cmd.Flags().MarkHidden("seqs")
+	cmd.Flags().StringSliceVar(&f.lanePrefixes, "lane-prefix", nil, "only lanes whose name starts with this (repeatable); reads no cursor")
+	cmd.Flags().IntVar(&f.perLane, "per-lane", 0, "with --lane-prefix, print only each lane's newest this many records, grouped under its name, sharing --budget")
+	cmd.MarkFlagsMutuallyExclusive("lane-prefix", "lane")
+	cmd.MarkFlagsMutuallyExclusive("lane-prefix", "mail")
+	cmd.MarkFlagsMutuallyExclusive("lane-prefix", "cursor")
 	return cmd, f
 }
 
 func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
 	if cmd.Flags().Changed("seqs") {
 		return f.runSelected(ctx, cmd, st)
+	}
+	if len(f.lanePrefixes) > 0 {
+		return f.runLanePrefix(ctx, cmd, st, peer)
+	}
+	if f.perLane != 0 {
+		return errors.New("--per-lane needs --lane-prefix")
 	}
 	if f.mail {
 		delivered, err := f.runMail(ctx, cmd, st, peer)
@@ -161,6 +176,55 @@ func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *sto
 			return err
 		}
 		if _, err := fmt.Fprintln(cmd.OutOrStdout(), render.JSON(record)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (f *tailFlags) runLanePrefix(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
+	if f.perLane < 0 {
+		return errors.New("--per-lane must be positive")
+	}
+	filter, err := f.rf.filterPeer(ctx, st, peer)
+	if err != nil {
+		return err
+	}
+	names, err := st.LanesWithPrefix(ctx, filter.Drive, f.lanePrefixes)
+	if err != nil || len(names) == 0 {
+		return err
+	}
+	opts := inbox.TailOptions{Filter: filter, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Fold: render.FoldWidth, Compact: true, Notes: tailNotes(ctx, cmd, f.rf.json)}
+	if f.all {
+		opts.Fold = 0
+	}
+	if f.perLane == 0 {
+		opts.Filter.Lanes = names
+		_, err := inbox.Tail(ctx, st, opts, cmd.OutOrStdout())
+		return err
+	}
+	opts.Limit, opts.Budget = f.perLane, cmp.Or(max(opts.Budget, 0), render.DefaultBudget)
+	for i, lane := range names {
+		if opts.Budget <= 0 {
+			_, err := fmt.Fprintf(cmd.OutOrStdout(), "... budget spent; %d lanes not printed: %s; raise --budget\n", len(names)-i, strings.Join(names[i:], " "))
+			return err
+		}
+		var page bytes.Buffer
+		opts.Filter.Lanes = []string{lane}
+		res, err := inbox.Tail(ctx, st, opts, &page)
+		if err != nil {
+			return err
+		}
+		if res.Printed == 0 {
+			continue
+		}
+		opts.Budget -= page.Len() + len(lane) + 4
+		if !f.rf.json {
+			if _, err := fmt.Fprintln(cmd.OutOrStdout(), "== "+lane); err != nil {
+				return err
+			}
+		}
+		if _, err := page.WriteTo(cmd.OutOrStdout()); err != nil {
 			return err
 		}
 	}
