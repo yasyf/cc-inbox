@@ -196,7 +196,7 @@ jobs:
       - uses: actions/checkout@v7
         if: env.FULL_CI == 'true'
         with:
-          ref: e084bf34789a3cc4d31fa7e2604a23993d9aafe2
+          ref: bb670c782e17155cc95286affaf6b926815eca5c
           path: .ci-compact-line-baseline
           persist-credentials: false
       - uses: actions/setup-go@v6
@@ -257,7 +257,7 @@ jobs:
           for history in 32 10000; do
             grep -F "GREP_BODY_TRANSFER_BOUND_EXCEEDED rows=$history json=false reads=$history want=0" "$RUNNER_TEMP/grep-body-old.log"
           done
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = e084bf34789a3cc4d31fa7e2604a23993d9aafe2
+          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
           (cd .ci-compact-line-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-old" ./cmd/cci)
           go build -p 2 -o "$RUNNER_TEMP/cci-grep-body-current" ./cmd/cci
           CCI_GREP_BODY_OLD_CLI="$RUNNER_TEMP/cci-grep-body-old" CCI_GREP_BODY_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -race -run '^TestGrepTextBodyProjection' -v ./internal/cli
@@ -286,7 +286,7 @@ jobs:
       - name: Text Tail Body immutable output error and cursor contract
         if: env.FULL_CI == 'true'
         run: |
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = e084bf34789a3cc4d31fa7e2604a23993d9aafe2
+          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
           cp internal/cli/tail_body_contract_test.go .ci-compact-line-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
           (cd .ci-compact-line-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli)
@@ -318,7 +318,7 @@ jobs:
       - name: Reader and mailbox addressed done Body immutable current contract
         if: env.FULL_CI == 'true'
         run: |
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = e084bf34789a3cc4d31fa7e2604a23993d9aafe2
+          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
           cp internal/cli/addressed_body_contract_test.go .ci-compact-line-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-addressed-body-contract"
           (cd .ci-compact-line-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
@@ -328,7 +328,7 @@ jobs:
         run: |
           test "$(git -C .ci-tail-page-baseline rev-parse HEAD)" = fe73b8c28964aa004782c8f0c7dd1fcca2ee082b
           cp internal/inbox/tail_page_assembly_test.go .ci-tail-page-baseline/internal/inbox/
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = e084bf34789a3cc4d31fa7e2604a23993d9aafe2
+          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
           cp internal/cli/tail_page_assembly_contract_test.go .ci-compact-line-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-page-contract"
           (cd .ci-compact-line-baseline && CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailPageAssemblyContract$' -v ./internal/cli)
@@ -706,7 +706,7 @@ jobs:
           test "$(git -C .ci-grep-selected-baseline rev-parse HEAD)" = 87dab0b9b17cd755721a4c0d74ec9488618c2ae9
           cp internal/cli/grep_cost_test.go internal/cli/grep_selected_cost_test.go .ci-grep-selected-baseline/internal/cli/
           (cd .ci-grep-selected-baseline && CCI_GREP_EXPECT_GLOBAL_REPLY_SCAN=1 go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$' -v ./internal/cli)
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = e084bf34789a3cc4d31fa7e2604a23993d9aafe2
+          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
           (cd .ci-compact-line-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-grep-current-baseline" ./cmd/cci)
           go build -p 2 -o "$RUNNER_TEMP/cci-grep-current" ./cmd/cci
           CCI_GREP_CURRENT_BASELINE="$RUNNER_TEMP/cci-grep-current-baseline" CCI_GREP_CURRENT_CLI="$RUNNER_TEMP/cci-grep-current" go test -count=1 -run '^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$|^TestGrepIndexedRepliesPreservePublicErrorsAndBytes$' -v ./internal/cli
@@ -930,7 +930,7 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = e084bf34789a3cc4d31fa7e2604a23993d9aafe2
+          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-compact-line-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
           (cd .ci-compact-line-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
