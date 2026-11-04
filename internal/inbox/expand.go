@@ -5,6 +5,7 @@ import (
 	"maps"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -21,9 +22,15 @@ type idTextReader interface {
 func Expand(ctx context.Context, st idTextReader, records []store.Record) error {
 	wanted := map[string][]string{}
 	for _, r := range records {
+		if !quotesWords(r.Text) {
+			continue
+		}
 		if tokens := wordsToken.FindAllString(r.Text, -1); len(tokens) > 0 {
 			wanted[r.Drive] = append(wanted[r.Drive], tokens...)
 		}
+	}
+	if len(wanted) == 0 {
+		return nil
 	}
 	texts := map[string]map[string]string{}
 	for _, drive := range slices.Sorted(maps.Keys(wanted)) {
@@ -34,6 +41,9 @@ func Expand(ctx context.Context, st idTextReader, records []store.Record) error 
 		texts[drive] = found
 	}
 	for i, r := range records {
+		if !quotesWords(r.Text) {
+			continue
+		}
 		expanded := map[string]bool{}
 		records[i].Text = wordsToken.ReplaceAllStringFunc(r.Text, func(token string) string {
 			words, ok := texts[r.Drive][token]
@@ -45,4 +55,8 @@ func Expand(ctx context.Context, st idTextReader, records []store.Record) error 
 		})
 	}
 	return nil
+}
+
+func quotesWords(text string) bool {
+	return strings.Contains(text, "owner:m") || strings.Contains(text, "slack:")
 }

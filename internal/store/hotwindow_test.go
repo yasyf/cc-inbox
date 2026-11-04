@@ -98,6 +98,51 @@ func TestHotWindowLeavesWhatItCannotProveToTheStore(t *testing.T) {
 	}
 }
 
+func TestHotWindowBoundsSinceAndKnowsWhatItCovers(t *testing.T) {
+	st, clock := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "below the floor"})
+	clock.Advance(72 * time.Hour)
+	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "first in the window"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "second in the window"})
+	if st.Covers(store.Filter{Drive: "d", Since: first.At}) {
+		t.Fatal("covers with no window served")
+	}
+	window, err := st.BuildHotWindow(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = window.Close() })
+	st.ServeHotWindow(window)
+	t.Cleanup(func() { st.ServeHotWindow(nil) })
+	tests := []struct {
+		name string
+		f    store.Filter
+		want bool
+	}{
+		{"a since inside the window", store.Filter{Drive: "d", Since: first.At}, true},
+		{"a cursor at the floor", store.Filter{Drive: "d", After: first.Seq - 1}, true},
+		{"a since below the floor", store.Filter{Drive: "d", Since: first.At.Add(-71 * time.Hour)}, false},
+		{"the whole drive", store.Filter{Drive: "d"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := st.Covers(tt.f); got != tt.want {
+				t.Errorf("Covers = %t, want %t", got, tt.want)
+			}
+		})
+	}
+	bounded, err := st.BoundSince(t.Context(), store.Filter{Drive: "d", Since: first.At})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bounded.After != first.Seq-1 {
+		t.Errorf("After = %d, want %d", bounded.After, first.Seq-1)
+	}
+	if failures := window.Stats().Failures; failures != 0 {
+		t.Errorf("failures = %d, want 0", failures)
+	}
+}
+
 func TestHotWindowSwitch(t *testing.T) {
 	home := t.TempDir()
 	if store.HotWindowOn(home) {

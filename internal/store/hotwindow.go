@@ -454,6 +454,29 @@ func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection s
 	return out, true
 }
 
+// Covers reports whether the window holds every record f can select, so f needs
+// no narrowing that exists to spare the store a scan.
+func (s *Store) Covers(f Filter) bool {
+	w := s.window.current.Load()
+	return w != nil && !w.stale.Load() && (f.After >= w.floor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > w.belowAt.Load())
+}
+
+// firstSince is the first seq at or after at when the window holds it. Rows copy
+// in seq order, so a row a lagging window already holds is still the first.
+func (w *MemWindow) firstSince(ctx context.Context, at int64) sql.NullInt64 {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	var found sql.NullInt64
+	if w.stale.Load() || at <= w.belowAt.Load() {
+		return found
+	}
+	if err := w.mem.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", at).Scan(&found); err != nil {
+		w.failures.Add(1)
+		return sql.NullInt64{}
+	}
+	return found
+}
+
 // Answer is what the window returns for f, with whether it could answer: the
 // parity harness compares it to the store's own read.
 func (w *MemWindow) Answer(ctx context.Context, s *Store, f Filter) ([]Record, bool, error) {
