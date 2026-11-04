@@ -422,6 +422,74 @@ func TestSyncReadsALongSparseLogWithoutAHoleAndInOrder(t *testing.T) {
 	}
 }
 
+func TestSyncOfASparseLogReadsFewDuplicates(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	const records = 3000
+	for i := range records {
+		drive := "d"
+		if i%3 != 0 {
+			drive = "other"
+		}
+		testutil.Post(t, a.st, store.Record{Drive: drive, Kind: kinds.Note, Text: fmt.Sprintf("note %d", i)})
+	}
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a, b)
+	join(t, srv, late)
+	if err := a.node.Share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := late.node.Sync(context.Background(), "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Inserted != records/3 || got.Duplicate > got.Inserted/5 {
+		t.Fatalf("sync = %+v; want %d inserted and few duplicates", got, records/3)
+	}
+}
+
+func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	for i := range 5 {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("note %d", i)})
+	}
+	testutil.Post(t, a.st, store.Record{Drive: "other", Kind: kinds.Note, Text: "another drive"})
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	var copied bytes.Buffer
+	if err := relay.ExportDrive(context.Background(), a.st, "d", &copied); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a, b)
+	join(t, srv, late)
+	if err := a.node.Share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	seeded, err := late.node.Seed(context.Background(), "d", &copied)
+	if err != nil || seeded.Inserted != 5 {
+		t.Fatalf("seed = %+v, %v; want 5 inserted", seeded, err)
+	}
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: "after the copy"})
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+
+	synced, err := late.node.Sync(context.Background(), "d")
+	if err != nil || synced.Inserted != 1 || synced.Duplicate != 0 {
+		t.Fatalf("sync after the seed = %+v, %v; want only the 1 new record", synced, err)
+	}
+	if got := texts(t, late.st); len(got) != 6 || got[0] != "note 0" || got[5] != "after the copy" {
+		t.Fatalf("store holds %q", got)
+	}
+}
+
 type unconfirmedCursors struct{}
 
 func (unconfirmedCursors) Commit(_ context.Context, w store.Write) (store.Written, error) {
