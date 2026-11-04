@@ -1467,6 +1467,34 @@ func TestShowPrintsRecordsWholeInTheOrderAsked(t *testing.T) {
 	}
 }
 
+func TestShowPrintsABodyFilesWords(t *testing.T) {
+	for name, tt := range map[string]struct{ body, want string }{
+		"the body field":   {`{"body":"WORDS of the report\nsecond line"}`, "WORDS of the report\nsecond line\n"},
+		"a bare string":    {`"WORDS of the report"`, "WORDS of the report\n"},
+		"a text field":     {`{"text":"WORDS of the report"}`, "WORDS of the report\n"},
+		"any other shape":  {`{"rows":[1,2]}`, `{"rows":[1,2]}` + "\n"},
+		"the line's words": {`{"text":"a report"}`, "a report\n"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("CCI_HOME", t.TempDir())
+			file := filepath.Join(t.TempDir(), "body.json")
+			if err := os.WriteFile(file, []byte(tt.body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "report", "--text", "a report", "--body-file", file); err != nil {
+				t.Fatal(err)
+			}
+			out, err := run(t, "show", "1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.HasSuffix(out, tt.want) {
+				t.Errorf("show = %q, want it to end with %q", out, tt.want)
+			}
+		})
+	}
+}
+
 func TestShowPrintsEachRecordsTextOnceWithinItsBudget(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	long := "OPENING " + strings.Repeat("a long finding about the stack cap ", 20) + "THE END"

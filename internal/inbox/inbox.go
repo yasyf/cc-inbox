@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -617,17 +618,13 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
 		}
-		path := records[i].Refs.Path
-		if asJSON || path == "" {
+		if asJSON {
 			continue
 		}
-		body, err := os.ReadFile(path) //nolint:gosec // G304: the path is the one the record names.
-		if errors.Is(err, os.ErrNotExist) {
-			body = []byte(path + " is not on this machine")
-		} else if err != nil {
+		body, err := shownBody(records[i])
+		if err != nil {
 			return fmt.Errorf("show %s: %w", records[i].Name(), err)
 		}
-		body = BodyAfterText(body, records[i].Text)
 		if share > 0 && len(body) > share {
 			body = fmt.Appendf(body[:share:share], "\n... cut %d bytes of %s; cci show %s reads it whole", len(body)-share, records[i].Name(), records[i].Name())
 		}
@@ -642,6 +639,44 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 		}
 	}
 	return nil
+}
+
+func shownBody(r store.Record) ([]byte, error) {
+	path := r.Refs.Path
+	if path == "" {
+		return bodyWords(r), nil
+	}
+	body, err := os.ReadFile(path) //nolint:gosec // G304: the path is the one the record names.
+	if errors.Is(err, os.ErrNotExist) {
+		return []byte(path + " is not on this machine"), nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return BodyAfterText(body, r.Text), nil
+}
+
+func bodyWords(r store.Record) []byte {
+	words := unwrapped(r.Body)
+	if strings.Contains(r.Text, string(words)) {
+		return nil
+	}
+	return words
+}
+
+func unwrapped(raw json.RawMessage) []byte {
+	var words string
+	if json.Unmarshal(raw, &words) == nil {
+		return []byte(words)
+	}
+	var wrapped struct {
+		Body string `json:"body"`
+		Text string `json:"text"`
+	}
+	if json.Unmarshal(raw, &wrapped) == nil && cmp.Or(wrapped.Body, wrapped.Text) != "" {
+		return []byte(cmp.Or(wrapped.Body, wrapped.Text))
+	}
+	return raw
 }
 
 func BodyAfterText(body []byte, text string) []byte {
