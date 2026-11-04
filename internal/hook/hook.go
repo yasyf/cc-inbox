@@ -37,16 +37,24 @@ const (
 var askKinds = []kinds.Kind{kinds.Ask, kinds.Decide, kinds.Blocker}
 
 type Payload struct {
-	SessionID      string `json:"session_id"`
-	AgentID        string `json:"agent_id"`
-	TranscriptPath string `json:"transcript_path"`
-	Cwd            string `json:"cwd"`
-	Event          string `json:"hook_event_name"`
-	Source         string `json:"source"`
-	Prompt         string `json:"prompt"`
-	ToolName       string `json:"tool_name"`
-	LastMessage    string `json:"last_assistant_message"`
-	Error          string `json:"error"`
+	SessionID       string            `json:"session_id"`
+	AgentID         string            `json:"agent_id"`
+	TranscriptPath  string            `json:"transcript_path"`
+	Cwd             string            `json:"cwd"`
+	Event           string            `json:"hook_event_name"`
+	Source          string            `json:"source"`
+	Prompt          string            `json:"prompt"`
+	ToolName        string            `json:"tool_name"`
+	LastMessage     string            `json:"last_assistant_message"`
+	Error           string            `json:"error"`
+	BackgroundTasks []json.RawMessage `json:"background_tasks"`
+	SessionCrons    []json.RawMessage `json:"session_crons"`
+}
+
+// LiveWait reports whether a task or cron the harness tracks will wake this
+// session after its turn ends.
+func (p Payload) LiveWait() bool {
+	return len(p.BackgroundTasks) > 0 || len(p.SessionCrons) > 0
 }
 
 // Key is the session thread the hook fired in: the root thread, or the

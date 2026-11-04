@@ -253,6 +253,72 @@ func TestAThreadWhoseWakeExistsStopsFreely(t *testing.T) {
 	})
 }
 
+func TestALiveHarnessWaitEndsARootThreadsTurn(t *testing.T) {
+	for name, payload := range map[string]string{
+		"monitor": `{"background_tasks":[{"id":"m1","type":"monitor","status":"running","description":"ci"}],"session_crons":[]}`,
+		"agent":   `{"background_tasks":[{"id":"a1","type":"subagent","status":"running","description":"finder","agent_type":"Explore"}],"session_crons":[]}`,
+		"cron":    `{"background_tasks":[],"session_crons":[{"id":"c1","schedule":"15 10 4 11 *","recurring":false,"prompt":"read the build"}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			launch(t, st, quietLane, "/briefs/fix-lane-1.md")
+			p := bindLane(t, st, quietLane)
+			if err := json.Unmarshal([]byte(payload), &p); err != nil {
+				t.Fatal(err)
+			}
+			testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Report, To: []string{"meta-desk-1"}, Text: "pushed the branch"})
+
+			for range 2 {
+				if reason := stopReason(t, st, p); reason != "" {
+					t.Fatalf("a stop on a live wait was refused: %q", reason)
+				}
+			}
+			if open := blockersToRoot(t, st); len(open) != 0 {
+				t.Fatalf("a stop on a live wait wrote a blocker: %+v", open)
+			}
+		})
+	}
+}
+
+func TestEmptyWaitListsStillHoldATurn(t *testing.T) {
+	st, _ := testutil.Store(t)
+	launch(t, st, quietLane, "/briefs/fix-lane-1.md")
+	p := bindLane(t, st, quietLane)
+	if err := json.Unmarshal([]byte(`{"background_tasks":[],"session_crons":[]}`), &p); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Report, To: []string{"meta-desk-1"}, Text: "pushed the branch"})
+
+	if reason := stopReason(t, st, p); !strings.Contains(reason, "--kind done") {
+		t.Fatalf("stop = %q", reason)
+	}
+}
+
+func TestASessionsLiveWaitDoesNotReleaseATeammateLane(t *testing.T) {
+	ctx := context.Background()
+	st, _ := testutil.Store(t)
+	launch(t, st, quietLane, "/briefs/fix-lane-1.md")
+	lane := hook.Payload{SessionID: "s1", AgentID: "afix-lane-1-0123456789abcdef", Event: "SubagentStop"}
+	if err := json.Unmarshal([]byte(`{"background_tasks":[{"id":"m1","type":"monitor","status":"running"}]}`), &lane); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: lane.SessionID, Agent: lane.AgentID, AgentName: quietLane}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, lane.Key(), "d", quietLane, time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Report, Text: "working"})
+
+	var out bytes.Buffer
+	if err := hook.SubagentStop(ctx, st, lane, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := decision(t, &out); !strings.Contains(got, "--kind done") {
+		t.Fatalf("the lane's stop = %q", got)
+	}
+}
+
 func TestATeammateLaneIsHeldAndItsHelperIsNot(t *testing.T) {
 	ctx := context.Background()
 	st, _ := testutil.Store(t)

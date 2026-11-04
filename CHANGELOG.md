@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci hook stop` lets a launched lane's root thread end its turn on a live harness
+  wait. A Stop payload listing a background task or session cron wakes the thread
+  itself, so the turn is not refused and no blocker is written.
 - `client.Follow` returns nil again when its context ends, on the daemon as on
   the store, and `client.Open` reads the same empty list through either.
 - A lane holding a stem receives records addressed to that stem again when an

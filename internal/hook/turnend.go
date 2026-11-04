@@ -91,13 +91,19 @@ func settled(ctx context.Context, st *store.Store, r store.Record) (bool, error)
 // endTurn lets a launched lane's thread stop only on a record that says who
 // resumes its work. It refuses once per record with the commands that settle
 // the turn; a second stop with nothing new gets the blocker written for it, so
-// the turn never ends unrecorded. It reports whether it refused.
+// the turn never ends unrecorded. A root thread with a live wait stops freely,
+// since the harness wakes it; a subagent's payload lists the whole session's
+// waits and none of them wakes the subagent, so it says nothing of the lane. It
+// reports whether it refused.
 func endTurn(ctx context.Context, st *store.Store, p Payload, b store.Binding, w io.Writer) (bool, error) {
 	launched, err := launchedLane(ctx, st, p.Key(), b)
 	if err != nil || !launched {
 		return false, err
 	}
 	if p.AgentID == "" {
+		if p.LiveWait() {
+			return false, nil
+		}
 		_, subscribed, err := st.SessionSubscription(ctx, p.SessionID)
 		if err != nil || subscribed {
 			return false, err
