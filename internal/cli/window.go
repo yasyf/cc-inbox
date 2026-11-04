@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -161,6 +162,7 @@ func replay(ctx context.Context, st *store.Store, home string, entry capturedReq
 	if run != nil {
 		out.code, out.stderr = ExitCode(run), out.stderr+run.Error()
 	}
+	out.stdout, out.stderr = strings.ReplaceAll(out.stdout, home, "<home>"), strings.ReplaceAll(out.stderr, home, "<home>")
 	var err error
 	if out.cursors, out.records, err = view.ParityDigest(ctx); err != nil {
 		return replayed{}, err
@@ -239,7 +241,16 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	}
 	defer func() { _ = out.Close() }()
 	differences := json.NewEncoder(out)
-	type tally struct{ same, different int }
+	type tally struct {
+		same, different           int
+		storeNanos, windowNanos   int64
+		storeFaults, windowFaults int64
+	}
+	usage := func() (int64, int64) {
+		var u syscall.Rusage
+		_ = syscall.Getrusage(syscall.RUSAGE_SELF, &u)
+		return u.Utime.Nano() + u.Stime.Nano(), u.Minflt
+	}
 	classes := map[string]*tally{}
 	skipped, different := 0, 0
 	lines := bufio.NewScanner(file)
@@ -253,18 +264,26 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 			skipped++
 			continue
 		}
+		cpu0, faults0 := usage()
 		a, err := replay(ctx, plain, plainHome, entry)
 		if err != nil {
 			return fmt.Errorf("replay %v on the store: %w", entry.Argv, err)
 		}
+		cpu1, faults1 := usage()
 		b, err := replay(ctx, windowed, windowedHome, entry)
 		if err != nil {
 			return fmt.Errorf("replay %v through the window: %w", entry.Argv, err)
 		}
+		cpu2, faults2 := usage()
 		class := parityClass(entry)
 		if classes[class] == nil {
 			classes[class] = &tally{}
 		}
+		t := classes[class]
+		t.storeNanos += cpu1 - cpu0
+		t.windowNanos += cpu2 - cpu1
+		t.storeFaults += faults1 - faults0
+		t.windowFaults += faults2 - faults1
 		if a == b {
 			classes[class].same++
 			continue
@@ -288,7 +307,10 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		say("%-34s same=%d different=%d\n", name, classes[name].same, classes[name].different)
+		t := classes[name]
+		count := int64(t.same + t.different)
+		say("%-30s same=%-5d different=%-3d cpu/req store=%6.1fms window=%6.1fms faults/req store=%6d window=%6d\n", name, t.same, t.different,
+			float64(t.storeNanos)/float64(count)/1e6, float64(t.windowNanos)/float64(count)/1e6, t.storeFaults/count, t.windowFaults/count)
 	}
 	matrix, mismatches, err := windowMatrix(ctx, windowed, window, differences)
 	if err != nil {

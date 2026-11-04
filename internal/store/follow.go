@@ -47,6 +47,13 @@ var recordMutationObjects = [...]physicalObject{
 	},
 }
 
+func countRecordsDeleted(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, "INSERT INTO meta (key, value) VALUES (?, 1) ON CONFLICT (key) DO UPDATE SET value = value + 1", recordMutationsKey); err != nil {
+		return fmt.Errorf("count deleted records: %w", err)
+	}
+	return nil
+}
+
 // Tip is where the store's records stand: Head is the newest seq, and
 // Mutations moves when a stored record changed under a reader. Exact is false
 // on a store whose trigger counting mutations is not installed yet, so any
