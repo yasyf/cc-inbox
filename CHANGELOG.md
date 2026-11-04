@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A lane on a fresh Sprite no longer replays every old broadcast. The relay
+  fills a new store with records numbered in arrival order, so a floor made of
+  record numbers read them all as new. A lane now also hears a broadcast only
+  if it was written since the lane started. Lanes bound on an older cci keep
+  their floor alone until they bind again.
 - A lane that stood down and was then named another lane's successor no longer
   holds that lane's stem. The successor's new row carried no stand-down, so a
   finished fallback read as the stem's newest live lane and the running lane

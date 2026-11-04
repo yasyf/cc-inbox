@@ -420,6 +420,10 @@ func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection s
 			return nil, false
 		}
 		f.broadcastAfter = &after
+		if f.broadcastSince, _, err = s.Cursor(ctx, broadcastStart(f.BroadcastFloor), f.Drive); err != nil {
+			w.failures.Add(1)
+			return nil, false
+		}
 	}
 	if err := w.catchUp(ctx); err != nil {
 		w.failures.Add(1)
