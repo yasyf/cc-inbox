@@ -134,7 +134,7 @@ func TestDaemonStreamsAWatchForAnyRelease(t *testing.T) {
 	st, _ := testutil.Store(t)
 	socket := commandSocket(t, st)
 	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "seen by the watch"})
-	watch := relayCommand(t, socket, wire.Request{Version: "0.0.0-other", Argv: []string{"cci", "watch", "--drive", "d", "--since-seq", "0", "--for", "1s", "--interval", "10ms"}, Cwd: t.TempDir(), PID: os.Getpid()}, "")
+	watch := relayCommand(t, socket, wire.Request{Version: "0.0.0-other", Argv: []string{"cci", "watch", "--drive", "d", "--since", "1h", "--for", "1s", "--interval", "10ms"}, Cwd: t.TempDir(), PID: os.Getpid()}, "")
 	if !watch.ran || watch.code != 0 || !strings.Contains(watch.stdout, "seen by the watch") {
 		t.Fatalf("watch = %+v", watch)
 	}

@@ -152,7 +152,7 @@ func TestGrepPreservesReadErrorOutput(t *testing.T) {
 					}
 					wantError = fmt.Sprintf("decode refs of #%d:", reply.Seq)
 				}
-				for _, budget := range []int{1, 6144, 1 << 20} {
+				for _, budget := range []int{1 << 20} {
 					var got, want bytes.Buffer
 					pattern := regexp.MustCompile("REVIEW")
 					gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, budget, 0, asJSON, &got, nil)

@@ -79,6 +79,10 @@ type Reach = store.Reach
 // maintain-indexes has not installed yet; cci post then addresses a name as typed.
 var ErrNoLaneRegistry = store.ErrNoLaneRegistry
 
+func init() {
+	cli.ReplayThrough("cci")
+}
+
 var (
 	sharedMu sync.Mutex
 	shared   = map[string]*store.Store{}

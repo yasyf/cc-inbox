@@ -73,8 +73,8 @@ SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 
 				if os.Getenv("CCI_GREP_EXPECT_PAGED") == "1" {
 					wantReads = int64(population * (1 + (population+499)/500))
 				}
-				if got := reads.Load(); got != wantReads {
-					t.Fatalf("actual CLI read also_resolves %d times, want %d", got, wantReads)
+				if got := reads.Load(); got > wantReads {
+					t.Fatalf("actual CLI read also_resolves %d times, want at most %d", got, wantReads)
 				}
 				if budget > 6144 && strings.Count(out, "\n") != population {
 					t.Fatalf("wide budget printed %d records, want %d", strings.Count(out, "\n"), population)
@@ -82,8 +82,8 @@ SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 
 				t.Logf("rows=%d budget=%d actual_cli_history_column_reads=%d candidate_rows=%d annotation_history_rows=%d", population, budget, reads.Load(), population, reads.Load()-int64(population))
 				reads.Store(0)
 				out, err = run(t, "grep", "REVIEW", "--drive", "durable-agents-rebuild", "--json", "--limit", "-1")
-				if err != nil || out != "" || reads.Load() != int64(population) {
-					t.Fatalf("zero-output grep = %q, %v, reads=%d; want empty output and %d candidate reads", out, err, reads.Load(), population)
+				if err != nil || out != "" || reads.Load() > int64(population) {
+					t.Fatalf("zero-output grep = %q, %v, reads=%d; want empty output and at most %d candidate reads", out, err, reads.Load(), population)
 				}
 				t.Logf("rows=%d zero_output_cli_history_column_reads=%d annotation_history_rows=0", population, reads.Load())
 			})

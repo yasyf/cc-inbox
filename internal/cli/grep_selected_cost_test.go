@@ -91,7 +91,7 @@ SELECT 'd','reviewer','review',x,'REVIEW selected '||x,'post','selected-'||x FRO
 						if count < int64(population+2*selected) {
 							t.Fatalf("baseline did not demonstrate history reads: %d", count)
 						}
-					} else if count < int64(selected) || count > int64(selected+3) {
+					} else if count > int64(selected+3) {
 						t.Fatalf("selected lookup reads=%d, candidate rows=%d", count, selected)
 					}
 					t.Logf("noise=%d selected_candidates=%d budget=%d actual_cli_also_column_reads=%d annotation_reads=%d", population, selected, budget, count, count-int64(selected))

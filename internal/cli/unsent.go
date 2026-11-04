@@ -174,6 +174,15 @@ func dropKept(path string) error {
 	return nil
 }
 
+// replayProgram replays kept posts when this process is not cci itself.
+var replayProgram string
+
+// ReplayThrough names the cci an embedder replays its kept posts with: its own
+// program would not know the post verb's flags.
+func ReplayThrough(program string) {
+	replayProgram = program
+}
+
 func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
 	if getenv(ctx, unsentEnv) != "" {
 		return nil
@@ -191,9 +200,11 @@ func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
 		return err
 	}
 	slices.Sort(kept)
-	self, err := os.Executable()
-	if err != nil {
-		return err
+	self := replayProgram
+	if self == "" {
+		if self, err = os.Executable(); err != nil {
+			return err
+		}
 	}
 drain:
 	for _, path := range kept {
