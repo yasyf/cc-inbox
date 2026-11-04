@@ -220,6 +220,9 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			}
 		}
 	}
+	if err := s.dropRefusedLanes(ctx); err != nil {
+		return report, err
+	}
 	for _, index := range missing {
 		if err := s.buildPhysicalIndex(ctx, index); err != nil {
 			return report, err

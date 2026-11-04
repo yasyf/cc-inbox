@@ -144,10 +144,12 @@ type hold struct {
 	live                  bool
 }
 
-// Reach resolves name on drive through the lane registry: a live lane reads
-// its own mail; a stood-down one passes it to the successor it named, else to
-// its stem's holder; a stem reaches its holder. An unregistered numbered name
-// keeps its mail until it registers. Each hop is one indexed lookup.
+// Reach resolves name on drive through the lane registry: a live numbered lane
+// reads its own mail; a stood-down one passes it to the successor it named, else
+// to its stem's holder; a stem reaches its holder, the newest live registration,
+// as Aliases and Holding count it, even when a lane named the stem itself is older
+// and live. An unregistered numbered name keeps its mail until it registers. Each
+// hop is one indexed lookup.
 func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 	if err := s.laneRegistry(ctx); err != nil {
 		return Reach{}, err
@@ -171,6 +173,9 @@ func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 		}
 		visited = append(visited, cur)
 		switch {
+		case own >= 0 && rows[own].live && cur == Stem(cur):
+			out.Lane = holders[0]
+			return out, nil
 		case own >= 0 && rows[own].live:
 			out.Lane = cur
 			return out, nil
@@ -311,9 +316,9 @@ func (s *Store) Generations(ctx context.Context, drive, stem string) ([]string, 
 }
 
 // Holding returns which of lanes on drive hold their stem: a numbered lane that
-// is the stem's newest live registration, with no live lane named the stem
-// itself, so mail to the stem reaches it. One query reads every lane's own row
-// and its stem's index, whatever the drive's other lanes.
+// is the stem's newest live registration, so mail to the stem reaches it. One
+// query reads every lane's own row and its stem's index, whatever the drive's
+// other lanes.
 func (s *Store) Holding(ctx context.Context, drive string, lanes []string) ([]string, error) {
 	switch err := s.laneRegistry(ctx); {
 	case errors.Is(err, ErrNoLaneRegistry) || len(lanes) == 0:
@@ -322,7 +327,7 @@ func (s *Store) Holding(ctx context.Context, drive string, lanes []string) ([]st
 		return nil, err
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT h.lane FROM lane_holds h WHERE h.drive = ? AND h.lane IN (`+strings.Repeat("?,", len(lanes)-1)+`?) AND h.stem != h.lane AND `+liveOf("h")+`
-	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = h.drive AND o.stem = h.stem AND o.lane != h.lane AND `+liveOf("o")+` AND (o.held > h.held OR o.held = h.held AND o.lane < h.lane OR o.lane = h.stem))
+	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = h.drive AND o.stem = h.stem AND o.lane != h.lane AND `+liveOf("o")+` AND (o.held > h.held OR o.held = h.held AND o.lane < h.lane))
 	ORDER BY h.lane`, append([]any{drive}, toAny(lanes)...)...)
 	if err != nil {
 		return nil, fmt.Errorf("read which lanes hold their stem on %s: %w", drive, err)
@@ -337,6 +342,28 @@ func (s *Store) Holding(ctx context.Context, drive string, lanes []string) ([]st
 		out = append(out, lane)
 	}
 	return out, rows.Err()
+}
+
+const refusedOnly = `down = 0 AND EXISTS (SELECT 1 FROM records r WHERE r.seq = lane_holds.held AND r.topic = ?1)
+	AND NOT EXISTS (SELECT 1 FROM records r WHERE r.drive = lane_holds.drive AND r.lane = lane_holds.lane AND r.topic != ?1)
+	AND NOT EXISTS (SELECT 1 FROM sessions t WHERE t.drive = lane_holds.drive AND t.lane = lane_holds.lane)`
+
+// dropRefusedLanes removes the registry row an older cci's refused post left: its
+// blocker named the refused lane as its writer, so the name counted as a live
+// lane and, being newest, took the stem from the lane really holding it. A cci
+// on an older pin still writes that blocker, and the relay carries it here.
+func (s *Store) dropRefusedLanes(ctx context.Context) error {
+	var found bool
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM lane_holds WHERE "+refusedOnly+")", RefusedPostTopic).Scan(&found); err != nil {
+		return fmt.Errorf("look for lanes only a refused post registered: %w", err)
+	}
+	if !found {
+		return nil
+	}
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM lane_holds WHERE "+refusedOnly, RefusedPostTopic); err != nil {
+		return fmt.Errorf("drop lanes only a refused post registered: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane string) (string, []any, error) {

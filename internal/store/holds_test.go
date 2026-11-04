@@ -155,6 +155,73 @@ func TestAPostToAStemReachesItsNewestLiveHolder(t *testing.T) {
 	}
 }
 
+func TestAnOlderLiveLaneNamedTheStemLeavesItsMailWithTheNewestHolder(t *testing.T) {
+	g := newRegistry(t)
+	g.up("desk")
+	g.up("desk-7")
+	g.up("other-1")
+	order := g.note("desk")
+	if got := g.reads("desk-7"); !slices.Equal(got, []int64{order}) {
+		t.Fatalf("desk-7 reads %v; want the order to its alias, #%d", got, order)
+	}
+	if got := g.reads("other-1"); len(got) != 0 {
+		t.Fatalf("other-1 reads %v; want nothing of another stem", got)
+	}
+	if r := g.reach("desk"); r.Lane != "desk-7" {
+		t.Fatalf("Reach(desk) = %+v; want desk-7, the lane delivery gives the alias's mail", r)
+	}
+	if holding, err := g.st.Holding(context.Background(), "d", []string{"desk-7"}); err != nil || !slices.Equal(holding, []string{"desk-7"}) {
+		t.Fatalf("Holding(desk-7) = %v, %v; want desk-7, which reads its stem's mail", holding, err)
+	}
+
+	g.launch("desk")
+	if r := g.reach("desk"); r.Lane != "desk" {
+		t.Fatalf("Reach(desk) = %+v after a launch under the stem itself; want desk", r)
+	}
+}
+
+func TestARefusedPostStopsHoldingTheStemOnceTheIndexesAreMaintained(t *testing.T) {
+	g := newRegistry(t)
+	g.up("sv-1")
+	g.up("other-1")
+	refused := func(lane string) {
+		g.t.Helper()
+		g.post(store.Record{Lane: lane, Kind: kinds.Blocker, Topic: store.RefusedPostTopic, To: []string{lane}, Text: "post refused"})
+	}
+	refused("sv")
+	refused("reposted")
+	g.up("reposted")
+	refused("bound")
+	if err := g.st.BindLane(context.Background(), store.PeerKey{Session: "bound-thread"}, "d", "bound", g.clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	order := g.note("sv")
+	if got := g.reads("sv-1"); len(got) != 0 {
+		t.Fatalf("sv-1 reads %v before maintenance; want this test to reproduce the stolen stem", got)
+	}
+
+	if _, err := store.MaintainIndexes(context.Background(), g.st.HomeDir()); err != nil {
+		t.Fatal(err)
+	}
+	if got := g.reads("sv-1"); !slices.Equal(got, []int64{order}) {
+		t.Fatalf("sv-1 reads %v; want the order to its alias, #%d", got, order)
+	}
+	if got := g.reads("other-1"); len(got) != 0 {
+		t.Fatalf("other-1 reads %v; want nothing of another stem", got)
+	}
+	if r := g.reach("sv"); r.Lane != "sv-1" || r.Started {
+		t.Fatalf("Reach(sv) = %+v; want sv-1 and no lane named sv", r)
+	}
+	for _, kept := range []string{"reposted", "bound"} {
+		if r := g.reach(kept); !r.Started || r.Lane != kept {
+			t.Fatalf("Reach(%s) = %+v; want the lane kept, it did more than be refused", kept, r)
+		}
+	}
+	if _, err := store.MaintainIndexes(context.Background(), g.st.HomeDir()); err != nil {
+		t.Fatalf("a second maintenance with nothing to drop: %v", err)
+	}
+}
+
 func TestRunningNumberedLanesKeepTheirOwnMail(t *testing.T) {
 	g := newRegistry(t)
 	for _, lane := range []string{"fd-14", "fd-15", "fd-16"} {
