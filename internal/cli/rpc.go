@@ -160,7 +160,7 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 		return err
 	}
 	view.BeforeCursorMove(replies.Flush)
-	root := NewRootCmd()
+	root := NewRootCmd() //nolint:contextcheck // the tree takes ctx from ExecuteContext below.
 	root.SetArgs(request.Argv[1:])
 	root.SetOut(replies)
 	root.SetErr(replies.stderr())

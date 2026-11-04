@@ -337,7 +337,7 @@ func Follow(ctx context.Context, w Watch, emit func(Record) error) error {
 	if err != nil {
 		return err
 	}
-	filter := store.Filter{Drive: w.Drive, For: w.Reader, Peer: cli.SelfPeer().String(), Kinds: selected, After: w.After}
+	filter := store.Filter{Drive: w.Drive, For: w.Reader, Peer: cli.SelfPeer(ctx).String(), Kinds: selected, After: w.After}
 	return inbox.Watch(ctx, st, inbox.WatchOptions{Filter: filter, Interval: time.Second, JSON: true}, func(r store.Record, _ string) error {
 		return emit(r)
 	})
