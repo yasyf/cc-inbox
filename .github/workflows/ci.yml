@@ -512,18 +512,6 @@ jobs:
           go test -count=1 -run '^$' -bench '^BenchmarkBriefUnusedElisionAllocations$' -benchtime=1x -cpu=2 -v ./internal/render
           (cd .ci-brief-elision-baseline && go test -count=3 -run '^$' -bench '^BenchmarkBriefElision$' -benchmem -benchtime=100ms -cpu=2 ./internal/render) | tee "$RUNNER_TEMP/brief-elision-old.log"
           go test -count=3 -run '^$' -bench '^BenchmarkBriefElision$' -benchmem -benchtime=100ms -cpu=2 ./internal/render | tee "$RUNNER_TEMP/brief-elision-current.log"
-      - name: Direct native grep whole-query bytes and process CPU against official494 source
-        if: env.FULL_CI == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          test "$(git -C .ci-render-text-baseline rev-parse HEAD)" = 69637a6ba3370ec3a3ba11a59bb6b1d80d367dbb
-          (cd .ci-render-text-baseline && go build -p 2 -o "$RUNNER_TEMP/cci-render-query-old" ./cmd/cci)
-          test -x "$RUNNER_TEMP/cci-render-query-old"
-          test -x "$RUNNER_TEMP/cci-grep-body-current"
-          go version -m "$RUNNER_TEMP/cci-render-query-old" > "$RUNNER_TEMP/render-text-query-buildinfo.log"
-          go version -m "$RUNNER_TEMP/cci-grep-body-current" >> "$RUNNER_TEMP/render-text-query-buildinfo.log"
-          CCI_RENDER_GREP_OLD_CLI="$RUNNER_TEMP/cci-render-query-old" CCI_RENDER_GREP_CURRENT_CLI="$RUNNER_TEMP/cci-grep-body-current" go test -count=1 -run '^TestGrepRenderedTextQueryCost$' -v ./internal/cli | tee "$RUNNER_TEMP/render-text-query.log"
       - name: Numbered rendered text per-record costs and aggregate diagnostics against official494 source
         if: env.FULL_CI == 'true'
         shell: bash

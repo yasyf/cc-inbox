@@ -121,12 +121,22 @@ func TestDaemonLeavesTheCursorWhenTheClientDiesBeforeWriting(t *testing.T) {
 	}
 }
 
+func TestDaemonRunsAHookFromItsPayload(t *testing.T) {
+	st, _ := testutil.Store(t)
+	socket := commandSocket(t, st)
+	hook := relayCommand(t, socket, wire.Request{Argv: []string{"cci", "hook", "post-tool-use"}, Cwd: t.TempDir(), PID: os.Getpid()}, `{"session_id":"a-session","hook_event_name":"PostToolUse"}`)
+	if !hook.ran || hook.code != 0 || hook.stderr != "" {
+		t.Fatalf("hook = %+v", hook)
+	}
+}
+
 func TestDaemonSendsOtherVersionsAndOtherCommandsBack(t *testing.T) {
 	st, _ := testutil.Store(t)
 	socket := commandSocket(t, st)
 	for _, request := range []wire.Request{
 		{Version: "0.0.0-other", Argv: []string{"cci", "tail"}},
 		{Argv: []string{"cci", "channel"}},
+		{Argv: []string{"cci", "hook", "session-start"}},
 		{Argv: []string{"cci", "post", "--path", "/dev/fd/3"}},
 	} {
 		if got := relayCommand(t, socket, request, ""); got.ran {

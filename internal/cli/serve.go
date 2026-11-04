@@ -292,12 +292,12 @@ func runHook(cmd *cobra.Command, args []string, budget time.Duration, fn func(cm
 	ctx, cancel := context.WithTimeout(cmd.Context(), budget)
 	defer cancel()
 	connectCtx, cancelConnect := context.WithTimeout(ctx, hookBudget)
-	st, err := connectStore(connectCtx)
+	st, release, err := hookStore(connectCtx)
 	cancelConnect()
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer release()
 	cmd.SetContext(ctx)
 	if err := fn(cmd, st, args); err != nil {
 		if ctx.Err() != nil {
@@ -306,6 +306,17 @@ func runHook(cmd *cobra.Command, args []string, budget time.Duration, fn func(cm
 		return err
 	}
 	return nil
+}
+
+func hookStore(ctx context.Context) (*store.Store, func(), error) {
+	if inv := invoked(ctx); inv != nil {
+		return inv.st, func() {}, nil
+	}
+	st, err := connectStore(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return st, func() { _ = st.Close() }, nil
 }
 
 func newPromptHookCmd() *cobra.Command {
@@ -346,11 +357,11 @@ func newPromptHookCmd() *cobra.Command {
 func prompt(ctx context.Context, p hook.Payload, at time.Time) error {
 	ctx, cancel := context.WithTimeout(ctx, hookBudget)
 	defer cancel()
-	st, err := connectStore(ctx)
+	st, release, err := hookStore(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
+	defer release()
 	if err := hook.Prompt(ctx, st, p, at); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("%w: %w", store.ErrBusy, err)

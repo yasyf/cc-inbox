@@ -418,6 +418,8 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 	return a, nil
 }
 
+const grepMore = "... more matches; narrow with --kind, --lane or --since"
+
 func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.Regexp, limit, budget, width int, asJSON bool, w, notes io.Writer) error {
 	query := st.QueryText
 	if asJSON {
@@ -425,7 +427,8 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 	}
 	b := render.NewBudget(w, budget)
 	candidateBudget := render.NewBudget(io.Discard, budget)
-	matched, printed, kept := 0, 0, 0
+	printed, kept := 0, 0
+	more := false
 	var selected [][]store.Record
 	var readErr error
 	f.Descending = true
@@ -444,9 +447,9 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 			if !pattern.MatchString(line) {
 				continue
 			}
-			matched++
 			if candidateBudget.Full() || limit != 0 && kept >= limit {
-				continue
+				more = true
+				break
 			}
 			if asJSON {
 				line = render.JSON(r)
@@ -459,7 +462,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		if len(hits) > 0 {
 			selected = append(selected, hits)
 		}
-		if len(records) < pageRows {
+		if more || len(records) < pageRows {
 			break
 		}
 		f.Before = records[len(records)-1].Seq
@@ -482,25 +485,24 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		return readErr
 	}
 	if asJSON {
-		if matched > printed && limit >= 0 && notes != nil {
-			if _, err := fmt.Fprintf(notes, "... %d more matches; narrow with --kind, --lane or --since\n", matched-printed); err != nil {
+		if (more || kept > printed) && limit >= 0 && notes != nil {
+			if _, err := fmt.Fprintln(notes, grepMore); err != nil {
 				return fmt.Errorf("write grep: %w", err)
 			}
 		}
 		return nil
 	}
-	if matched == 0 {
+	if kept == 0 && !more {
 		head, err := st.MaxSeq(ctx)
 		if err != nil {
 			return err
 		}
 		b.Trailer(fmt.Sprintf("no records on %s match; store head #%d", f.Drive, head))
 	}
-	if matched > printed {
-		more := fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed)
-		b.Trailer(more)
+	if more || kept > printed {
+		b.Trailer(grepMore)
 		if notes != nil {
-			if _, err := fmt.Fprintln(notes, more); err != nil {
+			if _, err := fmt.Fprintln(notes, grepMore); err != nil {
 				return fmt.Errorf("write grep: %w", err)
 			}
 		}

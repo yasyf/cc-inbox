@@ -112,7 +112,7 @@ func pagedGrep(ctx context.Context, st *store.Store, f store.Filter, pattern *re
 		b.Trailer(fmt.Sprintf("no records on %s match; store head #%d", f.Drive, head))
 	}
 	if matched > printed {
-		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
+		b.Trailer(grepMore)
 	}
 	return nil
 }
