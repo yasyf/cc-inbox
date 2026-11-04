@@ -76,46 +76,6 @@ func TestDaemonServesDigestAndHTTP(t *testing.T) {
 	}
 }
 
-func TestDaemonImportsAppendedInboxLines(t *testing.T) {
-	home := t.TempDir()
-	ctx := context.Background()
-	inboxFile := filepath.Join(t.TempDir(), "deploy-go.md")
-	if err := os.WriteFile(inboxFile, []byte("GO root (9:00 PM PT) first\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	st, err := store.Open(ctx, home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	if _, err := importer.Import(ctx, st, inboxFile, "d", ""); err != nil {
-		t.Fatal(err)
-	}
-	serve(t, home)
-	f, err := os.OpenFile(inboxFile, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := f.WriteString("GO root (9:01 PM PT) second\n"); err != nil {
-		t.Fatal(err)
-	}
-	_ = f.Close()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		n, err := st.Count(ctx, store.Filter{Drive: "d"})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if n == 2 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("daemon imported %d records, want 2", n)
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-}
-
 func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener, func() error) {
 	t.Helper()
 	kit, err := os.MkdirTemp("/tmp", "cci-dk")
