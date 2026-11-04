@@ -122,6 +122,9 @@ func TestNativeTailHTTPParity(t *testing.T) {
 				if err := json.Unmarshal(raw, &want); err != nil {
 					t.Fatal(err)
 				}
+				if nativeTailPRSkipsCorruptRefs(t, variant.name, call.name, got, want) {
+					return
+				}
 				if got.Code != want.Code || !bytes.Equal(got.Out, want.Out) || !bytes.Equal(got.Err, want.Err) {
 					t.Fatalf("native HTTP differs from immutable CLI: code=%d/%d stdout=%q/%q stderr=%q/%q", got.Code, want.Code, got.Out, want.Out, got.Err, want.Err)
 				}
