@@ -271,6 +271,7 @@ type Record struct {
 	Source       string          `json:"source"`
 	Body         json.RawMessage `json:"body,omitempty"`
 	Status       string          `json:"status,omitempty"`
+	Stem         string          `json:"stem,omitempty"`
 	Num          string          `json:"num,omitempty"`
 	ReNum        string          `json:"-"`
 	CloseNums    []string        `json:"-"`

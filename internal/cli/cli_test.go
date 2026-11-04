@@ -1318,7 +1318,7 @@ func TestClaimForALaneTiesTheLanesSession(t *testing.T) {
 	if out, err := run(t, "claim", "--for", "successor-2@drive-b", "--pr", "owner/repo#9"); err != nil || out != "owns pr:owner/repo#9\n" {
 		t.Fatalf("claim --for a teammate that never posted = %q, %v", out, err)
 	}
-	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0"); err != nil || !strings.Contains(out, "CLAIM successor-2 claim: successor-2 owns #owner/repo#9") {
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0"); err != nil || !strings.Contains(out, "CLAIM successor claim: successor-2 owns #owner/repo#9") {
 		t.Fatalf("claim record for a teammate that never posted = %q, %v", out, err)
 	}
 	if out, err := run(t, "who", "--drive", "drive-b", "--lane", "successor-2", "--json"); err != nil || !strings.Contains(out, `"agent":"asuccessor-2-0123"`) {

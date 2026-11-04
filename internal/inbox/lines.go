@@ -27,6 +27,38 @@ type openerReader interface {
 	OpenAmong(context.Context, string, []int64) ([]store.Record, error)
 }
 
+type stemHolders interface {
+	Holding(context.Context, string, []string) ([]string, error)
+}
+
+// Stems sets each record's Stem to its writer's stem when the writer holds it,
+// so a reader sees the name that reaches the lane; one query per drive per page.
+func Stems(ctx context.Context, st stemHolders, records []store.Record) error {
+	writers := map[string][]string{}
+	for _, r := range records {
+		if store.Stem(r.Lane) != r.Lane && !slices.Contains(writers[r.Drive], r.Lane) {
+			writers[r.Drive] = append(writers[r.Drive], r.Lane)
+		}
+	}
+	holding := map[string]map[string]bool{}
+	for _, drive := range slices.Sorted(maps.Keys(writers)) {
+		lanes, err := st.Holding(ctx, drive, writers[drive])
+		if err != nil {
+			return err
+		}
+		holding[drive] = map[string]bool{}
+		for _, lane := range lanes {
+			holding[drive][lane] = true
+		}
+	}
+	for i, r := range records {
+		if holding[r.Drive][r.Lane] {
+			records[i].Stem = store.Stem(r.Lane)
+		}
+	}
+	return nil
+}
+
 func Annotate(ctx context.Context, st openerReader, records []store.Record) error {
 	tracked := map[string][]int64{}
 	for _, r := range records {
@@ -74,6 +106,9 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 	out := make([]string, len(records))
 	folded := make([]bool, len(records))
 	if err := Expand(ctx, st, records); err != nil {
+		return nil, nil, err
+	}
+	if err := Stems(ctx, st, records); err != nil {
 		return nil, nil, err
 	}
 	if v.JSON {

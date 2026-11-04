@@ -310,6 +310,35 @@ func (s *Store) Generations(ctx context.Context, drive, stem string) ([]string, 
 	return out, rows.Err()
 }
 
+// Holding returns which of lanes on drive hold their stem: a numbered lane that
+// is the stem's newest live registration, with no live lane named the stem
+// itself, so mail to the stem reaches it. One query reads every lane's own row
+// and its stem's index, whatever the drive's other lanes.
+func (s *Store) Holding(ctx context.Context, drive string, lanes []string) ([]string, error) {
+	switch err := s.laneRegistry(ctx); {
+	case errors.Is(err, ErrNoLaneRegistry) || len(lanes) == 0:
+		return nil, nil
+	case err != nil:
+		return nil, err
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT h.lane FROM lane_holds h WHERE h.drive = ? AND h.lane IN (`+strings.Repeat("?,", len(lanes)-1)+`?) AND h.stem != h.lane AND `+liveOf("h")+`
+	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = h.drive AND o.stem = h.stem AND o.lane != h.lane AND `+liveOf("o")+` AND (o.held > h.held OR o.held = h.held AND o.lane < h.lane OR o.lane = h.stem))
+	ORDER BY h.lane`, append([]any{drive}, toAny(lanes)...)...)
+	if err != nil {
+		return nil, fmt.Errorf("read which lanes hold their stem on %s: %w", drive, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var lane string
+		if err := rows.Scan(&lane); err != nil {
+			return nil, fmt.Errorf("scan which lanes hold their stem on %s: %w", drive, err)
+		}
+		out = append(out, lane)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane string) (string, []any, error) {
 	switch err := s.laneRegistry(ctx); {
 	case errors.Is(err, ErrNoLaneRegistry):

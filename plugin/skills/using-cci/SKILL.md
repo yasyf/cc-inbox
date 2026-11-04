@@ -77,6 +77,8 @@ binding beside its live predecessor binds, and cci stands the predecessor down
 for it at once, as lane `registry`, so mail to either name reaches the successor;
 the predecessor posts its handoff and stops.
 
+Readers name a writer by the stem it holds, so the name in a line is the one to
+address; a writer that no longer holds its stem keeps its number.
 Address a numbered lane by its stem, the name without its trailing `-<n>`:
 `--to signal-valkey` reaches the stem's newest live lane, the one whose first
 post, thread binding or spawn record came last, or the successor a stand-down

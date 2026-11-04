@@ -96,3 +96,30 @@ func TestAPostToANumberedLaneIsStoredForItsStemWhileTheStemReachesThatLane(t *te
 		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's mail and none sent to the running sv-2", out, err)
 	}
 }
+
+func TestAReaderNamesAWriterByTheStemItHoldsAndAnOlderLaneByItsNumber(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "sv-2", "--kind", "state", "--text", "first word"); err != nil {
+		t.Fatal(err)
+	}
+	alone, err := run(t, "tail", "--drive", "d", "--since", "0")
+	if err != nil || !strings.Contains(alone, "STATE sv first word") {
+		t.Fatalf("tail with sv-2 alone = %q, %v; want sv-2 named by its stem", alone, err)
+	}
+
+	if _, err := run(t, "post", "--drive", "d", "--lane", "sv-3", "--kind", "state", "--text", "second word"); err != nil {
+		t.Fatal(err)
+	}
+	both, err := run(t, "tail", "--drive", "d", "--since", "0")
+	if err != nil || !strings.Contains(both, "STATE sv-2 first word") || !strings.Contains(both, "STATE sv second word") {
+		t.Fatalf("tail with sv-3 newer = %q, %v; want sv-2 by its number and sv-3 by the stem", both, err)
+	}
+	asJSON, err := run(t, "tail", "--drive", "d", "--since", "0", "--json")
+	if err != nil || strings.Count(asJSON, `"stem":"sv"`) != 1 || !strings.Contains(asJSON, `"lane":"sv-3"`) {
+		t.Fatalf("tail --json = %q, %v; want the stem on sv-3's record alone and every lane exact", asJSON, err)
+	}
+}
