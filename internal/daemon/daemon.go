@@ -20,7 +20,6 @@ import (
 	daemonversion "github.com/yasyf/daemonkit/version"
 
 	"github.com/yasyf/cc-inbox/internal/hook"
-	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/mesh"
@@ -46,10 +45,12 @@ const (
 	SessionIdle = time.Minute
 	// MaintenanceDrive holds the records the daemon writes about the store
 	// itself, such as a migration that held every client open.
-	MaintenanceDrive = "cci"
-	maintainRetry    = time.Minute
-	collectInterval  = 24 * time.Hour
-	collectPause     = time.Second
+	MaintenanceDrive    = "cci"
+	maintainRetry       = time.Minute
+	promptDrainInterval = 5 * time.Second
+	collectInterval     = 24 * time.Hour
+	collectSettle       = time.Hour
+	collectPause        = time.Second
 )
 
 func Definition() (daemonkit.Daemon, error) {
@@ -175,9 +176,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	syncCtx, p.stopSync = context.WithCancel(context.Background())
 	var loops sync.WaitGroup
 	loops.Go(func() {
-		if err := p.syncImports(syncCtx); err != nil {
-			r.fail(c, err)
-		}
+		p.drainPrompts(syncCtx)
 	})
 	loops.Go(func() {
 		if err := superviseMesh(syncCtx, c, r.home); err != nil {
@@ -213,19 +212,16 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	return p, nil
 }
 
-func (p *Product) syncImports(ctx context.Context) error {
-	tick := time.NewTicker(ImportInterval)
+func (p *Product) drainPrompts(ctx context.Context) {
+	tick := time.NewTicker(promptDrainInterval)
 	defer tick.Stop()
 	for {
-		if _, err := importer.Refresh(ctx, p.st); err != nil && ctx.Err() == nil {
-			return fmt.Errorf("refresh imports: %w", err)
-		}
 		if err := hook.DrainPrompts(ctx, p.st); err != nil && ctx.Err() == nil {
 			slog.Warn("cci daemon could not record a kept prompt yet", "err", err)
 		}
 		select {
 		case <-ctx.Done():
-			return nil
+			return
 		case <-tick.C:
 		}
 	}
@@ -255,10 +251,12 @@ func collect(ctx context.Context, st *store.Store) {
 			return nil
 		}
 	}
+	select {
+	case <-ctx.Done():
+		return
+	case <-time.After(collectSettle):
+	}
 	for {
-		if err := pause(ctx); err != nil {
-			return
-		}
 		res, err := st.Collect(ctx, pause)
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("cci daemon could not collect the store", "err", err)
