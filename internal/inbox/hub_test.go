@@ -103,6 +103,23 @@ func TestHubFirstReadSeesARecordChangedAfterTheReadersOwn(t *testing.T) {
 	}
 }
 
+func TestHubWakesTheRunningLaneForAStemAFinishedFallbackWasHanded(t *testing.T) {
+	st, _ := testutil.Store(t)
+	for _, lane := range []string{"bugs-1", "bugs-2", "bugs-2-opus"} {
+		testutil.Post(t, st, store.Record{Lane: lane, Kind: kinds.Note, Text: lane + " registers"})
+	}
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.StandDown, Text: "bugs-2-opus stands down", To: []string{"bugs-2-opus"}})
+	anchor := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.StandDown, Text: "bugs-1 stands down", To: []string{"bugs-1"}, Fields: store.Fields{Attrs: map[string]string{"successor": "bugs-2-opus"}}})
+	hub := inbox.NewHub(st, time.Millisecond)
+	defer hub.Close()
+	running := hub.Follow(store.Filter{Drive: "d", To: "bugs-2", After: anchor.Seq})
+	defer running.Leave()
+	mail := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "for the stem", To: []string{"bugs"}})
+	if wake := awaitWake(t, running); wake.First > mail.Seq {
+		t.Fatalf("wake = %+v, want first at or before %d", wake, mail.Seq)
+	}
+}
+
 func TestHubReadsAgainWhenAFollowerGainsAnAlias(t *testing.T) {
 	st, _ := testutil.Store(t)
 	anchor := testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "anchor"})
