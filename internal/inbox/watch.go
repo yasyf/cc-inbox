@@ -37,7 +37,7 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 		}
 		f.After = start
 	}
-	w := &watcher{st: st, opts: opts, filter: f, floor: f.After, emit: emit}
+	w := &watcher{st: st, opts: opts, filter: f, emit: emit}
 	if opts.For > 0 {
 		w.deadline = time.Now().Add(opts.For)
 	}
@@ -60,7 +60,6 @@ type watcher struct {
 	st       *store.Store
 	opts     WatchOptions
 	filter   store.Filter
-	floor    int64
 	deadline time.Time
 	emit     func(store.Record, string) error
 }
@@ -72,13 +71,10 @@ func (w *watcher) follow(ctx context.Context, feed store.Feed) (bool, error) {
 		followed, cancel = context.WithDeadline(ctx, w.deadline)
 		defer cancel()
 	}
-	from := w.filter
-	from.After = max(w.filter.After, w.floor)
-	err := feed.Follow(followed, from, func(wake store.Wake) error {
+	err := feed.Follow(followed, w.filter, func(wake store.Wake) error {
 		w.filter.After = max(w.filter.After, wake.First-1)
 		w.filter.Before = wake.Head + 1
 		defer func() { w.filter.Before = 0 }()
-		w.floor = max(w.floor, wake.Head)
 		for {
 			n, err := w.page(followed)
 			if err != nil {

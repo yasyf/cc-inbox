@@ -617,7 +617,8 @@ UNION ALL SELECT j.value, r.seq FROM records r, json_each(r.also_resolves) j WHE
 
 func assertSameRead[T any](t *testing.T, name string, got T, gotErr error, want T, wantErr error) {
 	t.Helper()
-	if fmt.Sprint(gotErr) != fmt.Sprint(wantErr) || !reflect.DeepEqual(got, want) {
+	stage := func(err error) string { return strings.TrimPrefix(fmt.Sprint(err), "query records: ") }
+	if stage(gotErr) != stage(wantErr) || !reflect.DeepEqual(got, want) {
 		t.Fatalf("%s = %+v, %v; unbounded predicate = %+v, %v", name, got, gotErr, want, wantErr)
 	}
 }

@@ -31,9 +31,9 @@ func NewHub(st *store.Store, interval time.Duration) *Hub {
 	return &Hub{st: st, interval: interval, kick: make(chan struct{}, 1), done: make(chan struct{}), followers: map[*Follower]struct{}{}}
 }
 
-// Follower is one reader's place in a Hub. Rows past floor are unread; base is
-// the last place it was woken from, which a changed record or a new alias sends
-// the floor back to, as a poll from the last delivered record would have seen them.
+// Follower is one reader's place in a Hub. Rows past filter.After are unread;
+// base is the last place it was woken from, which a changed record or a new alias
+// sends the read back to, as a poll from the last delivered record would have seen them.
 type Follower struct {
 	hub     *Hub
 	filter  store.Filter
@@ -44,10 +44,10 @@ type Follower struct {
 	ready   chan struct{}
 }
 
-// Follow starts reading f past floor; a changed record rewinds to f.After.
-func (h *Hub) Follow(f store.Filter, floor int64) *Follower {
+// Follow starts reading f past f.After. Its first read covers those rows as they
+// stand then, so a record that changed before the Hub saw it still wakes.
+func (h *Hub) Follow(f store.Filter) *Follower {
 	follower := &Follower{hub: h, filter: f, base: f.After, ready: make(chan struct{}, 1)}
-	follower.filter.After = floor
 	h.mu.Lock()
 	h.followers[follower] = struct{}{}
 	if !h.running {
