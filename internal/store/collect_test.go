@@ -238,8 +238,8 @@ func TestCollectRetiresASilentDriveWhole(t *testing.T) {
 
 func TestCollectKeepsTheNewestSpawnOfEachLane(t *testing.T) {
 	st, clock := testutil.Store(t)
-	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn x", Refs: store.Refs{Lanes: []string{"x"}}})
-	second := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn y", Refs: store.Refs{Lanes: []string{"y"}}})
+	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn x", Refs: store.Refs{Lanes: []string{"x"}}, Fields: store.Fields{Attrs: map[string]string{"brief": "/brief", "model": "opus"}}})
+	second := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn y", Refs: store.Refs{Lanes: []string{"y"}}, Fields: store.Fields{Attrs: map[string]string{"brief": "/brief", "model": "opus"}}})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "newer"})
 	clock.Advance(40 * 24 * time.Hour)
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
@@ -401,8 +401,11 @@ func TestCollectArchivesEveryRecordItDeletes(t *testing.T) {
 
 func TestCollectArchivesABlobWithItsRecord(t *testing.T) {
 	st, clock := testutil.Store(t)
-	body := strings.Repeat("word ", store.MaxText)
-	excerpt, path, err := st.Fit(body)
+	excerpt, path, err := st.Fit(strings.Repeat("word ", store.MaxText))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,7 +432,7 @@ func TestCollectArchivesABlobWithItsRecord(t *testing.T) {
 	if err := json.NewDecoder(gz).Decode(&line); err != nil {
 		t.Fatal(err)
 	}
-	if line["blob"] != body {
+	if line["blob"] != string(body) {
 		t.Fatalf("archived blob = %.40v, want the body", line["blob"])
 	}
 }
