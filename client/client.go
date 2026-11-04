@@ -13,6 +13,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -243,13 +244,25 @@ type Peer struct {
 // Who reads every session bound to drive, ended ones included, through cci who
 // itself, so its liveness and stand-down marks are the ones cci prints.
 func Who(ctx context.Context, drive string) ([]Peer, error) {
-	var out bytes.Buffer
-	root := cli.NewRootCmd() //nolint:contextcheck // the tree takes ctx from ExecuteContext below, which contextcheck cannot follow.
-	root.SetArgs([]string{"who", "--drive", drive, "--all", "--json", "--fields", "session,agent,lane,live,seen_at,stood_down"})
-	root.SetOut(&out)
-	root.SetErr(io.Discard)
-	if err := root.ExecuteContext(ctx); err != nil {
+	args := []string{"who", "--drive", drive, "--all", "--json", "--fields", "session,agent,lane,live,seen_at,stood_down"}
+	var out, stderr bytes.Buffer
+	code, err := daemonRead(ctx, args, strings.NewReader(""), &out, &stderr)
+	switch {
+	case errors.Is(err, errNoDaemon):
+		out.Reset()
+		root := cli.NewRootCmd() //nolint:contextcheck // the tree takes ctx from ExecuteContext
+		root.SetArgs(args)
+		root.SetOut(&out)
+		root.SetErr(io.Discard)
+		if err := root.ExecuteContext(ctx); err != nil {
+			return nil, err
+		}
+	case err != nil:
 		return nil, err
+	default:
+		if err := daemonError(code, stderr.String()); err != nil {
+			return nil, err
+		}
 	}
 	var rows []Peer
 	decoder := json.NewDecoder(&out)

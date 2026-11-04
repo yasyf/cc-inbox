@@ -102,3 +102,15 @@ func TestNewestExportBoundsSelectedBodyAllocation(t *testing.T) {
 		})
 	}
 }
+
+func TestExportTreatsADirectoryPathAsNoBody(t *testing.T) {
+	st, _ := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "names a directory", Refs: store.Refs{Path: t.TempDir()}})
+	rows, err := st.Export(t.Context(), st.Self(), 0, 0)
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("export = %+v/%v", rows, err)
+	}
+	if rows[0].PathBody != "" {
+		t.Errorf("PathBody = %q, want none", rows[0].PathBody)
+	}
+}
