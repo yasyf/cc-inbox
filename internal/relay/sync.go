@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/e2e"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -390,6 +391,12 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 
 var errStaleEpoch = errors.New("relay: sealed under a superseded group key")
 
+// relayRefuses names what the relay never takes from an owner: a dotted kind is
+// a service's namespace there, so cci's typed lr.* records stay on this machine.
+func (n *Node) relayRefuses(kind kinds.Kind) bool {
+	return n.Config.Tier == e2e.TierOwner && strings.Contains(string(kind), ".")
+}
+
 func (n *Node) pushBatch(ctx context.Context, configs []Config, batch []store.Row) (pushResponse, map[int64]store.Row, error) {
 	ring, err := LoadKeyring(n.Home, n.Config.Mesh)
 	if err != nil {
@@ -407,7 +414,7 @@ func (n *Node) pushBatch(ctx context.Context, configs []Config, batch []store.Ro
 	var envs []e2e.Envelope
 	sent := map[int64]store.Row{}
 	for _, r := range batch {
-		if Route(configs, r.Drive) != n.Config.Mesh {
+		if Route(configs, r.Drive) != n.Config.Mesh || n.relayRefuses(r.Kind) {
 			continue
 		}
 		e, err := SealRow(k, n.Identity, n.Config, r)

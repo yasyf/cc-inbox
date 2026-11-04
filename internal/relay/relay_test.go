@@ -193,6 +193,23 @@ func TestRotationLocksOutDroppedMember(t *testing.T) {
 	}
 }
 
+func TestAnOwnerNeverOffersTheRelayADottedKind(t *testing.T) {
+	srv, a, _, _ := mesh(t)
+	before := len(srv.Pushes)
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Kind("lr.note"), Body: []byte(`{}`), Text: "stays here"})
+	res, err := a.node.Push(context.Background(), configs(t, a))
+	if err != nil || res.Pushed != 0 || len(res.Rejected) != 0 {
+		t.Fatalf("push = %+v, %v; want nothing pushed and nothing refused", res, err)
+	}
+	if len(srv.Pushes) != before {
+		t.Fatalf("a batch of only dotted kinds still called the relay %d times", len(srv.Pushes)-before)
+	}
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Decision, Text: "crosses"})
+	if res, err := a.node.Push(context.Background(), configs(t, a)); err != nil || res.Pushed != 1 {
+		t.Fatalf("the next push = %+v, %v; want the decision", res, err)
+	}
+}
+
 func TestPairedNodeNeverPushes(t *testing.T) {
 	srv, _, _, c := mesh(t)
 	testutil.Post(t, c.st, store.Record{Kind: kinds.Note, Text: "read-only"})
