@@ -88,8 +88,8 @@ func TestDigestOfOpenItemsMatchesTheWholeRecordReads(t *testing.T) {
 	closed := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Ask, Text: "answered ask", To: []string{"root"}})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Answer, Text: "yes", Re: closed.Seq})
 	hold := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Hold, Text: "tracked hold", Refs: store.Refs{Targets: []string{"api"}}})
-	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Hold, Text: "lifted hold", Refs: store.Refs{Stacks: []string{"p/e"}}})
-	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Lift, Text: "lift", Refs: store.Refs{Stacks: []string{"p/e"}}})
+	lifted := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Hold, Text: "lifted hold", Refs: store.Refs{Stacks: []string{"p/e"}}})
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Lift, Text: "lift", Resolves: lifted.Seq, Refs: store.Refs{Stacks: []string{"p/e"}}})
 	open, untracked, older, err := st.OpenSince(ctx, "d", since)
 	if err != nil {
 		t.Fatal(err)
