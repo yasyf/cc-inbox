@@ -114,7 +114,7 @@ func TestNativeTailHTTPParity(t *testing.T) {
 				t.Setenv("CCI_AGENT_ID", "daemon-agent")
 				handler := nativeTailHandler(t, fixture)
 				got := normalizeNativeTail(nativeTailResultFromHTTP(t, nativeTailResponse(t, handler, body)), fixture.node)
-				raw, err := os.ReadFile(nativeTailSnapshotPath(variant.name + "/" + call.name))
+				raw, err := os.ReadFile(nativeTailWantPath(variant.name+"/"+call.name, call.args))
 				if err != nil {
 					t.Fatal(err)
 				}

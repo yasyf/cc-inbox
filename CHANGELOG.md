@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci tail`, `cci grep` and `cci show` print the compact line the hook and the
+  MCP tools print, `<seq> <kind> <lane>[><to>] [^<re>] [x<closed>] … <text>`,
+  under an `@<clock>` line each time the minute changes. `--json` is unchanged,
+  and a grep pattern still matches each record's long line. The compact line
+  names a record by its number, so a replica prints the origin's number, not its
+  local seq. Its minute header is added as the line prints, so a record the
+  budget or a skip leaves first still carries its minute.
 - A numbered lane that registers while its live predecessor holds the stem
   stands that predecessor down for itself at once: cci posts the
   `stand-down --successor` as lane `registry`, so mail to either name reaches

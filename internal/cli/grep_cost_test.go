@@ -66,7 +66,7 @@ SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !strings.HasPrefix(out, fmt.Sprintf("#%d ", population)) {
+				if strings.Index(out, "REVIEW history ") != strings.Index(out, fmt.Sprintf("REVIEW history %d\n", population)) {
 					t.Fatalf("grep newest row missing: %q", out)
 				}
 				wantReads := int64(population)
@@ -76,8 +76,8 @@ SELECT 'durable-agents-rebuild', 'reviewer', 'note', n, 'REVIEW history ' || n, 
 				if got := reads.Load(); got > wantReads {
 					t.Fatalf("actual CLI read also_resolves %d times, want at most %d", got, wantReads)
 				}
-				if budget > 6144 && strings.Count(out, "\n") != population {
-					t.Fatalf("wide budget printed %d records, want %d", strings.Count(out, "\n"), population)
+				if budget > 6144 && strings.Count(out, "REVIEW history ") != population {
+					t.Fatalf("wide budget printed %d records, want %d", strings.Count(out, "REVIEW history "), population)
 				}
 				t.Logf("rows=%d budget=%d actual_cli_history_column_reads=%d candidate_rows=%d annotation_history_rows=%d", population, budget, reads.Load(), population, reads.Load()-int64(population))
 				reads.Store(0)

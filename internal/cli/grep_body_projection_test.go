@@ -69,7 +69,7 @@ func TestGrepTextBodyProjectionWork(t *testing.T) {
 					if !bytes.Equal(record.Body, body) || transferred.Load() < int64(len(body)) {
 						t.Fatalf("JSON body bytes=%d, want=%d; transferred=%d", len(record.Body), len(body), transferred.Load())
 					}
-				} else if strings.Count(out, "\n") != 2 || !strings.Contains(out, "selected global peer") || !strings.Contains(out, "selected local") || strings.Contains(out, "body-only-token") {
+				} else if strings.Count(out, "\n")-strings.Count("\n"+out, "\n@") != 2 || !strings.Contains(out, "selected global peer") || !strings.Contains(out, "selected local") || strings.Contains(out, "body-only-token") {
 					t.Fatalf("text grep output=%q", out)
 				}
 				t.Logf("GREP_BODY_TRANSFER rows=%d json=%t actual_body_reads=%d actual_body_bytes=%d selected_body_bytes=%d", population, asJSON, reads.Load(), transferred.Load(), len(body))
@@ -79,9 +79,9 @@ func TestGrepTextBodyProjectionWork(t *testing.T) {
 }
 
 func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
-	old, current := os.Getenv("CCI_GREP_BODY_OLD_CLI"), os.Getenv("CCI_GREP_BODY_CURRENT_CLI")
-	if old == "" || current == "" {
-		t.Skip("CI supplies immutable and current native CLI binaries")
+	old, parity, current := os.Getenv("CCI_GREP_BODY_OLD_CLI"), os.Getenv("CCI_GREP_BODY_PARITY_CLI"), os.Getenv("CCI_GREP_BODY_CURRENT_CLI")
+	if old == "" || parity == "" || current == "" {
+		t.Skip("CI supplies immutable, compact-line parity and current native CLI binaries")
 	}
 	for _, test := range []struct {
 		name    string
@@ -131,10 +131,10 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			wantOut, wantErr, wantCode := invoke(old)
+			_, oldErr, oldCode := invoke(old)
 			gotOut, gotErr, gotCode := invoke(current)
-			if wantCode != test.code {
-				t.Fatalf("immutable CLI exit=%d, want=%d; stderr=%s", wantCode, test.code, wantErr)
+			if oldCode != test.code {
+				t.Fatalf("immutable CLI exit=%d, want=%d; stderr=%s", oldCode, test.code, oldErr)
 			}
 			if test.skips {
 				if gotCode != 0 || len(gotErr) != 0 || !bytes.Equal(gotOut, intact) {
@@ -148,6 +148,7 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 				}
 				return
 			}
+			wantOut, wantErr, wantCode := invoke(parity)
 			if !bytes.Equal(gotOut, wantOut) || !pipedStderrMatches(gotOut, gotErr, wantErr) || gotCode != wantCode {
 				t.Fatalf("CLI parity code=%d/%d stdout=%q/%q stderr=%q/%q", gotCode, wantCode, gotOut, wantOut, gotErr, wantErr)
 			}

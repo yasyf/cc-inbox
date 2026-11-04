@@ -83,8 +83,9 @@ SELECT 'd','reviewer','review',x,'REVIEW selected '||x,'post','selected-'||x FRO
 			if !bytes.Equal(gotOut, wantOut) || !pipedStderrMatches(gotOut, gotErr, wantErr) || gotCode != wantCode {
 				t.Fatalf("CLI parity code=%d/%d stdout=%q/%q stderr=%q/%q", gotCode, wantCode, gotOut, wantOut, gotErr, wantErr)
 			}
-			if test.prefix >= 0 && (wantCode == 0 || strings.Count(string(wantOut), "\n") != test.prefix) {
-				t.Fatalf("oracle did not prove partial-prefix case: code=%d rows=%d stderr=%s", wantCode, strings.Count(string(wantOut), "\n"), wantErr)
+			rows := strings.Count(string(wantOut), "\n") - strings.Count("\n"+string(wantOut), "\n@")
+			if test.prefix >= 0 && (wantCode == 0 || rows != test.prefix) {
+				t.Fatalf("oracle did not prove partial-prefix case: code=%d rows=%d stderr=%s", wantCode, rows, wantErr)
 			}
 		})
 	}

@@ -16,7 +16,7 @@ var leadingStamp = regexp.MustCompile(`^(?:R\d+ \()?\d{1,2}:\d\d ?[AP]M\)?:? ?`)
 
 func Compact(r store.Record, width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%d %s", r.Seq, r.Kind)
+	fmt.Fprintf(&b, "%s %s", strings.TrimPrefix(r.Name(), "#"), r.Kind)
 	if r.Status == "closed" {
 		b.WriteString(" closed")
 	}
@@ -78,8 +78,11 @@ type Wire struct {
 }
 
 func (w *Wire) Line(r store.Record, width int) string {
-	line := Compact(r, width)
-	if minute := Stamp(r.At, w.Now); minute != w.minute {
+	return w.Headed(r.At, Compact(r, width))
+}
+
+func (w *Wire) Headed(at time.Time, line string) string {
+	if minute := Stamp(at, w.Now); minute != w.minute {
 		w.minute = minute
 		return "@" + minute + "\n" + line
 	}
