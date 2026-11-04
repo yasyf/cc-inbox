@@ -173,19 +173,44 @@ func Relay(version string) (int, bool) {
 	}
 	pump := &stdinPump{in: os.Stdin, needs: make(chan struct{}, 1)}
 	go pump.run()
+	code, ok, argv := relay(conn, request, pump, func() io.ReadWriteCloser {
+		if conn := redial(socket); conn != nil {
+			return conn
+		}
+		return nil
+	}, os.Stdout, os.Stderr)
+	os.Args = argv
+	return code, ok
+}
+
+// relay plays request on conn and on each connection redial returns after the
+// last is lost, and returns the argv the caller runs itself when it reports
+// false. A channel belongs to Claude Code until it closes stdin: a daemon that
+// ends one first, as a daemon going away or failing to resume it does, hands
+// the channel back to this process instead of ending the MCP session.
+func relay(conn io.ReadWriteCloser, request Request, pump *stdinPump, redial func() io.ReadWriteCloser, stdout, stderr io.Writer) (int, bool, []string) {
 	started, first := time.Now(), request.Argv
 	for {
-		code, ok, lost := exchange(conn, request, pump, os.Stdout, os.Stderr)
+		code, ok, lost := exchange(conn, request, pump, stdout, stderr)
 		_ = conn.Close()
+		if channel(request.Argv) && ok && !lost && !pump.closed() {
+			if pump.fed() {
+				return 0, false, resumed(first)
+			}
+			return 0, false, request.Argv
+		}
 		if !lost || !Stream(request.Argv) {
-			return code, ok
+			return code, ok, request.Argv
 		}
 		request.Argv = forWhatIsLeft(resumed(first), started)
-		os.Args = request.Argv
-		if conn = redial(socket); conn == nil {
-			return 0, false
+		if conn = redial(); conn == nil {
+			return 0, false, request.Argv
 		}
 	}
+}
+
+func channel(argv []string) bool {
+	return len(argv) > 1 && argv[1] == "channel"
 }
 
 func resumable(argv []string) []string {
@@ -196,7 +221,7 @@ func resumable(argv []string) []string {
 }
 
 func resumed(argv []string) []string {
-	if argv[1] != "channel" || slices.Contains(argv, "--resumed") {
+	if !channel(argv) || slices.Contains(argv, "--resumed") {
 		return argv
 	}
 	return append(slices.Clone(argv), "--resumed")
@@ -234,6 +259,23 @@ type stdinPump struct {
 	w       io.Writer
 	reading bool
 	held    [][]byte
+	eof     bool
+	sent    bool
+}
+
+// closed reports whether this process's stdin has ended.
+func (p *stdinPump) closed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.eof
+}
+
+// fed reports whether any of stdin has gone to a daemon, so a command that
+// takes it over must resume rather than start again.
+func (p *stdinPump) fed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.sent
 }
 
 // attach sends everything the last connection could not take down w, once w has
@@ -264,11 +306,13 @@ func (p *stdinPump) run() {
 	buf := make([]byte, readBytes)
 	for range p.needs {
 		n, err := p.in.Read(buf)
-		if err != nil {
-			n = 0
+		for n == 0 && err == nil {
+			n, err = p.in.Read(buf)
 		}
 		p.mu.Lock()
 		p.reading = false
+		p.eof = n == 0
+		p.sent = p.sent || n > 0
 		if WriteFrame(p.w, FrameStdin, buf[:n]) != nil {
 			p.held = append(p.held, slices.Clone(buf[:n]))
 		}
