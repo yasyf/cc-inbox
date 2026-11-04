@@ -95,33 +95,55 @@ func (s *Store) TrigramsReady(ctx context.Context) bool {
 	return err == nil && ready
 }
 
-// TrigramsNarrow reports whether the index picks few enough records for words that
-// a scan through it is cheaper than one over the drive: a common word re-reads
-// every match on each page, which costs far more than the scan it replaces.
-func (s *Store) TrigramsNarrow(ctx context.Context, words []string) bool {
-	match, ok := trigramMatch(words)
-	if !ok || !s.TrigramsReady(ctx) {
-		return false
+// TrigramsNarrow is the MATCH expression for a record holding every word of all,
+// or else one word of either, when the index picks few enough records that reading
+// through it is cheaper than scanning the drive; otherwise it is empty. A common
+// word re-reads every match on each page, which costs far more than the scan.
+func (s *Store) TrigramsNarrow(ctx context.Context, either, all []string) string {
+	match := trigramEvery(all)
+	if match == "" {
+		match = trigramEither(either)
+	}
+	if match == "" || !s.TrigramsReady(ctx) {
+		return ""
 	}
 	var hits int
-	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM (SELECT 1 FROM record_trigrams WHERE record_trigrams MATCH ? LIMIT ?)", match, trigramNarrow).Scan(&hits)
-	return err == nil && hits < trigramNarrow
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM (SELECT 1 FROM record_trigrams WHERE record_trigrams MATCH ? LIMIT ?)", match, trigramNarrow).Scan(&hits); err != nil || hits >= trigramNarrow {
+		return ""
+	}
+	return match
 }
 
-// trigramMatch is the MATCH expression every record holding one of words passes,
-// or false when a word is too short to index or may name a number column.
-func trigramMatch(words []string) (string, bool) {
+func trigramIndexable(word string) bool {
+	return utf8.RuneCountInString(word) >= 3 && strings.Trim(word, "0123456789") != ""
+}
+
+func trigramTerm(word string) string {
+	runes := []rune(word)
+	grams := make([]string, 0, min(len(runes)-2, trigramMaxWord))
+	for i := 0; i+3 <= len(runes) && len(grams) < trigramMaxWord; i++ {
+		grams = append(grams, `"`+strings.ReplaceAll(string(runes[i:i+3]), `"`, `""`)+`"`)
+	}
+	return strings.Join(grams, " AND ")
+}
+
+func trigramEvery(words []string) string {
 	terms := make([]string, 0, len(words))
 	for _, word := range words {
-		runes := []rune(word)
-		if utf8.RuneCountInString(word) < 3 || strings.Trim(word, "0123456789") == "" {
-			return "", false
+		if trigramIndexable(word) {
+			terms = append(terms, trigramTerm(word))
 		}
-		grams := make([]string, 0, min(len(runes)-2, trigramMaxWord))
-		for i := 0; i+3 <= len(runes) && len(grams) < trigramMaxWord; i++ {
-			grams = append(grams, `"`+strings.ReplaceAll(string(runes[i:i+3]), `"`, `""`)+`"`)
-		}
-		terms = append(terms, "("+strings.Join(grams, " AND ")+")")
 	}
-	return strings.Join(terms, " OR "), len(terms) > 0
+	return strings.Join(terms, " AND ")
+}
+
+func trigramEither(words []string) string {
+	terms := make([]string, 0, len(words))
+	for _, word := range words {
+		if !trigramIndexable(word) {
+			return ""
+		}
+		terms = append(terms, "("+trigramTerm(word)+")")
+	}
+	return strings.Join(terms, " OR ")
 }

@@ -24,6 +24,32 @@ func requiredWords(pattern string) []string {
 	return required(re.Simplify())
 }
 
+func everyWord(pattern string) []string {
+	re, err := syntax.Parse(pattern, syntax.Perl)
+	if err != nil {
+		return nil
+	}
+	return concatWords(re.Simplify())
+}
+
+func concatWords(re *syntax.Regexp) []string {
+	switch re.Op {
+	case syntax.OpLiteral:
+		if word := longestWord(re.Rune); word != "" {
+			return []string{word}
+		}
+	case syntax.OpCapture, syntax.OpPlus:
+		return concatWords(re.Sub[0])
+	case syntax.OpConcat:
+		var all []string
+		for _, sub := range re.Sub {
+			all = append(all, concatWords(sub)...)
+		}
+		return all
+	}
+	return nil
+}
+
 func required(re *syntax.Regexp) []string {
 	switch re.Op {
 	case syntax.OpLiteral:
