@@ -100,7 +100,7 @@ func announceThisAgent(ctx context.Context, st *store.Store, self store.PeerKey,
 	if self.Agent == "" || window.PID == 0 {
 		return nil
 	}
-	sessions, err := harness.Dir()
+	sessions, err := harness.Dir(ctx)
 	if err != nil {
 		return err
 	}

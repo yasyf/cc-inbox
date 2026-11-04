@@ -59,6 +59,7 @@ func NewRootCmd() *cobra.Command {
 		newDaemonCmd(),
 		newHookCmd(),
 		newWindowCmd(),
+		newEmbedCmd(),
 		newSubscribeCmd(),
 		newUnsubscribeCmd(),
 		newChannelCmd(),

@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -16,15 +17,11 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
-	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const (
-	pageRows    = 500
-	typedPrefix = "lr."
-)
+const typedPrefix = "lr."
 
 // Record is one stored record, the value cci tail --json prints.
 type Record = store.Record
@@ -112,6 +109,10 @@ func sharedStore(ctx context.Context) (*store.Store, error) {
 // mail, a stood-down one passes it to the successor it named, else to its stem's
 // newest live lane, and a stem reaches that lane. Each hop is one indexed lookup.
 func Resolve(ctx context.Context, drive, name string) (Reach, error) {
+	reach, err := daemonCall[Reach](ctx, cli.EmbedCall{Op: "reach", Drive: drive, Name: name})
+	if !errors.Is(err, errNoDaemon) {
+		return reach, err
+	}
 	st, err := sharedStore(ctx)
 	if err != nil {
 		return Reach{}, err
@@ -122,6 +123,10 @@ func Resolve(ctx context.Context, drive, name string) (Reach, error) {
 // Generations lists every lane registered under stem on drive, live or stood
 // down, so a launch can number past them and never reuse a name.
 func Generations(ctx context.Context, drive, stem string) ([]string, error) {
+	names, err := daemonCall[[]string](ctx, cli.EmbedCall{Op: "generations", Drive: drive, Name: stem})
+	if !errors.Is(err, errNoDaemon) {
+		return names, err
+	}
 	st, err := sharedStore(ctx)
 	if err != nil {
 		return nil, err
@@ -133,6 +138,27 @@ func Generations(ctx context.Context, drive, stem string) ([]string, error) {
 // text limits and the unsent queue a down bus falls back to all apply; the error
 // is the one cci post would exit on.
 func Post(ctx context.Context, d Draft) (Record, error) {
+	var answer, notices bytes.Buffer
+	code, err := daemonRun(ctx, d.args(), bytes.NewReader(d.Body), &answer, &notices)
+	if err == nil {
+		if code != 0 {
+			return Record{}, daemonError(code, notices.String())
+		}
+		if d.Notices != nil {
+			_, _ = d.Notices.Write(notices.Bytes())
+		}
+		var stored Record
+		if err := json.Unmarshal(answer.Bytes(), &stored); err != nil {
+			return Record{}, fmt.Errorf("cci post printed %q: %w", answer.String(), err)
+		}
+		return stored, nil
+	}
+	if errors.Is(err, errLostCall) {
+		return Record{}, &BusDown{Cause: store.ErrUnconfirmed, Path: "the daemon's unsent queue"}
+	}
+	if !errors.Is(err, errNoDaemon) {
+		return Record{}, err
+	}
 	var out bytes.Buffer
 	root := cli.NewRootCmd() //nolint:contextcheck // the tree takes ctx from ExecuteContext below, which contextcheck cannot follow.
 	root.SetArgs(d.args())
@@ -254,69 +280,19 @@ type Query struct {
 // opening record as cci tail --json sets it. Unlike cci tail it has no byte
 // budget, so a caller never pages by output size.
 func Tail(ctx context.Context, q Query) ([]Record, error) {
-	selected, err := kinds.ParseAll(q.Kinds)
-	if err != nil {
-		return nil, err
-	}
-	var pr store.PR
-	if q.PR != "" {
-		if pr, err = store.ParsePR(q.PR); err != nil {
-			return nil, err
-		}
-	}
-	st, err := sharedStore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	filter := store.Filter{Drive: q.Drive, Kinds: selected, Lanes: q.Lanes, PR: pr, After: q.After, Since: q.Since, Limit: pageRows}
-	var records []Record
-	for {
-		page, err := st.Query(ctx, filter)
-		if err != nil {
-			return nil, err
-		}
-		records = append(records, page...)
-		if len(page) < pageRows {
-			return records, inbox.Annotate(ctx, st, records)
-		}
-		filter.After = page[len(page)-1].Seq
-	}
+	return embedRecords(ctx, cli.EmbedCall{Op: "tail", Drive: q.Drive, After: q.After, Since: q.Since, Kinds: q.Kinds, Lanes: q.Lanes, PR: q.PR})
 }
 
 // Among reads the records of drive with the named seqs, oldest first, leaving out
 // a seq that names no record there, as cci tail --seqs does.
 func Among(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
-	st, err := sharedStore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	records, err := st.RecordsAmong(ctx, drive, seqs)
-	if err != nil {
-		return nil, err
-	}
-	return records, inbox.Annotate(ctx, st, records)
+	return embedRecords(ctx, cli.EmbedCall{Op: "among", Drive: drive, Seqs: seqs})
 }
 
 // Open reads the drive's openers of the named kinds that no closer or resolver
 // has closed, oldest first.
 func Open(ctx context.Context, drive string, names ...string) ([]Record, error) {
-	selected, err := kinds.ParseAll(names)
-	if err != nil {
-		return nil, err
-	}
-	st, err := sharedStore(ctx)
-	if err != nil {
-		return nil, err
-	}
-	openers, err := st.Query(ctx, store.Filter{Drive: drive, Kinds: selected, IncludeExpired: true})
-	if err != nil {
-		return nil, err
-	}
-	seqs := make([]int64, 0, len(openers))
-	for _, r := range openers {
-		seqs = append(seqs, r.Seq)
-	}
-	return st.OpenAmong(ctx, drive, seqs)
+	return embedRecords(ctx, cli.EmbedCall{Op: "open", Drive: drive, Kinds: names})
 }
 
 // Watch selects what Follow delivers: the records after seq After addressed to
@@ -333,18 +309,7 @@ type Watch struct {
 // it, until ctx ends or emit fails. Unlike cci watch --reader root it never
 // narrows the kinds addressed to the reader, so a hold addressed to root arrives.
 func Follow(ctx context.Context, w Watch, emit func(Record) error) error {
-	selected, err := kinds.ParseAll(w.Kinds)
-	if err != nil {
-		return err
-	}
-	st, err := sharedStore(ctx)
-	if err != nil {
-		return err
-	}
-	filter := store.Filter{Drive: w.Drive, For: w.Reader, Peer: cli.SelfPeer(ctx).String(), Kinds: selected, After: w.After}
-	return inbox.Watch(ctx, st, inbox.WatchOptions{Filter: filter, Interval: time.Second, JSON: true}, func(r store.Record, _ string) error {
-		return emit(r)
-	})
+	return daemonFollow(ctx, cli.EmbedCall{Op: "follow", Drive: w.Drive, Reader: w.Reader, After: w.After, Kinds: w.Kinds}, emit)
 }
 
 // Kinds lists the kinds a lane can post, every fixed kind but those only cci writes.

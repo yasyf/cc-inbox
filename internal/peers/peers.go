@@ -238,7 +238,7 @@ func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]
 			claimed[holder] = append(claimed[holder], c)
 		}
 	}
-	dir, err := harness.Dir()
+	dir, err := harness.Dir(ctx)
 	if err != nil {
 		return nil, err
 	}
