@@ -13,6 +13,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"time"
 
@@ -39,6 +40,7 @@ const (
 	ImportInterval                   = time.Second
 	hotWindowFollow                  = time.Second
 	hotWindowPace                    = 5 * time.Millisecond
+	schedulerProcs                   = 4
 	// Sessions is how many client sessions, and requests in flight, the
 	// daemon takes at once: every cci process that writes holds one.
 	Sessions = 256
@@ -123,6 +125,7 @@ func (r *Runtime) fail(c daemonkit.Ctx, err error) {
 }
 
 func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
+	runtime.GOMAXPROCS(min(schedulerProcs, runtime.GOMAXPROCS(0)))
 	roots, err := version.DefaultRoots()
 	if err != nil {
 		return nil, err

@@ -559,8 +559,13 @@ func (s *Store) firstSince(ctx context.Context, at int64) (int64, error) {
 		return first, nil
 	}
 	var found sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", at).Scan(&found); err != nil || !found.Valid {
-		return 0, err
+	if w := s.window.current.Load(); w != nil {
+		found = w.firstSince(ctx, at)
+	}
+	if !found.Valid {
+		if err := s.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", at).Scan(&found); err != nil || !found.Valid {
+			return 0, err
+		}
 	}
 	s.floors.mu.Lock()
 	defer s.floors.mu.Unlock()
