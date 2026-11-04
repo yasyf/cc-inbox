@@ -13,15 +13,11 @@ import (
 	"github.com/yasyf/cc-inbox/internal/cli"
 	applog "github.com/yasyf/cc-inbox/internal/log"
 	"github.com/yasyf/cc-inbox/internal/version"
-	"github.com/yasyf/cc-inbox/internal/wire"
 )
 
 const handoffEnv = "CCI_HANDED_OFF_FROM"
 
 func main() {
-	if code, ok := wire.Relay(version.String()); ok {
-		os.Exit(code)
-	}
 	applog.Setup()
 	roots, err := version.DefaultRoots()
 	if err != nil {

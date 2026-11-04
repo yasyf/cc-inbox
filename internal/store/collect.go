@@ -709,6 +709,9 @@ func (s *Store) forgetSessions(ctx context.Context, cutoff int64) (sessions, cla
 	if err != nil {
 		return 0, 0, fmt.Errorf("delete idle sessions: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM cursors WHERE name LIKE 'watch-%' AND seq < (SELECT COALESCE(MIN(seq), 0) FROM records WHERE at >= ?)", cutoff); err != nil {
+		return 0, 0, fmt.Errorf("delete abandoned watch cursors: %w", err)
+	}
 	dropped, err := tx.ExecContext(ctx, "DELETE FROM claims WHERE at < ? AND NOT EXISTS (SELECT 1 FROM sessions s WHERE s.session = claims.session)", cutoff)
 	if err != nil {
 		return 0, 0, fmt.Errorf("delete orphaned claims: %w", err)

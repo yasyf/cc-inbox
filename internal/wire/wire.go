@@ -7,14 +7,15 @@ import (
 	"bufio"
 	"encoding/binary"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
+	"time"
 )
 
 const (
@@ -32,8 +33,12 @@ const (
 	headerBytes   = 5
 	maxFrameBytes = 16 << 20
 	readBytes     = 64 << 10
+	redialFor     = 30 * time.Second
+	redialEvery   = 100 * time.Millisecond
 	// LostExit is the exit code of a command whose daemon went away mid-reply.
 	LostExit = 75
+	// WatchCursorPrefix names the cursor a watch without one resumes from.
+	WatchCursorPrefix = "watch-"
 )
 
 // Request is one command the daemon runs for a client.
@@ -53,7 +58,7 @@ func Relayed(argv []string) bool {
 		return false
 	}
 	switch argv[1] {
-	case "post", "tail", "grep", "show", "digest":
+	case "post", "tail", "grep", "show", "digest", "watch", "channel":
 	case "hook":
 		if len(argv) < 3 || !slices.Contains([]string{"post-tool-use", "stop", "subagent-stop", "prompt"}, argv[2]) {
 			return false
@@ -108,9 +113,16 @@ func dial(path string) (*os.File, error) {
 	return os.NewFile(uintptr(fd), "cci-daemon"), nil //nolint:gosec // G115: a file descriptor fits in uintptr.
 }
 
+// Stream reports whether argv runs until its client leaves: a stream outlives
+// any one daemon, so its client reconnects and any release's client may ask.
+func Stream(argv []string) bool {
+	return len(argv) > 1 && (argv[1] == "watch" || argv[1] == "channel")
+}
+
 // Relay runs this process's command in the daemon and reports its exit code. It
-// returns false when the daemon did not take the command, so the caller runs it
-// itself; once any output has arrived the command is the daemon's.
+// returns false when the daemon did not take the command, so the caller runs
+// os.Args itself; once any output has arrived the command is the daemon's. A
+// stream that loses its daemon resumes on the next one, from its cursor.
 func Relay(version string) (int, bool) {
 	if !Relayed(os.Args) || os.Getenv("CCI_HOME") != "" || os.Getenv("CCI_UNSENT") != "" {
 		return 0, false
@@ -119,11 +131,11 @@ func Relay(version string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	conn, err := dial(filepath.Join(home, ".cc-inbox", SocketName))
+	socket := filepath.Join(home, ".cc-inbox", SocketName)
+	conn, err := dial(socket)
 	if err != nil {
 		return 0, false
 	}
-	defer func() { _ = conn.Close() }()
 	cwd, err := os.Getwd()
 	if err != nil {
 		return 0, false
@@ -132,35 +144,125 @@ func Relay(version string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	return Exchange(conn, Request{
-		Version: version, Argv: os.Args, Env: os.Environ(), Cwd: cwd, PID: os.Getpid(),
+	request := Request{
+		Version: version, Argv: resumable(os.Args), Env: os.Environ(), Cwd: cwd, PID: os.Getpid(),
 		StdoutChar: info.Mode()&os.ModeCharDevice != 0,
-	}, os.Stdin, os.Stdout, os.Stderr)
+	}
+	pump := &stdinPump{in: os.Stdin, needs: make(chan struct{}, 1), w: conn}
+	go pump.run()
+	for {
+		code, ok, lost := exchange(conn, request, pump, os.Stdout, os.Stderr)
+		_ = conn.Close()
+		if !lost || !Stream(request.Argv) {
+			return code, ok
+		}
+		request.Argv = resumed(request.Argv)
+		os.Args = request.Argv
+		if conn = redial(socket); conn == nil {
+			return 0, false
+		}
+		pump.attach(conn)
+	}
+}
+
+func resumable(argv []string) []string {
+	if argv[1] != "watch" || slices.ContainsFunc(argv, func(arg string) bool { return arg == "--cursor" || strings.HasPrefix(arg, "--cursor=") }) {
+		return argv
+	}
+	return append(slices.Clone(argv), fmt.Sprintf("--cursor=%s%d-%d", WatchCursorPrefix, os.Getpid(), time.Now().UnixNano()))
+}
+
+func resumed(argv []string) []string {
+	if argv[1] != "channel" || slices.Contains(argv, "--resumed") {
+		return argv
+	}
+	return append(slices.Clone(argv), "--resumed")
+}
+
+func redial(socket string) *os.File {
+	for deadline := time.Now().Add(redialFor); time.Now().Before(deadline); time.Sleep(redialEvery) {
+		if conn, err := dial(socket); err == nil {
+			return conn
+		}
+	}
+	return nil
 }
 
 // Exchange sends request over conn and plays the daemon's reply onto the streams.
 func Exchange(conn io.ReadWriter, request Request, stdin io.Reader, stdout, stderr io.Writer) (int, bool) {
+	pump := &stdinPump{in: stdin, needs: make(chan struct{}, 1), w: conn}
+	go pump.run()
+	code, ok, _ := exchange(conn, request, pump, stdout, stderr)
+	return code, ok
+}
+
+type stdinPump struct {
+	in      io.Reader
+	needs   chan struct{}
+	mu      sync.Mutex
+	w       io.Writer
+	reading bool
+}
+
+func (p *stdinPump) attach(w io.Writer) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.w = w
+}
+
+func (p *stdinPump) need() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.reading {
+		p.reading = true
+		p.needs <- struct{}{}
+	}
+}
+
+func (p *stdinPump) run() {
+	buf := make([]byte, readBytes)
+	for range p.needs {
+		n, err := p.in.Read(buf)
+		if err != nil {
+			n = 0
+		}
+		p.mu.Lock()
+		p.reading = false
+		_ = WriteFrame(p.w, FrameStdin, buf[:n])
+		p.mu.Unlock()
+	}
+}
+
+func (p *stdinPump) ack() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return WriteFrame(p.w, FrameAck, nil)
+}
+
+func exchange(conn io.ReadWriter, request Request, pump *stdinPump, stdout, stderr io.Writer) (code int, ok, lost bool) {
 	body, err := json.Marshal(request)
 	if err != nil || WriteFrame(conn, FrameRequest, body) != nil {
-		return 0, false
+		return 0, false, true
 	}
 	r := bufio.NewReaderSize(conn, readBytes)
-	w := conn
 	spoke := false
 	for {
 		kind, payload, err := ReadFrame(r)
 		if err != nil {
 			if !spoke {
-				return 0, false
+				return 0, false, true
+			}
+			if Stream(request.Argv) {
+				return 0, true, true
 			}
 			_, _ = fmt.Fprintln(stderr, "cci: the daemon went away:", err)
-			return LostExit, true
+			return LostExit, true, true
 		}
 		switch kind {
 		case FrameFallback:
-			return 0, false
+			return 0, false, false
 		case FrameExit:
-			return int(binary.BigEndian.Uint32(payload)), true
+			return int(binary.BigEndian.Uint32(payload)), true, false
 		case FrameStderr:
 			spoke = true
 			_, _ = stderr.Write(payload)
@@ -168,22 +270,14 @@ func Exchange(conn io.ReadWriter, request Request, stdin io.Reader, stdout, stde
 			spoke = true
 			if _, err := stdout.Write(payload); err != nil {
 				_, _ = fmt.Fprintln(stderr, "cci:", err)
-				return 1, true
+				return 1, true, false
 			}
-			if err := WriteFrame(w, FrameAck, nil); err != nil {
-				return LostExit, true
+			if err := pump.ack(); err != nil {
+				return LostExit, true, true
 			}
 		case FrameNeedIn:
 			spoke = true
-			buf := make([]byte, readBytes)
-			n, err := stdin.Read(buf)
-			if err != nil && !errors.Is(err, io.EOF) {
-				_, _ = fmt.Fprintln(stderr, "cci:", err)
-				return 1, true
-			}
-			if err := WriteFrame(w, FrameStdin, buf[:n]); err != nil {
-				return LostExit, true
-			}
+			pump.need()
 		}
 	}
 }

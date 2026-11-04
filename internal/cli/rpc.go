@@ -16,6 +16,7 @@ import (
 
 	"github.com/yasyf/cc-interact/procs"
 
+	"github.com/yasyf/cc-inbox/internal/channel"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
 	"github.com/yasyf/cc-inbox/internal/wire"
@@ -105,12 +106,12 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	if err := json.Unmarshal(payload, &request); err != nil || kind != wire.FrameRequest {
 		return errors.Join(fmt.Errorf("bad request frame %q", kind), err)
 	}
-	if request.Version != version.String() || !wire.Relayed(request.Argv) {
+	if !wire.Relayed(request.Argv) || request.Version != version.String() && !wire.Stream(request.Argv) {
 		return wire.WriteFrame(conn, wire.FrameFallback, nil)
 	}
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
-	replies := &replyStream{conn: conn, acks: make(chan struct{}, 1), input: make(chan []byte, 1), gone: ctx.Done()}
+	replies := &replyStream{conn: conn, acks: make(chan struct{}, 1), input: make(chan []byte, 1), gone: ctx.Done(), unbuffered: wire.Stream(request.Argv)}
 	go replies.readClient(r, cancel)
 	view := *st
 	if err := configureStoreOwner(&view, home); err != nil {
@@ -128,9 +129,9 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	root.SetOut(replies)
 	root.SetErr(&stderrStream{conn: conn})
 	root.SetIn(&inputStream{replies: replies})
-	err = root.ExecuteContext(context.WithValue(ctx, invocationKey{}, &invocation{
+	err = root.ExecuteContext(channel.Hosted(context.WithValue(ctx, invocationKey{}, &invocation{
 		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
-	}))
+	})))
 	if flushed := replies.Flush(ctx); flushed != nil {
 		return flushed
 	}
@@ -159,6 +160,8 @@ type replyStream struct {
 	acks  chan struct{}
 	input chan []byte
 	gone  <-chan struct{}
+
+	unbuffered bool
 }
 
 func (s *replyStream) readClient(r io.Reader, cancel context.CancelFunc) {
@@ -182,7 +185,7 @@ func (s *replyStream) readClient(r io.Reader, cancel context.CancelFunc) {
 func (s *replyStream) Write(p []byte) (int, error) {
 	s.mu.Lock()
 	s.buf = append(s.buf, p...)
-	full := len(s.buf) >= replyBufferBytes
+	full := s.unbuffered || len(s.buf) >= replyBufferBytes
 	s.mu.Unlock()
 	if full {
 		if err := s.Flush(context.Background()); err != nil {

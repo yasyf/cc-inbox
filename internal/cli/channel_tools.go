@@ -284,11 +284,11 @@ func inboxTool() mcp.Tool {
 			if !ok {
 				return msg, true
 			}
-			st, err := openStore(ctx)
+			st, release, err := hookStore(ctx)
 			if err != nil {
 				return err.Error(), true
 			}
-			defer func() { _ = st.Close() }()
+			defer release()
 			drive, err := resolveDrive(ctx, st, in.Drive)
 			if err != nil {
 				return err.Error(), true

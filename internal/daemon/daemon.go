@@ -150,6 +150,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	handler.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	handler.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	feed := server.New(st, time.Second)
+	st.FollowThrough(feed)
 	handler.Handle("/", feed.Handler())
 	p := &Product{
 		home:   r.home,

@@ -72,6 +72,18 @@ var errStale = errors.New("subscription replaced")
 // when resumed. When a newer cci is installed, the server re-executes it on
 // the same stdio, resumed, so a long-lived window never keeps filtering with
 // the release it started on.
+type hostedKey struct{}
+
+// Hosted marks ctx as a channel the daemon runs for a client: the daemon's own
+// upgrade moves it to the new release, so it never re-executes.
+func Hosted(ctx context.Context) context.Context {
+	return context.WithValue(ctx, hostedKey{}, true)
+}
+
+func hosted(ctx context.Context) bool {
+	return ctx.Value(hostedKey{}) != nil
+}
+
 func Serve(ctx context.Context, st *store.Store, window store.Window, channeled, resumed bool, in io.Reader, out io.Writer, tools ...mcp.Tool) error {
 	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions, Resumed: resumed}, tools)
 	initialized := make(chan struct{})
@@ -124,7 +136,7 @@ func Stream(ctx context.Context, st *store.Store, window store.Window, channeled
 		switch {
 		case err == nil && ok:
 			err = follow(ctx, st, sub, channeled, notify)
-		case err == nil && tick%releaseTicks == 0:
+		case err == nil && tick%releaseTicks == 0 && !hosted(ctx):
 			err = newerRelease()
 		}
 		var newer upgrade

@@ -130,13 +130,23 @@ func TestDaemonRunsAHookFromItsPayload(t *testing.T) {
 	}
 }
 
+func TestDaemonStreamsAWatchForAnyRelease(t *testing.T) {
+	st, _ := testutil.Store(t)
+	socket := commandSocket(t, st)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "seen by the watch"})
+	watch := relayCommand(t, socket, wire.Request{Version: "0.0.0-other", Argv: []string{"cci", "watch", "--drive", "d", "--since-seq", "0", "--for", "1s", "--interval", "10ms"}, Cwd: t.TempDir(), PID: os.Getpid()}, "")
+	if !watch.ran || watch.code != 0 || !strings.Contains(watch.stdout, "seen by the watch") {
+		t.Fatalf("watch = %+v", watch)
+	}
+}
+
 func TestDaemonSendsOtherVersionsAndOtherCommandsBack(t *testing.T) {
 	st, _ := testutil.Store(t)
 	socket := commandSocket(t, st)
 	for _, request := range []wire.Request{
 		{Version: "0.0.0-other", Argv: []string{"cci", "tail"}},
-		{Argv: []string{"cci", "channel"}},
 		{Argv: []string{"cci", "hook", "session-start"}},
+		{Argv: []string{"cci", "serve"}},
 		{Argv: []string{"cci", "post", "--path", "/dev/fd/3"}},
 	} {
 		if got := relayCommand(t, socket, request, ""); got.ran {

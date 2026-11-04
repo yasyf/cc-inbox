@@ -54,6 +54,24 @@ func (s *Server) Close() {
 	s.hub.Close()
 }
 
+// Follow streams wakes to each in this process, for a command the daemon runs.
+func (s *Server) Follow(ctx context.Context, f store.Filter, each func(store.Wake) error) error {
+	follower := s.hub.Follow(f) //nolint:contextcheck // the hub outlives one follower.
+	defer follower.Leave()
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.hub.Done():
+			return fmt.Errorf("%w: the hub closed", store.ErrUnrouted)
+		case <-follower.Ready():
+			if err := each(follower.Take()); err != nil {
+				return err
+			}
+		}
+	}
+}
+
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/drives", s.drives)
