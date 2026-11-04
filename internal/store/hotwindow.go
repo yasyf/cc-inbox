@@ -427,7 +427,7 @@ func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection s
 	}
 	w.mu.RLock()
 	defer w.mu.RUnlock()
-	if w.stale.Load() {
+	if w.stale.Load() || f.Trigrams != "" {
 		w.misses.Add(1)
 		return nil, false
 	}
@@ -438,7 +438,6 @@ func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection s
 		w.misses.Add(1)
 		return nil, false
 	}
-	f.Trigrams = ""
 	f.After = max(f.After, floor-1)
 	out, err := w.mem.selected(ctx, f, projection, now)
 	if err != nil {
