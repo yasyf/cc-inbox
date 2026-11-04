@@ -125,6 +125,11 @@ jobs:
       - uses: actions/checkout@v7
         if: env.FULL_CI == 'true'
         with:
+          ref: 7f5c374e7cd07911aa432b3434036a27b9007de9
+          path: .ci-native-tail-baseline
+      - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
+        with:
           ref: e101a16aa7d3d3023e6a0e8cd5fecca718e2c243
           path: .ci-native-tail-null-baseline
       - uses: actions/checkout@v7
@@ -931,13 +936,16 @@ jobs:
           fi
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
+          test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 7f5c374e7cd07911aa432b3434036a27b9007de9
           test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = bb670c782e17155cc95286affaf6b926815eca5c
+          cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-compact-line-baseline/internal/cli/
-          mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots"
-          (cd .ci-compact-line-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -run '^TestNativeTailHTTPParity$' -v ./internal/cli
-          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" go test -count=1 -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
+          mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots" "$RUNNER_TEMP/cci-native-tail-text-snapshots"
+          (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
+          (cd .ci-compact-line-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_TEXT_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_TEXT_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" go test -count=1 -run '^TestNativeTailHTTPParity$' -v ./internal/cli
+          CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_TEXT_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" go test -count=1 -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
 
 
   lint:

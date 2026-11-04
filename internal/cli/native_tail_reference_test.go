@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -209,6 +210,13 @@ func nativeTailSnapshotPath(name string) string {
 	return filepath.Join(os.Getenv("CCI_NATIVE_TAIL_SNAPSHOTS"), key+".json")
 }
 
+func nativeTailWantPath(name string, args []string) string {
+	if slices.Contains(args, "--json") {
+		return nativeTailSnapshotPath(name)
+	}
+	return filepath.Join(os.Getenv("CCI_NATIVE_TAIL_TEXT_SNAPSHOTS"), filepath.Base(nativeTailSnapshotPath(name)))
+}
+
 func nativeTailPRSkipsCorruptRefs(t *testing.T, variant, call string, got, want nativeTailResult) bool {
 	t.Helper()
 	if variant != "drive malformed refs" || call != "pr" {
@@ -232,18 +240,17 @@ func TestNativeTailCLIReference(t *testing.T) {
 				if variant.name == "clean" && call.name == "mute" && (got.Code != 0 || len(got.Out) == 0 || bytes.Contains(got.Out, []byte(`"kind":"note"`))) {
 					t.Fatalf("--mute-kinds did not exclude notes: code=%d output=%q error=%q", got.Code, got.Out, got.Err)
 				}
-				path := nativeTailSnapshotPath(variant.name + "/" + call.name)
 				if os.Getenv("CCI_NATIVE_TAIL_SNAPSHOT_WRITE") == "1" {
 					raw, err := json.Marshal(got)
 					if err != nil {
 						t.Fatal(err)
 					}
-					if err := os.WriteFile(path, raw, 0o600); err != nil {
+					if err := os.WriteFile(nativeTailSnapshotPath(variant.name+"/"+call.name), raw, 0o600); err != nil {
 						t.Fatal(err)
 					}
 					return
 				}
-				raw, err := os.ReadFile(path)
+				raw, err := os.ReadFile(nativeTailWantPath(variant.name+"/"+call.name, call.args))
 				if err != nil {
 					t.Fatal(err)
 				}
