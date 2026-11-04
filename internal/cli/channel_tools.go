@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/spf13/pflag"
 	mcp "github.com/yasyf/cc-interact/channel"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
@@ -60,53 +61,85 @@ func word(r json.RawMessage) string {
 	return string(r)
 }
 
-type toolRecord struct {
-	Lane     string            `json:"lane"`
-	Kind     string            `json:"kind"`
-	Text     string            `json:"text"`
-	Body     string            `json:"body"`
-	Path     string            `json:"path"`
-	To       words             `json:"to"`
-	Re       json.RawMessage   `json:"re"`
-	Resolves words             `json:"resolves"`
-	PR       words             `json:"pr"`
-	Topic    string            `json:"topic"`
-	Attrs    map[string]string `json:"attrs"`
+type toolRecord map[string]json.RawMessage
+
+func (r toolRecord) args(lane, drive string) ([]string, string, error) {
+	var body string
+	if raw, ok := r["body"]; ok {
+		body = word(raw)
+	}
+	args := []string{"post", "--lane=" + cmp.Or(r.text("lane"), lane), "--kind=" + r.text("kind")}
+	if d := cmp.Or(r.text("drive"), drive); d != "" {
+		args = append(args, "--drive="+d)
+	}
+	flags := newPostCmd().Flags()
+	for _, key := range slices.Sorted(maps.Keys(r)) {
+		switch key {
+		case "lane", "kind", "drive", "body", "records":
+			continue
+		}
+		name := flagOf(key)
+		if flags.Lookup(name) == nil {
+			return nil, "", fmt.Errorf("post: no field %s", key)
+		}
+		flagArgs, err := flagValues(name, r[key])
+		if err != nil {
+			return nil, "", fmt.Errorf("post: %s: %w", key, err)
+		}
+		args = append(args, flagArgs...)
+	}
+	if body != "" {
+		return append(args, "--path=-"), body, nil
+	}
+	return args, "", nil
 }
 
-func (r toolRecord) args(lane, drive string) ([]string, string) {
-	args := []string{"post", "--lane=" + cmp.Or(r.Lane, lane), "--kind=" + r.Kind}
-	if drive != "" {
-		args = append(args, "--drive="+drive)
+func (r toolRecord) text(key string) string {
+	if raw, ok := r[key]; ok {
+		return word(raw)
 	}
-	for _, to := range r.To {
-		args = append(args, "--to="+to)
+	return ""
+}
+
+func flagOf(key string) string {
+	if key == "attrs" {
+		return "attr"
 	}
-	if len(r.Re) > 0 {
-		args = append(args, "--re="+word(r.Re))
+	return strings.ReplaceAll(key, "_", "-")
+}
+
+func fieldOf(flag string) string {
+	if flag == "attr" {
+		return "attrs"
 	}
-	if len(r.Resolves) > 0 {
-		args = append(args, "--resolves="+strings.Join(r.Resolves, ","))
+	return strings.ReplaceAll(flag, "-", "_")
+}
+
+func flagValues(name string, raw json.RawMessage) ([]string, error) {
+	var on bool
+	if json.Unmarshal(raw, &on) == nil {
+		if on {
+			return []string{"--" + name}, nil
+		}
+		return nil, nil
 	}
-	for _, pr := range r.PR {
-		args = append(args, "--pr="+pr)
+	var pairs map[string]string
+	if json.Unmarshal(raw, &pairs) == nil && pairs != nil {
+		out := make([]string, 0, len(pairs))
+		for _, k := range slices.Sorted(maps.Keys(pairs)) {
+			out = append(out, "--"+name+"="+k+"="+pairs[k])
+		}
+		return out, nil
 	}
-	if r.Topic != "" {
-		args = append(args, "--topic="+r.Topic)
+	var values words
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return nil, err
 	}
-	for _, k := range slices.Sorted(maps.Keys(r.Attrs)) {
-		args = append(args, "--attr="+k+"="+r.Attrs[k])
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		out = append(out, "--"+name+"="+v)
 	}
-	if r.Text != "" {
-		args = append(args, "--text="+r.Text)
-	}
-	switch {
-	case r.Body != "":
-		return append(args, "--path=-"), r.Body
-	case r.Path != "":
-		args = append(args, "--path="+r.Path)
-	}
-	return args, ""
+	return out, nil
 }
 
 func runCCI(ctx context.Context, stdin string, args ...string) (string, string, error) {
@@ -154,7 +187,7 @@ var (
 )
 
 func recordProps() map[string]any {
-	return map[string]any{
+	props := map[string]any{
 		"lane":     laneProp,
 		"kind":     prop("string", "record kind, any case"),
 		"text":     prop("string", "the record line; over 400 chars the rest moves to the body"),
@@ -167,6 +200,23 @@ func recordProps() map[string]any {
 		"topic":    prop("string", "pairing key"),
 		"attrs":    map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
 	}
+	newPostCmd().Flags().VisitAll(func(f *pflag.Flag) {
+		field := fieldOf(f.Name)
+		if _, named := props[field]; named || f.Name == "help" || f.Name == "json" {
+			return
+		}
+		switch f.Value.Type() {
+		case "bool":
+			props[field] = prop("boolean", f.Usage)
+		case "stringToString":
+			props[field] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": f.Usage}
+		case "stringSlice":
+			props[field] = list(f.Usage)
+		default:
+			props[field] = prop("string", f.Usage)
+		}
+	})
+	return props
 }
 
 func postTool() mcp.Tool {
@@ -178,24 +228,30 @@ func postTool() mcp.Tool {
 		Description: "Post one record, or several with records. cci stamps the time; no shell quoting. Returns the new seqs.",
 		InputSchema: schema([]string{"lane"}, props),
 		Handler: func(ctx context.Context, raw json.RawMessage, _ func(string)) (string, bool) {
-			in, msg, ok := decode[struct {
-				toolRecord
-				Drive   string       `json:"drive"`
-				Records []toolRecord `json:"records"`
-			}](raw)
+			in, msg, ok := decode[toolRecord](raw)
 			if !ok {
 				return msg, true
 			}
-			records := in.Records
-			if in.Kind != "" {
-				records = append([]toolRecord{in.toolRecord}, records...)
+			var records []toolRecord
+			if in["kind"] != nil {
+				records = append(records, in)
+			}
+			if listed, ok := in["records"]; ok {
+				var more []toolRecord
+				if err := json.Unmarshal(listed, &more); err != nil {
+					return "decode records: " + err.Error(), true
+				}
+				records = append(records, more...)
 			}
 			if len(records) == 0 {
 				return "post: give kind and text, or records", true
 			}
 			seqs := make([]string, 0, len(records))
 			for i, r := range records {
-				args, stdin := r.args(in.Lane, in.Drive)
+				args, stdin, err := r.args(in.text("lane"), in.text("drive")) //nolint:contextcheck // args only reads the post command's flag table.
+				if err != nil {
+					return strings.TrimSpace(fmt.Sprintf("posted %s\nrecord %d: %s", strings.Join(seqs, " "), i+1, err)), true
+				}
 				out, errOut, err := runCCI(ctx, stdin, args...)
 				if err != nil {
 					text, _ := failed(out, errOut, err)
@@ -413,7 +469,16 @@ func closeTool() mcp.Tool {
 					}
 				}
 			}
-			args, _ := toolRecord{Lane: in.Lane, Kind: in.How, Text: in.Text, To: to, Resolves: in.Seqs}.args("", in.Drive)
+			args := []string{"post", "--lane=" + in.Lane, "--kind=" + in.How, "--resolves=" + strings.Join(in.Seqs, ",")}
+			if in.Drive != "" {
+				args = append(args, "--drive="+in.Drive)
+			}
+			for _, lane := range to {
+				args = append(args, "--to="+lane)
+			}
+			if in.Text != "" {
+				args = append(args, "--text="+in.Text)
+			}
 			out, errOut, err := runCCI(ctx, "", args...)
 			if err != nil {
 				return failed(out, errOut, err)

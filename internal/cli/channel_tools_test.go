@@ -109,3 +109,32 @@ func TestTheFindToolAnswersSeveralPullRequestsInOneCall(t *testing.T) {
 		t.Errorf("find prs 7 8 = %q, want each pull request's records under its own header", out)
 	}
 }
+
+func TestThePostToolTakesEveryPostFlag(t *testing.T) {
+	var props map[string]any
+	for _, tool := range cli.ChannelTools() {
+		if tool.Name == "post" {
+			props, _ = tool.InputSchema["properties"].(map[string]any)
+		}
+	}
+	for _, field := range []string{"id", "target", "stack", "env", "head", "commit", "ttl", "force", "owned_by", "lane_ref", "count", "attrs"} {
+		if _, ok := props[field]; !ok {
+			t.Errorf("post tool has no field %s, which cci post takes", field)
+		}
+	}
+}
+
+func TestThePostToolPassesFlagsTheCLITakes(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	args := map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "once", "id": "k1", "target": []string{"plat"}, "attrs": map[string]string{"step": "one"}}
+	first := mustTool(t, "post", args)
+	if second := mustTool(t, "post", args); second != first {
+		t.Errorf("a repost with the same id = %q, want the first record %q", second, first)
+	}
+	if out := mustTool(t, "read", map[string]any{"seqs": []any{first}}); !strings.Contains(out, "once") {
+		t.Errorf("read %s = %q", first, out)
+	}
+	if text, isErr := callTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "x", "bogus": "y"}); !isErr || !strings.Contains(text, "bogus") {
+		t.Errorf("post with a field cci post lacks = %q, %v; want it refused", text, isErr)
+	}
+}

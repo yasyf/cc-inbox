@@ -29,7 +29,15 @@ When the cci channel's tools (`mcp__plugin_cc-inbox_cci__*`) are in your tools,
 use them rather than Bash. Each takes `lane`, defaults to the session's drive,
 and returns compact lines: `<seq> <kind> <lane>><to> [^re] [x<closed>] [#pr]
 [+] <text>`, under an `@<clock>` line when the minute changes; `+` means a body
-waits for `read`.
+waits for `read`. The `post` tool takes every `cci post` flag as a field, a dash
+becoming an underscore (`owned_by`), with `attrs` for `--attr`.
+
+A session launched with the server whose server stops gets a blocker from its
+lane to `meta-desk` on its next tool call, and inside Orca
+`/mcp reconnect plugin:cc-inbox:cci` is typed at its next idle prompt; outside
+Orca, ask the human to type it. Keep working through the CLI meanwhile, never
+silently: the blocker closes itself when the server is back. Orca lanes launch
+with `--strict-mcp-config` and have no server by design: the CLI is their route.
 
 - `post`: one record from `kind`, `text`, `to`, `re`, `resolves`, `pr`,
   `topic`, `attrs`, and `body` or an absolute `path`; `records` posts several

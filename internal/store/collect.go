@@ -841,6 +841,9 @@ func (s *Store) SweepFiles(ctx context.Context) (blobs, archives int, err error)
 	if archives, err = sweep(filepath.Join(s.home, archiveDir), now.Add(-archiveWindow), func(string) bool { return false }); err != nil {
 		return blobs, archives, err
 	}
+	if _, err = sweep(filepath.Join(s.home, channelBeatDir), now.Add(-channelBeatWindow), func(string) bool { return false }); err != nil {
+		return blobs, archives, err
+	}
 	return blobs, archives, nil
 }
 

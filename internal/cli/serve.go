@@ -189,6 +189,17 @@ func newHookCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "hook", Short: "Claude Code hook entry points (read the hook payload on stdin)", Hidden: true}
 	cmd.AddCommand(
 		&cobra.Command{
+			Use:  "type-reconnect <orca> <terminal>",
+			Args: cobra.ExactArgs(2),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				orca := func(ctx context.Context, argv ...string) (string, error) {
+					out, err := exec.CommandContext(ctx, args[0], argv...).Output() //nolint:gosec // G204: the orca CLI the session announced.
+					return string(out), err
+				}
+				return hook.TypeReconnect(cmd.Context(), orca, args[1], func() { time.Sleep(reconnectPause) })
+			},
+		},
+		&cobra.Command{
 			Use:  "session-start",
 			Args: cobra.NoArgs,
 			RunE: withHookStore(sessionStartBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {

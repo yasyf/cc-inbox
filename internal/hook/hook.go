@@ -199,6 +199,11 @@ func keepSubscribedLane(ctx context.Context, st *store.Store, p Payload, window 
 // live is announced as its own peer first, with window naming the harness
 // process it runs in.
 func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() (store.Window, error), w io.Writer) error {
+	return PostToolUseNoted(ctx, st, p, "", window, w)
+}
+
+// PostToolUseNoted is PostToolUse with a line for the session ahead of its records.
+func PostToolUseNoted(ctx context.Context, st *store.Store, p Payload, note string, window func() (store.Window, error), w io.Writer) error {
 	if p.AgentID != "" {
 		if err := AnnounceAgent(ctx, st, p, window); err != nil {
 			return err
@@ -212,7 +217,7 @@ func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() 
 	case err != nil:
 		return err
 	case ok && b.Lane != "":
-		return deliver(ctx, st, p.Key(), b, p.Event, false, "", w)
+		return deliver(ctx, st, p.Key(), b, p.Event, false, note, w)
 	case p.AgentID != "":
 		return deliver(ctx, st, p.Key(), store.Binding{}, p.Event, false, "", w)
 	}
