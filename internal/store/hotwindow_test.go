@@ -3,6 +3,7 @@ package store_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -141,6 +142,40 @@ func TestHotWindowBoundsSinceAndKnowsWhatItCovers(t *testing.T) {
 	}
 	if failures := window.Stats().Failures; failures != 0 {
 		t.Errorf("failures = %d, want 0", failures)
+	}
+}
+
+func TestHotWindowStaysUnderItsCap(t *testing.T) {
+	st, _ := testutil.Store(t)
+	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "first"})
+	text := strings.Repeat("x", 1024)
+	for range 4200 {
+		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: text})
+	}
+	const limit = 2 << 20
+	window, err := st.BuildHotWindowUnder(t.Context(), noPace, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = window.Close() })
+	stats := window.Stats()
+	if stats.Bytes == 0 || stats.Bytes > limit {
+		t.Errorf("bytes = %d, want some and at most %d", stats.Bytes, limit)
+	}
+	if stats.Floor <= first.Seq {
+		t.Errorf("floor = %d, want it above the first record %d", stats.Floor, first.Seq)
+	}
+	f := store.Filter{Drive: "d", Descending: true, Limit: 10}
+	got, answered, err := window.Answer(t.Context(), st, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := st.Query(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if answered {
+		sameRecords(t, got, want)
 	}
 }
 
