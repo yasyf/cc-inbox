@@ -95,10 +95,14 @@ func TestTheClientReadsAndWritesThroughTheDaemonAndAloneAlike(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return map[string]any{"tail": tail, "among": among, "open": open, "generations": generations}
+		who, err := client.Who(ctx, "d")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]any{"tail": tail, "among": among, "open": open, "generations": generations, "who": who}
 	}
 	through := read()
-	if ln.accepted.Load() < 6 {
+	if ln.accepted.Load() < 7 {
 		t.Fatalf("accepted = %d; want each read to reach the daemon", ln.accepted.Load())
 	}
 	if tail := through["tail"].([]client.Record); len(tail) != 2 || tail[0].Seq != ask.Seq || tail[1].ReNum == "" {

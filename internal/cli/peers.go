@@ -96,6 +96,16 @@ func newMeCmd() *cobra.Command {
 	}
 }
 
+func callerIdentity(ctx context.Context) map[string]string {
+	env := map[string]string{}
+	for _, name := range peers.IdentityEnv {
+		if value := getenv(ctx, name); value != "" {
+			env[name] = value
+		}
+	}
+	return env
+}
+
 func announceThisAgent(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window) error {
 	if self.Agent == "" || window.PID == 0 {
 		return nil
@@ -397,7 +407,7 @@ func announceSelf(ctx context.Context, st *store.Store) error {
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
 	}
-	_, err = peers.Announce(ctx, st, peers.Options{Session: self.Session, Agent: self.Agent, Window: window, Cwd: cwd})
+	_, err = peers.Announce(ctx, st, peers.Options{Env: callerIdentity(ctx), Session: self.Session, Agent: self.Agent, Window: window, Cwd: cwd})
 	return err
 }
 
