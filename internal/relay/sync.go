@@ -449,6 +449,7 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 		}
 		readable := true
 		for width, more := 1, true; more; width = logReaders {
+			var through int64
 			for _, read := range l.pages(ctx, drive, origin, after, width) {
 				if read.err != nil {
 					return total, read.err
@@ -463,13 +464,17 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 				total.Released += a.Released
 				after = read.after
 				if readable = readable && read.readable; readable {
-					if err := n.Store.SetCursor(ctx, cursor, drive, after); err != nil {
-						return total, err
-					}
+					through = after
 				}
 				if more = read.more; !more {
 					break
 				}
+			}
+			if through == 0 {
+				continue
+			}
+			if err := n.Store.SetCursor(ctx, cursor, drive, through); err != nil && !errors.Is(err, store.ErrUnconfirmed) {
+				return total, err
 			}
 		}
 	}
