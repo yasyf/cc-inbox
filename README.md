@@ -713,6 +713,7 @@ The listener is fixed at `127.0.0.1:7377`.
 | `GET /v1/lanes?drive=D` | Select each lane's latest record by time and list the results by sequence number, newest first, for liveness. Includes expired records, excludes compaction digests, and returns at most 500 lanes. Use each record's `at` timestamp to measure age. |
 | `GET /v1/peers` | Array of peers as `cci who --json` prints them. Accepts `session`, `agent`, `name`, `role`, `drive`, `lane`, `tag`, `repo`, `worktree`, `branch`, `q`, one of `pr`, `build` or `ref=<kind>:<key>`, plus `rel`; `all=1` includes ended sessions. |
 | `GET /v1/stream?drive=D` | Server-sent events with a record JSON payload and sequence number as the event ID. Starts at the current head; pass `since` to resume after a sequence number. Accepts repeatable `kind`, `lane`, and `topic`, plus `to`, `reader`, `stack`, `target`, and `pr`. |
+| `POST /v1/follow` | Newline-delimited JSON wakes for cci's own readers. Takes `{"home","filter"}` and sends `{"first","head"}` when a record passes the filter, with zeros in both fields as a heartbeat every 30 seconds. Answers 409 when `home` names another store. |
 
 On both records and stream endpoints, `reader=<lane>` delivers records addressed
 to that lane regardless of `kind`, `lane`, or `topic` filters, plus other lanes'
