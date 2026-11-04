@@ -81,3 +81,40 @@ func TestTrigramsForgetACollectedRecord(t *testing.T) {
 		t.Fatalf("records = %+v, %v", records, err)
 	}
 }
+
+func TestBoundSinceKeepsEveryRecordInTheWindow(t *testing.T) {
+	st, clock := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "before"})
+	clock.Advance(time.Hour)
+	since := st.Now()
+	first := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "first inside"})
+	last := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "last inside"})
+	bounded, err := st.BoundSince(t.Context(), store.Filter{Drive: "d", Since: since})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bounded.After != first.Seq-1 {
+		t.Fatalf("After = %d, want %d", bounded.After, first.Seq-1)
+	}
+	records, err := st.Query(t.Context(), bounded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 || records[0].Seq != first.Seq || records[1].Seq != last.Seq {
+		t.Fatalf("records = %v", records)
+	}
+	later, err := st.BoundSince(t.Context(), store.Filter{Drive: "d", Since: since, After: last.Seq})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if later.After != last.Seq {
+		t.Fatalf("a later After moved back to %d", later.After)
+	}
+	empty, err := st.BoundSince(t.Context(), store.Filter{Drive: "d", Since: since.Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.After != 0 {
+		t.Fatalf("an empty window set After to %d", empty.After)
+	}
+}

@@ -506,6 +506,22 @@ func (s *Store) selectionColumnsAudienceAt(f Filter, projection string, rootAudi
 	return q, params
 }
 
+// BoundSince raises f.After to just below the first record inside f.Since, so a
+// walk over a drive stops at the window instead of reading all the drive's history.
+func (s *Store) BoundSince(ctx context.Context, f Filter) (Filter, error) {
+	if f.Since.IsZero() {
+		return f, nil
+	}
+	var first sql.NullInt64
+	if err := s.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", f.Since.UnixMilli()).Scan(&first); err != nil {
+		return f, fmt.Errorf("bound since: %w", err)
+	}
+	if first.Valid {
+		f.After = max(f.After, first.Int64-1)
+	}
+	return f, nil
+}
+
 func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
 	f, err := s.aliased(ctx, f)
 	if err != nil {
