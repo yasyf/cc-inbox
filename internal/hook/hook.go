@@ -483,7 +483,7 @@ func Prompt(ctx context.Context, st *store.Store, p Payload, at time.Time) error
 	if prompt == "" || strings.HasPrefix(prompt, "<") || strings.HasPrefix(prompt, "/") {
 		return nil
 	}
-	text, path, err := st.Fit(prompt)
+	text, path, err := st.Fit(store.WithoutCredentials(prompt))
 	if err != nil {
 		return err
 	}

@@ -334,3 +334,29 @@ func TestATurnKilledByAnAPIErrorLeavesABlockerTheSupervisorResumes(t *testing.T)
 		t.Fatalf("a thread nothing launched left a blocker: %+v", got)
 	}
 }
+
+func TestLastWordsLeaveACredentialOutOfTheBlocker(t *testing.T) {
+	value := "AS" + "IA" + strings.Repeat("A1B2", 4)
+	for _, event := range []string{"Stop", "StopFailure"} {
+		t.Run(event, func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			launch(t, st, quietLane, "/briefs/fix-lane-1.md")
+			p := bindLane(t, st, quietLane)
+			p.Event, p.LastMessage = event, "the key is "+value+" and I stopped"
+			testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Report, Text: "pushed the branch"})
+			if event == "Stop" {
+				stopReason(t, st, p)
+				stopReason(t, st, p)
+			} else {
+				p.Error = "rate_limit"
+				if err := hook.StopFailure(context.Background(), st, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			blockers := blockersToRoot(t, st)
+			if len(blockers) != 1 || strings.Contains(blockers[0].Text, value) || !strings.Contains(blockers[0].Text, "an AWS access key id withheld") {
+				t.Fatalf("blockers = %+v; want one with the value withheld", blockers)
+			}
+		})
+	}
+}

@@ -962,3 +962,22 @@ func TestSessionStartKeepsTheLaneTheWindowSubscribedAs(t *testing.T) {
 		t.Fatalf("cleared session binding = %+v %v %v", b, ok, err)
 	}
 }
+
+func TestAnOwnerPromptLeavesACredentialOutOfItsRecord(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	if err := st.Bind(ctx, store.PeerKey{Session: "root"}, "d", true); err != nil {
+		t.Fatal(err)
+	}
+	value := "AS" + "IA" + strings.Repeat("A1B2", 4)
+	if err := hook.Prompt(ctx, st, hook.Payload{SessionID: "root", Prompt: "use the key " + value + " for this"}, st.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Query(ctx, store.Filter{Drive: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) == 0 || strings.Contains(got[len(got)-1].Text, value) || !strings.Contains(got[len(got)-1].Text, "use the key") {
+		t.Fatalf("records = %+v; want the prompt with the value withheld", got)
+	}
+}

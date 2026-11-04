@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -66,6 +67,11 @@ func newPostCmd() *cobra.Command {
 				return fmt.Errorf("post takes its text once: as an argument or --text, not both")
 			case len(args) == 0 && !cmd.Flags().Changed("text") && !cmd.Flags().Changed("path") && !cmd.Flags().Changed("head") && !cmd.Flags().Changed("quoted"):
 				return fmt.Errorf("post needs its text, as one quoted argument, --text, or a --path file whose first line becomes the text")
+			}
+			literal := slices.Clone(args)
+			cmd.Flags().Visit(func(f *pflag.Flag) { literal = append(literal, f.Value.String()) })
+			if err := refuseCredential("the command line", []byte(strings.Join(literal, "\n"))); err != nil {
+				return refusedBeforeStore(cmd, drive, lane, kind, args, text, err)
 			}
 			if !cmd.Flags().Changed("kind") {
 				return nil
@@ -118,6 +124,9 @@ func newPostCmd() *cobra.Command {
 					}
 					if text = strings.TrimSpace(string(stdin)); text == "" {
 						return errors.New("post -: stdin is empty")
+					}
+					if err := refuseCredential("stdin", stdin); err != nil {
+						return err
 					}
 				}
 				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at); err != nil {
@@ -703,18 +712,29 @@ func keepPath(cmd *cobra.Command, st *store.Store, path string) (string, error) 
 		if absErr != nil {
 			return "", fmt.Errorf("--path: %w", absErr)
 		}
-		if info.Mode().IsRegular() && !strings.HasPrefix(abs, "/dev/") && !strings.HasPrefix(abs, "/proc/") {
-			return abs, nil
-		}
 		body, err = os.ReadFile(path) //nolint:gosec // G304: the caller names its own body file.
+		if err == nil && info.Mode().IsRegular() && !strings.HasPrefix(abs, "/dev/") && !strings.HasPrefix(abs, "/proc/") {
+			return abs, refuseCredential("--path", body)
+		}
 	}
 	if err != nil {
 		return "", fmt.Errorf("--path %s: %w", path, err)
+	}
+	if err := refuseCredential("--path", body); err != nil {
+		return "", err
 	}
 	if len(bytes.TrimSpace(body)) == 0 {
 		return "", fmt.Errorf("--path %s: empty body", path)
 	}
 	return st.Blob(string(body))
+}
+
+func refuseCredential(where string, said []byte) error {
+	shape, found := store.CredentialShape(said)
+	if !found {
+		return nil
+	}
+	return fmt.Errorf("%s holds %s, and a record cannot be taken back: post what the credential is for and where it went, never its value", where, shape)
 }
 
 func readBody(cmd *cobra.Command, path string) (json.RawMessage, error) {
@@ -732,6 +752,9 @@ func readBody(cmd *cobra.Command, path string) (json.RawMessage, error) {
 	}
 	if len(raw) > store.MaxBody {
 		return nil, fmt.Errorf("--body-file: body exceeds %d bytes", store.MaxBody)
+	}
+	if err := refuseCredential("--body-file", raw); err != nil {
+		return nil, err
 	}
 	body := bytes.TrimSpace(raw)
 	if len(body) == 0 || !json.Valid(body) {
