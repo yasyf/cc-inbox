@@ -224,8 +224,8 @@ func TestGrepMatchesWholeRecordLines(t *testing.T) {
 		{[]string{"-F", "census|GREEN"}, []string{"no records on release-v3 match; store head #4"}},
 		{[]string{"234.293"}, []string{"STATE census"}},
 		{[]string{"--fixed-strings", "234.293"}, []string{"no records on release-v3 match; store head #4"}},
-		{[]string{"-n", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... 1 more matches"}},
-		{[]string{"--limit", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... 1 more matches"}},
+		{[]string{"-n", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... more matches"}},
+		{[]string{"--limit", "1", "census|GREEN"}, []string{"runner-protocol-idle-tenant GREEN", "... more matches"}},
 		{[]string{"--ignore-case=false", "green"}, []string{"no records on release-v3 match; store head #4"}},
 		{[]string{"--ignore-case=false", "GREEN"}, []string{"runner-protocol-idle-tenant GREEN"}},
 	}
@@ -1944,7 +1944,7 @@ func TestAPipedReadStillShowsWhatItsBudgetCutOnStderr(t *testing.T) {
 		t.Fatalf("a piped tail cut by its budget left stderr %q; stdout:\n%s", stderr, out)
 	}
 	out, stderr = piped("grep", "--drive", "piped", "-n", "1", "ASK step")
-	if !strings.Contains(out, "... 39 more matches") || stderr != "... 39 more matches; narrow with --kind, --lane or --since\n" {
+	if !strings.Contains(out, "... more matches") || stderr != "... more matches; narrow with --kind, --lane or --since\n" {
 		t.Fatalf("a piped grep cut by its limit left stderr %q; stdout:\n%s", stderr, out)
 	}
 	whole, quiet := piped("tail", "--drive", "piped", "--since-seq", "0", "--budget", "4000000")

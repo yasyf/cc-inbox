@@ -11,21 +11,21 @@
     "PostToolUse": [
       {
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook post-tool-use", "timeout": 10 }
+          { "type": "http", "url": "http://127.0.0.1:7377/v1/hook/post-tool-use", "headers": { "X-Cci-Hook": "1", "X-Cci-Home": "$CCI_HOME" }, "allowedEnvVars": ["CCI_HOME"], "timeout": 10 }
         ]
       }
     ],
     "PostToolUseFailure": [
       {
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook post-tool-use", "timeout": 10 }
+          { "type": "http", "url": "http://127.0.0.1:7377/v1/hook/post-tool-use", "headers": { "X-Cci-Hook": "1", "X-Cci-Home": "$CCI_HOME" }, "allowedEnvVars": ["CCI_HOME"], "timeout": 10 }
         ]
       }
     ],
     "Stop": [
       {
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook stop", "timeout": 10 }
+          { "type": "http", "url": "http://127.0.0.1:7377/v1/hook/stop", "headers": { "X-Cci-Hook": "1", "X-Cci-Home": "$CCI_HOME" }, "allowedEnvVars": ["CCI_HOME"], "timeout": 10 }
         ]
       }
     ],
@@ -39,7 +39,7 @@
     "SubagentStop": [
       {
         "hooks": [
-          { "type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/cci\" hook subagent-stop", "timeout": 10 }
+          { "type": "http", "url": "http://127.0.0.1:7377/v1/hook/subagent-stop", "headers": { "X-Cci-Hook": "1", "X-Cci-Home": "$CCI_HOME" }, "allowedEnvVars": ["CCI_HOME"], "timeout": 10 }
         ]
       }
     ],

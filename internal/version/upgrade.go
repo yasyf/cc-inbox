@@ -85,7 +85,7 @@ func upgradeCommand(exe, goos, goarch string) string {
 		return pluginUpgrade
 	default:
 		dir := filepath.Dir(exe)
-		return fmt.Sprintf(`d=$(mktemp -d %[1]s/.cci.XXXXXX) && gh release download --repo yasyf/cc-inbox --pattern 'cci_*_%[2]s_%[3]s.tar.gz' --output - | tar -xzf - -C "$d" cci && "$d/cci" --version >/dev/null && mv -f "$d/cci" %[1]s/cci && rmdir "$d"`, dir, goos, goarch)
+		return fmt.Sprintf(`d=$(mktemp -d %[1]s/.cci.XXXXXX) && gh release download --repo yasyf/cc-inbox --pattern 'cci_*_%[2]s_%[3]s.tar.gz' --output - | tar -xzf - -C "$d" cci cci-core && "$d/cci" --version >/dev/null && mv -f "$d/cci-core" %[1]s/cci-core && mv -f "$d/cci" %[1]s/cci && rmdir "$d"`, dir, goos, goarch)
 	}
 }
 
@@ -101,7 +101,7 @@ func ProveRelease(ctx context.Context, bound time.Duration) error {
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
 	pattern := fmt.Sprintf("cci_*_%s_%s.tar.gz", runtime.GOOS, runtime.GOARCH)
-	fetch := exec.CommandContext(ctx, "/bin/sh", "-c", `gh release download --repo yasyf/cc-inbox --pattern "$1" --output - | tar -xzf - -C "$2" cci`, "sh", pattern, dir) //nolint:gosec // G204: fixed script, arguments passed positionally.
+	fetch := exec.CommandContext(ctx, "/bin/sh", "-c", `gh release download --repo yasyf/cc-inbox --pattern "$1" --output - | tar -xzf - -C "$2" cci cci-core`, "sh", pattern, dir) //nolint:gosec // G204: fixed script, arguments passed positionally.
 	if out, err := fetch.CombinedOutput(); err != nil {
 		return fmt.Errorf("download the newest cci release: %w: %s", err, strings.TrimSpace(string(out)))
 	}

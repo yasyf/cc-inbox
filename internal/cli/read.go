@@ -26,9 +26,13 @@ import (
 )
 
 func newTailCmd() *cobra.Command {
-	cmd, flags := tailCommand(SelfPeer().String())
+	cmd, flags := tailCommand("")
 	cmd.RunE = withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-		return flags.run(cmd.Context(), cmd, st, SelfPeer())
+		self := SelfPeer(cmd.Context())
+		if !cmd.Flags().Changed("cursor") {
+			flags.cursor = self.String()
+		}
+		return flags.run(cmd.Context(), cmd, st, self)
 	})
 	return cmd
 }
@@ -93,7 +97,7 @@ func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store
 	if err != nil {
 		return err
 	}
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Seed: f.seed, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(cmd, f.rf.json), Older: older}, cmd.OutOrStdout())
+	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: filter, Cursor: name, Seed: f.seed, Limit: f.rf.limit, Budget: f.rf.budget, Width: f.rf.width, JSON: f.rf.json, Oldest: f.oldest, Fold: fold, Notes: tailNotes(ctx, cmd, f.rf.json), Older: older}, cmd.OutOrStdout())
 	if err != nil || name == "" || !resumed || f.rf.limit > 0 {
 		return err
 	}
@@ -113,7 +117,7 @@ func (f *tailFlags) runMail(ctx context.Context, cmd *cobra.Command, st *store.S
 	if err != nil {
 		return false, err
 	}
-	_, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: mail, Cursor: store.LaneCursor(peer), Seed: f.seed, Budget: f.rf.budget, Compact: true, Reader: b.Lane, Open: true, Notes: tailNotes(cmd, false)}, cmd.OutOrStdout())
+	_, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: mail, Cursor: store.LaneCursor(peer), Seed: f.seed, Budget: f.rf.budget, Compact: true, Reader: b.Lane, Open: true, Notes: tailNotes(ctx, cmd, false)}, cmd.OutOrStdout())
 	return true, err
 }
 
@@ -164,7 +168,7 @@ func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *sto
 }
 
 func advanceLaneCursor(ctx context.Context, st *store.Store, f store.Filter, start, last int64) error {
-	self := SelfPeer()
+	self := SelfPeer(ctx)
 	b, bound, err := st.Binding(ctx, self)
 	if err != nil || !bound || b.Lane == "" || !store.SameLane(b.Lane, f.For) || b.Drive != f.Drive {
 		return err
@@ -269,7 +273,7 @@ func newGrepCmd() *cobra.Command {
 				return err
 			}
 			f.IncludeExpired = true
-			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.width, rf.json, cmd.OutOrStdout(), tailNotes(cmd, rf.json))
+			return inbox.Grep(cmd.Context(), st, f, pattern, rf.limit, rf.budget, rf.width, rf.json, cmd.OutOrStdout(), tailNotes(cmd.Context(), cmd, rf.json))
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
@@ -374,8 +378,14 @@ func newStateCmd() *cobra.Command {
 	return cmd
 }
 
-func tailNotes(cmd *cobra.Command, asJSON bool) io.Writer {
+func tailNotes(ctx context.Context, cmd *cobra.Command, asJSON bool) io.Writer {
 	if asJSON {
+		return cmd.ErrOrStderr()
+	}
+	if inv := invoked(ctx); inv != nil {
+		if inv.stdoutChar {
+			return nil
+		}
 		return cmd.ErrOrStderr()
 	}
 	out, ok := cmd.OutOrStdout().(*os.File)

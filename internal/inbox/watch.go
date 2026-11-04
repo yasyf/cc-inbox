@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/wire"
 )
 
 const feedRetry = 10 * time.Second
@@ -36,6 +38,17 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 			return err
 		}
 		f.After = start
+	}
+	if strings.HasPrefix(opts.Cursor, wire.WatchCursorPrefix) {
+		resumed, found, err := st.Cursor(ctx, opts.Cursor, f.Drive)
+		if err != nil {
+			return err
+		}
+		if found {
+			f.After, f.Since = max(f.After, resumed), time.Time{}
+		} else if err := st.SetCursor(ctx, opts.Cursor, f.Drive, f.After); err != nil {
+			return err
+		}
 	}
 	w := &watcher{st: st, opts: opts, filter: f, emit: emit}
 	if opts.For > 0 {

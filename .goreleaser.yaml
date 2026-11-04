@@ -11,8 +11,21 @@ before:
 
 builds:
   - id: cci
-    main: ./cmd/cci
+    main: ./cmd/cci-thin
     binary: cci
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+  - id: cci-core
+    main: ./cmd/cci
+    binary: cci-core
     env:
       - CGO_ENABLED=0
     goos: [darwin, linux]
@@ -43,6 +56,7 @@ notarize:
     - enabled: true
       ids:
         - cci
+        - cci-core
       sign:
         certificate: "{{ .Env.MACOS_SIGN_P12 }}"
         password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
@@ -66,6 +80,7 @@ homebrew_casks:
   - name: cci
     binaries:
       - cci
+      - cci-core
     # Strip quarantine and run cci once before the binary is linked: an exec that wins the
     # race against a postflight strip raises a Gatekeeper prompt that holds every later exec,
     # and a new binary's first exec waits on its assessment, which the upgrade pays instead.
@@ -74,6 +89,7 @@ homebrew_casks:
         install_steps: |
           on_macos do
             run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci"]
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci-core"]
             run "{{ .StagedPath }}/cci", args: ["--version"]
           end
     repository:

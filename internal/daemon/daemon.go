@@ -6,10 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/pprof"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -27,6 +30,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
+	"github.com/yasyf/cc-inbox/internal/wire"
 )
 
 const (
@@ -84,6 +88,12 @@ type Runtime struct {
 	failed              error
 	refreshRegistration func(context.Context, string, string) error
 	reads               func(context.Context, *store.Store) (ReadAPI, error)
+	commands            func(context.Context, net.Listener, *store.Store, string) error
+}
+
+// ServeCommands has the daemon run clients' commands over $CCI_HOME/cci.sock.
+func (r *Runtime) ServeCommands(serve func(context.Context, net.Listener, *store.Store, string) error) {
+	r.commands = serve
 }
 
 type ReadAPI interface {
@@ -133,6 +143,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	}
 	handler := http.NewServeMux()
 	handler.Handle("/v1/tail", reads)
+	handler.Handle("/v1/hook/", reads)
 	handler.Handle("/v1/incident-holds", reads)
 	handler.HandleFunc("/debug/pprof/", pprof.Index)
 	handler.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
@@ -140,6 +151,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	handler.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
 	handler.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	feed := server.New(st, time.Second)
+	st.FollowThrough(feed)
 	handler.Handle("/", feed.Handler())
 	p := &Product{
 		home:   r.home,
@@ -180,6 +192,13 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	loops.Go(func() { up.Follow(syncCtx, UpgradeInterval) })
 	loops.Go(func() { maintainIndexes(syncCtx, r.home) })
 	loops.Go(func() { collect(syncCtx, st) })
+	if r.commands != nil {
+		loops.Go(func() {
+			if err := r.serveCommands(syncCtx, st); err != nil && syncCtx.Err() == nil {
+				slog.Warn("cci daemon stopped running clients' commands; they run themselves", "err", err)
+			}
+		})
+	}
 	go func() {
 		loops.Wait()
 		close(p.synced)
@@ -210,6 +229,21 @@ func (p *Product) syncImports(ctx context.Context) error {
 		case <-tick.C:
 		}
 	}
+}
+
+func (r *Runtime) serveCommands(ctx context.Context, st *store.Store) error {
+	path := filepath.Join(r.home, wire.SocketName)
+	if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("clear the command socket: %w", err)
+	}
+	ln, err := net.Listen("unix", path)
+	if err != nil {
+		return fmt.Errorf("listen on the command socket: %w", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return errors.Join(fmt.Errorf("lock the command socket: %w", err), ln.Close())
+	}
+	return r.commands(ctx, ln, st, r.home)
 }
 
 func collect(ctx context.Context, st *store.Store) {

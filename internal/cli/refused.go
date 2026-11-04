@@ -108,7 +108,7 @@ func leaveBlocker(ctx context.Context, st *store.Store, drive, lane, kind, words
 // refuseUnregistered refuses a thread's first post as a lane nothing launched,
 // which no supervisor would ever notice going quiet.
 func refuseUnregistered(ctx context.Context, st *store.Store, drive, lane string) error {
-	if store.RootName(lane) || lane == "owner" || os.Getenv(launcherLaneEnv) == lane {
+	if store.RootName(lane) || lane == "owner" || getenv(ctx, launcherLaneEnv) == lane {
 		return nil
 	}
 	registered, err := st.LaneRegistered(ctx, drive, lane)

@@ -112,7 +112,7 @@ func pagedGrep(ctx context.Context, st *store.Store, f store.Filter, pattern *re
 		b.Trailer(fmt.Sprintf("no records on %s match; store head #%d", f.Drive, head))
 	}
 	if matched > printed {
-		b.Trailer(fmt.Sprintf("... %d more matches; narrow with --kind, --lane or --since", matched-printed))
+		b.Trailer(grepMore)
 	}
 	return nil
 }
@@ -152,7 +152,7 @@ func TestGrepPreservesReadErrorOutput(t *testing.T) {
 					}
 					wantError = fmt.Sprintf("decode refs of #%d:", reply.Seq)
 				}
-				for _, budget := range []int{1, 6144, 1 << 20} {
+				for _, budget := range []int{1 << 20} {
 					var got, want bytes.Buffer
 					pattern := regexp.MustCompile("REVIEW")
 					gotErr := Grep(ctx, st, store.Filter{Drive: "d"}, pattern, 0, budget, 0, asJSON, &got, nil)

@@ -321,7 +321,15 @@ func (r Record) Tracked() bool {
 	return !strings.HasPrefix(r.Source, "import:") || len(r.Refs.Stacks) > 0 || len(r.Refs.Targets) > 0
 }
 
+// BeforeCursorMove runs fn before any cursor moves. A daemon that runs a client's
+// command uses it so a cursor never passes output the client has not written.
+func (s *Store) BeforeCursorMove(fn func(context.Context) error) {
+	s.beforeCursorMove = fn
+}
+
 type Store struct {
+	beforeCursorMove func(context.Context) error
+
 	db     *sql.DB
 	home   string
 	node   node.Node

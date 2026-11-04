@@ -40,6 +40,7 @@ const (
 // Agent is empty, else the subagent or teammate the harness calls Agent. An
 // empty Role is inferred from its drive binding; Cwd is where git is read.
 type Options struct {
+	Env         map[string]string
 	Session     string
 	Agent       string
 	AgentName   string
@@ -88,10 +89,13 @@ func announce(ctx context.Context, st *store.Store, o Options) (store.Peer, erro
 			return store.Peer{}, err
 		}
 	}
-	env := map[string]string{}
-	for _, name := range IdentityEnv {
-		if v := os.Getenv(name); v != "" {
-			env[name] = v
+	env := o.Env
+	if env == nil {
+		env = map[string]string{}
+		for _, name := range IdentityEnv {
+			if v := os.Getenv(name); v != "" {
+				env[name] = v
+			}
 		}
 	}
 	return st.Announce(ctx, store.Peer{

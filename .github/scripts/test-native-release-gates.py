@@ -24,10 +24,11 @@ class NativeReleaseGateTest(unittest.TestCase):
     def test_cask_clears_quarantine_before_first_execution(self):
         casks = load_yaml(Path(".goreleaser.yaml"))["homebrew_casks"]
         cask = next(cask for cask in casks if cask["name"] == "cci")
-        self.assertEqual(cask["binaries"], ["cci"])
+        self.assertEqual(cask["binaries"], ["cci", "cci-core"])
         self.assertEqual(cask["hooks"]["pre"]["install_steps"].splitlines(), [
             "on_macos do",
             '  run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci"]',
+            '  run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/cci-core"]',
             '  run "{{ .StagedPath }}/cci", args: ["--version"]',
             "end",
         ])

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -92,6 +91,9 @@ func markStarted(roots version.Roots) {
 		if path, err = filepath.EvalSymlinks(exe); err != nil {
 			fail(err)
 		}
+		if filepath.Base(path) == "cci-core" {
+			path = filepath.Join(filepath.Dir(path), "cci")
+		}
 	}
 	if err := roots.MarkStarted(path); err != nil {
 		fail(err)
@@ -100,8 +102,5 @@ func markStarted(roots version.Roots) {
 
 func fail(err error) {
 	fmt.Fprintln(os.Stderr, "cci:", err)
-	if down := (*cli.BusDown)(nil); errors.As(err, &down) {
-		os.Exit(cli.BusDownExit)
-	}
-	os.Exit(1)
+	os.Exit(cli.ExitCode(err))
 }

@@ -85,7 +85,7 @@ func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, 
 }
 
 func keepUnsent(cmd *cobra.Command, args []string, cause error) error {
-	if os.Getenv(unsentEnv) != "" {
+	if getenv(cmd.Context(), unsentEnv) != "" {
 		return &BusDown{Cause: cause}
 	}
 	for _, name := range []string{"lane", "drive"} {
@@ -102,7 +102,7 @@ func keepUnsent(cmd *cobra.Command, args []string, cause error) error {
 	if err != nil {
 		return errors.Join(&BusDown{Cause: cause}, err)
 	}
-	dir, err := os.Getwd()
+	dir, err := getwd(cmd.Context())
 	if err != nil {
 		return errors.Join(&BusDown{Cause: cause}, err)
 	}
@@ -174,8 +174,17 @@ func dropKept(path string) error {
 	return nil
 }
 
+// replayProgram replays kept posts when this process is not cci itself.
+var replayProgram string
+
+// ReplayThrough names the cci an embedder replays its kept posts with: its own
+// program would not know the post verb's flags.
+func ReplayThrough(program string) {
+	replayProgram = program
+}
+
 func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
-	if os.Getenv(unsentEnv) != "" {
+	if getenv(ctx, unsentEnv) != "" {
 		return nil
 	}
 	home, err := store.Home()
@@ -191,9 +200,11 @@ func drainUnsent(ctx context.Context, cmd *cobra.Command) error {
 		return err
 	}
 	slices.Sort(kept)
-	self, err := os.Executable()
-	if err != nil {
-		return err
+	self := replayProgram
+	if self == "" {
+		if self, err = os.Executable(); err != nil {
+			return err
+		}
 	}
 drain:
 	for _, path := range kept {

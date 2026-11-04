@@ -40,11 +40,11 @@ func newAnnounceCmd() *cobra.Command {
 		Short: "Register this session in the machine-wide peer registry so other sessions can find it with cci who",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			self, window, err := peerIdentity()
+			self, window, err := peerIdentity(cmd.Context())
 			if err != nil {
 				return err
 			}
-			cwd, err := os.Getwd()
+			cwd, err := getwd(cmd.Context())
 			if err != nil {
 				return fmt.Errorf("resolve cwd: %w", err)
 			}
@@ -73,7 +73,7 @@ func newMeCmd() *cobra.Command {
 		Short: "Print this session's registry line, the one to paste into a handoff, and its channel subscription",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			self, window, err := peerIdentity()
+			self, window, err := peerIdentity(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -108,7 +108,7 @@ func announceThisAgent(ctx context.Context, st *store.Store, self store.PeerKey,
 	if err != nil || len(transcripts) == 0 {
 		return err
 	}
-	cwd, err := os.Getwd()
+	cwd, err := getwd(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
 	}
@@ -389,11 +389,11 @@ func printSuccessor(cmd *cobra.Command, st *store.Store, drive, lane string, asJ
 }
 
 func announceSelf(ctx context.Context, st *store.Store) error {
-	self, window, err := peerIdentity()
+	self, window, err := peerIdentity(ctx)
 	if err != nil {
 		return err
 	}
-	cwd, err := os.Getwd()
+	cwd, err := getwd(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve cwd: %w", err)
 	}
@@ -401,16 +401,20 @@ func announceSelf(ctx context.Context, st *store.Store) error {
 	return err
 }
 
-func peerIdentity() (store.PeerKey, store.Window, error) {
-	self := SelfPeer()
+func peerIdentity(ctx context.Context) (store.PeerKey, store.Window, error) {
+	self := SelfPeer(ctx)
 	if self.Session == "" {
 		return store.PeerKey{}, store.Window{}, errNoPeerSession
 	}
-	window, err := thisWindow()
+	window, err := thisWindow(ctx)
 	if !errors.Is(err, errNoSession) {
 		return self, window, err
 	}
-	if pid := procs.FindAncestor(os.Getpid(), isCodex); pid != 0 {
+	pid := os.Getpid()
+	if inv := invoked(ctx); inv != nil {
+		pid = inv.pid
+	}
+	if pid := procs.FindAncestor(pid, isCodex); pid != 0 {
 		window, err = windowOf(pid)
 		return self, window, err
 	}
@@ -461,7 +465,7 @@ func (c *claimFlags) register(cmd *cobra.Command) {
 
 func (c *claimFlags) holder(ctx context.Context, st *store.Store) (store.PeerKey, error) {
 	if c.forLane == "" {
-		self, _, err := peerIdentity()
+		self, _, err := peerIdentity(ctx)
 		return self, err
 	}
 	lane, drive, ok := strings.Cut(c.forLane, "@")
@@ -742,7 +746,7 @@ func resolvePeer(ctx context.Context, st *store.Store, t, target string) (string
 			v, err = onePeer(ctx, st, peers.Filter{Origin: origin, Session: v.Session, Agent: agent})
 		}
 	}
-	if self := SelfPeer(); errors.Is(err, sql.ErrNoRows) && origin == peers.LocalOrigin && self.Session != "" {
+	if self := SelfPeer(ctx); errors.Is(err, sql.ErrNoRows) && origin == peers.LocalOrigin && self.Session != "" {
 		v, err = onePeer(ctx, st, peers.Filter{Origin: origin, Session: self.Session, Agent: rest})
 	}
 	if errors.Is(err, sql.ErrNoRows) {
