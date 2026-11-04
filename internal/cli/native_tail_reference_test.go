@@ -209,6 +209,17 @@ func nativeTailSnapshotPath(name string) string {
 	return filepath.Join(os.Getenv("CCI_NATIVE_TAIL_SNAPSHOTS"), key+".json")
 }
 
+func nativeTailPRSkipsCorruptRefs(t *testing.T, variant, call string, got, want nativeTailResult) bool {
+	t.Helper()
+	if variant != "drive malformed refs" || call != "pr" {
+		return false
+	}
+	if want.Code != 1 || got.Code != 0 || !bytes.Contains(got.Out, []byte(`"prs":[29020]`)) {
+		t.Fatalf("--pr read a row its index does not name: code=%d/%d stdout=%q stderr=%q", got.Code, want.Code, got.Out, got.Err)
+	}
+	return true
+}
+
 func TestNativeTailCLIReference(t *testing.T) {
 	if os.Getenv("CCI_NATIVE_TAIL_SNAPSHOTS") == "" {
 		t.Skip("CI supplies immutable native Tail reference snapshots")
@@ -240,10 +251,7 @@ func TestNativeTailCLIReference(t *testing.T) {
 				if err := json.Unmarshal(raw, &want); err != nil {
 					t.Fatal(err)
 				}
-				if variant.name == "drive malformed refs" && call.name == "pr" {
-					if want.Code != 1 || got.Code != 0 || !bytes.Contains(got.Out, []byte(`"prs":[29020]`)) {
-						t.Fatalf("--pr read a row its index does not name: code=%d/%d stdout=%q stderr=%q", got.Code, want.Code, got.Out, got.Err)
-					}
+				if nativeTailPRSkipsCorruptRefs(t, variant.name, call.name, got, want) {
 					return
 				}
 				if got.Code != want.Code || !bytes.Equal(got.Out, want.Out) || !bytes.Equal(got.Err, want.Err) {
