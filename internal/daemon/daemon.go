@@ -33,10 +33,12 @@ import (
 )
 
 const (
-	Label          daemonkit.Label  = "com.yasyf.cc-inbox"
-	Schema         daemonkit.Schema = "cci.v1"
-	Addr                            = "127.0.0.1:7377"
-	ImportInterval                  = time.Second
+	Label           daemonkit.Label  = "com.yasyf.cc-inbox"
+	Schema          daemonkit.Schema = "cci.v1"
+	Addr                             = "127.0.0.1:7377"
+	ImportInterval                   = time.Second
+	hotWindowFollow                  = time.Second
+	hotWindowPace                    = 5 * time.Millisecond
 	// Sessions is how many client sessions, and requests in flight, the
 	// daemon takes at once: every cci process that writes holds one.
 	Sessions = 256
@@ -193,6 +195,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	loops.Go(func() { maintainIndexes(syncCtx, r.home) })
 	loops.Go(func() { collect(syncCtx, st) })
 	loops.Go(func() { indexTrigrams(syncCtx, st) })
+	loops.Go(func() { keepHotWindow(syncCtx, st, r.home) })
 	if r.commands != nil {
 		loops.Go(func() {
 			if err := r.serveCommands(syncCtx, st); err != nil && syncCtx.Err() == nil {
@@ -242,6 +245,57 @@ func (r *Runtime) serveCommands(ctx context.Context, st *store.Store) error {
 		return errors.Join(fmt.Errorf("lock the command socket: %w", err), ln.Close())
 	}
 	return r.commands(ctx, ln, st, r.home)
+}
+
+func keepHotWindow(ctx context.Context, st *store.Store, home string) {
+	var window *store.MemWindow
+	drop := func() {
+		if window == nil {
+			return
+		}
+		st.ServeHotWindow(nil)
+		if err := window.Close(); err != nil {
+			slog.Warn("cci daemon cannot close the hot window", "err", err)
+		}
+		window = nil
+	}
+	defer drop()
+	tick := time.NewTicker(hotWindowFollow)
+	defer tick.Stop()
+	for {
+		on := store.HotWindowOn(home)
+		if window != nil && (!on || window.Stale()) {
+			drop()
+		}
+		switch {
+		case on && window == nil:
+			built, err := st.BuildHotWindow(ctx, func(ctx context.Context) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(hotWindowPace):
+					return nil
+				}
+			})
+			if err != nil {
+				if ctx.Err() == nil {
+					slog.Warn("cci daemon cannot build the hot window; reads stay on the store", "err", err)
+				}
+				break
+			}
+			window = built
+			st.ServeHotWindow(window)
+		case window != nil:
+			if err := window.CatchUp(ctx); err != nil && !window.Stale() && ctx.Err() == nil {
+				slog.Warn("cci daemon cannot catch the hot window up", "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
 }
 
 func indexTrigrams(ctx context.Context, st *store.Store) {
