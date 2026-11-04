@@ -50,6 +50,7 @@ const (
 	promptDrainInterval = 5 * time.Second
 	collectInterval     = 24 * time.Hour
 	collectSettle       = time.Hour
+	trigramPause        = 200 * time.Millisecond
 	collectPause        = time.Second
 )
 
@@ -191,6 +192,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	loops.Go(func() { up.Follow(syncCtx, UpgradeInterval) })
 	loops.Go(func() { maintainIndexes(syncCtx, r.home) })
 	loops.Go(func() { collect(syncCtx, st) })
+	loops.Go(func() { indexTrigrams(syncCtx, st) })
 	if r.commands != nil {
 		loops.Go(func() {
 			if err := r.serveCommands(syncCtx, st); err != nil && syncCtx.Err() == nil {
@@ -240,6 +242,20 @@ func (r *Runtime) serveCommands(ctx context.Context, st *store.Store) error {
 		return errors.Join(fmt.Errorf("lock the command socket: %w", err), ln.Close())
 	}
 	return r.commands(ctx, ln, st, r.home)
+}
+
+func indexTrigrams(ctx context.Context, st *store.Store) {
+	err := st.IndexTrigrams(ctx, func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(trigramPause):
+			return nil
+		}
+	})
+	if err != nil && ctx.Err() == nil {
+		slog.Warn("cci daemon could not build grep's index; grep still scans", "err", err)
+	}
 }
 
 func collect(ctx context.Context, st *store.Store) {

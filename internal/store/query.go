@@ -52,6 +52,7 @@ type Filter struct {
 	Descending     bool
 	Limit          int
 	Contains       []string
+	Indexed        bool
 }
 
 // where renders the filter. Records in the drive pass the selectors;
@@ -132,6 +133,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	if f.Origin != "" {
 		clauses = append(clauses, "origin = ?")
 		params = append(params, f.Origin)
+	}
+	if match, ok := trigramMatch(f.Contains); ok && f.Indexed {
+		clauses = append(clauses, "seq IN (SELECT rowid FROM record_trigrams WHERE record_trigrams MATCH ?)")
+		params = append(params, match)
 	}
 	if len(f.Contains) > 0 {
 		holds := make([]string, 0, len(renderedColumns)*len(f.Contains))
