@@ -36,6 +36,32 @@ type invocation struct {
 	st         *store.Store
 }
 
+// WithStore has a command run with ctx use st, in this process's environment, in
+// place of opening its own store.
+func WithStore(ctx context.Context, st *store.Store) (context.Context, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, fmt.Errorf("resolve cwd: %w", err)
+	}
+	info, err := os.Stdout.Stat()
+	if err != nil {
+		return nil, fmt.Errorf("stat stdout: %w", err)
+	}
+	return context.WithValue(ctx, invocationKey{}, &invocation{
+		env: requestEnv(os.Environ()), cwd: cwd, pid: os.Getpid(), stdoutChar: info.Mode()&os.ModeCharDevice != 0, st: st,
+	}), nil
+}
+
+func requestEnv(entries []string) map[string]string {
+	env := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if name, value, ok := strings.Cut(entry, "="); ok {
+			env[name] = value
+		}
+	}
+	return env
+}
+
 func invoked(ctx context.Context) *invocation {
 	inv, _ := ctx.Value(invocationKey{}).(*invocation)
 	return inv
@@ -118,19 +144,13 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 		return err
 	}
 	view.BeforeCursorMove(replies.Flush)
-	env := make(map[string]string, len(request.Env))
-	for _, entry := range request.Env {
-		if name, value, ok := strings.Cut(entry, "="); ok {
-			env[name] = value
-		}
-	}
 	root := NewRootCmd()
 	root.SetArgs(request.Argv[1:])
 	root.SetOut(replies)
 	root.SetErr(&stderrStream{conn: conn})
 	root.SetIn(&inputStream{replies: replies})
 	err = root.ExecuteContext(channel.Hosted(context.WithValue(ctx, invocationKey{}, &invocation{
-		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
+		env: requestEnv(request.Env), cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
 	})))
 	if flushed := replies.Flush(ctx); flushed != nil {
 		return flushed

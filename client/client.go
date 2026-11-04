@@ -12,6 +12,7 @@ import (
 	"maps"
 	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
@@ -78,26 +79,49 @@ type Reach = store.Reach
 // maintain-indexes has not installed yet; cci post then addresses a name as typed.
 var ErrNoLaneRegistry = store.ErrNoLaneRegistry
 
+var (
+	sharedMu sync.Mutex
+	shared   = map[string]*store.Store{}
+)
+
+// sharedStore is this process's one handle on the store CCI_HOME names, so a long-lived
+// embedder keeps its page cache between calls. It lives as long as the process.
+func sharedStore(ctx context.Context) (*store.Store, error) {
+	home, err := store.Home()
+	if err != nil {
+		return nil, err
+	}
+	sharedMu.Lock()
+	defer sharedMu.Unlock()
+	if st, ok := shared[home]; ok {
+		return st, nil
+	}
+	st, err := cli.OpenStore(ctx)
+	if err != nil {
+		return nil, err
+	}
+	shared[home] = st
+	return st, nil
+}
+
 // Resolve reaches name on drive as cci post --to does: a live lane reads its own
 // mail, a stood-down one passes it to the successor it named, else to its stem's
 // newest live lane, and a stem reaches that lane. Each hop is one indexed lookup.
 func Resolve(ctx context.Context, drive, name string) (Reach, error) {
-	st, err := cli.OpenStore(ctx)
+	st, err := sharedStore(ctx)
 	if err != nil {
 		return Reach{}, err
 	}
-	defer func() { _ = st.Close() }()
 	return st.Reach(ctx, drive, name)
 }
 
 // Generations lists every lane registered under stem on drive, live or stood
 // down, so a launch can number past them and never reuse a name.
 func Generations(ctx context.Context, drive, stem string) ([]string, error) {
-	st, err := cli.OpenStore(ctx)
+	st, err := sharedStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
 	return st.Generations(ctx, drive, stem)
 }
 
@@ -114,7 +138,15 @@ func Post(ctx context.Context, d Draft) (Record, error) {
 	if d.Notices != nil {
 		root.SetErr(d.Notices)
 	}
-	if err := root.ExecuteContext(ctx); err != nil {
+	st, err := sharedStore(ctx)
+	if err != nil {
+		return Record{}, err
+	}
+	embedded, err := cli.WithStore(ctx, st)
+	if err != nil {
+		return Record{}, err
+	}
+	if err := root.ExecuteContext(embedded); err != nil {
 		return Record{}, err
 	}
 	var stored Record
@@ -228,11 +260,10 @@ func Tail(ctx context.Context, q Query) ([]Record, error) {
 			return nil, err
 		}
 	}
-	st, err := cli.OpenStore(ctx)
+	st, err := sharedStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
 	filter := store.Filter{Drive: q.Drive, Kinds: selected, Lanes: q.Lanes, PR: pr, After: q.After, Since: q.Since, Limit: pageRows}
 	var records []Record
 	for {
@@ -251,11 +282,10 @@ func Tail(ctx context.Context, q Query) ([]Record, error) {
 // Among reads the records of drive with the named seqs, oldest first, leaving out
 // a seq that names no record there, as cci tail --seqs does.
 func Among(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
-	st, err := cli.OpenStore(ctx)
+	st, err := sharedStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
 	records, err := st.RecordsAmong(ctx, drive, seqs)
 	if err != nil {
 		return nil, err
@@ -270,11 +300,10 @@ func Open(ctx context.Context, drive string, names ...string) ([]Record, error) 
 	if err != nil {
 		return nil, err
 	}
-	st, err := cli.OpenStore(ctx)
+	st, err := sharedStore(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = st.Close() }()
 	openers, err := st.Query(ctx, store.Filter{Drive: drive, Kinds: selected, IncludeExpired: true})
 	if err != nil {
 		return nil, err
@@ -304,11 +333,10 @@ func Follow(ctx context.Context, w Watch, emit func(Record) error) error {
 	if err != nil {
 		return err
 	}
-	st, err := cli.OpenStore(ctx)
+	st, err := sharedStore(ctx)
 	if err != nil {
 		return err
 	}
-	defer func() { _ = st.Close() }()
 	filter := store.Filter{Drive: w.Drive, For: w.Reader, Peer: cli.SelfPeer().String(), Kinds: selected, After: w.After}
 	return inbox.Watch(ctx, st, inbox.WatchOptions{Filter: filter, Interval: time.Second, JSON: true}, func(r store.Record, _ string) error {
 		return emit(r)
