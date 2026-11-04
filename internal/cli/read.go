@@ -325,9 +325,10 @@ func newShowCmd() *cobra.Command {
 		budget int
 	)
 	cmd := &cobra.Command{
-		Use:   "show SEQ...",
-		Short: "Print records by seq, each once: the full line, then the rest of the text or body file the record names",
-		Args:  cobra.MinimumNArgs(1),
+		Use:     "show SEQ...",
+		Aliases: []string{"read"},
+		Short:   "Print records by seq, each once: the full line, then the rest of the text or body file the record names",
+		Args:    cobra.MinimumNArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			records := make([]store.Record, len(args))
 			for i, arg := range args {
