@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A lane that stood down and was then named another lane's successor no longer
+  holds that lane's stem. The successor's new row carried no stand-down, so a
+  finished fallback read as the stem's newest live lane and the running lane
+  never received the stem's mail on `cci tail`, hook delivery or `lr wait`.
+  Registry reads now take a lane's stand-down from any of its rows, and `Reach`
+  names the same lane delivery does. No schema or trigger changes.
+- `Reach` no longer panics on a successor that was named and never registered.
 - `cci hook stop` lets a launched lane's root thread end its turn on a live harness
   wait. A Stop payload listing a background task or session cron wakes the thread
   itself, so the turn is not refused and no blocker is written.

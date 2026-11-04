@@ -222,6 +222,41 @@ func TestARefusedPostStopsHoldingTheStemOnceTheIndexesAreMaintained(t *testing.T
 	}
 }
 
+func TestALaneThatStoodDownBeforeItWasNamedASuccessorLeavesTheStemToTheRunningLane(t *testing.T) {
+	g := newRegistry(t)
+	g.up("bugs-1")
+	g.up("bugs-2")
+	g.up("bugs-2-opus")
+	g.standDown("bugs-2-opus", "")
+	g.standDown("bugs-1", "bugs-2-opus")
+
+	stem := g.note("bugs")
+	first := g.note("bugs-1")
+	fallback := g.note("bugs-2-opus")
+	if got := g.reads("bugs-2"); !slices.Equal(got, []int64{stem, first, fallback}) {
+		t.Fatalf("bugs-2 reads %v; want the stem's and both stood-down lanes' mail", got)
+	}
+	for _, name := range []string{"bugs", "bugs-1", "bugs-2-opus"} {
+		if r := g.reach(name); r.Lane != "bugs-2" {
+			t.Fatalf("Reach(%s) = %+v; want bugs-2", name, r)
+		}
+	}
+
+	g.up("bugs-2-opus")
+	if r := g.reach("bugs"); r.Lane != "bugs-2-opus" {
+		t.Fatalf("Reach(bugs) = %+v after bugs-2-opus posted again; want it holding the stem it was handed", r)
+	}
+}
+
+func TestASuccessorThatNeverRegisteredReadsItsOwnMail(t *testing.T) {
+	g := newRegistry(t)
+	g.up("bugs-1")
+	g.standDown("bugs-1", "relief")
+	if r := g.reach("relief"); r.Lane != "relief" {
+		t.Fatalf("Reach(relief) = %+v; want the named successor", r)
+	}
+}
+
 func TestRunningNumberedLanesKeepTheirOwnMail(t *testing.T) {
 	g := newRegistry(t)
 	for _, lane := range []string{"fd-14", "fd-15", "fd-16"} {

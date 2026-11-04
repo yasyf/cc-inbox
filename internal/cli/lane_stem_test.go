@@ -1,10 +1,15 @@
 package cli_test
 
 import (
+	"bytes"
+	"context"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 func TestAPostToALaneNoLiveLaneReadsTellsThePoster(t *testing.T) {
@@ -121,5 +126,72 @@ func TestAReaderNamesAWriterByTheStemItHoldsAndAnOlderLaneByItsNumber(t *testing
 	asJSON, err := run(t, "tail", "--drive", "d", "--since", "0", "--json")
 	if err != nil || strings.Count(asJSON, `"stem":"sv"`) != 1 || !strings.Contains(asJSON, `"lane":"sv-3"`) {
 		t.Fatalf("tail --json = %q, %v; want the stem on sv-3's record alone and every lane exact", asJSON, err)
+	}
+}
+
+func heldPastAFinishedFallback(t *testing.T) *store.Store {
+	t.Helper()
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	for _, lane := range []string{"bugs-1", "bugs-2-opus"} {
+		if _, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", lane+" up"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	k := store.PeerKey{Session: "session-1"}
+	if err := st.BindLane(ctx, k, "d", "bugs-2", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetCursor(ctx, store.LaneCursor(k), "d", 0); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", "bugs-2-opus", "--text", "bugs-2-opus stands down"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", "bugs-1", "--successor", "bugs-2-opus", "--text", "bugs-1 stands down"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "bugs", "--text", "the order for the alias"); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+func TestTailListsAnAliasOrderForTheLaneHoldingIt(t *testing.T) {
+	heldPastAFinishedFallback(t)
+	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--reader", "bugs-2", "--to", "bugs-2")
+	if err != nil || !strings.Contains(out, "the order for the alias") {
+		t.Fatalf("tail --reader bugs-2 --to bugs-2 = %q, %v; want the order addressed to bugs", out, err)
+	}
+}
+
+func TestLrWaitsReadReturnsAnAliasOrderForTheLaneHoldingIt(t *testing.T) {
+	heldPastAFinishedFallback(t)
+	out, err := run(t, "tail", "--drive", "d", "--cursor", "bugs-2-wake", "--seed", "bugs-2", "--to", "bugs-2", "--mail")
+	if err != nil || !strings.Contains(out, "the order for the alias") {
+		t.Fatalf("lr wait's read = %q, %v; want the order addressed to bugs", out, err)
+	}
+}
+
+func TestTheHookDeliversAnAliasOrderToTheLaneHoldingIt(t *testing.T) {
+	st := heldPastAFinishedFallback(t)
+	var out bytes.Buffer
+	window := func() (store.Window, error) { return store.Window{PID: 1}, nil }
+	if err := hook.PostToolUse(context.Background(), st, hook.Payload{SessionID: "session-1", Event: "PostToolUse"}, window, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "the order for the alias") {
+		t.Fatalf("hook = %q; want the order addressed to bugs", out.String())
 	}
 }

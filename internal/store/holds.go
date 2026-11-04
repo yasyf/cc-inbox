@@ -34,10 +34,16 @@ func spawnedSQL(record string) string {
 	return "CASE WHEN " + record + ".kind = 'spawn' AND json_valid(" + record + ".refs) THEN json_extract(" + record + ".refs, '$.lanes[0]') WHEN " + record + ".kind = 'state' AND " + record + ".topic GLOB 'spawn:?*' THEN substr(" + record + ".topic, 7) END"
 }
 
-const liveSQL = "(down = 0 OR seen > down)"
+func unstamped(table string) string {
+	return table + ".seen = 0 AND " + table + ".down = 0"
+}
+
+func goneSQL(table string) string {
+	return "SELECT 1 FROM lane_holds gone WHERE gone.drive = " + table + ".drive AND gone.lane = " + table + ".lane AND gone.down > 0 AND gone.seen <= gone.down"
+}
 
 func liveOf(table string) string {
-	return "(" + table + ".down = 0 OR " + table + ".seen > " + table + ".down)"
+	return "CASE WHEN " + unstamped(table) + " THEN NOT EXISTS (" + goneSQL(table) + ") ELSE " + table + ".down = 0 OR " + table + ".seen > " + table + ".down END"
 }
 
 func holdsFill() string {
@@ -156,7 +162,7 @@ func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 	}
 	out := Reach{Stem: Stem(name)}
 	for cur, visited := name, []string{}; ; {
-		rows, err := s.holds(ctx, drive, cur)
+		rows, err := s.holds(ctx, drive, cur, Stem(cur))
 		if err != nil {
 			return Reach{}, err
 		}
@@ -173,7 +179,7 @@ func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 		}
 		visited = append(visited, cur)
 		switch {
-		case own >= 0 && rows[own].live && cur == Stem(cur):
+		case own >= 0 && rows[own].live && cur == Stem(cur) && len(holders) > 0:
 			out.Lane = holders[0]
 			return out, nil
 		case own >= 0 && rows[own].live:
@@ -182,8 +188,15 @@ func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 		case own >= 0 && rows[own].successor != "" && !slices.Contains(visited, rows[own].successor):
 			cur = rows[own].successor
 		case own >= 0 || cur == Stem(cur):
-			if i := slices.IndexFunc(holders, func(l string) bool { return !slices.Contains(visited, l) }); i >= 0 {
-				out.Lane = holders[i]
+			if own >= 0 && rows[own].stem != Stem(cur) {
+				handed, err := s.holds(ctx, drive, cur, rows[own].stem)
+				if err != nil {
+					return Reach{}, err
+				}
+				rows = append(handed, rows...)
+			}
+			if i := slices.IndexFunc(rows, func(h hold) bool { return h.live && !slices.Contains(visited, h.lane) }); i >= 0 {
+				out.Lane = rows[i].lane
 			}
 			return out, nil
 		default:
@@ -192,10 +205,11 @@ func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 	}
 }
 
-func (s *Store) holds(ctx context.Context, drive, lane string) ([]hold, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT lane, stem, successor, `+liveSQL+`, held FROM lane_holds WHERE drive = ? AND lane = ?
-UNION SELECT lane, stem, successor, `+liveSQL+`, held FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? AND `+liveSQL+`
-ORDER BY held DESC, lane`, drive, lane, drive, Stem(lane))
+func (s *Store) holds(ctx context.Context, drive, lane, stem string) ([]hold, error) {
+	columns := `lane, stem, CASE WHEN ` + unstamped("lane_holds") + ` THEN (SELECT MAX(named.successor) FROM lane_holds named WHERE named.drive = lane_holds.drive AND named.lane = lane_holds.lane) ELSE successor END, ` + liveOf("lane_holds") + `, held`
+	rows, err := s.db.QueryContext(ctx, `SELECT `+columns+` FROM lane_holds WHERE drive = ? AND lane = ?
+UNION SELECT `+columns+` FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? AND `+liveOf("lane_holds")+`
+ORDER BY held DESC, lane`, drive, lane, drive, stem)
 	if err != nil {
 		return nil, fmt.Errorf("read the lane registry for %s on %s: %w", lane, drive, err)
 	}
@@ -236,12 +250,12 @@ func aliases(ctx context.Context, q rowsQuerier, drive, lane string) ([]string, 
 		return nil, nil
 	}
 	rows, err := q.QueryContext(ctx, `WITH RECURSIVE
-held(stem) AS (SELECT h.stem FROM lane_holds h WHERE h.drive = ?1 AND h.lane = ?2 AND (h.down = 0 OR h.seen > h.down)
-	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = ?1 AND o.stem = h.stem AND o.lane != h.lane AND (o.down = 0 OR o.seen > o.down) AND (o.held > h.held OR o.held = h.held AND o.lane < h.lane))),
+held(stem) AS (SELECT h.stem FROM lane_holds h WHERE h.drive = ?1 AND h.lane = ?2 AND `+liveOf("h")+`
+	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = ?1 AND o.stem = h.stem AND o.lane != h.lane AND `+liveOf("o")+` AND (o.held > h.held OR o.held = h.held AND o.lane < h.lane))),
 reach(name) AS (
 	SELECT ?2
 	UNION SELECT stem FROM held
-	UNION SELECT r.lane FROM held CROSS JOIN lane_holds r INDEXED BY lane_holds_stem ON r.drive = ?1 AND r.stem = held.stem WHERE r.down > 0 AND r.seen <= r.down AND r.successor = ''
+	UNION SELECT r.lane FROM held CROSS JOIN lane_holds r INDEXED BY lane_holds_stem ON r.drive = ?1 AND r.stem = held.stem WHERE r.down > 0 AND r.seen <= r.down AND r.successor = '' OR `+unstamped("r")+` AND EXISTS (`+goneSQL("r")+` AND gone.successor = '')
 	UNION SELECT r.lane FROM reach CROSS JOIN lane_holds r INDEXED BY lane_holds_successor ON r.drive = ?1 AND r.successor = reach.name WHERE r.successor != '' AND r.down > 0 AND r.seen <= r.down
 )
 SELECT name FROM reach WHERE name != ?2 ORDER BY name`, drive, lane)
@@ -275,7 +289,7 @@ func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []str
 	for cur := lane; ; {
 		var successor string
 		var down int64
-		err := s.db.QueryRowContext(ctx, "SELECT down, successor FROM lane_holds WHERE drive = ? AND lane = ? LIMIT 1", drive, cur).Scan(&down, &successor)
+		err := s.db.QueryRowContext(ctx, "SELECT down, successor FROM lane_holds WHERE drive = ? AND lane = ? ORDER BY down DESC LIMIT 1", drive, cur).Scan(&down, &successor)
 		if errors.Is(err, sql.ErrNoRows) {
 			return chain, standDown, nil
 		}
@@ -378,7 +392,7 @@ func (s *Store) waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane stri
 		return "", nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT o.lane, o.held, o.down, `+liveOf("o")+` FROM lane_holds h CROSS JOIN lane_holds o INDEXED BY lane_holds_stem ON o.drive = h.drive AND o.stem = h.stem WHERE h.drive = ? AND h.lane = ?
-UNION SELECT lane, held, down, `+liveSQL+` FROM lane_holds WHERE drive = ? AND lane IN (`+placeholders(len(names))+`)`,
+UNION SELECT lane, held, down, `+liveOf("lane_holds")+` FROM lane_holds WHERE drive = ? AND lane IN (`+placeholders(len(names))+`)`,
 		append([]any{drive, lane, drive}, toAny(names)...)...)
 	if err != nil {
 		return "", nil, fmt.Errorf("read the registry around %s on %s: %w", lane, drive, err)
@@ -400,7 +414,7 @@ UNION SELECT lane, held, down, `+liveSQL+` FROM lane_holds WHERE drive = ? AND l
 		case live:
 			otherLive = true
 		default:
-			downs[name] = down
+			downs[name] = max(downs[name], down)
 			lastDown = max(lastDown, down)
 		}
 	}
