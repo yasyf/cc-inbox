@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"path/filepath"
@@ -72,7 +73,13 @@ func HookHandler(st *store.Store, home string) http.Handler {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		p, err := hook.Read(r.Body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		captureHook(home, r.PathValue("event"), body)
+		p, err := hook.Read(bytes.NewReader(body))
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -86,17 +93,11 @@ func HookHandler(st *store.Store, home string) http.Handler {
 		view.BeforeCursorMove(reply.flush)
 		ctx, cancel := context.WithTimeout(r.Context(), hookRunBudget)
 		defer cancel()
-		switch event := r.PathValue("event"); event {
-		case "post-tool-use":
-			err = hook.PostToolUse(ctx, &view, p, func() (store.Window, error) { return parentWindow(ctx, &view, p) }, reply)
-		case "stop":
-			err = hook.Stop(ctx, &view, p, reply)
-		case "subagent-stop":
-			err = hook.SubagentStop(ctx, &view, p, reply)
-		default:
-			http.Error(w, "no hook "+event, http.StatusNotFound)
+		if !httpHook(r.PathValue("event")) {
+			http.Error(w, "no hook "+r.PathValue("event"), http.StatusNotFound)
 			return
 		}
+		err = runHookEvent(ctx, &view, r.PathValue("event"), p, reply)
 		if err != nil && !errors.Is(err, store.ErrUnconfirmed) && !store.Busy(err) && ctx.Err() == nil {
 			slog.Warn("cci daemon: a hook failed", "hook", r.PathValue("event"), "err", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -107,6 +108,21 @@ func HookHandler(st *store.Store, home string) http.Handler {
 		}
 	})
 	return mux
+}
+
+func httpHook(event string) bool {
+	return event == "post-tool-use" || event == "stop" || event == "subagent-stop"
+}
+
+func runHookEvent(ctx context.Context, st *store.Store, event string, p hook.Payload, w io.Writer) error {
+	switch event {
+	case "post-tool-use":
+		return hook.PostToolUse(ctx, st, p, func() (store.Window, error) { return parentWindow(ctx, st, p) }, w)
+	case "stop":
+		return hook.Stop(ctx, st, p, w)
+	default:
+		return hook.SubagentStop(ctx, st, p, w)
+	}
 }
 
 func parentWindow(ctx context.Context, st *store.Store, p hook.Payload) (store.Window, error) {

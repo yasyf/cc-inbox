@@ -41,6 +41,7 @@ type Filter struct {
 	Lanes          []string
 	To             string
 	BroadcastFloor string
+	broadcastAfter *int64
 	For            string
 	Aliases        []string
 	Addressed      string
@@ -106,7 +107,11 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		in := "(" + placeholders(len(names)) + ")"
 		all := "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all') AND lane NOT IN " + in
 		allParams := names
-		if f.BroadcastFloor != "" {
+		switch {
+		case f.broadcastAfter != nil:
+			all += " AND seq > ?"
+			allParams = append(slices.Clone(names), *f.broadcastAfter)
+		case f.BroadcastFloor != "":
 			all += " AND seq > COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0)"
 			allParams = append(slices.Clone(names), f.BroadcastFloor, f.Drive)
 		}
@@ -440,6 +445,19 @@ func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Recor
 		return nil, err
 	}
 	now := s.Now()
+	if w := s.window.current.Load(); w != nil {
+		if out, ok := w.answer(ctx, s, f, projection, now); ok {
+			return out, s.numbered(ctx, out)
+		}
+	}
+	out, err := s.selected(ctx, f, projection, now)
+	if err != nil {
+		return nil, err
+	}
+	return out, s.numbered(ctx, out)
+}
+
+func (s *Store) selected(ctx context.Context, f Filter, projection string, now time.Time) ([]Record, error) {
 	conn, err := s.rootAudienceConnectionAt(ctx, f, now)
 	if err != nil {
 		return nil, err
@@ -470,7 +488,7 @@ func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Recor
 		_ = rows.Close()
 		_ = conn.Close()
 	}
-	return out, s.numbered(ctx, out)
+	return out, nil
 }
 
 func (s *Store) selection(f Filter) (string, []any) {
