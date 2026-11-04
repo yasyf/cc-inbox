@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ const (
 	pushBatch    = 25
 	pullMax      = 10
 	logPage      = 100
+	logReaders   = 16
 	instanceLife = 24 * time.Hour
 	renewWithin  = 2 * time.Hour
 )
@@ -445,25 +447,28 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 		if err != nil {
 			return total, err
 		}
-		for more, readable := true, true; more; {
-			var (
-				rows []store.Row
-				read bool
-			)
-			if rows, after, more, read, err = l.page(ctx, drive, origin, after, logPage); err != nil {
-				return total, err
-			}
-			a, err := n.Store.Apply(ctx, rows, nil)
-			if err != nil {
-				return total, err
-			}
-			total.Inserted += a.Inserted
-			total.Duplicate += a.Duplicate
-			total.Buffered += a.Buffered
-			total.Released += a.Released
-			if readable = readable && read; readable {
-				if err := n.Store.SetCursor(ctx, cursor, drive, after); err != nil {
+		readable := true
+		for width, more := 1, true; more; width = logReaders {
+			for _, read := range l.pages(ctx, drive, origin, after, width) {
+				if read.err != nil {
+					return total, read.err
+				}
+				a, err := n.Store.Apply(ctx, read.rows, nil)
+				if err != nil {
 					return total, err
+				}
+				total.Inserted += a.Inserted
+				total.Duplicate += a.Duplicate
+				total.Buffered += a.Buffered
+				total.Released += a.Released
+				after = read.after
+				if readable = readable && read.readable; readable {
+					if err := n.Store.SetCursor(ctx, cursor, drive, after); err != nil {
+						return total, err
+					}
+				}
+				if more = read.more; !more {
+					break
 				}
 			}
 		}
@@ -559,6 +564,31 @@ func (n *Node) logReader(ctx context.Context) (logReader, error) {
 		slog.Warn("relay keyring holds an unusable wrap", "mesh", n.Config.Mesh, "err", err)
 	}
 	return logReader{n: n, keys: keys, members: members}, nil
+}
+
+type logRead struct {
+	rows     []store.Row
+	after    int64
+	more     bool
+	readable bool
+	err      error
+}
+
+// pages reads width consecutive pages of origin's log at once and returns them
+// oldest first. A page starts logPage sequence numbers past the one before, so
+// on an origin whose numbers are sparse on this drive pages overlap, which
+// Apply counts as duplicates, and never leave a hole.
+func (l logReader) pages(ctx context.Context, drive, origin string, after int64, width int) []logRead {
+	reads := make([]logRead, width)
+	var wg sync.WaitGroup
+	for i := range reads {
+		wg.Go(func() {
+			r := &reads[i]
+			r.rows, r.after, r.more, r.readable, r.err = l.page(ctx, drive, origin, after+int64(i*logPage), logPage)
+		})
+	}
+	wg.Wait()
+	return reads
 }
 
 func (l logReader) page(ctx context.Context, drive, origin string, after int64, limit int) ([]store.Row, int64, bool, bool, error) {

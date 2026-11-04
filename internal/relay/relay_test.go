@@ -370,6 +370,41 @@ func TestSyncBackfillsADriveFromTheLog(t *testing.T) {
 	}
 }
 
+func TestSyncReadsALongSparseLogWithoutAHoleAndInOrder(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	const records = 2000
+	for i := range records {
+		drive := "d"
+		if i%3 == 2 {
+			drive = "other"
+		}
+		testutil.Post(t, a.st, store.Record{Drive: drive, Kind: kinds.Note, Text: fmt.Sprintf("note %d", i)})
+	}
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a, b)
+	join(t, srv, late)
+	if err := a.node.Share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := late.node.Sync(context.Background(), "d"); err != nil {
+		t.Fatal(err)
+	}
+	var want []string
+	for i := range records {
+		if i%3 != 2 {
+			want = append(want, fmt.Sprintf("note %d", i))
+		}
+	}
+	got := texts(t, late.st)
+	if !slices.Equal(got, want) {
+		t.Fatalf("synced %d records, want %d in origin order", len(got), len(want))
+	}
+}
+
 func TestSyncDoesNotMovePastARecordItCouldNotReadYet(t *testing.T) {
 	srv, a, _, _ := mesh(t)
 	for i := range 3 {
