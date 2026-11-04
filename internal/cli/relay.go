@@ -20,7 +20,7 @@ import (
 
 func newRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relay", Short: "Replicate records end-to-end encrypted through the wide-area relay"}
-	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayPushCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd())
+	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd())
 	return cmd
 }
 
@@ -341,6 +341,7 @@ func newRelaySyncCmd() *cobra.Command {
 			if len(nodes) != 1 {
 				return errors.New("pass --mesh: this node joined more than one mesh")
 			}
+			nodes[0].Progress = cmd.ErrOrStderr()
 			a, err := nodes[0].Sync(cmd.Context(), drive)
 			if err != nil {
 				return err
@@ -356,6 +357,50 @@ func newRelaySyncCmd() *cobra.Command {
 	cmd.Flags().StringVar(&mesh, "mesh", "", "mesh to read (default: the only joined mesh)")
 	cmd.Flags().StringVar(&drive, "drive", "", "drive to backfill")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "print the apply counts as JSON")
+	_ = cmd.MarkFlagRequired("drive")
+	return cmd
+}
+
+func newRelayExportCmd() *cobra.Command {
+	var drive string
+	cmd := &cobra.Command{
+		Use:   "export",
+		Short: "Write a drive's records to stdout as gzipped JSON lines, for cci relay seed on a new node",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			return relay.ExportDrive(cmd.Context(), st, drive, cmd.OutOrStdout())
+		}),
+	}
+	cmd.Flags().StringVar(&drive, "drive", "", "drive to export")
+	_ = cmd.MarkFlagRequired("drive")
+	return cmd
+}
+
+func newRelaySeedCmd() *cobra.Command {
+	var mesh, drive string
+	cmd := &cobra.Command{
+		Use:   "seed",
+		Short: "Load a drive's records from cci relay export on stdin, printing progress, so relay sync reads only what arrived since",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			nodes, _, err := relayNodes(st, mesh)
+			if err != nil {
+				return err
+			}
+			if len(nodes) != 1 {
+				return errors.New("pass --mesh: this node joined more than one mesh")
+			}
+			nodes[0].Progress = cmd.ErrOrStderr()
+			a, err := nodes[0].Seed(cmd.Context(), drive, cmd.InOrStdin())
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s %s: %d new, %d duplicate, %d held, %d released\n", nodes[0].Config.Mesh, drive, a.Inserted, a.Duplicate, a.Buffered, a.Released)
+			return err
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", "", "mesh to seed (default: the only joined mesh)")
+	cmd.Flags().StringVar(&drive, "drive", "", "drive to seed")
 	_ = cmd.MarkFlagRequired("drive")
 	return cmd
 }

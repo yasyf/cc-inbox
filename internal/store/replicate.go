@@ -93,6 +93,26 @@ func (s *Store) Export(ctx context.Context, origin string, since int64, limit in
 	return out, rows.Err()
 }
 
+// VisitDriveExports visits drive's non-digest rows in this store's order, so a
+// reply nearly always follows the record it answers.
+func (s *Store) VisitDriveExports(ctx context.Context, drive string, visit func(Row) error) error {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records WHERE drive = ? AND kind != ? ORDER BY seq", drive, string(kinds.Digest))
+	if err != nil {
+		return fmt.Errorf("export %s: %w", drive, err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		row, err := s.scanExportRow(rows)
+		if err != nil {
+			return err
+		}
+		if err := visit(row); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
 // VisitNewestExports visits origin's non-digest rows after since, newest first, until visit returns false.
 func (s *Store) VisitNewestExports(ctx context.Context, origin string, since int64, visit func(Row) (bool, error)) error {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records INDEXED BY records_origin WHERE origin=? AND origin_seq>? AND kind!=? ORDER BY origin_seq DESC", origin, since, string(kinds.Digest))

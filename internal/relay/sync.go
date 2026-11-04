@@ -1,10 +1,12 @@
 package relay
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -26,6 +28,7 @@ import (
 
 const (
 	pushBatch    = 25
+	seedBatch    = 2000
 	pullMax      = 10
 	logPage      = 100
 	logReaders   = 16
@@ -45,6 +48,7 @@ type Node struct {
 	Config   Config
 	HTTP     *http.Client
 	Keyring  *Keyring
+	Progress io.Writer
 
 	servicePEM []byte
 }
@@ -448,16 +452,19 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 	if err != nil {
 		return total, err
 	}
-	for _, origin := range origins {
+	for i, origin := range origins {
 		cursor := syncCursor + n.Config.Mesh + ":" + origin
 		after, _, err := n.Store.Cursor(ctx, cursor, drive)
 		if err != nil {
 			return total, err
 		}
+		before := total
 		readable := true
-		for width, more := 1, true; more; width = logReaders {
+		for width, stride, more := 1, int64(logPage), true; more; width = logReaders {
 			var through int64
-			for _, read := range l.pages(ctx, drive, origin, after, width) {
+			start := after
+			used := stride
+			for i, read := range l.pages(ctx, drive, origin, start, width, used) {
 				if read.err != nil {
 					return total, read.err
 				}
@@ -473,7 +480,10 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 				if readable = readable && read.readable; readable {
 					through = after
 				}
-				if more = read.more; !more {
+				if i == 0 {
+					stride = max(logPage, after-start)
+				}
+				if more = read.more; !more || start+int64(i+1)*used > after {
 					break
 				}
 			}
@@ -484,8 +494,78 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 				return total, err
 			}
 		}
+		if n.Progress != nil {
+			_, _ = fmt.Fprintf(n.Progress, "origin %d of %d, %s: %d new, %d duplicate; %d new so far\n", i+1, len(origins), origin, total.Inserted-before.Inserted, total.Duplicate-before.Duplicate, total.Inserted)
+		}
 	}
 	return total, nil
+}
+
+// Seed applies a drive's rows from the gzipped JSON lines ExportDrive wrote, and
+// starts Sync where the copy stops, so a new node reads only what arrived since.
+// The caller trusts the node the copy came from: rows are applied unverified.
+func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Applied, error) {
+	var total store.Applied
+	unzipped, err := gzip.NewReader(from)
+	if err != nil {
+		return total, fmt.Errorf("seed: %w", err)
+	}
+	through := map[string]int64{}
+	decoder := json.NewDecoder(unzipped)
+	batch := make([]store.Row, 0, seedBatch)
+	flush := func() error {
+		a, err := n.Store.Apply(ctx, batch, nil)
+		if err != nil {
+			return err
+		}
+		total.Inserted += a.Inserted
+		total.Duplicate += a.Duplicate
+		total.Buffered += a.Buffered
+		total.Released += a.Released
+		batch = batch[:0]
+		if n.Progress != nil {
+			_, _ = fmt.Fprintf(n.Progress, "seeded %d new, %d duplicate, %d held\n", total.Inserted, total.Duplicate, total.Buffered)
+		}
+		return nil
+	}
+	for {
+		var row store.Row
+		err := decoder.Decode(&row)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return total, fmt.Errorf("seed: %w", err)
+		}
+		if row.Drive != drive {
+			return total, fmt.Errorf("seed: %s/%d is on drive %s, not %s", row.Origin, row.OriginSeq, row.Drive, drive)
+		}
+		through[row.Origin] = max(through[row.Origin], row.OriginSeq)
+		if batch = append(batch, row); len(batch) == seedBatch {
+			if err := flush(); err != nil {
+				return total, err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return total, err
+	}
+	for origin, seq := range through {
+		if err := n.Store.SetCursor(ctx, syncCursor+n.Config.Mesh+":"+origin, drive, seq); err != nil && !errors.Is(err, store.ErrUnconfirmed) {
+			return total, err
+		}
+	}
+	return total, nil
+}
+
+// ExportDrive writes a drive's rows as gzipped JSON lines for Seed on another node.
+func ExportDrive(ctx context.Context, st *store.Store, drive string, to io.Writer) error {
+	zipped := gzip.NewWriter(to)
+	encoder := json.NewEncoder(zipped)
+	if err := st.VisitDriveExports(ctx, drive, func(row store.Row) error { return encoder.Encode(row) }); err != nil {
+		return err
+	}
+	return zipped.Close()
 }
 
 // Find reads the record num names on drive from the relay's log: an owner's
@@ -586,17 +666,18 @@ type logRead struct {
 	err      error
 }
 
-// pages reads width consecutive pages of origin's log at once and returns them
-// oldest first. A page starts logPage sequence numbers past the one before, so
-// on an origin whose numbers are sparse on this drive pages overlap, which
-// Apply counts as duplicates, and never leave a hole.
-func (l logReader) pages(ctx context.Context, drive, origin string, after int64, width int) []logRead {
+// pages reads width pages of origin's log at once and returns them oldest
+// first. A page starts stride sequence numbers past the one before. Sync sets
+// stride to the numbers its last page spanned, so an origin sparse on this
+// drive reads no page twice, and stops at the first page that starts past where
+// the one before ended, so a denser stretch leaves no hole.
+func (l logReader) pages(ctx context.Context, drive, origin string, after int64, width int, stride int64) []logRead {
 	reads := make([]logRead, width)
 	var wg sync.WaitGroup
 	for i := range reads {
 		wg.Go(func() {
 			r := &reads[i]
-			r.rows, r.after, r.more, r.readable, r.err = l.page(ctx, drive, origin, after+int64(i*logPage), logPage)
+			r.rows, r.after, r.more, r.readable, r.err = l.page(ctx, drive, origin, after+int64(i)*stride, logPage)
 		})
 	}
 	wg.Wait()
