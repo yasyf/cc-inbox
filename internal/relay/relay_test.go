@@ -451,6 +451,38 @@ func TestSyncOfASparseLogReadsFewDuplicates(t *testing.T) {
 	}
 }
 
+func TestASeedCutOffPartwayKeepsWhatItReadAndSyncReadsOnlyTheRest(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	const records = 500
+	for i := range records {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("note %d of a long drive with enough text to fill a gzip block %d", i, i*i)})
+	}
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	var copied bytes.Buffer
+	if err := relay.ExportDrive(context.Background(), a.st, "d", &copied); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a, b)
+	join(t, srv, late)
+	if err := a.node.Share(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	seeded, err := late.node.Seed(context.Background(), "d", bytes.NewReader(copied.Bytes()[:copied.Len()/2]))
+	if err == nil || seeded.Inserted == 0 || seeded.Inserted == records {
+		t.Fatalf("seed of half a copy = %+v, %v; want an error and some rows", seeded, err)
+	}
+
+	synced, err := late.node.Sync(context.Background(), "d")
+	if err != nil || seeded.Inserted+synced.Inserted != records || synced.Duplicate >= seeded.Inserted {
+		t.Fatalf("seed %+v then sync %+v, %v; want %d in all and few rows read twice", seeded, synced, err, records)
+	}
+}
+
 func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
 	srv, a, b, _ := mesh(t)
 	for i := range 5 {

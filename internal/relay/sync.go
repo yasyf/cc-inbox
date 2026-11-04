@@ -503,6 +503,7 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 
 // Seed applies a drive's rows from the gzipped JSON lines ExportDrive wrote, and
 // starts Sync where the copy stops, so a new node reads only what arrived since.
+// A copy cut off partway keeps every row it read, and Sync resumes from those.
 // The caller trusts the node the copy came from: rows are applied unverified.
 func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Applied, error) {
 	var total store.Applied
@@ -510,7 +511,7 @@ func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Ap
 	if err != nil {
 		return total, fmt.Errorf("seed: %w", err)
 	}
-	through := map[string]int64{}
+	through, saved := map[string]int64{}, map[string]int64{}
 	decoder := json.NewDecoder(unzipped)
 	batch := make([]store.Row, 0, seedBatch)
 	flush := func() error {
@@ -523,6 +524,15 @@ func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Ap
 		total.Buffered += a.Buffered
 		total.Released += a.Released
 		batch = batch[:0]
+		for origin, seq := range through {
+			if seq <= saved[origin] {
+				continue
+			}
+			if err := n.Store.SetCursor(ctx, syncCursor+n.Config.Mesh+":"+origin, drive, seq); err != nil && !errors.Is(err, store.ErrUnconfirmed) {
+				return err
+			}
+			saved[origin] = seq
+		}
 		if n.Progress != nil {
 			_, _ = fmt.Fprintf(n.Progress, "seeded %d new, %d duplicate, %d held\n", total.Inserted, total.Duplicate, total.Buffered)
 		}
@@ -532,10 +542,12 @@ func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Ap
 		var row store.Row
 		err := decoder.Decode(&row)
 		if errors.Is(err, io.EOF) {
-			break
+			err := flush()
+			return total, err
 		}
 		if err != nil {
-			return total, fmt.Errorf("seed: %w", err)
+			err = errors.Join(fmt.Errorf("seed: %w", err), flush())
+			return total, err
 		}
 		if row.Drive != drive {
 			return total, fmt.Errorf("seed: %s/%d is on drive %s, not %s", row.Origin, row.OriginSeq, row.Drive, drive)
@@ -547,15 +559,6 @@ func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Ap
 			}
 		}
 	}
-	if err := flush(); err != nil {
-		return total, err
-	}
-	for origin, seq := range through {
-		if err := n.Store.SetCursor(ctx, syncCursor+n.Config.Mesh+":"+origin, drive, seq); err != nil && !errors.Is(err, store.ErrUnconfirmed) {
-			return total, err
-		}
-	}
-	return total, nil
 }
 
 // ExportDrive writes a drive's rows as gzipped JSON lines for Seed on another node.
