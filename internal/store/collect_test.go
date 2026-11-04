@@ -143,44 +143,94 @@ func TestCollectKeepsAParentAFreshReplyNames(t *testing.T) {
 
 func TestCollectSparesWhatARecordArrivingDuringThePassNames(t *testing.T) {
 	st, clock := testutil.Store(t)
-	var last store.Record
+	var first store.Record
 	for i := range 1001 {
-		last = testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "note " + strconv.Itoa(i)})
+		note := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "note " + strconv.Itoa(i)})
+		if i == 0 {
+			first = note
+		}
 	}
 	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newest"})
 	var reply store.Record
 	res, err := st.Collect(t.Context(), func(context.Context) error {
 		if reply.Seq == 0 {
-			reply = testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "late reply", Re: last.Seq})
+			reply = testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "late reply", Re: first.Seq})
 		}
 		return nil
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !exists(t, st, last.Seq) || res.Archived != 1000 {
-		t.Fatalf("named record kept = %t, archived = %d", exists(t, st, last.Seq), res.Archived)
+	if !exists(t, st, first.Seq) || res.Archived != 1000 {
+		t.Fatalf("named record kept = %t, archived = %d", exists(t, st, first.Seq), res.Archived)
 	}
 }
 
-func TestCollectKeepsALandedWhileItsOpenedStays(t *testing.T) {
+func TestCollectKeepsAnUnlandedPRAndForgetsALandedOne(t *testing.T) {
 	st, clock := testutil.Store(t)
-	pr := store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 7}}}
-	opened := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Opened, Text: "opened", Refs: pr})
-	landed := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Landed, Text: "landed", Refs: pr})
-	clock.Advance(store.HotWindow + time.Hour)
+	landedPR := store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 7}}}
+	opened := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Opened, Text: "opened 7", Refs: landedPR})
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Landed, Text: "landed 7", Refs: landedPR})
+	unlanded := testutil.Post(t, st, store.Record{Lane: "b", Kind: kinds.Opened, Text: "opened 8", Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 8}}}})
+	testutil.Post(t, st, store.Record{Lane: "b", Kind: kinds.Note, Text: "newer"})
+	clock.Advance(40 * 24 * time.Hour)
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
 	}
-	if !exists(t, st, opened.Seq) || !exists(t, st, landed.Seq) {
-		t.Fatalf("opened kept = %t, landed kept = %t", exists(t, st, opened.Seq), exists(t, st, landed.Seq))
+	if exists(t, st, opened.Seq) || !exists(t, st, unlanded.Seq) {
+		t.Fatalf("landed opened kept = %t, unlanded opened kept = %t", exists(t, st, opened.Seq), exists(t, st, unlanded.Seq))
 	}
-	stillOpen, err := st.OpenPR(t.Context(), "d", "a")
+	for lane, want := range map[string]bool{"a": false, "b": true} {
+		got, err := st.OpenPR(t.Context(), "d", lane)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != want {
+			t.Errorf("OpenPR(%s) = %t, want %t", lane, got, want)
+		}
+	}
+}
+
+func TestCollectKeepsALaneNewestRecord(t *testing.T) {
+	st, clock := testutil.Store(t)
+	older := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "older"})
+	newest := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newest"})
+	clock.Advance(40 * 24 * time.Hour)
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, st, older.Seq) || !exists(t, st, newest.Seq) {
+		t.Fatalf("older kept = %t, newest kept = %t", exists(t, st, older.Seq), exists(t, st, newest.Seq))
+	}
+}
+
+func TestCollectKeepsARecordWhoseExpiryIsAhead(t *testing.T) {
+	st, clock := testutil.Store(t)
+	note, _, err := st.Post(t.Context(), store.Record{Drive: "d", Lane: "a", Kind: kinds.Note, Text: "long lived"}, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stillOpen {
-		t.Fatal("collecting reopened a landed PR")
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newer"})
+	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newest"})
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	if !exists(t, st, note.Seq) {
+		t.Fatal("a record went before its expiry")
+	}
+}
+
+func TestCollectRetiresASilentDriveWhole(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ask := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Ask, Text: "nobody came back", To: []string{"root"}})
+	clock.Advance(91 * 24 * time.Hour)
+	if _, err := st.Collect(t.Context(), noPause); err != nil {
+		t.Fatal(err)
+	}
+	if exists(t, st, ask.Seq) {
+		t.Fatal("a drive silent for 90 days kept its open ask")
 	}
 }
 
@@ -188,7 +238,8 @@ func TestCollectKeepsTheNewestSpawnOfEachLane(t *testing.T) {
 	st, clock := testutil.Store(t)
 	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn x", Refs: store.Refs{Lanes: []string{"x"}}})
 	second := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Spawn, Text: "spawn y", Refs: store.Refs{Lanes: []string{"y"}}})
-	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "newer"})
+	clock.Advance(40 * 24 * time.Hour)
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
 	}
@@ -201,6 +252,7 @@ func TestCollectAdvancesCompactedThroughForLocalRecords(t *testing.T) {
 	st, clock := testutil.Store(t)
 	note := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "local"})
 	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newer"})
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +272,7 @@ func TestCollectAdvancesCompactedThroughForLocalRecords(t *testing.T) {
 
 func TestCollectPublishesASegmentPerPass(t *testing.T) {
 	st, clock := testutil.Store(t)
-	for _, text := range []string{"first pass", "second pass"} {
+	for _, text := range []string{"first pass", "second pass", "third pass"} {
 		testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: text})
 		clock.Advance(store.HotWindow + time.Hour)
 		if _, err := st.Collect(t.Context(), noPause); err != nil {
@@ -237,6 +289,7 @@ func TestCollectKeepsTheNewestHeadForThirtyDays(t *testing.T) {
 	st, clock := testutil.Store(t)
 	older := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Head, Text: "older", Topic: "t"})
 	newest := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Head, Text: "newest", Topic: "t"})
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newer"})
 	clock.Advance(store.HotWindow + time.Hour)
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
@@ -260,6 +313,7 @@ func TestCollectDoesNotLetAForeignRowReturn(t *testing.T) {
 		t.Fatal(err)
 	}
 	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "elsewhere", Kind: kinds.Note, Text: "newer"})
 	res, err := st.Collect(t.Context(), noPause)
 	if err != nil {
 		t.Fatal(err)
@@ -310,12 +364,14 @@ func TestCollectArchivesEveryRecordItDeletes(t *testing.T) {
 	st, clock := testutil.Store(t)
 	note := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "keep a copy of this"})
 	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newer"})
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
 	}
 	long := strings.Repeat("a long drive name ", 40)
 	testutil.Post(t, st, store.Record{Drive: long, Lane: "a", Kind: kinds.Note, Text: "from a drive named past a file name's limit"})
 	clock.Advance(store.HotWindow + time.Hour)
+	testutil.Post(t, st, store.Record{Drive: long, Lane: "a", Kind: kinds.Note, Text: "newer"})
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
 	}
@@ -345,6 +401,7 @@ func TestCollectLeavesWhatAPeerHasNotAcknowledged(t *testing.T) {
 	st, clock := testutil.Store(t)
 	acked := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "acknowledged"})
 	unacked := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "not acknowledged"})
+	testutil.Post(t, st, store.Record{Lane: "b", Kind: kinds.Note, Text: "other lane"})
 	if err := st.Ack(t.Context(), "peer", acked.Seq); err != nil {
 		t.Fatal(err)
 	}

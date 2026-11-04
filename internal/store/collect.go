@@ -30,6 +30,7 @@ const (
 	sessionWindow    = 30 * 24 * time.Hour
 	pinnedWindow     = 30 * 24 * time.Hour
 	archiveWindow    = 180 * 24 * time.Hour
+	retiredWindow    = 90 * 24 * time.Hour
 	blobGrace        = time.Hour
 	collectBatch     = 1000
 	vacuumFreeRatio  = 10
@@ -53,25 +54,26 @@ type Collected struct {
 	Checkpointed bool
 }
 
-// Collect deletes the records past their retention, oldest first, after
-// publishing each to a complete archive segment, then returns the freed pages to
-// the file system. Records that name each other go or stay together, so a kept
-// record never loses its parent, its closer or its replies. A record stays while
-// it is open, while an opener sharing its topic, stack or target stays, and while
-// a peer has not acknowledged it. The newest state or report of its identity
-// stays until HotWindow, and the newest head, contract, opened, spawn or
-// stand-down until 30 days. pause runs between batches, so a writer never waits
-// on more than one, and a record that arrives during the pass spares whatever it
-// names.
+// Collect deletes the records past their retention, newest first so a reply goes
+// before its parent, after publishing each to a complete archive segment, then
+// returns the freed pages to the file system. Records that name each other go or
+// stay together, so a kept record never loses its parent, its closer or its
+// replies. A record stays while it is open, while an opener sharing its topic,
+// stack or target stays, while a peer or a buffered row needs it, and while it is
+// the answer to a lane's newest record, newest spawn or unlanded PR. The newest
+// state or report of its identity stays until HotWindow, and the newest head,
+// contract or stand-down until 30 days. A drive silent for 90 days goes whole.
+// pause runs between batches, so a writer never waits on more than one, and a
+// record that arrives during the pass spares whatever it names.
 func (s *Store) Collect(ctx context.Context, pause func(context.Context) error) (Collected, error) {
 	var res Collected
 	now := s.Now()
-	window := collectWindow{hot: now.Add(-HotWindow).UnixMilli(), expired: now.Add(-expiredGrace).UnixMilli(), pinned: now.Add(-pinnedWindow).UnixMilli()}
+	window := collectWindow{hot: now.Add(-HotWindow).UnixMilli(), expired: now.Add(-expiredGrace).UnixMilli(), pinned: now.Add(-pinnedWindow).UnixMilli(), retired: now.Add(-retiredWindow).UnixMilli()}
 	var head sql.NullInt64
 	if err := s.db.QueryRowContext(ctx, "SELECT MAX(seq) FROM records").Scan(&head); err != nil {
 		return res, fmt.Errorf("read the newest record: %w", err)
 	}
-	doomed, skipped, err := s.collectable(ctx, window, head.Int64)
+	doomed, skipped, keep, err := s.collectable(ctx, window, head.Int64)
 	if err != nil {
 		return res, err
 	}
@@ -80,7 +82,7 @@ func (s *Store) Collect(ctx context.Context, pause func(context.Context) error) 
 		return res, err
 	}
 	for batch := range slices.Chunk(doomed, collectBatch) {
-		forgotten, err := s.forget(ctx, batch, head.Int64)
+		forgotten, err := s.forget(ctx, batch, head.Int64, keep)
 		if err != nil {
 			return res, err
 		}
@@ -99,19 +101,23 @@ func (s *Store) Collect(ctx context.Context, pause func(context.Context) error) 
 	return res, err
 }
 
-var newestStays = []kinds.Kind{kinds.Head, kinds.Contract, kinds.Opened, kinds.Spawn, kinds.StandDown}
+const spawnTopic = "spawn:"
+
+var newestStays = []kinds.Kind{kinds.Head, kinds.Contract, kinds.StandDown}
 
 type recordQuerier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
 type collectWindow struct {
-	hot, expired, pinned int64
+	hot, expired, pinned, retired int64
 }
 
 type collectRow struct {
 	seq, re, resolves, at, originSeq int64
-	drive, kind, lane, origin        string
+	drive, kind, lane, origin, hash  string
+	spawnOf                          string
+	handoffToCCN                     bool
 	also                             []int64
 	opens, closes                    []string
 	aged                             bool
@@ -129,7 +135,7 @@ func (r collectRow) pinned(w collectWindow) bool {
 }
 
 func (w collectWindow) eachRecord(ctx context.Context, q recordQuerier, where string, arg int64, each func(collectRow)) error {
-	rows, err := q.QueryContext(ctx, `SELECT seq, re, resolves, COALESCE(also_resolves, ''), at, at < ? OR COALESCE(expires_at < ?, 0), drive, kind, lane, origin, origin_seq, topic, refs
+	rows, err := q.QueryContext(ctx, `SELECT seq, re, resolves, COALESCE(also_resolves, ''), at, CASE WHEN expires_at IS NULL THEN at < ? ELSE expires_at < ? END, drive, kind, lane, origin, origin_seq, hash, topic, refs
 FROM records WHERE `+where, w.hot, w.expired, arg)
 	if err != nil {
 		return fmt.Errorf("read records: %w", err)
@@ -140,7 +146,7 @@ FROM records WHERE `+where, w.hot, w.expired, arg)
 			r                collectRow
 			also, topic, raw string
 		)
-		if err := rows.Scan(&r.seq, &r.re, &r.resolves, &also, &r.at, &r.aged, &r.drive, &r.kind, &r.lane, &r.origin, &r.originSeq, &topic, &raw); err != nil {
+		if err := rows.Scan(&r.seq, &r.re, &r.resolves, &also, &r.at, &r.aged, &r.drive, &r.kind, &r.lane, &r.origin, &r.originSeq, &r.hash, &topic, &raw); err != nil {
 			return fmt.Errorf("scan record: %w", err)
 		}
 		if also != "" && also != "[]" && json.Unmarshal([]byte(also), &r.also) != nil {
@@ -148,9 +154,16 @@ FROM records WHERE `+where, w.hot, w.expired, arg)
 		}
 		kind := kinds.Kind(r.kind)
 		opens, closes := slices.Contains(kinds.Openers(), kind) || kind == kinds.Opened, slices.Contains(kinds.Closers(), kind) || kind == kinds.Landed
-		if opens || closes {
+		if kind == kinds.State && strings.HasPrefix(topic, spawnTopic) {
+			r.spawnOf = strings.TrimPrefix(topic, spawnTopic)
+		}
+		if opens || closes || kind == kinds.Spawn || kind == kinds.Handoff {
 			var refs Refs
 			_ = json.Unmarshal([]byte(raw), &refs)
+			if kind == kinds.Spawn && len(refs.Lanes) > 0 {
+				r.spawnOf = refs.Lanes[0]
+			}
+			r.handoffToCCN = kind == kinds.Handoff && refs.CCN != ""
 			keys := closureKeys(r.lane, topic, kind, refs)
 			if opens {
 				r.opens = keys
@@ -183,6 +196,14 @@ func closureKeys(lane, topic string, kind kinds.Kind, refs Refs) []string {
 		keys = append(keys, "target:"+target)
 	}
 	return keys
+}
+
+func (r collectRow) showsLaneTurn() bool {
+	switch kinds.Kind(r.kind) {
+	case kinds.Claim, kinds.Peer, kinds.Digest:
+		return false
+	}
+	return !r.handoffToCCN
 }
 
 func driveKey(drive, key string) string {
@@ -226,10 +247,25 @@ func (k *retention) spread() {
 	}
 }
 
-func (s *Store) collectable(ctx context.Context, w collectWindow, head int64) ([]collectRow, []string, error) {
+func (s *Store) collectable(ctx context.Context, w collectWindow, head int64) ([]collectRow, []string, *retention, error) {
 	k := &retention{aged: map[int64]collectRow{}, referrers: map[int64][]int64{}, closers: map[string][]int64{}, kept: map[int64]bool{}}
 	var fresh []collectRow
+	newest := map[string]int64{}
+	spoke := map[string]int64{}
+	landed := map[string]int64{}
 	err := w.eachRecord(ctx, s.db, "seq <= ?", head, func(r collectRow) {
+		spoke[r.drive] = max(spoke[r.drive], r.at)
+		if r.showsLaneTurn() {
+			newest[driveKey(r.drive, "lane:"+r.lane)] = max(newest[driveKey(r.drive, "lane:"+r.lane)], r.seq)
+		}
+		if r.spawnOf != "" {
+			newest[driveKey(r.drive, "spawn:"+r.spawnOf)] = max(newest[driveKey(r.drive, "spawn:"+r.spawnOf)], r.seq)
+		}
+		if r.kind == string(kinds.Landed) {
+			for _, key := range r.closes {
+				landed[driveKey(r.drive, key)] = max(landed[driveKey(r.drive, key)], r.seq)
+			}
+		}
 		if !r.aged {
 			if r.re != 0 || r.resolves != 0 || len(r.also) > 0 || len(r.opens) > 0 {
 				fresh = append(fresh, collectRow{re: r.re, resolves: r.resolves, also: r.also, drive: r.drive, opens: r.opens})
@@ -247,20 +283,20 @@ func (s *Store) collectable(ctx context.Context, w collectWindow, head int64) ([
 		}
 	})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	floor, held, err := s.compactionFloor(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	open := map[string]map[int64]bool{}
 	skipped := map[string]bool{}
-	var pinned []int64
+	var pinned, outside []int64
 	for _, r := range k.aged {
-		if _, read := open[r.drive]; !read && !skipped[r.drive] {
+		if _, read := open[r.drive]; !read && !skipped[r.drive] && spoke[r.drive] >= w.retired {
 			seqs, err := s.openAmong(ctx, r.drive)
 			if ctx.Err() != nil {
-				return nil, nil, ctx.Err()
+				return nil, nil, nil, ctx.Err()
 			}
 			if err != nil {
 				skipped[r.drive] = true
@@ -271,14 +307,31 @@ func (s *Store) collectable(ctx context.Context, w collectWindow, head int64) ([
 		if r.pinned(w) {
 			pinned = append(pinned, r.seq)
 		}
+		for _, target := range r.targets() {
+			if _, aged := k.aged[target]; !aged && target != 0 {
+				outside = append(outside, target)
+			}
+		}
 	}
 	replaced, err := s.supersededAmong(ctx, pinned)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+	live, err := s.liveAmong(ctx, outside)
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	for _, r := range k.aged {
 		switch {
-		case r.kind == string(kinds.Digest), r.kind == string(kinds.Incident), skipped[r.drive], open[r.drive][r.seq], held && r.seq > floor, r.pinned(w) && !replaced[r.seq]:
+		case held && r.seq > floor,
+			slices.ContainsFunc(r.targets(), func(target int64) bool { return live[target] }):
+			k.keep(r.seq)
+		case spoke[r.drive] < w.retired:
+		case r.kind == string(kinds.Digest), r.kind == string(kinds.Incident), skipped[r.drive], open[r.drive][r.seq],
+			r.pinned(w) && !replaced[r.seq],
+			r.showsLaneTurn() && newest[driveKey(r.drive, "lane:"+r.lane)] == r.seq,
+			r.spawnOf != "" && newest[driveKey(r.drive, "spawn:"+r.spawnOf)] == r.seq,
+			r.kind == string(kinds.Opened) && slices.ContainsFunc(r.opens, func(key string) bool { return landed[driveKey(r.drive, key)] < r.seq }):
 			k.keep(r.seq)
 		}
 	}
@@ -288,31 +341,75 @@ func (s *Store) collectable(ctx context.Context, w collectWindow, head int64) ([
 		}
 		k.keepClosers(r.drive, r.opens)
 	}
-	var outside []int64
-	for _, r := range k.aged {
-		for _, target := range r.targets() {
-			if _, aged := k.aged[target]; !aged && target != 0 {
-				outside = append(outside, target)
-			}
-		}
-	}
-	live, err := s.liveAmong(ctx, outside)
+	buffered, err := pendingTargets(ctx, s.db)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	for _, r := range k.aged {
-		if slices.ContainsFunc(r.targets(), func(target int64) bool { return live[target] }) {
-			k.keep(r.seq)
-		}
+	for _, seq := range buffered {
+		k.keep(seq)
 	}
 	k.spread()
 	doomed := make([]collectRow, 0, len(k.aged)-len(k.kept))
-	for _, seq := range slices.Sorted(maps.Keys(k.aged)) {
+	for _, seq := range slices.Backward(slices.Sorted(maps.Keys(k.aged))) {
 		if !k.kept[seq] {
 			doomed = append(doomed, k.aged[seq])
 		}
 	}
-	return doomed, slices.Sorted(maps.Keys(skipped)), nil
+	return doomed, slices.Sorted(maps.Keys(skipped)), k, nil
+}
+
+func pendingTargets(ctx context.Context, q recordQuerier) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, "SELECT row FROM pending")
+	if err != nil {
+		return nil, fmt.Errorf("read buffered rows: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var pointers []Pointer
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("scan buffered row: %w", err)
+		}
+		var row Row
+		if err := json.Unmarshal([]byte(raw), &row); err != nil {
+			return nil, fmt.Errorf("decode buffered row: %w", err)
+		}
+		pointers = append(pointers, row.AlsoResolves...)
+		for _, p := range []*Pointer{row.Re, row.Resolves} {
+			if p != nil {
+				pointers = append(pointers, *p)
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	var seqs []int64
+	for _, p := range pointers {
+		found, err := pointerSeqs(ctx, q, p)
+		if err != nil {
+			return nil, err
+		}
+		seqs = append(seqs, found...)
+	}
+	return seqs, nil
+}
+
+func pointerSeqs(ctx context.Context, q recordQuerier, p Pointer) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, "SELECT seq FROM records WHERE origin = ?1 AND origin_seq = ?2 UNION SELECT seq FROM aliases WHERE origin = ?1 AND origin_seq = ?2", p.Origin, p.Seq)
+	if err != nil {
+		return nil, fmt.Errorf("resolve buffered reference: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var seqs []int64
+	for rows.Next() {
+		var seq int64
+		if err := rows.Scan(&seq); err != nil {
+			return nil, fmt.Errorf("scan buffered reference: %w", err)
+		}
+		seqs = append(seqs, seq)
+	}
+	return seqs, rows.Err()
 }
 
 func (s *Store) supersededAmong(ctx context.Context, seqs []int64) (map[int64]bool, error) {
@@ -497,12 +594,11 @@ func (s *Store) blobBody(path string) (string, bool) {
 	return string(body), true
 }
 
-func (s *Store) spared(ctx context.Context, tx *sql.Tx, rows []collectRow, head int64) ([]collectRow, error) {
-	named := map[int64]bool{}
+func (s *Store) spared(ctx context.Context, tx *sql.Tx, rows []collectRow, head int64, k *retention) ([]collectRow, error) {
 	opened := map[string]bool{}
 	if err := (collectWindow{}).eachRecord(ctx, tx, "seq > ?", head, func(r collectRow) {
 		for _, target := range r.targets() {
-			named[target] = true
+			k.keep(target)
 		}
 		for _, key := range r.opens {
 			opened[driveKey(r.drive, key)] = true
@@ -510,32 +606,43 @@ func (s *Store) spared(ctx context.Context, tx *sql.Tx, rows []collectRow, head 
 	}); err != nil {
 		return nil, err
 	}
+	buffered, err := pendingTargets(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	for _, seq := range buffered {
+		k.keep(seq)
+	}
 	ids, err := json.Marshal(collectedSeqs(rows))
 	if err != nil {
 		return nil, fmt.Errorf("encode forgotten records: %w", err)
 	}
-	current, err := tx.QueryContext(ctx, "SELECT seq, kind FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids))
+	current, err := tx.QueryContext(ctx, "SELECT seq, hash FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids))
 	if err != nil {
-		return nil, fmt.Errorf("read forgotten kinds: %w", err)
+		return nil, fmt.Errorf("read forgotten versions: %w", err)
 	}
 	defer func() { _ = current.Close() }()
 	stored := make(map[int64]string, len(rows))
 	for current.Next() {
 		var (
 			seq  int64
-			kind string
+			hash string
 		)
-		if err := current.Scan(&seq, &kind); err != nil {
-			return nil, fmt.Errorf("scan forgotten kind: %w", err)
+		if err := current.Scan(&seq, &hash); err != nil {
+			return nil, fmt.Errorf("scan forgotten version: %w", err)
 		}
-		stored[seq] = kind
+		stored[seq] = hash
 	}
 	if err := current.Err(); err != nil {
 		return nil, err
 	}
-	return slices.DeleteFunc(rows, func(r collectRow) bool {
-		return stored[r.seq] != r.kind || named[r.seq] || slices.ContainsFunc(r.closes, func(key string) bool { return opened[driveKey(r.drive, key)] })
-	}), nil
+	for _, r := range rows {
+		if stored[r.seq] != r.hash || slices.ContainsFunc(r.closes, func(key string) bool { return opened[driveKey(r.drive, key)] }) {
+			k.keep(r.seq)
+		}
+	}
+	k.spread()
+	return slices.DeleteFunc(rows, func(r collectRow) bool { return k.kept[r.seq] }), nil
 }
 
 func collectedSeqs(rows []collectRow) []int64 {
@@ -546,13 +653,13 @@ func collectedSeqs(rows []collectRow) []int64 {
 	return seqs
 }
 
-func (s *Store) forget(ctx context.Context, rows []collectRow, head int64) (int, error) {
+func (s *Store) forget(ctx context.Context, rows []collectRow, head int64, k *retention) (int, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin forget: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err = s.spared(ctx, tx, rows, head)
+	rows, err = s.spared(ctx, tx, rows, head, k)
 	if err != nil {
 		return 0, err
 	}
@@ -670,11 +777,11 @@ func (s *Store) checkpoint(ctx context.Context) (bool, error) {
 // archives past their window. A blob stays for an hour, since a post writes it
 // before its record.
 func (s *Store) SweepFiles(ctx context.Context) (blobs, archives int, err error) {
-	named, err := s.blobsNamed(ctx)
+	queued, err := s.queuedWrites()
 	if err != nil {
 		return 0, 0, err
 	}
-	queued, err := s.queuedWrites()
+	named, err := s.blobsNamed(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
