@@ -5,7 +5,7 @@ import "testing"
 func TestSelectedClosureProjectionDeduplicatesRefAtomsAcrossPaths(t *testing.T) {
 	st, _ := openStore(t)
 	opener := selectedPost(t, st, Record{Kind: "ask", Text: "selected", Refs: Refs{Stacks: []string{"a/api"}}})
-	closer := selectedPost(t, st, Record{Kind: "answer", Text: "closer", Topic: "shared", Refs: Refs{Stacks: []string{"a/api", "a/api"}, Targets: []string{"a/api"}}})
+	closer := selectedPost(t, st, Record{Lane: "api", Kind: "answer", Text: "closer", Topic: "shared", Refs: Refs{Stacks: []string{"a/api", "a/api"}, Targets: []string{"a/api"}}})
 	assertSelectedOpen(t, st, opener.Seq, false)
 	assertKeys := func() {
 		t.Helper()

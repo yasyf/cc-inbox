@@ -1,6 +1,7 @@
 package store
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"os"
@@ -14,7 +15,7 @@ import (
 
 func selectedPost(t *testing.T, st *Store, r Record) Record {
 	t.Helper()
-	r.Drive, r.Lane, r.Source = "d", "lane", "post"
+	r.Drive, r.Lane, r.Source = "d", cmp.Or(r.Lane, "lane"), "post"
 	got, _, err := st.Post(context.Background(), r, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -34,7 +35,7 @@ func TestSelectedClosureKeysFollowRawWriterMutations(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openStore(t)
 	opener := selectedPost(t, st, Record{Kind: "ask", Text: "selected"})
-	closer := selectedPost(t, st, Record{Kind: "answer", Text: "closer", Re: opener.Seq})
+	closer := selectedPost(t, st, Record{Lane: "api", Kind: "answer", Text: "closer", Re: opener.Seq})
 	assertSelectedOpen(t, st, opener.Seq, false)
 	for _, step := range []struct {
 		query string

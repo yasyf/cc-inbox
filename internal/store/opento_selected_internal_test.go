@@ -16,8 +16,8 @@ func TestOpenToSelectedClosureMatchesAllAddressedOpeners(t *testing.T) {
 	for i := range 1001 {
 		selectedPost(t, st, Record{Kind: kinds.Ask, Text: fmt.Sprint(i), To: []string{"api"}, Topic: fmt.Sprintf("topic-%d", i)})
 	}
-	selectedPost(t, st, Record{Kind: kinds.Answer, Text: "answer", Re: 1})
-	selectedPost(t, st, Record{Kind: kinds.Answer, Text: "topic", Topic: "topic-1"})
+	selectedPost(t, st, Record{Lane: "api", Kind: kinds.Answer, Text: "answer", Re: 1})
+	selectedPost(t, st, Record{Lane: "api", Kind: kinds.Answer, Text: "topic", Topic: "topic-1"})
 	if _, err := st.db.ExecContext(ctx, `INSERT INTO records(drive,lane,kind,at,text,also_resolves,source,hash) VALUES('foreign','resolver','note',1,'resolve','[3]','post','resolve')`); err != nil {
 		t.Fatal(err)
 	}
