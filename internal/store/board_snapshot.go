@@ -103,6 +103,19 @@ func (s *BoardSnapshot) OpenAmong(ctx context.Context, drive string, seqs []int6
 	return s.unclosedAmong(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return !o.Tracked() }))
 }
 
+// OpenSeqsAmong is the seqs of OpenAmong's answer.
+func (s *BoardSnapshot) OpenSeqsAmong(ctx context.Context, drive string, seqs []int64) ([]int64, error) {
+	open, err := s.OpenAmong(ctx, drive, seqs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int64, len(open))
+	for i, o := range open {
+		out[i] = o.Seq
+	}
+	return out, nil
+}
+
 func (s *BoardSnapshot) openersAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
 	openers := kinds.Openers()
 	ids, _ := json.Marshal(seqs)

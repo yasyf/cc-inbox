@@ -1152,17 +1152,23 @@ func (s *Store) decoded(raw rawRecord) (Record, error) {
 		t := time.UnixMilli(raw.expires.Int64).UTC()
 		r.ExpiresAt = &t
 	}
-	if err := json.Unmarshal([]byte(raw.recipients), &r.To); err != nil {
-		return Record{}, fmt.Errorf("decode recipients of #%d: %w", r.Seq, err)
+	if raw.recipients != "[]" {
+		if err := json.Unmarshal([]byte(raw.recipients), &r.To); err != nil {
+			return Record{}, fmt.Errorf("decode recipients of #%d: %w", r.Seq, err)
+		}
+		if len(r.To) == 0 {
+			r.To = nil
+		}
 	}
-	if len(r.To) == 0 {
-		r.To = nil
+	if raw.refs != "{}" {
+		if err := json.Unmarshal([]byte(raw.refs), &r.Refs); err != nil {
+			return Record{}, fmt.Errorf("decode refs of #%d: %w", r.Seq, err)
+		}
 	}
-	if err := json.Unmarshal([]byte(raw.refs), &r.Refs); err != nil {
-		return Record{}, fmt.Errorf("decode refs of #%d: %w", r.Seq, err)
-	}
-	if err := json.Unmarshal([]byte(raw.fields), &r.Fields); err != nil {
-		return Record{}, fmt.Errorf("decode fields of #%d: %w", r.Seq, err)
+	if raw.fields != "{}" {
+		if err := json.Unmarshal([]byte(raw.fields), &r.Fields); err != nil {
+			return Record{}, fmt.Errorf("decode fields of #%d: %w", r.Seq, err)
+		}
 	}
 	return r, nil
 }

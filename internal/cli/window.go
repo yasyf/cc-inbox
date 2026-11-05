@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"runtime/pprof"
 	"slices"
 	"strings"
 	"syscall"
@@ -19,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yasyf/cc-inbox/internal/channel"
+	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -249,14 +251,14 @@ func parityClass(entry capturedRequest) string {
 func newWindowParityCmd() *cobra.Command {
 	var plain, windowed, traffic, report string
 	var limit int64
-	var model bool
+	var opts parityOptions
 	cmd := &cobra.Command{
 		Use:    "parity",
 		Short:  "Replay captured traffic through the store and the window on two copies of a store, and diff everything",
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWindowParity(cmd.Context(), cmd.OutOrStdout(), plain, windowed, traffic, report, limit, model)
+			return runWindowParity(cmd.Context(), cmd.OutOrStdout(), plain, windowed, traffic, report, limit, opts)
 		},
 	}
 	cmd.Flags().StringVar(&plain, "plain", "", "home of the copy that reads the store alone")
@@ -264,14 +266,21 @@ func newWindowParityCmd() *cobra.Command {
 	cmd.Flags().StringVar(&traffic, "traffic", "", "captured requests, one JSON document a line")
 	cmd.Flags().StringVar(&report, "report", "", "file for each difference, one JSON document a line")
 	cmd.Flags().Int64Var(&limit, "cap", store.HotWindowBytes, "bytes the window may hold")
-	cmd.Flags().BoolVar(&model, "model", false, "compare the read model rather than the window")
+	cmd.Flags().BoolVar(&opts.model, "model", false, "compare the read model rather than the window")
+	cmd.Flags().BoolVar(&opts.replayOnly, "replay-only", false, "stop after the captured traffic, without the reader matrix")
+	cmd.Flags().StringVar(&opts.profile, "profile", "", "file for a CPU profile, labeled side=served on the read through the window or model")
 	for _, name := range []string{"plain", "windowed", "traffic", "report"} {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
 }
 
-func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, traffic, report string, limit int64, useModel bool) error {
+type parityOptions struct {
+	model, replayOnly bool
+	profile           string
+}
+
+func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, traffic, report string, limit int64, opts parityOptions) error {
 	say := func(format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
 	plain, err := store.Open(ctx, plainHome)
 	if err != nil {
@@ -293,7 +302,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 		describe func() string
 	)
 	free := func(context.Context) error { return nil }
-	if useModel {
+	if opts.model {
 		model, err := windowed.BuildReadModelUnder(ctx, free, limit)
 		if err != nil {
 			return err
@@ -328,7 +337,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	var heap1 runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&heap1)
-	say("built in %s, heap %d MB: %s\n", time.Since(built).Round(time.Millisecond), (int64(heap1.HeapAlloc)-int64(heap0.HeapAlloc))/1e6, describe())
+	say("built in %s, heap %.0f MB: %s\n", time.Since(built).Round(time.Millisecond), (float64(heap1.HeapAlloc)-float64(heap0.HeapAlloc))/1e6, describe())
 	file, err := os.Open(traffic) //nolint:gosec // G304: the owner names the capture to replay.
 	if err != nil {
 		return err
@@ -352,6 +361,17 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	}
 	classes := map[string]*tally{}
 	skipped, different := 0, 0
+	if opts.profile != "" {
+		profile, err := os.Create(opts.profile)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = profile.Close() }()
+		if err := pprof.StartCPUProfile(profile); err != nil {
+			return err
+		}
+		defer pprof.StopCPUProfile()
+	}
 	lines := bufio.NewScanner(file)
 	lines.Buffer(nil, 64<<20)
 	for lines.Scan() {
@@ -363,13 +383,20 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 			skipped++
 			continue
 		}
+		harness.KeepSessions(0)
 		cpu0, faults0 := usage()
 		a, err := replay(ctx, plain, plainHome, entry)
 		if err != nil {
 			return fmt.Errorf("replay %v on the store: %w", entry.Argv, err)
 		}
 		cpu1, faults1 := usage()
-		b, err := replay(ctx, windowed, windowedHome, entry)
+		if opts.model {
+			harness.KeepSessions(time.Second)
+		}
+		var b replayed
+		pprof.Do(ctx, pprof.Labels("side", "served"), func(ctx context.Context) {
+			b, err = replay(ctx, windowed, windowedHome, entry)
+		})
 		if err != nil {
 			return fmt.Errorf("replay %v through the window: %w", entry.Argv, err)
 		}
@@ -410,6 +437,10 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 		count := int64(t.same + t.different)
 		say("%-30s same=%-5d different=%-3d cpu/req store=%6.1fms window=%6.1fms faults/req store=%6d window=%6d\n", name, t.same, t.different,
 			float64(t.storeNanos)/float64(count)/1e6, float64(t.windowNanos)/float64(count)/1e6, t.storeFaults/count, t.windowFaults/count)
+	}
+	if opts.replayOnly {
+		say("streams skipped=%d\nserved %s\n", skipped, describe())
+		return nil
 	}
 	matrix, mismatches, err := windowMatrix(ctx, windowed, reads, serve, differences)
 	if err != nil {
@@ -485,6 +516,30 @@ func windowMatrix(ctx context.Context, st *store.Store, reads parityReads, serve
 					gotCount, err := st.Count(ctx, f)
 					if err != nil {
 						return compared, mismatched, err
+					}
+					seqs := make([]int64, 0, len(want))
+					for _, r := range want {
+						if r.Drive == reader.Drive {
+							seqs = append(seqs, r.Seq)
+						}
+					}
+					gotOpen, err := st.OpenSeqsAmong(ctx, reader.Drive, seqs)
+					if err != nil {
+						return compared, mismatched, err
+					}
+					serve(false)
+					wantOpen, err := st.OpenSeqsAmong(ctx, reader.Drive, seqs)
+					serve(true)
+					if err != nil {
+						return compared, mismatched, err
+					}
+					slices.Sort(gotOpen)
+					slices.Sort(wantOpen)
+					if !slices.Equal(gotOpen, wantOpen) {
+						mismatched++
+						if err := differences.Encode(map[string]any{"class": "matrix-open", "reader": reader, "filter": fmt.Sprintf("%+v", f), "store": wantOpen, "served": gotOpen}); err != nil {
+							return compared, mismatched, err
+						}
 					}
 					compared++
 					if wantCount != gotCount {

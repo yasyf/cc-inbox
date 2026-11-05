@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shirou/gopsutil/v4/process"
@@ -114,6 +115,84 @@ func Sessions(dir string) (map[string]Session, error) {
 		out[s.SessionID] = s
 	}
 	return out, nil
+}
+
+type sessionFile struct {
+	modified time.Time
+	size     int64
+	session  Session
+}
+
+var sessionsKept struct {
+	sync.Mutex
+	span  time.Duration
+	dir   string
+	at    time.Time
+	files map[string]sessionFile
+	read  map[string]Session
+}
+
+// KeepSessions has RecentSessions reuse a registry read for span; zero makes it
+// read the directory every time.
+func KeepSessions(span time.Duration) {
+	sessionsKept.Lock()
+	defer sessionsKept.Unlock()
+	sessionsKept.span = span
+}
+
+// RecentSessions is Sessions at most KeepSessions' span old, for a caller that
+// asks often. It decodes only the files whose size or time changed. The map is
+// shared, so a caller reads it and never writes to it.
+func RecentSessions(dir string) (map[string]Session, error) {
+	sessionsKept.Lock()
+	defer sessionsKept.Unlock()
+	kept := &sessionsKept
+	if kept.span == 0 {
+		return Sessions(dir)
+	}
+	if kept.dir == dir && time.Since(kept.at) < kept.span {
+		return kept.read, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return map[string]Session{}, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read session registry: %w", err)
+	}
+	files := make(map[string]sessionFile, len(entries))
+	read := make(map[string]Session, len(entries))
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".json") {
+			continue
+		}
+		info, err := e.Info()
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("stat %s: %w", e.Name(), err)
+		}
+		file, known := kept.files[e.Name()]
+		if kept.dir != dir || !known || !file.modified.Equal(info.ModTime()) || file.size != info.Size() {
+			raw, err := os.ReadFile(filepath.Join(dir, e.Name())) //nolint:gosec // G304: dir is the registry; names come from its listing.
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				return nil, fmt.Errorf("read %s: %w", e.Name(), err)
+			}
+			file = sessionFile{modified: info.ModTime(), size: info.Size()}
+			if err := json.Unmarshal(raw, &file.session); err != nil {
+				slog.Warn("skipping a session registry file that does not decode", "file", e.Name(), "err", err)
+				continue
+			}
+		}
+		files[e.Name()] = file
+		read[file.session.SessionID] = file.session
+	}
+	kept.dir, kept.at, kept.files, kept.read = dir, time.Now(), files, read
+	return read, nil
 }
 
 // Procs reads each process's create time once, however many registry rows

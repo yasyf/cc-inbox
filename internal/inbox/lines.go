@@ -24,7 +24,7 @@ var replyMarks = map[kinds.Kind]string{
 }
 
 type openerReader interface {
-	OpenAmong(context.Context, string, []int64) ([]store.Record, error)
+	OpenSeqsAmong(context.Context, string, []int64) ([]int64, error)
 }
 
 type stemHolders interface {
@@ -68,12 +68,12 @@ func Annotate(ctx context.Context, st openerReader, records []store.Record) erro
 	}
 	live := map[int64]bool{}
 	for _, drive := range slices.Sorted(maps.Keys(tracked)) {
-		open, err := st.OpenAmong(ctx, drive, tracked[drive])
+		open, err := st.OpenSeqsAmong(ctx, drive, tracked[drive])
 		if err != nil {
 			return err
 		}
-		for _, o := range open {
-			live[o.Seq] = true
+		for _, seq := range open {
+			live[seq] = true
 		}
 	}
 	for i, r := range records {

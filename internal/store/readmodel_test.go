@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -93,6 +94,82 @@ func TestReadModelMatchesTheStore(t *testing.T) {
 				t.Errorf("count = %d, want %d", gotCount, wantCount)
 			}
 		})
+	}
+}
+
+func TestReadModelKnowsWhatIsOpen(t *testing.T) {
+	st, clock := testutil.Store(t)
+	open := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, Text: "still open?", To: []string{"worker"}})
+	answered := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, Text: "answered?", To: []string{"worker"}})
+	testutil.Post(t, st, store.Record{Lane: "worker", Kind: kinds.Answer, Text: "yes", Re: answered.Seq})
+	resolved := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, Text: "resolved?", To: []string{"worker"}})
+	testutil.Post(t, st, store.Record{Lane: "worker", Kind: kinds.Note, Text: "closing", Resolves: resolved.Seq})
+	held := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Hold, Text: "hold", Refs: store.Refs{Stacks: []string{"s/1"}}})
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Release, Text: "go", Refs: store.Refs{Stacks: []string{"s/1"}}})
+	topical := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Blocker, Text: "blocked", Topic: "t"})
+	note := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "not an opener"})
+	seqs := []int64{open.Seq, answered.Seq, resolved.Seq, held.Seq, topical.Seq, note.Seq, 99999}
+	want, err := st.OpenSeqsAmong(t.Context(), "d", seqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	st.ServeReadModel(model)
+	t.Cleanup(func() { st.ServeReadModel(nil) })
+	got, err := st.OpenSeqsAmong(t.Context(), "d", seqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slices.Sort(got)
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("open = %v, store says %v", got, want)
+	}
+	if stats := model.Stats(); stats.Hits == 0 {
+		t.Error("the model did not answer")
+	}
+	records, err := st.OpenAmong(t.Context(), "d", seqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.ServeReadModel(nil)
+	stored, err := st.OpenAmong(t.Context(), "d", seqs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRecords(t, records, stored)
+}
+
+func TestReadModelNamesTargets(t *testing.T) {
+	st, _ := testutil.Store(t)
+	readModelFixture(t, st)
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	f := store.Filter{Drive: "d"}
+	want, err := st.Query(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.ServeReadModel(model)
+	t.Cleanup(func() { st.ServeReadModel(nil) })
+	got, err := st.Query(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRecords(t, got, want)
+	for _, r := range want {
+		seq, err := st.Resolve(t.Context(), r.Num)
+		if err != nil || seq != r.Seq {
+			t.Errorf("resolve %s = %d, %v, want %d", r.Num, seq, err, r.Seq)
+		}
 	}
 }
 
