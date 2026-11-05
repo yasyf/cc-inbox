@@ -75,7 +75,7 @@ func (s *Store) numbered(ctx context.Context, records []Record) error {
 }
 
 func (s *Store) ownersAndNames(ctx context.Context, targets []int64) (map[string]bool, map[int64]string, error) {
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if owners, names, ok := m.namesOf(ctx, s, targets); ok {
 			return owners, names, nil
 		}
@@ -214,7 +214,7 @@ func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
 
 func (s *Store) unambiguous(ctx context.Context, ref string, n int64) error {
 	var lane, kind, origin string
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if other, ok := m.otherNumbered(ctx, n); ok {
 			if other == nil {
 				return nil

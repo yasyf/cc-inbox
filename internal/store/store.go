@@ -341,7 +341,7 @@ type Store struct {
 	moved  *Migration
 	Now    func() time.Time
 	floors *sinceFloors
-	window *hotWindowSlot
+	reads  *servedModel
 }
 
 // Migration is the schema upgrade an initializer ran on a store that already
@@ -446,7 +446,7 @@ func openDB(home string, busy time.Duration) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	return &Store{db: db, rw: db, home: home, node: n, owner: true, Now: time.Now, floors: &sinceFloors{}, window: &hotWindowSlot{}}, nil
+	return &Store{db: db, rw: db, home: home, node: n, owner: true, Now: time.Now, floors: &sinceFloors{}, reads: &servedModel{}}, nil
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

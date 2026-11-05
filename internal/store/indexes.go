@@ -129,7 +129,7 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		return report, fmt.Errorf("open index maintenance store: %w", err)
 	}
 	defer func() { _ = db.Close() }()
-	s := &Store{db: db, rw: db, home: home, window: &hotWindowSlot{}}
+	s := &Store{db: db, rw: db, home: home, reads: &servedModel{}}
 	var schema int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
 		return report, fmt.Errorf("read index maintenance schema: %w", err)

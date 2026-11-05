@@ -40,7 +40,7 @@ func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, err
 // returned. seqs travels as one JSON array parameter, so its length is not
 // bounded by SQLite's limit on bound variables.
 func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if open, ok := m.openRecordsAmong(ctx, s, drive, seqs); ok {
 			return open, nil
 		}
@@ -84,7 +84,7 @@ AND EXISTS (SELECT 1 FROM records l WHERE l.drive = r.drive AND l.kind = r.kind 
 // OpenSeqsAmong is the seqs of OpenAmong's answer, for a reader that needs no
 // more than which are open.
 func (s *Store) OpenSeqsAmong(ctx context.Context, drive string, seqs []int64) ([]int64, error) {
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if open, ok := m.openAmong(ctx, s, drive, seqs); ok {
 			return open, nil
 		}
@@ -125,7 +125,7 @@ func (s *Store) openersAmong(ctx context.Context, drive string, seqs []int64) ([
 }
 
 func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([]Record, error) {
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if open, ok := m.unclosed(ctx, s, drive, openers); ok {
 			return open, nil
 		}
@@ -238,7 +238,7 @@ const closureColumns = "seq, lane, kind, at, topic, re, resolves, COALESCE(also_
 // closureRows reads drive's records of ks in seq order, with only the columns
 // that open or close an item, for reads that touch every opener and closer.
 func (s *Store) servedClosureRows(ctx context.Context, drive string, ks []kinds.Kind) ([]Record, error) {
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if rows, ok := m.closureRows(ctx, drive, ks); ok {
 			return rows, nil
 		}

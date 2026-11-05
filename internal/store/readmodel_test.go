@@ -1,7 +1,9 @@
 package store_test
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"slices"
@@ -14,6 +16,23 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
+
+func noPace(context.Context) error { return nil }
+
+func sameRecords(t *testing.T, got, want []store.Record) {
+	t.Helper()
+	a, err := json.Marshal(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(a) != string(b) {
+		t.Fatalf("model = %s\nstore = %s", a, b)
+	}
+}
 
 func readModelFixture(t *testing.T, st *store.Store) {
 	t.Helper()
