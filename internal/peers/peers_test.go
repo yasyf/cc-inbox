@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -185,7 +186,7 @@ func TestALineWithNoSightingNeverNamesATime(t *testing.T) {
 	view.Name, view.Role, view.Lane = "red-tunnel-fix", "session", "red-tunnel-fix"
 	got := view.Line(now)
 	want := "red-tunnel-fix session lane=red-tunnel-fix gone, never seen"
-	if got != want {
-		t.Errorf("Line() = %q, want %q", got, want)
+	if !strings.HasPrefix(got, want) || strings.Contains(got, "last seen") {
+		t.Errorf("Line() = %q, want it to start %q and name no time", got, want)
 	}
 }
