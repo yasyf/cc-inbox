@@ -13,6 +13,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
+	"github.com/yasyf/cc-inbox/internal/wire"
 )
 
 func TestWatchDrainsPagesAndKeepsDeliveryFrontier(t *testing.T) {
@@ -90,12 +91,18 @@ func TestWatchCancelledBeforeFirstRead(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	err := inbox.Watch(ctx, st, inbox.WatchOptions{Filter: store.Filter{Drive: "d", After: 1}}, func(store.Record, string) error {
-		t.Fatal("cancelled watch emitted a record")
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("cancelled watch error = %v", err)
+	for _, opts := range []inbox.WatchOptions{
+		{Filter: store.Filter{Drive: "d", After: 1}},
+		{Filter: store.Filter{Drive: "d"}, Cursor: "relay-channel"},
+		{Filter: store.Filter{Drive: "d", After: 1}, Cursor: wire.WatchCursorPrefix + "relay-channel"},
+	} {
+		err := inbox.Watch(ctx, st, opts, func(store.Record, string) error {
+			t.Fatal("cancelled watch emitted a record")
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("cancelled watch %+v error = %v", opts, err)
+		}
 	}
 }
 

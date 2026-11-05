@@ -98,6 +98,27 @@ func TestDedupeWindow(t *testing.T) {
 	}
 }
 
+func TestARecordRepostedAfterItsTwinWasResolvedLands(t *testing.T) {
+	st, c := open(t)
+	ctx := context.Background()
+	withdraw := store.Record{Drive: "d", Lane: "meta-desk-3", Kind: kinds.Go, To: []string{"desk-runner"}, Text: "orca-desk: withdraw R497770"}
+	other := post(t, st, store.Record{Lane: "meta-desk-3", Kind: kinds.Go, To: []string{"desk-runner"}, Text: "orca-desk: withdraw R498517"})
+	first := post(t, st, withdraw)
+	c.Advance(time.Minute)
+	if again, dup, err := st.Post(ctx, withdraw, 0); err != nil || !dup || again.Seq != first.Seq {
+		t.Fatalf("re-post while #%d is open = #%d dup=%v %v; want the open twin", first.Seq, again.Seq, dup, err)
+	}
+	post(t, st, store.Record{Lane: "meta-desk-3", Kind: kinds.Answer, To: []string{"desk-runner"}, Re: other.Seq, Resolves: other.Seq, AlsoResolves: []int64{first.Seq}, Text: "Cancel my withdraws: do not fence either dispatch"})
+	c.Advance(time.Minute)
+	again, dup, err := st.Post(ctx, withdraw, 0)
+	if err != nil || dup || again.Seq == first.Seq {
+		t.Fatalf("re-post after the cancel resolved #%d = #%d dup=%v %v; want a new record", first.Seq, again.Seq, dup, err)
+	}
+	if twin, dup, err := st.Post(ctx, withdraw, 0); err != nil || !dup || twin.Seq != again.Seq {
+		t.Fatalf("re-post while #%d is open = #%d dup=%v %v; want the open twin", again.Seq, twin.Seq, dup, err)
+	}
+}
+
 func TestPostAtStoresTheCallersTime(t *testing.T) {
 	st, c := open(t)
 	ctx := context.Background()

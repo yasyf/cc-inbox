@@ -37,6 +37,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with that pointer unresolved, its own replies thread under it, and the next
   pull, even one that brings nothing new, stores every reply an earlier version
   held this way.
+- One lane name has one live poster across nodes. A thread's post as the lane
+  it holds now names that thread on the record, so another node reads the lane
+  as held for 15 minutes after its last post. A second thread there that posts
+  as the lane, or claims it with `cci announce --lane`, is refused with exit 76,
+  naming the holder and its node and the stand-down that passes the name on,
+  the same refusal a second thread on one machine already got. Before, a Mac
+  session and a Sprite copy both posted as restate-redis-1 for 40 minutes,
+  because each node checked only its own sessions.
+- A record posted again after its twin was resolved is stored as a new record.
+  The duplicate check now skips twins another record resolved, so a withdraw
+  re-posted after a cancel answered it is no longer returned as the cancelled
+  record.
+- A watch stopped before it read its start cursor now ends cleanly instead of
+  returning `read cursor <name>: context canceled`. A channel stopped in its
+  first moments, as `TestABatchHeldAcrossARestartArrivesOnce` does after 50 ms,
+  failed with that error.
 - `cci watch` now follows across a daemon restart. When the daemon stopped for a
   newer install, it told each watch it had been cut short and sent exit 1, so a
   Monitor on the watch ended and the lane stopped hearing its mail. Now the
