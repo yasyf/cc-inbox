@@ -850,7 +850,9 @@ func mistypedLane(ctx context.Context, st *store.Store, drive, lane string) erro
 	if err != nil {
 		return err
 	}
-	near := slices.DeleteFunc(slices.Collect(maps.Keys(reading)), func(live string) bool { return !mistyped(lane, live) })
+	near := slices.DeleteFunc(slices.Collect(maps.Keys(reading)), func(live string) bool {
+		return !mistyped(lane, live) || store.Stem(live) == lane && slices.Contains(reading[live], drive)
+	})
 	if len(near) == 0 {
 		return nil
 	}

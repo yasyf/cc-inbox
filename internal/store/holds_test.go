@@ -305,3 +305,35 @@ func TestASuccessorOwesItsPredecessorsOpenAsk(t *testing.T) {
 		t.Fatalf("Successors(sv-2) = %v, %d, %v; want [sv-3] and its stand-down", chain, standDown, err)
 	}
 }
+
+func TestAReplicaKnowsTheHolderWhateverOrderTheRecordsArrived(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	start := clock.Now()
+	arrive := func(r store.Record, written time.Duration) {
+		t.Helper()
+		if _, _, err := st.PostAt(ctx, r, 0, start.Add(written)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clock.Advance(time.Hour)
+	arrive(store.Record{Drive: "d", Lane: "root", Kind: kinds.StandDown, To: []string{"desk-7"}, Fields: store.Fields{Attrs: map[string]string{"successor": "desk-8"}}, Text: "desk-7 stands down"}, 20*time.Minute)
+	arrive(store.Record{Drive: "d", Lane: "desk-8", Kind: kinds.State, Text: "desk-8 up"}, 30*time.Minute)
+	arrive(store.Record{Drive: "d", Lane: "desk-7", Kind: kinds.State, Text: "desk-7 from the backlog"}, 10*time.Minute)
+	arrive(store.Record{Drive: "d", Lane: "desk-7", Kind: kinds.Report, Text: "desk-7 later in the backlog"}, 15*time.Minute)
+
+	reach, err := st.Reach(ctx, "d", "desk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reach.Lane != "desk-8" {
+		t.Fatalf("Reach(desk) = %+v; want desk-8, the lane desk-7 handed over to", reach)
+	}
+	aliases, err := st.Aliases(ctx, "d", "desk-8")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(aliases, "desk") || !slices.Contains(aliases, "desk-7") {
+		t.Fatalf("Aliases(desk-8) = %q; want desk and desk-7", aliases)
+	}
+}
