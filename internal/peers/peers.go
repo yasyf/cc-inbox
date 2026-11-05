@@ -172,6 +172,7 @@ type Filter struct {
 	Role     string
 	Drive    string
 	Lane     string
+	Alias    string
 	Tag      string
 	Repo     string
 	Worktree string
@@ -352,6 +353,7 @@ func (f Filter) matches(v View) bool {
 		(f.Role == "" || v.Role == f.Role) &&
 		(f.Drive == "" || v.Drive == f.Drive) &&
 		(f.Lane == "" || v.Lane == f.Lane) &&
+		(f.Alias == "" || store.AnswersTo(v.Lane, f.Alias)) &&
 		(f.Tag == "" || slices.Contains(v.Tags, f.Tag)) &&
 		(f.Repo == "" || v.Repo == f.Repo || v.Remote == f.Repo) &&
 		(worktree == "" || v.Worktree == worktree || v.Cwd == worktree) &&

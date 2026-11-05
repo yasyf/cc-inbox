@@ -195,3 +195,108 @@ func TestTheHookDeliversAnAliasOrderToTheLaneHoldingIt(t *testing.T) {
 		t.Fatalf("hook = %q; want the order addressed to bugs", out.String())
 	}
 }
+
+func TestALaneFilterReadsEveryLaneThatHeldTheAlias(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	for _, lane := range []string{"sv-2", "sv-3", "fallback-1", "other"} {
+		if _, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", "word from "+lane); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", "sv-3", "--successor", "fallback-1", "--text", "sv-3 hands over"); err != nil {
+		t.Fatal(err)
+	}
+	for _, read := range [][]string{
+		{"tail", "--drive", "d", "--since", "0", "--lane", "sv"},
+		{"grep", "word", "--drive", "d", "--lane", "sv"},
+		{"state", "--drive", "d", "--lane", "sv"},
+		{"watch", "--drive", "d", "--since", "1h", "--lane", "sv", "--for", "1s", "--interval", "10ms"},
+	} {
+		out, err := run(t, read...)
+		if err != nil || !strings.Contains(out, "word from sv-2") || !strings.Contains(out, "word from sv-3") || !strings.Contains(out, "word from fallback-1") || strings.Contains(out, "word from other") {
+			t.Fatalf("%v = %q, %v; want every lane that held sv and no other", read, out, err)
+		}
+	}
+	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--lane", "sv-2")
+	if err != nil || !strings.Contains(out, "word from sv-2") || strings.Contains(out, "word from sv-3") {
+		t.Fatalf("tail --lane sv-2 = %q, %v; want that lane alone", out, err)
+	}
+}
+
+func TestWhoFindsALaneByItsAlias(t *testing.T) {
+	heldPastAFinishedFallback(t)
+	out, err := run(t, "who", "--all", "--lane", "bugs")
+	if err != nil || !strings.Contains(out, "lane=bugs-") {
+		t.Fatalf("who --all --lane bugs = %q, %v; want the session bound under bugs", out, err)
+	}
+}
+
+func TestALaneFilterHoldsForMailFromAnotherDrive(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	for _, post := range [][]string{
+		{"--drive", "d", "--lane", "relay", "--kind", "state", "--text", "relay up"},
+		{"--drive", "d", "--lane", "sv-2", "--kind", "note", "--to", "relay", "--text", "from the lane"},
+		{"--drive", "scratch", "--lane", "stranger", "--kind", "note", "--to", "relay@d", "--text", "from another drive"},
+	} {
+		if _, err := run(t, append([]string{"post"}, post...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, "tail", "--drive", "d", "--since", "0", "--to", "relay", "--lane", "sv")
+	if err != nil || !strings.Contains(out, "from the lane") || strings.Contains(out, "from another drive") {
+		t.Fatalf("tail --to relay --lane sv = %q, %v; want sv's mail and no other lane's", out, err)
+	}
+	out, err = run(t, "tail", "--drive", "d", "--since", "0", "--to", "relay")
+	if err != nil || !strings.Contains(out, "from the lane") || !strings.Contains(out, "from another drive") {
+		t.Fatalf("tail --to relay = %q, %v; want mail from either drive", out, err)
+	}
+}
+
+func TestAnAliasStaysOnTheDriveWhereALaneHoldsIt(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lane := range []string{"watchdog", "loner"} {
+		k := store.PeerKey{Session: "session-elsewhere", Agent: "a" + lane}
+		if err := st.BindLane(ctx, k, "elsewhere", lane, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "here", "--lane", "watchdog-4", "--kind", "state", "--text", "watchdog-4 up"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "post", "--drive", "here", "--lane", "root", "--kind", "note", "--to", "watchdog", "--text", "for the lane here", "--json")
+	if err != nil || !strings.Contains(out, `"to":["watchdog"]`) {
+		t.Fatalf("post --to watchdog = %q, %v; want the alias kept on drive here", out, err)
+	}
+	out, err = run(t, "tail", "--drive", "here", "--since", "0", "--reader", "watchdog-4")
+	if err != nil || !strings.Contains(out, "for the lane here") {
+		t.Fatalf("tail --reader watchdog-4 = %q, %v; want the mail", out, err)
+	}
+	out, err = run(t, "post", "--drive", "here", "--lane", "root", "--kind", "note", "--to", "loner", "--text", "for the lane elsewhere", "--json")
+	if err != nil || !strings.Contains(out, `"to":["loner@elsewhere"]`) {
+		t.Fatalf("post --to loner = %q, %v; want it sent to the only drive holding loner", out, err)
+	}
+}

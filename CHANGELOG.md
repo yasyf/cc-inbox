@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci post --to <alias>` now stays on the drive it names when a lane there holds
+  the alias. Before, a live lane of that exact name on another drive took the
+  mail, with one notice line and a clean exit.
+- `--lane <alias>` on `tail`, `watch`, `grep`, `state` and `who` now reads every
+  lane that has held the alias. Before, it matched only a lane of that exact
+  name, so an alias printed nothing and exited clean. A numbered name still
+  reads that lane alone.
+- `--to <lane>` with `--lane`, `--kind` or `--topic` now applies them to mail
+  from another drive, which used to print whatever its writer or kind.
 - A report now reaches every lane it names, in hook delivery, `--mail` and `lr
   wait`. Before, a lane named after the first addressee never heard it. Head,
   claim, state, matrix and review stay first-addressee only.

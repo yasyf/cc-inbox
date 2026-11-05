@@ -212,7 +212,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "only these kinds (repeatable)")
 		cmd.Flags().StringSliceVar(&f.mute, "mute-kinds", nil, "never these kinds, even addressed to --reader (repeatable)")
 		cmd.Flags().StringSliceVar(&f.toKinds, "to-kind", nil, "only these kinds among records addressed to --reader or --to; broadcasts still follow --kind (repeatable)")
-		cmd.Flags().StringSliceVar(&f.lanes, "lane", nil, "only these lanes (repeatable)")
+		cmd.Flags().StringSliceVar(&f.lanes, "lane", nil, "only these lanes (repeatable); a name with no number reads every lane that has held it, a numbered name that lane alone")
 		cmd.Flags().StringVar(&f.to, "to", "", "only records addressed to this lane")
 		cmd.Flags().StringVar(&f.reader, "reader", "", "deliver to this lane: records addressed to it, plus other lanes' broadcasts that match --kind, --lane and --topic")
 		cmd.Flags().StringSliceVar(&f.topics, "topic", nil, "only these topics (repeatable)")
@@ -247,7 +247,7 @@ func (f *readFlags) filterPeer(ctx context.Context, st *store.Store, peer store.
 	if err != nil {
 		return store.Filter{}, err
 	}
-	out := store.Filter{Drive: drive, Origin: f.origin, Lanes: f.lanes, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
+	out := store.Filter{Drive: drive, Origin: f.origin, Lanes: f.lanes, LaneAliases: true, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
 	if f.to == "" {
 		out.Peer = peer.String()
 	}

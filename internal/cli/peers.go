@@ -253,7 +253,7 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&f.Name, "name", "", "the harness name, as ListAgents prints it")
 	fl.StringVar(&f.Role, "role", "", "root, lane, desk, watcher, codex, agent, workflow or session; workflow lists Workflow tool agents by label")
 	fl.StringVar(&f.Drive, "drive", "", "sessions bound to this drive")
-	fl.StringVar(&f.Lane, "lane", "", "sessions bound as this lane")
+	fl.StringVar(&f.Alias, "lane", "", "sessions bound as this lane, or under this alias")
 	fl.StringVar(&f.Tag, "tag", "", "sessions announced with this tag")
 	fl.StringVar(&f.Repo, "repo", "", "sessions in this repository, by owner/name or git common dir")
 	fl.StringVar(&f.Worktree, "worktree", "", "sessions whose worktree or cwd is this path")
@@ -288,7 +288,7 @@ func unboundSpawns(ctx context.Context, st *store.Store, f peers.Filter) ([]stor
 		since = f.Since
 	}
 	spawns, err := st.UnboundSpawns(ctx, drive, since)
-	return slices.DeleteFunc(spawns, func(sp store.Spawn) bool { return f.Lane != "" && sp.Lane != f.Lane }), err
+	return slices.DeleteFunc(spawns, func(sp store.Spawn) bool { return f.Alias != "" && !store.AnswersTo(sp.Lane, f.Alias) }), err
 }
 
 var viewKeys = jsonKeys(reflect.TypeFor[peers.View]())
@@ -730,7 +730,11 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 				err = mistypedLane(ctx, st, drive, t)
 			}
 			if err == nil {
-				out[i], err = routeLane(t, drive, reading[t], notices)
+				readers := reading[t]
+				if registry && reach.Lane != "" && reach.Lane != t {
+					readers = []string{drive}
+				}
+				out[i], err = routeLane(t, drive, readers, notices)
 			}
 			if err == nil && registry && out[i] == t && kind != kinds.StandDown {
 				err = noticeReach(notices, t, reach)
