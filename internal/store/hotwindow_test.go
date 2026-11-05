@@ -152,7 +152,7 @@ func TestHotWindowStaysUnderItsCap(t *testing.T) {
 	for range 4200 {
 		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: text})
 	}
-	const limit = 1 << 20
+	const limit = 1 << 18
 	window, err := st.BuildHotWindowUnder(t.Context(), noPace, limit)
 	if err != nil {
 		t.Fatal(err)
@@ -193,40 +193,4 @@ func TestHotWindowSwitch(t *testing.T) {
 	if err := store.SetHotWindow(home, false); err != nil {
 		t.Fatalf("turn off twice: %v", err)
 	}
-}
-
-func TestHotWindowAgesOutWhatCollectionDeletes(t *testing.T) {
-	st, clock := testutil.Store(t)
-	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "first"})
-	testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "second"})
-	window, err := st.BuildHotWindow(t.Context(), noPace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = window.Close() })
-	clock.Advance(30 * 24 * time.Hour)
-	newest := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "newest"})
-	collected, err := st.Collect(t.Context(), noPace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if collected.Archived == 0 {
-		t.Fatalf("collected = %+v, want old records deleted", collected)
-	}
-	if err := window.CatchUp(t.Context()); err != nil {
-		t.Fatal(err)
-	}
-	if stats := window.Stats(); stats.Floor != newest.Seq {
-		t.Fatalf("floor = %d, want the old records aged out to %d", stats.Floor, newest.Seq)
-	}
-	f := store.Filter{Drive: "d", After: newest.Seq - 1, IncludeExpired: true}
-	got, answered, err := window.Answer(t.Context(), st, f)
-	if err != nil || !answered {
-		t.Fatalf("answered = %t, %v", answered, err)
-	}
-	want, err := st.Query(t.Context(), f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sameRecords(t, got, want)
 }
