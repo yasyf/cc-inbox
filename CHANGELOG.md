@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci relay export --since 24h` exports only the drive's records written in
+  that span, so a new node seeds the recent drive in minutes instead of every
+  record the drive ever held. `cci relay seed` and `cci relay sync` take it as
+  they take a whole export.
 - `cci tail --open` prints every open ask, blocker and question-ending decide
   the lane this thread is bound as owes, newest first at any age, in one call;
   `--to <lane>` reads another lane's and `--kind ask` narrows it. A lane read

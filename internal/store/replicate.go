@@ -94,10 +94,10 @@ func (s *Store) Export(ctx context.Context, origin string, since int64, limit in
 	return out, rows.Err()
 }
 
-// VisitDriveExports visits drive's non-digest rows in this store's order, so a
-// reply nearly always follows the record it answers.
-func (s *Store) VisitDriveExports(ctx context.Context, drive string, visit func(Row) error) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records WHERE drive = ? AND kind != ? ORDER BY seq", drive, string(kinds.Digest))
+// VisitDriveExports visits drive's non-digest rows written at or after since
+// in this store's order, so a reply nearly always follows the record it answers.
+func (s *Store) VisitDriveExports(ctx context.Context, drive string, since time.Time, visit func(Row) error) error {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records WHERE drive = ? AND kind != ? AND at >= ? ORDER BY seq", drive, string(kinds.Digest), since.UnixMilli())
 	if err != nil {
 		return fmt.Errorf("export %s: %w", drive, err)
 	}

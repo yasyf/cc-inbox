@@ -531,7 +531,7 @@ func TestASeedCutOffPartwayKeepsWhatItReadAndSyncReadsOnlyTheRest(t *testing.T) 
 		t.Fatal(err)
 	}
 	var copied bytes.Buffer
-	if err := relay.ExportDrive(context.Background(), a.st, "d", &copied); err != nil {
+	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, &copied); err != nil {
 		t.Fatal(err)
 	}
 	late := newPeer(t, srv, node.TierOwner)
@@ -563,7 +563,7 @@ func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
 		t.Fatal(err)
 	}
 	var copied bytes.Buffer
-	if err := relay.ExportDrive(context.Background(), a.st, "d", &copied); err != nil {
+	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, &copied); err != nil {
 		t.Fatal(err)
 	}
 	late := newPeer(t, srv, node.TierOwner)
@@ -588,6 +588,45 @@ func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
 		t.Fatalf("sync after the seed = %+v, %v; want only the 1 new record", synced, err)
 	}
 	if got := texts(t, late.st); len(got) != 6 || got[0] != "note 0" || got[5] != "after the copy" {
+		t.Fatalf("store holds %q", got)
+	}
+}
+
+func TestAnExportSinceASpanSeedsOnlyThatSpanAndSyncReadsWhatArrivedSince(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	ctx := context.Background()
+	if _, _, err := a.st.PostAt(ctx, store.Record{Drive: "d", Lane: "obs-desk", Kind: kinds.Note, Text: "a day and an hour ago", Source: "post"}, 0, a.st.Now().Add(-25*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, a.st, store.Record{Lane: "obs-desk", Kind: kinds.Note, Text: "inside the last day"})
+	if _, err := a.node.Push(ctx, configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	var copied bytes.Buffer
+	if err := relay.ExportDrive(ctx, a.st, "d", a.st.Now().Add(-24*time.Hour), &copied); err != nil {
+		t.Fatal(err)
+	}
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, a, late)
+	pin(t, late, a, b)
+	join(t, srv, late)
+	if err := a.node.Share(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	seeded, err := late.node.Seed(ctx, "d", &copied)
+	if err != nil || seeded.Inserted != 1 {
+		t.Fatalf("seed of the last 24h = %+v, %v; want the 1 record inside it", seeded, err)
+	}
+	testutil.Post(t, a.st, store.Record{Lane: "obs-desk", Kind: kinds.Note, Text: "after the join"})
+	if _, err := a.node.Push(ctx, configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	synced, err := late.node.Sync(ctx, "d")
+	if err != nil || synced.Inserted != 1 || synced.Duplicate != 0 {
+		t.Fatalf("sync after the seed = %+v, %v; want only the 1 new record", synced, err)
+	}
+	if got := texts(t, late.st); len(got) != 2 || got[0] != "inside the last day" || got[1] != "after the join" {
 		t.Fatalf("store holds %q", got)
 	}
 }
