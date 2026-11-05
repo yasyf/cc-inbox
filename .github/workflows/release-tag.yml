@@ -1,6 +1,10 @@
 name: Release tag
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   schedule:
     - cron: "17 * * * *"
   workflow_dispatch:
@@ -11,11 +15,12 @@ permissions:
 
 jobs:
   release:
-    uses: yasyf/cc-skills/.github/workflows/plugin-release-tag.yml@c94a8c8ee7ee44e41ebdd5a1ad37a4678b4822a8
+    uses: yasyf/cc-skills/.github/workflows/plugin-release-tag.yml@25d2bccaf0d1d1f19aad8847ab824d54b7578534
     with:
       release-workflow: release.yml
       ci-workflow: ci.yml
-      script-ref: c94a8c8ee7ee44e41ebdd5a1ad37a4678b4822a8
+      min-interval: 60
+      script-ref: 25d2bccaf0d1d1f19aad8847ab824d54b7578534
       paths: |
         client
         cmd
