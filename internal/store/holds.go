@@ -344,7 +344,11 @@ func (s *Store) Generations(ctx context.Context, drive, stem string) ([]string, 
 	if err := s.laneRegistry(ctx); err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT lane FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? ORDER BY lane", drive, stem)
+	return generations(ctx, s.db, drive, stem)
+}
+
+func generations(ctx context.Context, q rowsQuerier, drive, stem string) ([]string, error) {
+	rows, err := q.QueryContext(ctx, "SELECT lane FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? ORDER BY lane", drive, stem)
 	if err != nil {
 		return nil, fmt.Errorf("read the generations of %s on %s: %w", stem, drive, err)
 	}
@@ -361,15 +365,22 @@ func (s *Store) Generations(ctx context.Context, drive, stem string) ([]string, 
 }
 
 func (s *Store) lanesAnswering(ctx context.Context, drive string, names []string) ([]string, error) {
+	switch err := s.laneRegistry(ctx); {
+	case errors.Is(err, ErrNoLaneRegistry):
+		return names, nil
+	case err != nil:
+		return nil, err
+	}
+	return lanesAnswering(ctx, s.db, drive, names)
+}
+
+func lanesAnswering(ctx context.Context, q rowsQuerier, drive string, names []string) ([]string, error) {
 	out := slices.Clone(names)
 	for _, name := range names {
 		if Stem(name) != name {
 			continue
 		}
-		held, err := s.Generations(ctx, drive, name)
-		if errors.Is(err, ErrNoLaneRegistry) {
-			return names, nil
-		}
+		held, err := generations(ctx, q, drive, name)
 		if err != nil {
 			return nil, err
 		}

@@ -445,7 +445,7 @@ func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 		}
 	}
 	var err error
-	if f.LaneAliases {
+	if f.LaneAliases && len(f.Lanes) > 0 {
 		if f.Lanes, err = s.lanesAnswering(ctx, f.Drive, f.Lanes); err != nil {
 			return f, err
 		}
