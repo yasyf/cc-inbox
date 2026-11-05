@@ -693,10 +693,8 @@ func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, 
 }
 
 func Show(ctx context.Context, st *store.Store, records []store.Record, drive string, budget int, asJSON bool, w io.Writer) error {
-	for _, r := range records {
-		if drive != "" && r.Drive != drive {
-			return fmt.Errorf("show: %s is on drive %s, not %s", r.Name(), r.Drive, drive)
-		}
+	if err := onDrive(records, drive); err != nil {
+		return err
 	}
 	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON, Compact: true})
 	if err != nil {
@@ -735,6 +733,57 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 		}
 	}
 	return nil
+}
+
+func ShowBodies(records []store.Record, drive string, budget int, w io.Writer) error {
+	if err := onDrive(records, drive); err != nil {
+		return err
+	}
+	share := 0
+	if budget > 0 {
+		share = max(budget/len(records), 1)
+	}
+	for _, r := range records {
+		text, err := wholeText(r)
+		if err != nil {
+			return fmt.Errorf("show %s: %w", r.Name(), err)
+		}
+		if len(records) > 1 {
+			if _, err := fmt.Fprintln(w, r.Name()); err != nil {
+				return err
+			}
+		}
+		if share > 0 && len(text) > share {
+			text = fmt.Appendf(text[:share:share], "\n... cut %d bytes of %s; cci show %s --body --budget 0 reads it whole", len(text)-share, r.Name(), r.Name())
+		}
+		if _, err := w.Write(append(bytes.TrimRight(text, "\n"), '\n')); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func onDrive(records []store.Record, drive string) error {
+	for _, r := range records {
+		if drive != "" && r.Drive != drive {
+			return fmt.Errorf("show: %s is on drive %s, not %s", r.Name(), r.Drive, drive)
+		}
+	}
+	return nil
+}
+
+func wholeText(r store.Record) ([]byte, error) {
+	rest, err := shownBody(r)
+	if err != nil {
+		return nil, err
+	}
+	if after, spilled := bytes.CutPrefix(rest, []byte("…")); spilled && strings.HasSuffix(r.Text, "…") {
+		return append([]byte(strings.TrimSuffix(r.Text, "…")), after...), nil
+	}
+	if len(rest) == 0 {
+		return []byte(r.Text), nil
+	}
+	return append([]byte(r.Text+"\n"), rest...), nil
 }
 
 func shownBody(r store.Record) ([]byte, error) {
