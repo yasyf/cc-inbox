@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -413,4 +414,66 @@ func TestReadModelOpenItemsMatchTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameRecords(t, items, wantItems)
+}
+
+func TestReadModelDeclinesAPRPastThirtyTwoBits(t *testing.T) {
+	st, _ := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "large", Refs: store.Refs{PRs: []store.PR{{Repo: "a/b", Number: 1 << 31}}}})
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	if _, answered, err := model.Answer(t.Context(), st, store.Filter{Drive: "d", PR: store.PR{Number: 1 << 31}}); err != nil || answered {
+		t.Errorf("answered = %t, err = %v; want the store", answered, err)
+	}
+}
+
+func TestReadModelReadsItsOwnWritesUnderLoad(t *testing.T) {
+	st, _ := testutil.Store(t)
+	readModelFixture(t, st)
+	model, err := st.BuildReadModelUnder(t.Context(), noPace, 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	st.ServeReadModel(model)
+	t.Cleanup(func() { st.ServeReadModel(nil) })
+	var readers sync.WaitGroup
+	stop := make(chan struct{})
+	for range 4 {
+		readers.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if _, err := st.Query(t.Context(), store.Filter{Drive: "d", Descending: true, Limit: 20, Contains: []string{"written"}}); err != nil {
+					t.Error(err)
+					return
+				}
+				if _, err := st.OpenSeqsAmong(t.Context(), "d", []int64{1, 2, 3}); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+	}
+	text := strings.Repeat("y", 380)
+	for i := range 300 {
+		posted := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"worker"}, Text: fmt.Sprint("written ", i, text)})
+		got, err := st.Query(t.Context(), store.Filter{Drive: "d", After: posted.Seq - 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].Seq != posted.Seq || got[0].Text != posted.Text {
+			t.Fatalf("read after commit = %+v, want #%d", got, posted.Seq)
+		}
+	}
+	close(stop)
+	readers.Wait()
+	if stats := model.Stats(); stats.Hits == 0 || stats.Failures != 0 {
+		t.Errorf("stats = %+v, want answers and no failures", stats)
+	}
 }

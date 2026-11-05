@@ -39,6 +39,9 @@ const (
 	readModelTrimAge   = 10 * time.Minute
 	readModelMetaHeld  = 1 << 10
 	readModelMetaSlots = 1 << 13
+	readModelMetaBytes = 12 << 20
+	readModelMetaFloor = 64 << 20
+	modelBlobOverhead  = 6*binary.MaxVarintLen64 + 2*(1+binary.MaxVarintLen64)
 	modelNoExpiry      = math.MinInt64
 	modelNoText        = -1
 	modelNone          = -1
@@ -156,7 +159,7 @@ type ReadModel struct {
 	byKind      map[uint64][]int32
 	byAddress   map[int32][]int32
 	byPR        map[uint64][]int32
-	closerHead  map[uint64]int32
+	closerHead  map[modelCloserKey]int32
 	closerLinks []modelCloser
 	resolvedBy  map[int64]int64
 	foreign     map[int64][]int32
@@ -172,6 +175,7 @@ type ReadModel struct {
 	chunkBase   int64
 	scratch     []byte
 	textStarted bool
+	keepMetas   bool
 	coldAt      int64
 	bytes       int64
 	inserted    int
@@ -221,8 +225,13 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 		source: s, observer: observer, limit: limit, mutations: tip.Mutations,
 		chunkSize: int(max(readModelMinChunk, min(readModelChunk, limit/16))),
 		byDrive:   map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
-		closerHead: map[uint64]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
+		closerHead: map[modelCloserKey]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
 		ids: map[string]int32{}, addrIDs: map[string]int32{},
+	}
+	m.keepMetas = limit >= readModelMetaFloor
+	m.bytes = int64(unsafe.Sizeof(m.metas))
+	if m.keepMetas {
+		m.bytes += readModelMetaBytes
 	}
 	for {
 		m.mu.Lock()
@@ -377,8 +386,9 @@ func pairKey(a, b int32) uint64 {
 	return uint64(uint32(a))<<32 | uint64(uint32(b)) //nolint:gosec // G115: the bits are the key.
 }
 
-func closerKey(drive int32, axis int, value int64) uint64 {
-	return uint64(uint32(drive))<<40 | uint64(axis)<<38 | uint64(value)&(1<<38-1) //nolint:gosec // G115: the bits are the key.
+type modelCloserKey struct {
+	drive, axis int32
+	value       int64
 }
 
 func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
@@ -481,20 +491,20 @@ func (m *ReadModel) indexClosure(row *modelRow, kind string, refs *parsedRefs, a
 		return
 	}
 	if row.re != 0 {
-		m.linkCloser(closerKey(row.drive, closerRe, row.re), index)
+		m.linkCloser(modelCloserKey{row.drive, closerRe, row.re}, index)
 	}
 	if m.strs[row.topic] != "" {
-		m.linkCloser(closerKey(row.drive, closerTopic, int64(row.topic)), index)
+		m.linkCloser(modelCloserKey{row.drive, closerTopic, int64(row.topic)}, index)
 	}
 	if refs == nil || row.refs == modelNone {
 		return
 	}
 	for _, ref := range slices.Concat(refs.stacks, refs.targets) {
-		m.linkCloser(closerKey(row.drive, closerRef, int64(m.intern(ref))), index)
+		m.linkCloser(modelCloserKey{row.drive, closerRef, int64(m.intern(ref))}, index)
 	}
 }
 
-func (m *ReadModel) linkCloser(key uint64, index int32) {
+func (m *ReadModel) linkCloser(key modelCloserKey, index int32) {
 	next, held := m.closerHead[key]
 	if !held {
 		next = modelNone
@@ -671,6 +681,12 @@ func (m *ReadModel) view(r *modelRow) modelView {
 }
 
 func (m *ReadModel) place(row *modelRow, text *modelText) error {
+	if len(text.id)+len(text.text)+len(text.refs)+len(text.fields)+len(text.body)+len(text.also)+modelBlobOverhead > m.chunkSize {
+		m.coldAt = max(m.coldAt, row.at)
+		m.hotFloor.Store(row.seq + 1)
+		m.hotAt.Store(m.coldAt)
+		return nil
+	}
 	blob := m.scratch[:0]
 	for _, field := range [...]string{text.id, text.text, text.refs, text.fields, text.body, text.also} {
 		blob = append(binary.AppendUvarint(blob, uint64(len(field))), field...)
@@ -683,9 +699,6 @@ func (m *ReadModel) place(row *modelRow, text *modelText) error {
 		}
 	}
 	m.scratch = blob
-	if len(blob) > m.chunkSize {
-		return nil
-	}
 	if len(m.chunks) == 0 || m.chunks[len(m.chunks)-1].used+len(blob) > m.chunkSize {
 		memory, err := syscall.Mmap(-1, 0, m.chunkSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
 		if err != nil {
@@ -860,7 +873,7 @@ func (m *ReadModel) firstSince(at int64) sql.NullInt64 {
 }
 
 func (f Filter) modelable() bool {
-	if f.Trigrams != "" {
+	if f.Trigrams != "" || f.PR.Number < math.MinInt32 || f.PR.Number > math.MaxInt32 {
 		return false
 	}
 	for _, word := range f.Contains {
@@ -961,9 +974,7 @@ func (sel *modelSelection) candidates() [][]int32 {
 			lists = append(lists, byAddress(address))
 		}
 	case f.PR.Number != 0:
-		if f.PR.Number >= math.MinInt32 && f.PR.Number <= math.MaxInt32 {
-			lists = append(lists, m.byPR[pairKey(drive, int32(f.PR.Number))]) //nolint:gosec // G115: the bounds just checked.
-		}
+		lists = append(lists, m.byPR[pairKey(drive, int32(f.PR.Number))]) //nolint:gosec // G115: modelable declines the rest.
 	case f.For == "" && len(f.Lanes) > 0:
 		for _, lane := range f.Lanes {
 			lists = append(lists, m.byLane[pairKey(drive, m.idOf(lane))])
@@ -1212,7 +1223,7 @@ func (sel *modelSelection) followBranch(v *modelView) bool {
 
 func (sel *modelSelection) namesPR(refs modelRefs) bool {
 	pr := sel.f.PR
-	if pr.Number >= math.MinInt32 && pr.Number <= math.MaxInt32 && slices.Contains(refs.ints, int32(pr.Number)) { //nolint:gosec // G115: the bounds just checked.
+	if slices.Contains(refs.ints, int32(pr.Number)) { //nolint:gosec // G115: modelable declines the rest.
 		return true
 	}
 	if pr.Repo != "" {
@@ -1431,7 +1442,7 @@ func (m *ReadModel) metaOf(seq int64, text *modelText) (*modelMeta, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(text.refs)+len(text.fields) <= readModelMetaHeld {
+	if m.keepMetas && len(text.refs)+len(text.fields) <= readModelMetaHeld {
 		slot.Store(meta)
 	}
 	return meta, nil
@@ -1591,7 +1602,7 @@ func (m *ReadModel) closersOf(drive string, openers []Record) []Record {
 	held := m.idOf(drive)
 	seen := map[int32]bool{}
 	var out []Record
-	add := func(key uint64) {
+	add := func(key modelCloserKey) {
 		link, ok := m.closerHead[key]
 		for ok && link != modelNone {
 			entry := m.closerLinks[link]
@@ -1603,15 +1614,15 @@ func (m *ReadModel) closersOf(drive string, openers []Record) []Record {
 		}
 	}
 	for _, o := range openers {
-		add(closerKey(held, closerRe, o.Seq))
+		add(modelCloserKey{held, closerRe, o.Seq})
 		if o.Topic != "" {
 			if topic := m.idOf(o.Topic); topic != modelNone {
-				add(closerKey(held, closerTopic, int64(topic)))
+				add(modelCloserKey{held, closerTopic, int64(topic)})
 			}
 		}
 		for _, ref := range slices.Concat(o.Refs.Stacks, o.Refs.Targets) {
 			if id := m.idOf(ref); id != modelNone {
-				add(closerKey(held, closerRef, int64(id)))
+				add(modelCloserKey{held, closerRef, int64(id)})
 			}
 		}
 	}
