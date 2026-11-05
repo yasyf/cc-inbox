@@ -470,7 +470,7 @@ func Busy(err error) bool {
 }
 
 func storeDSN(home string, timeoutMS int) string {
-	return fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(2147418112)&_pragma=cache_size(-16384)&_pragma=journal_size_limit(16777216)&_txlock=immediate", filepath.Join(home, DBFile), timeoutMS)
+	return fmt.Sprintf("file:%s?_pragma=page_size(1024)&_pragma=busy_timeout(%d)&_pragma=synchronous(NORMAL)&_pragma=mmap_size(2147418112)&_pragma=cache_size(-16384)&_pragma=journal_size_limit(16777216)&_txlock=immediate", filepath.Join(home, DBFile), timeoutMS)
 }
 
 func (s *Store) connect(ctx context.Context) error {
