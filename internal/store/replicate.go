@@ -113,29 +113,6 @@ func (s *Store) VisitDriveExports(ctx context.Context, drive string, visit func(
 	return rows.Err()
 }
 
-// VisitNewestExports visits origin's non-digest rows after since, newest first, until visit returns false.
-func (s *Store) VisitNewestExports(ctx context.Context, origin string, since int64, visit func(Row) (bool, error)) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records INDEXED BY records_origin WHERE origin=? AND origin_seq>? AND kind!=? ORDER BY origin_seq DESC", origin, since, string(kinds.Digest))
-	if err != nil {
-		return fmt.Errorf("export %s: %w", origin, err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		row, err := s.scanExportRow(rows)
-		if err != nil {
-			return err
-		}
-		more, err := visit(row)
-		if err != nil {
-			return err
-		}
-		if !more {
-			return ctx.Err()
-		}
-	}
-	return rows.Err()
-}
-
 func (s *Store) scanExportRow(row scanner) (Row, error) {
 	var re, resolves Pointer
 	var alsoOrigins string

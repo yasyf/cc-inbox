@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -115,97 +114,4 @@ func scanMember(row scanner) (Member, error) {
 	}
 	m.Tier, m.At = node.Tier(tier), time.UnixMilli(at).UTC()
 	return m, nil
-}
-
-// Presence is one node's sessions and explicit claims, replicated as a
-// whole snapshot rather than row by row.
-type Presence struct {
-	Origin string    `json:"origin"`
-	At     time.Time `json:"at"`
-	Peers  []Peer    `json:"peers"`
-	Claims []Claim   `json:"claims"`
-}
-
-// ExportPresence snapshots this node's sessions and explicit claims. A paired
-// viewer sees no process, environment or filesystem detail.
-func (s *Store) ExportPresence(ctx context.Context, viewer node.Tier) (Presence, error) {
-	p := Presence{Origin: s.Self(), At: s.Now().UTC()}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+peerColumns+" FROM sessions WHERE origin = ? ORDER BY session", s.Self())
-	if err != nil {
-		return Presence{}, fmt.Errorf("export sessions: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		peer, err := s.scanPeer(rows)
-		if err != nil {
-			return Presence{}, fmt.Errorf("export sessions: %w", err)
-		}
-		if viewer == node.TierPaired {
-			peer = peer.Redacted()
-		}
-		p.Peers = append(p.Peers, peer)
-	}
-	if err := rows.Err(); err != nil {
-		return Presence{}, fmt.Errorf("export sessions: %w", err)
-	}
-	claims, err := s.db.QueryContext(ctx, "SELECT session, agent, rel, kind, key, at FROM claims WHERE origin = ? ORDER BY session, agent, rel, kind, key", s.Self())
-	if err != nil {
-		return Presence{}, fmt.Errorf("export claims: %w", err)
-	}
-	defer func() { _ = claims.Close() }()
-	for claims.Next() {
-		var (
-			c  Claim
-			at int64
-		)
-		if err := claims.Scan(&c.Session, &c.Agent, &c.Rel, &c.Kind, &c.Key, &at); err != nil {
-			return Presence{}, fmt.Errorf("export claims: %w", err)
-		}
-		if viewer == node.TierPaired && c.Kind == "worktree" {
-			continue
-		}
-		c.At, c.Source = time.UnixMilli(at).UTC(), "claim"
-		p.Claims = append(p.Claims, c)
-	}
-	return p, claims.Err()
-}
-
-// ApplyPresence replaces every session and claim held for p.Origin with p's.
-// It never takes over a session id another origin holds.
-func (s *Store) ApplyPresence(ctx context.Context, p Presence) error {
-	if p.Origin == "" || p.Origin == s.Self() {
-		return fmt.Errorf("apply presence: origin %q is not another node", p.Origin)
-	}
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("apply presence of %s: %w", p.Origin, err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE origin = ?", p.Origin); err != nil {
-		return fmt.Errorf("apply presence of %s: %w", p.Origin, err)
-	}
-	if _, err := tx.ExecContext(ctx, "DELETE FROM claims WHERE origin = ?", p.Origin); err != nil {
-		return fmt.Errorf("apply presence of %s: %w", p.Origin, err)
-	}
-	for _, peer := range p.Peers {
-		tags, _ := json.Marshal(nonNil(peer.Tags))
-		env, _ := json.Marshal(peer.Env)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO sessions (session, agent, agent_name, origin, drive, root, lane, role, description, tags, cwd, repo, worktree, branch, remote, pid, pid_started, env, announced_at, seen_at, superseded)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (session, agent) DO NOTHING`,
-			peer.Session, peer.Agent, peer.AgentName, p.Origin, peer.Drive, peer.Root, peer.Lane, peer.Role, peer.Description, string(tags), peer.Cwd, peer.Repo, peer.Worktree, peer.Branch, peer.Remote,
-			peer.PID, peer.PIDStarted, string(env), peer.AnnouncedAt.UnixMilli(), peer.SeenAt.UnixMilli(), peer.Superseded); err != nil {
-			return fmt.Errorf("apply session %s of %s: %w", peer.Session, p.Origin, err)
-		}
-	}
-	for _, c := range p.Claims {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO claims (session, agent, rel, kind, key, at, origin)
-SELECT ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM sessions WHERE session = ? AND agent = ? AND origin = ?) ON CONFLICT DO NOTHING`,
-			c.Session, c.Agent, c.Rel, c.Kind, c.Key, c.At.UnixMilli(), p.Origin, c.Session, c.Agent, p.Origin); err != nil {
-			return fmt.Errorf("apply claim of %s: %w", p.Origin, err)
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("apply presence of %s: %w", p.Origin, err)
-	}
-	return nil
 }
