@@ -297,7 +297,7 @@ func keepHotWindow(ctx context.Context, st *store.Store, home string) {
 const (
 	readModelRetry    = 5 * time.Minute
 	readModelSessions = time.Second
-	readModelMemory   = store.ReadModelBytes + 350<<20
+	readModelMemory   = 350 << 20
 )
 
 func keepReadModel(ctx context.Context, st *store.Store, home string) {
