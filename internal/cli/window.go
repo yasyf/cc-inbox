@@ -31,6 +31,7 @@ const (
 	captureFile = "traffic.capture"
 	matrixSpan  = 500
 	matrixLanes = 16
+	matrixPage  = 500
 )
 
 var (
@@ -78,7 +79,7 @@ func newWindowModelCmd(home func(*cobra.Command) (string, error)) *cobra.Command
 				return err
 			}
 			s := inv.st.ServedReadModel().Stats()
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "switch on=%t rows=%d hot_floor=%d head=%d bytes=%d cap=%d hits=%d misses=%d failures=%d\n", store.ReadModelOn(at), s.Rows, s.HotFloor, s.Head, s.Bytes, int64(store.ReadModelBytes), s.Hits, s.Misses, s.Failures)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "switch on=%t rows=%d search_floor=%d text_bytes=%d head=%d bytes=%d cap=%d hits=%d misses=%d failures=%d\n", store.ReadModelOn(at), s.Rows, s.SearchFloor, s.TextBytes, s.Head, s.Bytes, int64(store.ReadModelBytes), s.Hits, s.Misses, s.Failures)
 			return err
 		}},
 	)
@@ -472,68 +473,70 @@ func windowMatrix(ctx context.Context, st *store.Store, reads *store.ReadModel, 
 			{Drive: reader.Drive, Peer: reader.Lane, Kinds: askKinds},
 		}
 		for _, shape := range shapes {
+			filters := []store.Filter{parityNewest(shape), parityOldest(shape)}
 			for _, after := range afters {
-				for _, f := range []store.Filter{parityAfter(shape, after), parityNewest(shape)} {
-					got, answered, err := reads.Answer(ctx, st, f)
-					if err != nil {
-						return compared, mismatched, err
-					}
-					if !answered {
-						continue
-					}
-					serve(false)
-					want, err := st.Query(ctx, f)
-					if err != nil {
-						serve(true)
-						return compared, mismatched, err
-					}
-					wantCount, err := st.Count(ctx, f)
+				filters = append(filters, parityAfter(shape, after))
+			}
+			for _, f := range filters {
+				got, answered, err := reads.Answer(ctx, st, f)
+				if err != nil {
+					return compared, mismatched, err
+				}
+				if !answered {
+					continue
+				}
+				serve(false)
+				want, err := st.Query(ctx, f)
+				if err != nil {
 					serve(true)
-					if err != nil {
+					return compared, mismatched, err
+				}
+				wantCount, err := st.Count(ctx, f)
+				serve(true)
+				if err != nil {
+					return compared, mismatched, err
+				}
+				gotCount, err := st.Count(ctx, f)
+				if err != nil {
+					return compared, mismatched, err
+				}
+				seqs := make([]int64, 0, len(want))
+				for _, r := range want {
+					if r.Drive == reader.Drive {
+						seqs = append(seqs, r.Seq)
+					}
+				}
+				gotOpen, err := st.OpenSeqsAmong(ctx, reader.Drive, seqs)
+				if err != nil {
+					return compared, mismatched, err
+				}
+				serve(false)
+				wantOpen, err := st.OpenSeqsAmong(ctx, reader.Drive, seqs)
+				serve(true)
+				if err != nil {
+					return compared, mismatched, err
+				}
+				slices.Sort(gotOpen)
+				slices.Sort(wantOpen)
+				if !slices.Equal(gotOpen, wantOpen) {
+					mismatched++
+					if err := differences.Encode(map[string]any{"class": "matrix-open", "reader": reader, "filter": fmt.Sprintf("%+v", f), "store": wantOpen, "served": gotOpen}); err != nil {
 						return compared, mismatched, err
 					}
-					gotCount, err := st.Count(ctx, f)
-					if err != nil {
+				}
+				compared++
+				if wantCount != gotCount {
+					mismatched++
+					if err := differences.Encode(map[string]any{"class": "matrix-count", "reader": reader, "filter": fmt.Sprintf("%+v", f), "store": wantCount, "served": gotCount}); err != nil {
 						return compared, mismatched, err
 					}
-					seqs := make([]int64, 0, len(want))
-					for _, r := range want {
-						if r.Drive == reader.Drive {
-							seqs = append(seqs, r.Seq)
-						}
-					}
-					gotOpen, err := st.OpenSeqsAmong(ctx, reader.Drive, seqs)
-					if err != nil {
+				}
+				a, _ := json.Marshal(want)
+				b, _ := json.Marshal(got)
+				if !bytes.Equal(a, b) {
+					mismatched++
+					if err := differences.Encode(map[string]any{"class": "matrix", "reader": reader, "filter": fmt.Sprintf("%+v", f), "store": len(want), "window": len(got)}); err != nil {
 						return compared, mismatched, err
-					}
-					serve(false)
-					wantOpen, err := st.OpenSeqsAmong(ctx, reader.Drive, seqs)
-					serve(true)
-					if err != nil {
-						return compared, mismatched, err
-					}
-					slices.Sort(gotOpen)
-					slices.Sort(wantOpen)
-					if !slices.Equal(gotOpen, wantOpen) {
-						mismatched++
-						if err := differences.Encode(map[string]any{"class": "matrix-open", "reader": reader, "filter": fmt.Sprintf("%+v", f), "store": wantOpen, "served": gotOpen}); err != nil {
-							return compared, mismatched, err
-						}
-					}
-					compared++
-					if wantCount != gotCount {
-						mismatched++
-						if err := differences.Encode(map[string]any{"class": "matrix-count", "reader": reader, "filter": fmt.Sprintf("%+v", f), "store": wantCount, "served": gotCount}); err != nil {
-							return compared, mismatched, err
-						}
-					}
-					a, _ := json.Marshal(want)
-					b, _ := json.Marshal(got)
-					if !bytes.Equal(a, b) {
-						mismatched++
-						if err := differences.Encode(map[string]any{"class": "matrix", "reader": reader, "filter": fmt.Sprintf("%+v", f), "store": len(want), "window": len(got)}); err != nil {
-							return compared, mismatched, err
-						}
 					}
 				}
 			}
@@ -549,5 +552,10 @@ func parityAfter(f store.Filter, after int64) store.Filter {
 
 func parityNewest(f store.Filter) store.Filter {
 	f.Descending, f.Limit = true, 40
+	return f
+}
+
+func parityOldest(f store.Filter) store.Filter {
+	f.After, f.Limit = 0, matrixPage
 	return f
 }

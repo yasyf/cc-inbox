@@ -27,24 +27,21 @@ import (
 
 const (
 	readModelFile = "model.on"
-	// ReadModelBytes caps what a read model holds: every record's selection
-	// columns, and the whole text of the newest records that fit.
+	// ReadModelBytes caps what a read model holds in memory: every record's
+	// selection columns. The whole text of every record sits in a file the kernel
+	// pages in on demand and can drop under pressure, outside this cap.
 	ReadModelBytes     = 150 << 20
 	readModelSpan      = 36 * time.Hour
 	readModelBatch     = 1000
 	readModelRowBytes  = 170
 	readModelKeyBytes  = 64
-	readModelChunk     = 4 << 20
-	readModelMinChunk  = 64 << 10
-	readModelTrimRows  = 1000
-	readModelTrimAge   = 10 * time.Minute
+	readModelChunk     = 16 << 20
+	readModelDiskFloor = 1 << 30
 	readModelMetaHeld  = 1 << 10
 	readModelMetaSlots = 1 << 13
 	readModelMetaBytes = 12 << 20
 	readModelMetaFloor = 64 << 20
-	modelBlobOverhead  = 6*binary.MaxVarintLen64 + 2*(1+binary.MaxVarintLen64)
 	modelNoExpiry      = math.MinInt64
-	modelNoText        = -1
 	modelNone          = -1
 	readModelColumns   = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, ''), re_origin_seq, resolves_origin_seq"
 )
@@ -129,10 +126,9 @@ type modelView struct {
 }
 
 type modelChunk struct {
-	memory  []byte
-	used    int
-	lastSeq int64
-	maxAt   int64
+	memory []byte
+	offset int64
+	used   int
 }
 
 // walChange is the part of SQLite's WAL index header that moves on every commit:
@@ -148,15 +144,17 @@ type modelCloser struct {
 }
 
 // ReadModel answers record selections from memory: every record's selection
-// columns, indexed, and the whole text of the newest ones, mapped outside the
+// columns, indexed, and every record's whole text in a file mapped outside the
 // heap. A read it cannot answer exactly goes to the store, so whatever it
 // returns is what the store would have.
 type ReadModel struct {
-	source    *Store
-	observer  *ChangeVersion
-	walIndex  []byte
-	limit     int64
-	chunkSize int
+	source   *Store
+	observer *ChangeVersion
+	walIndex []byte
+	limit    int64
+	text     *os.File
+	textEnd  int64
+	textUsed int64
 
 	mu          sync.RWMutex
 	head        int64
@@ -181,35 +179,31 @@ type ReadModel struct {
 	refPool     []int32
 	alsoPool    []int64
 	chunks      []modelChunk
-	chunkBase   int64
 	scratch     []byte
-	textStarted bool
 	keepMetas   bool
-	coldAt      int64
 	bytes       int64
-	inserted    int
-	trimmed     time.Time
 	metas       [readModelMetaSlots]atomic.Pointer[modelMeta]
 
-	stale    atomic.Bool
-	seen     atomic.Uint64
-	hotFloor atomic.Int64
-	hotAt    atomic.Int64
-	held     atomic.Int64
-	hits     atomic.Int64
-	misses   atomic.Int64
-	failures atomic.Int64
+	stale       atomic.Bool
+	seen        atomic.Uint64
+	searchFloor atomic.Int64
+	searchSince atomic.Int64
+	held        atomic.Int64
+	hits        atomic.Int64
+	misses      atomic.Int64
+	failures    atomic.Int64
 }
 
 // ReadModelStats is what a read model holds and how often it has answered.
 type ReadModelStats struct {
-	Rows     int
-	HotFloor int64
-	Head     int64
-	Bytes    int64
-	Hits     int64
-	Misses   int64
-	Failures int64
+	Rows        int
+	SearchFloor int64
+	TextBytes   int64
+	Head        int64
+	Bytes       int64
+	Hits        int64
+	Misses      int64
+	Failures    int64
 }
 
 // BuildReadModel fills a read model from the store, in batches that pace calls
@@ -235,10 +229,13 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 	if err != nil {
 		return nil, errors.Join(err, observer.Close())
 	}
+	textFile, err := openModelText(s.home)
+	if err != nil {
+		return nil, errors.Join(err, syscall.Munmap(walIndex), observer.Close())
+	}
 	m := &ReadModel{
-		source: s, observer: observer, walIndex: walIndex, limit: limit, mutations: tip.Mutations,
-		chunkSize: int(max(readModelMinChunk, min(readModelChunk, limit/16))),
-		byDrive:   map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
+		source: s, observer: observer, walIndex: walIndex, text: textFile, limit: limit, mutations: tip.Mutations,
+		byDrive: map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
 		closerHead: map[modelCloserKey]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
 		ids: map[string]int32{}, addrIDs: map[string]int32{},
 	}
@@ -251,7 +248,7 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 		m.mu.Lock()
 		more, err := m.catchUpBatch(ctx)
 		if err == nil {
-			err = m.trim()
+			err = m.withinCap()
 		}
 		m.mu.Unlock()
 		if err != nil {
@@ -275,21 +272,21 @@ type servedModel struct {
 	aliases aliasMemo
 }
 
-// HeldFrom is the lowest seq whose whole text the model holds, 0 when no model
-// serves.
+// HeldFrom is the lowest seq a search scans in the model, 0 when no model
+// serves; older records answer it from the store's trigram narrowing.
 func (s *Store) HeldFrom() int64 {
 	m := s.reads.model.Load()
 	if m == nil || m.stale.Load() {
 		return 0
 	}
-	return m.hotFloor.Load()
+	return m.searchFloor.Load()
 }
 
-// Covers reports whether the model holds the text of every record f can select,
+// Covers reports whether a search of f stays above the model's search floor,
 // so f needs no narrowing that exists to spare the store a scan.
 func (s *Store) Covers(f Filter) bool {
 	m := s.reads.model.Load()
-	return m != nil && !m.stale.Load() && (f.After >= m.hotFloor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > m.hotAt.Load())
+	return m != nil && !m.stale.Load() && (f.After >= m.searchFloor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > m.searchSince.Load())
 }
 
 func mapWALIndex(ctx context.Context, s *Store) ([]byte, error) {
@@ -337,6 +334,7 @@ func (m *ReadModel) Close() error {
 		failed = errors.Join(failed, syscall.Munmap(chunk.memory))
 	}
 	m.chunks = nil
+	failed = errors.Join(failed, m.text.Close())
 	if m.walIndex != nil {
 		failed = errors.Join(failed, syscall.Munmap(m.walIndex))
 		m.walIndex = nil
@@ -353,14 +351,14 @@ func (m *ReadModel) Stale() bool {
 func (m *ReadModel) Stats() ReadModelStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return ReadModelStats{Rows: len(m.rows), HotFloor: m.hotFloor.Load(), Head: m.head, Bytes: m.held.Load(), Hits: m.hits.Load(), Misses: m.misses.Load(), Failures: m.failures.Load()}
+	return ReadModelStats{Rows: len(m.rows), SearchFloor: m.searchFloor.Load(), TextBytes: m.textUsed, Head: m.head, Bytes: m.held.Load(), Hits: m.hits.Load(), Misses: m.misses.Load(), Failures: m.failures.Load()}
 }
 
-// Bounds is the lowest seq whose whole text the model holds, and its newest seq.
+// Bounds is the model's search floor and its newest seq.
 func (m *ReadModel) Bounds() (floor, head int64) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.hotFloor.Load(), m.head
+	return m.searchFloor.Load(), m.head
 }
 
 // CatchUp copies what the store committed since the last call.
@@ -393,7 +391,7 @@ func (m *ReadModel) catchUp(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if err := m.trim(); err != nil {
+		if err := m.withinCap(); err != nil {
 			m.stale.Store(true)
 			return err
 		}
@@ -427,10 +425,9 @@ func (m *ReadModel) catchUpBatch(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("read records for the read model: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	cold := m.source.Now().Add(-readModelSpan).UnixMilli()
 	copied := 0
 	for rows.Next() {
-		if err := m.ingest(rows, cold); err != nil {
+		if err := m.ingest(rows); err != nil {
 			return false, err
 		}
 		copied++
@@ -438,7 +435,6 @@ func (m *ReadModel) catchUpBatch(ctx context.Context) (bool, error) {
 	if err := rows.Err(); err != nil {
 		return false, fmt.Errorf("read records for the read model: %w", err)
 	}
-	m.inserted += copied
 	return copied == readModelBatch, nil
 }
 
@@ -463,7 +459,7 @@ type modelCloserKey struct {
 	value       int64
 }
 
-func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
+func (m *ReadModel) ingest(rows *sql.Rows) error {
 	var (
 		text                  modelText
 		seq, at, re, resolves int64
@@ -477,7 +473,7 @@ func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
 		return fmt.Errorf("scan a record for the read model: %w", err)
 	}
 	row := modelRow{
-		seq: seq, at: at, re: re, resolves: resolves, originSeq: originSeq, expires: modelNoExpiry, textAt: modelNoText, refs: modelNone, also: modelNone,
+		seq: seq, at: at, re: re, resolves: resolves, originSeq: originSeq, expires: modelNoExpiry, refs: modelNone, also: modelNone,
 		drive: m.intern(drive), lane: m.intern(lane), kind: m.intern(kind), topic: m.intern(topic), source: m.intern(source), from: m.intern(origin),
 	}
 	if expires.Valid {
@@ -505,15 +501,9 @@ func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
 		}
 	}
 	index := int32(len(m.rows)) //nolint:gosec // G115: a store never holds 2^31 records.
-	if at >= cold || m.textStarted {
-		m.textStarted = true
-		if err := m.place(&row, &text); err != nil {
-			return err
-		}
-	} else {
-		m.coldAt = max(m.coldAt, at)
-		m.hotFloor.Store(seq + 1)
-		m.hotAt.Store(m.coldAt)
+	if err := m.place(&row, &text); err != nil {
+		m.stale.Store(true)
+		return err
 	}
 	m.bytes += readModelRowBytes
 	m.rows = append(m.rows, row)
@@ -753,12 +743,6 @@ func (m *ReadModel) view(r *modelRow) modelView {
 }
 
 func (m *ReadModel) place(row *modelRow, text *modelText) error {
-	if len(text.id)+len(text.text)+len(text.refs)+len(text.fields)+len(text.body)+len(text.also)+modelBlobOverhead > m.chunkSize {
-		m.coldAt = max(m.coldAt, row.at)
-		m.hotFloor.Store(row.seq + 1)
-		m.hotAt.Store(m.coldAt)
-		return nil
-	}
 	blob := m.scratch[:0]
 	for _, field := range [...]string{text.id, text.text, text.refs, text.fields, text.body, text.also} {
 		blob = append(binary.AppendUvarint(blob, uint64(len(field))), field...)
@@ -771,31 +755,56 @@ func (m *ReadModel) place(row *modelRow, text *modelText) error {
 		}
 	}
 	m.scratch = blob
-	if len(m.chunks) == 0 || m.chunks[len(m.chunks)-1].used+len(blob) > m.chunkSize {
-		memory, err := syscall.Mmap(-1, 0, m.chunkSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
-		if err != nil {
-			return fmt.Errorf("map read model text: %w", err)
+	if len(m.chunks) == 0 || m.chunks[len(m.chunks)-1].used+len(blob) > len(m.chunks[len(m.chunks)-1].memory) {
+		if err := m.growText(len(blob)); err != nil {
+			return err
 		}
-		m.chunks = append(m.chunks, modelChunk{memory: memory})
-		m.bytes += int64(m.chunkSize)
 	}
 	chunk := &m.chunks[len(m.chunks)-1]
-	row.textAt = (m.chunkBase+int64(len(m.chunks)-1))<<32 | int64(chunk.used)
-	copy(chunk.memory[chunk.used:], blob)
+	if _, err := m.text.WriteAt(blob, chunk.offset+int64(chunk.used)); err != nil {
+		return fmt.Errorf("write read model text: %w", err)
+	}
+	row.textAt = int64(len(m.chunks)-1)<<32 | int64(chunk.used)
 	chunk.used += len(blob)
-	chunk.lastSeq, chunk.maxAt = row.seq, max(chunk.maxAt, row.at)
+	m.textUsed += int64(len(blob))
 	return nil
 }
 
-func (m *ReadModel) textOf(r *modelRow) (modelText, bool) {
-	if r.textAt == modelNoText {
-		return modelText{}, false
+func (m *ReadModel) growText(blob int) error {
+	var disk syscall.Statfs_t
+	if err := syscall.Fstatfs(int(m.text.Fd()), &disk); err != nil { //nolint:gosec // G115: a file descriptor fits in an int.
+		return fmt.Errorf("read the disk under read model text: %w", err)
 	}
-	which := r.textAt>>32 - m.chunkBase
-	if which < 0 {
-		return modelText{}, false
+	if free := uint64(disk.Bavail) * uint64(disk.Bsize); free < readModelDiskFloor { //nolint:gosec,unconvert // G115: both fields are sizes; their types differ by platform.
+		return fmt.Errorf("read model text: %d bytes free, under its floor of %d", free, readModelDiskFloor)
 	}
-	blob := m.chunks[which].memory[r.textAt&math.MaxUint32:]
+	page := os.Getpagesize()
+	size := (max(readModelChunk, blob) + page - 1) &^ (page - 1)
+	if err := m.text.Truncate(m.textEnd + int64(size)); err != nil {
+		return fmt.Errorf("grow read model text: %w", err)
+	}
+	memory, err := syscall.Mmap(int(m.text.Fd()), m.textEnd, size, syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: a file descriptor fits in an int.
+	if err != nil {
+		return fmt.Errorf("map read model text: %w", err)
+	}
+	m.chunks = append(m.chunks, modelChunk{memory: memory, offset: m.textEnd})
+	m.textEnd += int64(size)
+	return nil
+}
+
+func openModelText(home string) (*os.File, error) {
+	file, err := os.CreateTemp(home, "read-model-text-*")
+	if err != nil {
+		return nil, fmt.Errorf("create read model text: %w", err)
+	}
+	if err := os.Remove(file.Name()); err != nil {
+		return nil, errors.Join(fmt.Errorf("unlink read model text: %w", err), file.Close())
+	}
+	return file, nil
+}
+
+func (m *ReadModel) textOf(r *modelRow) modelText {
+	blob := m.chunks[r.textAt>>32].memory[r.textAt&math.MaxUint32:]
 	field := func() string {
 		n, read := binary.Uvarint(blob)
 		value := unsafe.String(unsafe.SliceData(blob[read:]), n) //nolint:gosec // G103, G115: a view of this chunk, copied before a record leaves the model.
@@ -814,31 +823,23 @@ func (m *ReadModel) textOf(r *modelRow) (modelText, bool) {
 	}
 	text := modelText{id: field(), text: field(), refs: field(), fields: field(), body: field(), also: field()}
 	text.reOriginSeq, text.resolvesOriginSeq = number(), number()
-	return text, true
+	return text
 }
 
-func (m *ReadModel) trim() error {
-	now := m.source.Now()
-	if m.inserted < readModelTrimRows && !m.trimmed.IsZero() && now.Sub(m.trimmed) < readModelTrimAge && m.bytes <= m.limit {
-		return nil
+func (m *ReadModel) moveSearchFloor() {
+	first, _ := slices.BinarySearch(m.atHigh, m.source.Now().Add(-readModelSpan).UnixMilli())
+	if first == 0 {
+		return
 	}
-	m.inserted, m.trimmed = 0, now
-	cold := now.Add(-readModelSpan).UnixMilli()
-	for len(m.chunks) > 0 && (m.chunks[0].maxAt < cold && len(m.chunks) > 1 || m.bytes > m.limit) {
-		oldest := m.chunks[0]
-		if err := syscall.Munmap(oldest.memory); err != nil {
-			return fmt.Errorf("unmap read model text: %w", err)
-		}
-		m.chunks = m.chunks[1:]
-		m.chunkBase++
-		m.bytes -= int64(m.chunkSize)
-		m.coldAt = max(m.coldAt, oldest.maxAt)
-		m.hotFloor.Store(max(m.hotFloor.Load(), oldest.lastSeq+1))
-	}
-	m.hotAt.Store(m.coldAt)
+	m.searchFloor.Store(m.rows[first-1].seq + 1)
+	m.searchSince.Store(m.atHigh[first-1])
+}
+
+func (m *ReadModel) withinCap() error {
+	m.moveSearchFloor()
 	m.held.Store(m.bytes)
 	if m.bytes > m.limit {
-		return fmt.Errorf("read model: %d rows hold %d bytes with no text left to drop, over its cap of %d", len(m.rows), m.bytes, m.limit)
+		return fmt.Errorf("read model: %d rows hold %d bytes, over its cap of %d", len(m.rows), m.bytes, m.limit)
 	}
 	return nil
 }
@@ -888,7 +889,7 @@ func (m *ReadModel) answer(ctx context.Context, s *Store, f Filter, projection s
 		m.misses.Add(1)
 		return nil, false
 	}
-	out, err := m.hydrated(ctx, s, chosen, projection)
+	out, err := m.hydrated(s, chosen, projection)
 	if err != nil {
 		m.failures.Add(1)
 		return nil, false
@@ -1211,10 +1212,10 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 	if len(sel.wordsLower) == 0 {
 		return true, true
 	}
-	text, held := sel.m.textOf(r)
-	if !held {
+	if r.seq < sel.m.searchFloor.Load() {
 		return false, false
 	}
+	text := sel.m.textOf(r)
 	return sel.holdsAWord(&v, &text), true
 }
 
@@ -1428,74 +1429,20 @@ func matchesFoldASCII(hay string, word []byte) bool {
 	return true
 }
 
-func (m *ReadModel) hydrated(ctx context.Context, s *Store, chosen []*modelRow, projection string) ([]Record, error) {
+func (m *ReadModel) hydrated(s *Store, chosen []*modelRow, projection string) ([]Record, error) {
+	if len(chosen) == 0 {
+		return nil, nil
+	}
 	out := make([]Record, len(chosen))
-	var coldSeqs []int64
-	var coldAt []int
 	for i, row := range chosen {
-		text, held := m.textOf(row)
-		if !held {
-			coldSeqs = append(coldSeqs, row.seq)
-			coldAt = append(coldAt, i)
-			continue
-		}
+		text := m.textOf(row)
 		record, err := m.record(s, row, &text, projection)
 		if err != nil {
 			return nil, err
 		}
 		out[i] = record
 	}
-	if len(coldSeqs) == 0 {
-		if len(out) == 0 {
-			return nil, nil
-		}
-		return out, nil
-	}
-	cold, err := m.recordsBySeq(ctx, s, coldSeqs, projection)
-	if err != nil {
-		return nil, err
-	}
-	for i, at := range coldAt {
-		record, ok := cold[coldSeqs[i]]
-		if !ok {
-			return nil, fmt.Errorf("record #%d left the store under the read model", coldSeqs[i])
-		}
-		out[at] = record
-	}
 	return out, nil
-}
-
-func (m *ReadModel) recordsBySeq(ctx context.Context, s *Store, seqs []int64, projection string) (map[int64]Record, error) {
-	wanted, err := json.Marshal(seqs)
-	if err != nil {
-		return nil, err
-	}
-	snapshot, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return nil, fmt.Errorf("begin a read of older text: %w", err)
-	}
-	defer func() { _ = snapshot.Rollback() }()
-	var mutations int64
-	if err := snapshot.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM meta WHERE key = ?), 0)", recordMutationsKey).Scan(&mutations); err != nil {
-		return nil, fmt.Errorf("read record mutations: %w", err)
-	}
-	if mutations != m.mutations {
-		return nil, errReadModelStale
-	}
-	rows, err := snapshot.QueryContext(ctx, "SELECT "+projection+" FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(wanted))
-	if err != nil {
-		return nil, fmt.Errorf("read records by seq: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	out := make(map[int64]Record, len(seqs))
-	for rows.Next() {
-		record, err := s.scan(rows)
-		if err != nil {
-			return nil, err
-		}
-		out[record.Seq] = record
-	}
-	return out, rows.Err()
 }
 
 func (m *ReadModel) record(s *Store, row *modelRow, text *modelText, projection string) (Record, error) {
@@ -1590,7 +1537,7 @@ func (m *ReadModel) openRecordsAmong(ctx context.Context, s *Store, drive string
 		}
 		chosen = append(chosen, row)
 	}
-	out, err := m.hydrated(ctx, s, chosen, columns)
+	out, err := m.hydrated(s, chosen, columns)
 	if err != nil {
 		m.failures.Add(1)
 		return nil, false
