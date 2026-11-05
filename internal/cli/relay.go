@@ -466,8 +466,12 @@ func newRelayStatusCmd() *cobra.Command {
 				if len(r.Routes) > 0 {
 					routes = strings.Join(r.Routes, ",")
 				}
-				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s node %s %s, epoch %d, drives %s, pushed through %d, %d unpushed; %s\n",
-					r.Mesh, r.URL, r.Node, r.Tier, r.Epoch, routes, r.Pushed, r.Unpushed, remote); err != nil {
+				local := ""
+				if r.KeptLocal != "" {
+					local = "; " + r.KeptLocal + " stays on this node, since the relay takes none from an owner"
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s node %s %s, epoch %d, drives %s, pushed through %d, %d unpushed%s; %s\n",
+					r.Mesh, r.URL, r.Node, r.Tier, r.Epoch, routes, r.Pushed, r.Unpushed, local, remote); err != nil {
 					return err
 				}
 			}

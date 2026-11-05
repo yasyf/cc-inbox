@@ -395,6 +395,8 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 
 var errStaleEpoch = errors.New("relay: sealed under a superseded group key")
 
+const ownerKeepsLocal = "every dotted kind, such as lr.note, lr.item, lr.escalation and board.card"
+
 // relayRefuses names what the relay never takes from an owner: a dotted kind is
 // a service's namespace there, so cci's typed lr.* records stay on this machine.
 func (n *Node) relayRefuses(kind kinds.Kind) bool {
@@ -885,6 +887,7 @@ type StatusReport struct {
 	Routes    []string      `json:"routes,omitempty"`
 	Pushed    int64         `json:"pushed_through"`
 	Unpushed  int           `json:"unpushed"`
+	KeptLocal string        `json:"kept_local,omitempty"`
 	Remote    *RemoteStatus `json:"remote,omitempty"`
 	RemoteErr string        `json:"remote_error,omitempty"`
 }
@@ -905,6 +908,9 @@ func (n *Node) Status(ctx context.Context) (StatusReport, error) {
 	}
 	if n.Config.Tier != e2e.TierPaired {
 		rep.Unpushed = len(pending)
+	}
+	if n.Config.Tier == e2e.TierOwner {
+		rep.KeptLocal = ownerKeepsLocal
 	}
 	var rs RemoteStatus
 	if err := n.client().Call(ctx, http.MethodGet, "/v1/status?"+url.Values{"mesh": {n.Config.Mesh}}.Encode(), nil, &rs); err != nil {
