@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -14,15 +15,37 @@ import (
 
 var numberedLane = regexp.MustCompile(`^(.+)-([1-9]\d*)$`)
 
-// refuseSecondBinder refuses self binding lane on drive while another live
-// thread holds it, and tells root once by a defect record. A numbered
-// successor binding beside its live predecessor binds, and the predecessor
-// stands down for it.
-func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window, drive, lane string, at time.Time) error {
-	if b, ok, err := st.Binding(ctx, self); err != nil || ok && (b.Root || b.Lane != "" || b.Drive != drive) {
-		return err
+// HeldLaneExit is the exit code of a post or announce refused because another
+// live thread holds its lane, so a launcher's first command can stop on it.
+const HeldLaneExit = 76
+
+// HeldLane is the refusal of a thread taking a lane another live thread holds.
+type HeldLane struct {
+	text string
+}
+
+func (e *HeldLane) Error() string {
+	return e.text
+}
+
+func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window, drive, lane string, at time.Time) (bool, error) {
+	b, ok, err := st.Binding(ctx, self)
+	switch {
+	case err != nil:
+		return false, err
+	case ok && (b.Root || b.Drive != drive || b.Lane != "" && b.Lane != lane):
+		return false, nil
+	case ok && b.Lane == lane:
+		holder, held, err := remoteHolder(ctx, st, drive, lane)
+		if err != nil || !held {
+			return true, err
+		}
+		if _, standDown, err := st.Successors(ctx, drive, lane); err != nil || standDown != 0 {
+			return true, err
+		}
+		return true, refuseHolder(ctx, st, self, drive, lane, holder, at)
 	}
-	return refuseHeldLane(ctx, st, self, window, drive, lane, at)
+	return true, refuseHeldLane(ctx, st, self, window, drive, lane, at)
 }
 
 // refuseHeldLane refuses self taking lane on drive from another live thread
@@ -42,22 +65,36 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, wi
 		if !ok {
 			continue
 		}
-		seen := st.Now().Sub(holder.SeenAt).Round(time.Minute)
-		if held != lane {
-			text := fmt.Sprintf("%s stood down for %s, which registered under %s while %s, thread %s %s, was live, seen %s ago: %s posts its handoff for %s and stops", held, lane, store.Stem(lane), held, holder.Name, holder.Key(), seen, held, lane)
-			if _, _, err := st.PostAt(ctx, store.Record{ID: "replaced:" + held + ":" + lane, Drive: drive, Lane: peers.RegistryLane, Kind: kinds.StandDown, To: []string{held, lane}, Text: text, Fields: store.Fields{Attrs: map[string]string{"successor": lane}}, Source: "post"}, 0, at); err != nil {
-				return err
-			}
-			continue
+		if held == lane {
+			return refuseHolder(ctx, st, self, drive, lane, holder, at)
 		}
-		text := fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, holder.Name, holder.Key(), seen, lane)
-		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
-		if err != nil {
+		text := fmt.Sprintf("%s stood down for %s, which registered under %s while %s, thread %s, was live, seen %s ago: %s posts its handoff for %s and stops", held, lane, store.Stem(lane), held, holderName(holder), seenAgo(st, holder), held, lane)
+		if _, _, err := st.PostAt(ctx, store.Record{ID: "replaced:" + held + ":" + lane, Drive: drive, Lane: peers.RegistryLane, Kind: kinds.StandDown, To: []string{held, lane}, Text: text, Fields: store.Fields{Attrs: map[string]string{"successor": lane}}, Source: "post"}, 0, at); err != nil {
 			return err
 		}
-		return fmt.Errorf("lane %s is held by live thread %s %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d", lane, holder.Name, holder.Key(), seen, defect.Seq)
 	}
 	return nil
+}
+
+func refuseHolder(ctx context.Context, st *store.Store, self store.PeerKey, drive, lane string, holder peers.View, at time.Time) error {
+	name, seen := holderName(holder), seenAgo(st, holder)
+	text := fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, name, seen, lane)
+	defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + lane + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
+	if err != nil {
+		return err
+	}
+	return &HeldLane{fmt.Sprintf("lane %s is held by live thread %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d. The name passes to another thread only after a stand-down: cci post --drive %s --lane root --kind stand-down --to %s --successor <lane> --text '<why>'", lane, name, seen, defect.Seq, drive, lane)}
+}
+
+func holderName(holder peers.View) string {
+	if holder.Origin == "" {
+		return holder.Name + " " + holder.Key().String()
+	}
+	return fmt.Sprintf("%s %s on node %s", holder.Name, holder.Key(), holder.Origin)
+}
+
+func seenAgo(st *store.Store, holder peers.View) time.Duration {
+	return st.Now().Sub(holder.SeenAt).Round(time.Minute)
 }
 
 func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey, window store.Window, drive, lane string) (peers.View, bool, error) {
@@ -74,7 +111,16 @@ func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey,
 			return v, true, nil
 		}
 	}
-	return peers.View{}, false, nil
+	return remoteHolder(ctx, st, drive, lane)
+}
+
+func remoteHolder(ctx context.Context, st *store.Store, drive, lane string) (peers.View, bool, error) {
+	r, ok, err := st.RemoteBinder(ctx, drive, lane, st.Now().Add(-peers.StaleAfter))
+	if err != nil || !ok || r.Kind == kinds.Done || r.Kind == kinds.Stopped {
+		return peers.View{}, false, err
+	}
+	session, agent, _ := strings.Cut(r.Fields.Attrs[store.BinderAttr], "/")
+	return peers.View{Peer: store.Peer{Session: session, Agent: agent, Origin: r.Origin, Drive: drive, Lane: lane, SeenAt: r.At}, Name: lane}, true, nil
 }
 
 func predecessors(lane string) []string {

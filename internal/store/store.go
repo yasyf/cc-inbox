@@ -903,7 +903,10 @@ func (s *Store) post(ctx context.Context, tx *sql.Tx, r Record, ttl time.Duratio
 		err = sql.ErrNoRows
 	}
 	if errors.Is(err, sql.ErrNoRows) {
-		err = tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE hash = ? AND at >= ? AND origin = ? ORDER BY seq DESC LIMIT 1",
+		err = tx.QueryRowContext(ctx, `SELECT seq FROM records t WHERE hash = ? AND at >= ? AND origin = ?
+AND NOT EXISTS (SELECT 1 FROM records c WHERE c.resolves = t.seq AND c.resolves != 0)
+AND NOT EXISTS (SELECT 1 FROM record_also_resolves a WHERE a.target = t.seq)
+ORDER BY seq DESC LIMIT 1`,
 			hash, r.At.Add(-DedupWindow).UnixMilli(), s.Self()).Scan(&existing)
 	}
 	switch {

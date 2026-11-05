@@ -61,6 +61,9 @@ Address lanes with `--to`; when an action needs the owner, use `--to owner`.
 A post that exits 75 was not stored: the bus is down. With `--lane` and
 `--drive` it is kept, and the next `cci post` that reaches the store stores it;
 without them, repost it once the bus answers. Never treat exit 75 as sent.
+A post or `cci announce --lane` that exits 76 was refused because another live
+thread holds the lane, on this machine or on another node; nothing was stored.
+Stop. The name passes to another thread only after the lane stands down.
 A launched lane's turn ends only on a typed record: `cci hook stop` refuses
 every other stop and prints the commands. The records that end a turn are
 `done`, `stopped`, `stand-down`, a `handoff` with no doc, and an open `ask`,

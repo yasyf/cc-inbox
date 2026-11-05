@@ -192,6 +192,9 @@ func ExitCode(err error) int {
 	if down := (*BusDown)(nil); errors.As(err, &down) {
 		return BusDownExit
 	}
+	if held := (*HeldLane)(nil); errors.As(err, &held) {
+		return HeldLaneExit
+	}
 	return 1
 }
 

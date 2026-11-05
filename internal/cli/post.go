@@ -286,18 +286,25 @@ func newPostCmd() *cobra.Command {
 					}
 				}
 			}
-			var bind *store.LaneBinding
+			var (
+				bind   *store.LaneBinding
+				binder string
+			)
 			if self, window, err := peerIdentity(cmd.Context()); getenv(cmd.Context(), unsentEnv) == "" && err == nil && window.PID != 0 {
 				if err := refuseUnregistered(cmd.Context(), st, r.Drive, lane); err != nil {
 					return err
 				}
-				if err := refuseSecondBinder(cmd.Context(), st, self, window, r.Drive, lane, at); err != nil {
+				holds, err := refuseSecondBinder(cmd.Context(), st, self, window, r.Drive, lane, at)
+				if err != nil {
 					return err
+				}
+				if holds {
+					binder = self.String()
 				}
 				bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
 			}
 			for i := range records {
-				records[i].Fields.Attrs = namedAttrs(records[i], named)
+				records[i].Fields.Attrs = namedAttrs(records[i], named, binder)
 			}
 			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
 			if errors.Is(err, store.ErrUnconfirmed) {
@@ -681,7 +688,7 @@ func namedRefPRs(ctx context.Context, st *store.Store, drive, ref string) ([]sto
 	return r.Refs.PRs, nil
 }
 
-func namedAttrs(r store.Record, named map[int64]string) map[string]string {
+func namedAttrs(r store.Record, named map[int64]string, binder string) map[string]string {
 	attrs := maps.Clone(r.Fields.Attrs)
 	set := func(key, alias string) {
 		if alias == "" {
@@ -696,6 +703,7 @@ func namedAttrs(r store.Record, named map[int64]string) map[string]string {
 	for i, seq := range r.Closes() {
 		set(store.ResolvesAliasAttr(i), named[seq])
 	}
+	set(store.BinderAttr, binder)
 	return attrs
 }
 
