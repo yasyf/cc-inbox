@@ -54,7 +54,7 @@ func decision(t *testing.T, out *bytes.Buffer) string {
 
 func blockersToRoot(t *testing.T, st *store.Store) []store.Record {
 	t.Helper()
-	open, err := st.OpenTo(context.Background(), "d", "root", []kinds.Kind{kinds.Blocker})
+	open, err := st.OpenTo(context.Background(), store.PeerKey{}, "d", "root", []kinds.Kind{kinds.Blocker})
 	if err != nil {
 		t.Fatal(err)
 	}

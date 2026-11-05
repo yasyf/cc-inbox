@@ -30,7 +30,7 @@ func TestOpenToSelectedClosureMatchesAllAddressedOpeners(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	current, err := st.OpenTo(ctx, "d", "api", ks)
+	current, err := st.OpenTo(ctx, PeerKey{}, "d", "api", ks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestOpenToSelectedErrorsAndUnrelatedPrivateCorruption(t *testing.T) {
 				if _, err := st.db.ExecContext(ctx, "UPDATE records SET "+field+"='[' WHERE seq=?", seq); err != nil {
 					t.Fatal(err)
 				}
-				current, err := st.OpenTo(ctx, "d", "api", []kinds.Kind{kinds.Ask})
+				current, err := st.OpenTo(ctx, PeerKey{}, "d", "api", []kinds.Kind{kinds.Ask})
 				if scope == "unrelated" && field != "recipients" {
 					if err != nil || len(current) != 1 {
 						t.Fatalf("unrelated corruption selected: %+v/%v", current, err)

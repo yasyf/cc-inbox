@@ -117,6 +117,39 @@ func TestReadModelMatchesTheStore(t *testing.T) {
 	}
 }
 
+func TestReadModelSkipsWhatARelayBackfilledAfterALaneBound(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := t.Context()
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"worker"}, Text: "posted before the bind"})
+	k := store.PeerKey{Session: "s1"}
+	if err := st.BindLane(ctx, k, "d", "worker", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, []store.Row{{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: clock.Now().Add(-time.Hour), Text: "backfilled", To: []string{"worker"}, Source: "post"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"worker"}, Text: "posted since the bind"})
+	model, err := st.BuildReadModel(ctx, noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	f := store.LaneMail(k, store.Binding{Drive: "d", Lane: "worker"})
+	got, answered, err := model.Answer(ctx, st, f)
+	if err != nil || !answered {
+		t.Fatalf("model answered %v, %v", answered, err)
+	}
+	want, err := st.Query(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRecords(t, got, want)
+	if len(want) != 2 || want[0].Text != "posted before the bind" || want[1].Text != "posted since the bind" {
+		t.Fatalf("lane mail = %+v; want both posts and not the backfilled record", want)
+	}
+}
+
 func TestReadModelKnowsWhatIsOpen(t *testing.T) {
 	st, clock := testutil.Store(t)
 	open := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, Text: "still open?", To: []string{"worker"}})

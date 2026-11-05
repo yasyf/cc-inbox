@@ -159,22 +159,26 @@ func (f *tailFlags) runOpen(ctx context.Context, cmd *cobra.Command, st *store.S
 	if err != nil {
 		return err
 	}
+	b, bound, err := st.Binding(ctx, peer)
+	if err != nil {
+		return err
+	}
 	lane := f.rf.to
 	if lane == "" {
-		b, bound, err := st.Binding(ctx, peer)
-		if err != nil {
-			return err
-		}
 		if !bound || b.Drive != drive || b.Lane == "" {
 			return fmt.Errorf("--open needs --to <lane>: this thread is bound as no lane of %s", drive)
 		}
 		lane = b.Lane
 	}
+	thread := store.PeerKey{}
+	if bound && b.Drive == drive && store.SameLane(b.Lane, lane) {
+		thread = peer
+	}
 	only, err := kinds.ParseAll(f.rf.kinds)
 	if err != nil {
 		return err
 	}
-	open, err := hook.Owed(ctx, st, drive, lane)
+	open, err := hook.Owed(ctx, st, thread, drive, lane)
 	if err != nil {
 		return err
 	}

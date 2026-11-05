@@ -319,6 +319,42 @@ func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.
 	}
 }
 
+func TestALaneOwesNothingARelayBackfilledAfterItBound(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"lane-x"}, Text: "posted before the lane bound"})
+	clock.Advance(time.Minute)
+	k := store.PeerKey{Session: "s1"}
+	if err := st.BindLane(ctx, k, "d", "lane-x", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	backfilled := clock.Now().Add(-time.Hour)
+	if _, err := st.Apply(ctx, []store.Row{
+		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Ask, At: backfilled, Text: "a backfilled ask", To: []string{"lane-x"}, Source: "post"},
+		{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: kinds.Note, At: backfilled, Text: "a backfilled note", To: []string{"lane-x"}, Source: "post"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"lane-x"}, Text: "posted since the lane started"})
+
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "posted since the lane started") || !strings.Contains(got, "posted before the lane bound") || strings.Contains(got, "backfilled") {
+		t.Fatalf("additionalContext = %q; want what was posted to the lane before it bound and since it started, and nothing a relay backfilled after it bound", got)
+	}
+	owed, err := hook.Owed(ctx, st, k, "d", "lane-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owed) != 1 || owed[0].Text != "posted before the lane bound" {
+		t.Fatalf("owed = %+v; want only the ask posted before the lane bound", owed)
+	}
+}
+
 func TestPostToolUseDeliversAReportToEveryLaneItNames(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
@@ -356,18 +392,20 @@ func TestALanesHookFeedsNoAliasMailItsPredecessorCouldHaveRead(t *testing.T) {
 	note("root", "desk", "an order while no one held desk")
 	note("root", "worker", "an order before any worker registered")
 	clock.Advance(time.Minute)
-	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "desk-2", clock.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.BindLane(ctx, store.PeerKey{Session: "s2"}, "d", "worker-1", clock.Now()); err != nil {
-		t.Fatal(err)
-	}
+	started := clock.Now()
 	clock.Advance(-10 * time.Minute)
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"desk"}, Text: "an order desk-1 read"})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"desk"}, Text: "a decide desk-1 may have missed"})
 	clock.Advance(-5 * time.Minute)
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"desk"}, Text: "a decide from before desk-1"})
-	clock.Advance(25 * time.Minute)
+	clock.Advance(15 * time.Minute)
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "desk-2", started); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s2"}, "d", "worker-1", started); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(10 * time.Minute)
 	note("root", "desk", "an order for desk-2")
 
 	var out bytes.Buffer

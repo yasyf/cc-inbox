@@ -2,14 +2,18 @@ package relay_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +24,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/relay/relaytest"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
+	"modernc.org/sqlite"
 )
 
 const secret = "the launch code is swordfish"
@@ -584,6 +589,59 @@ func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
 	}
 	if got := texts(t, late.st); len(got) != 6 || got[0] != "note 0" || got[5] != "after the copy" {
 		t.Fatalf("store holds %q", got)
+	}
+}
+
+var (
+	countCommits sync.Once
+	commits      sync.Map
+)
+
+func commitsUnder(home string) int64 {
+	var n int64
+	commits.Range(func(dsn, count any) bool {
+		if strings.Contains(dsn.(string), home+string(filepath.Separator)) {
+			n += count.(*atomic.Int64).Load()
+		}
+		return true
+	})
+	return n
+}
+
+func TestASeedCommitsOnceHoweverManyRowsItCopies(t *testing.T) {
+	countCommits.Do(func() {
+		sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
+			count, _ := commits.LoadOrStore(dsn, new(atomic.Int64))
+			conn.(sqlite.HookRegisterer).RegisterCommitHook(func() int32 {
+				count.(*atomic.Int64).Add(1)
+				return 0
+			})
+			return nil
+		})
+	})
+	for _, rows := range []int{1, 2500} {
+		t.Run(fmt.Sprintf("rows=%d", rows), func(t *testing.T) {
+			srv := relaytest.NewServer(t)
+			late := newPeer(t, srv, node.TierOwner)
+			join(t, srv, late)
+			var copied bytes.Buffer
+			zipped := gzip.NewWriter(&copied)
+			encoder := json.NewEncoder(zipped)
+			at := time.Now().Add(-time.Hour)
+			for i := range rows {
+				if err := encoder.Encode(store.Row{Origin: "0123456789abcdef", OriginSeq: int64(i + 1), Drive: "d", Lane: "root", Kind: kinds.Note, At: at, Text: fmt.Sprintf("note %d", i), Source: "post"}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := zipped.Close(); err != nil {
+				t.Fatal(err)
+			}
+			before := commitsUnder(late.st.HomeDir())
+			seeded, err := late.node.Seed(context.Background(), "d", &copied)
+			if got := commitsUnder(late.st.HomeDir()) - before; err != nil || seeded.Inserted != rows || got != 1 {
+				t.Fatalf("seed of %d rows = %+v, %v in %d commits; want every row and the sync cursor in one commit", rows, seeded, err, got)
+			}
+		})
 	}
 }
 

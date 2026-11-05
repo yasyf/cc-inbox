@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"iter"
 	"os"
 	"time"
 	"unicode/utf8"
@@ -255,6 +256,30 @@ func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
 	return a, nil
 }
 
+// ApplyAll ingests every row rows yields as Apply does, then makes the cursor
+// moves moves returns once rows ends, all in one transaction: a copy of a
+// whole drive commits once, and a row Apply refuses keeps none of it.
+func (s *Store) ApplyAll(ctx context.Context, rows iter.Seq[Row], moves func() []CursorMove) (Applied, error) {
+	tx, err := s.rw.BeginTx(ctx, nil)
+	if err != nil {
+		return Applied{}, fmt.Errorf("begin apply: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var a Applied
+	for row := range rows {
+		if err := s.apply(ctx, tx, row, &a, false, nil); err != nil {
+			return Applied{}, err
+		}
+	}
+	if _, err := s.write(ctx, tx, Write{Cursors: moves()}); err != nil {
+		return Applied{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Applied{}, fmt.Errorf("commit apply: %w", err)
+	}
+	return a, nil
+}
+
 func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, released bool, absent map[Pointer]bool) error {
 	if row.Origin == "" || row.OriginSeq <= 0 {
 		return fmt.Errorf("apply: row has no origin identity (%q, %d)", row.Origin, row.OriginSeq)
@@ -331,17 +356,13 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 		Origin: row.Origin, OriginSeq: row.OriginSeq, ID: row.ID,
 		Drive: row.Drive, Lane: row.Lane, Kind: row.Kind, At: row.At, Text: row.Text, Topic: row.Topic, To: row.To,
 		Re: re, Resolves: resolves, Refs: refs, Fields: row.Fields, ExpiresAt: row.ExpiresAt, Source: row.Source, Body: row.Body,
+		reOrigin: row.Re, resolvesOrigin: row.Resolves,
 	}
 	if len(also) > 0 {
 		r.AlsoResolves, r.alsoOrigins = also, row.AlsoResolves
 	}
-	seq, err := s.insert(ctx, tx, r, Hash(r), nil)
-	if err != nil {
+	if _, err := s.insert(ctx, tx, r, Hash(r), nil); err != nil {
 		return err
-	}
-	if _, err := tx.ExecContext(ctx, "UPDATE records SET re_origin = ?, re_origin_seq = ?, resolves_origin = ?, resolves_origin_seq = ? WHERE seq = ?",
-		pointerOrigin(row.Re), pointerSeq(row.Re), pointerOrigin(row.Resolves), pointerSeq(row.Resolves), seq); err != nil {
-		return fmt.Errorf("apply pointers of %s/%d: %w", row.Origin, row.OriginSeq, err)
 	}
 	if released {
 		a.Released++
