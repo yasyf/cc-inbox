@@ -3,12 +3,13 @@ package cli_test
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"strings"
 	"testing"
 
-	"github.com/yasyf/cc-inbox/client"
+	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -79,8 +80,7 @@ func TestAThreadCannotPostAsALaneNothingLaunched(t *testing.T) {
 
 func TestAnLrVerbPostsAsItsOwnLaneAndBindsTheSessionThatRanItOnlyToThatSessionsLane(t *testing.T) {
 	if lane := os.Getenv("CCI_TEST_EMBEDDED"); lane != "" {
-		_, err := client.Post(context.Background(), client.Draft{Drive: "d", Lane: lane, Kind: "report", Text: "one-pager for the owner"})
-		fmt.Printf("err=%v\n", err)
+		fmt.Printf("err=%v\n", embeddedPost(lane))
 		return
 	}
 	home := t.TempDir()
@@ -158,4 +158,20 @@ func TestAPostUnderTheAliasItsSessionHoldsGoesOutAsThatSessionsLane(t *testing.T
 	if out := post("meta-desk", "019a3c3e-other"); !strings.Contains(out, "has no registry row") {
 		t.Fatalf("another session's post under that alias = %s; want it refused", out)
 	}
+}
+
+func embeddedPost(lane string) error {
+	ctx := context.Background()
+	st, err := cli.OpenStore(ctx)
+	if err != nil {
+		return err
+	}
+	embedded, err := cli.WithStore(ctx, st)
+	if err != nil {
+		return err
+	}
+	root := cli.NewRootCmd()
+	root.SetArgs([]string{"post", "--drive", "d", "--lane", lane, "--kind", "report", "--text", "one-pager for the owner"})
+	root.SetOut(io.Discard)
+	return root.ExecuteContext(embedded)
 }
