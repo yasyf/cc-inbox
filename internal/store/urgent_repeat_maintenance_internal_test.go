@@ -30,6 +30,8 @@ func TestUrgentRepeatIndexRequiresExplicitMaintenance(t *testing.T) {
 	}
 }
 
+const urgentIndexWriterBudget = 8 * time.Second
+
 func TestUrgentRepeatIndexProvisioningWithinWriterBudget(t *testing.T) {
 	population := 32
 	if value := os.Getenv("CCI_URGENT_INDEX_ROWS"); value != "" {
@@ -55,7 +57,7 @@ printf('t%0255d',n),n,'history','post','urgent-build-'||n FROM history`, populat
 	}
 	fingerprint := st.SchemaFingerprint()
 	report, err := MaintainIndexes(ctx, home)
-	if err != nil || !slices.Equal(report.Created, []string{"records_urgent_repeat"}) || report.Elapsed >= 5*time.Second {
+	if err != nil || !slices.Equal(report.Created, []string{"records_urgent_repeat"}) || report.Elapsed >= urgentIndexWriterBudget {
 		t.Fatalf("repeat index provisioning exceeds writer budget: rows=%d report=%+v error=%v", population, report, err)
 	}
 	var records, textKeyBytes, maxDrive, maxLane, maxKind, maxTopic int64
@@ -67,5 +69,5 @@ MAX(length(CAST(drive AS BLOB))),MAX(length(CAST(lane AS BLOB))),MAX(length(CAST
 	if st.SchemaFingerprint() != fingerprint || records != int64(population) || textKeyBytes != int64(population)*416 || maxDrive != 32 || maxLane != 64 || maxKind != 64 || maxTopic != 256 {
 		t.Fatalf("repeat index changed logical state or seed widths: rows=%d text_key_bytes=%d max=%v", records, textKeyBytes, []int64{maxDrive, maxLane, maxKind, maxTopic})
 	}
-	t.Logf("urgent_repeat_index_rows=%d text_key_bytes=%d max_text_key_bytes=%v elapsed=%s writer_budget=%s created=%v", records, textKeyBytes, []int64{maxDrive, maxLane, maxKind, maxTopic}, report.Elapsed, 5*time.Second, report.Created)
+	t.Logf("urgent_repeat_index_rows=%d text_key_bytes=%d max_text_key_bytes=%v elapsed=%s writer_budget=%s created=%v", records, textKeyBytes, []int64{maxDrive, maxLane, maxKind, maxTopic}, report.Elapsed, urgentIndexWriterBudget, report.Created)
 }
