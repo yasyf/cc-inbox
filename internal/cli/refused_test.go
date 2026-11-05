@@ -125,3 +125,37 @@ func inWindow(t *testing.T, test, home, id string, env ...string) string {
 	}
 	return string(out)
 }
+
+func TestAPostUnderTheAliasItsSessionHoldsGoesOutAsThatSessionsLane(t *testing.T) {
+	if lane := os.Getenv("CCI_TEST_ALIAS"); lane != "" {
+		out, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", "working", "--json")
+		fmt.Printf("out=%s err=%v\n", strings.TrimSpace(out), err)
+		return
+	}
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "root", Kind: kinds.Spawn, Text: "SPAWNED meta-desk-3", Refs: store.Refs{Lanes: []string{"meta-desk-3"}}, Fields: store.Fields{Attrs: map[string]string{"brief": "/briefs/meta.md", "model": "opus"}}}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	post := func(lane, id string) string {
+		t.Helper()
+		return inWindow(t, "TestAPostUnderTheAliasItsSessionHoldsGoesOutAsThatSessionsLane", home, id, "CCI_TEST_ALIAS="+lane)
+	}
+	if out := post("meta-desk-3", "019a3c3e-desk"); !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("the launched lane's own post = %s", out)
+	}
+	if out := post("meta-desk", "019a3c3e-desk"); !strings.Contains(out, `"lane":"meta-desk-3"`) || !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("a post under the alias the session holds = %s; want it stored as meta-desk-3", out)
+	}
+	if out := post("meta-desk", "019a3c3e-other"); !strings.Contains(out, "has no registry row") {
+		t.Fatalf("another session's post under that alias = %s; want it refused", out)
+	}
+}

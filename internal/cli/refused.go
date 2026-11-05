@@ -11,6 +11,18 @@ import (
 
 const launcherLaneEnv = "CLAUDE_LONG_RUNNING_LANE"
 
+func aliasedLane(ctx context.Context, st *store.Store, drive, lane string) (string, error) {
+	b, bound, err := st.Binding(ctx, SelfPeer(ctx))
+	if err != nil || !bound || b.Drive != drive || b.Lane == "" || b.Lane == lane {
+		return lane, err
+	}
+	reach, err := st.Reach(ctx, drive, lane)
+	if err != nil || reach.Lane != b.Lane {
+		return lane, err
+	}
+	return b.Lane, nil
+}
+
 func bindsCaller(ctx context.Context, lane string) bool {
 	inv := invoked(ctx)
 	return inv == nil || !inv.embedder || getenv(ctx, launcherLaneEnv) == lane
