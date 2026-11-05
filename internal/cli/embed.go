@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -14,7 +16,10 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
-const embedPageRows = 500
+const (
+	embedPageRows = 500
+	embedSlow     = 50 * time.Millisecond
+)
 
 // EmbedCall is one read an embedder asks of a store.
 type EmbedCall struct {
@@ -140,6 +145,13 @@ func EmbedFollow(ctx context.Context, st *store.Store, c EmbedCall, peer string,
 	})
 }
 
+func embedderPID(ctx context.Context) int {
+	if inv := invoked(ctx); inv != nil {
+		return inv.pid
+	}
+	return os.Getpid()
+}
+
 func newEmbedCmd() *cobra.Command {
 	read := func(in io.Reader) (EmbedCall, error) {
 		var c EmbedCall
@@ -165,9 +177,13 @@ func newEmbedCmd() *cobra.Command {
 					return out.Encode(EmbedRecord{Record: r, ReNum: r.ReNum, CloseNums: r.CloseNums})
 				})
 			}
+			started := time.Now()
 			answer, err := embedAnswer(cmd.Context(), st, c)
 			if err != nil {
 				return err
+			}
+			if took := time.Since(started); took >= embedSlow {
+				slog.Info("slow embedded call", "op", c.Op, "pid", embedderPID(cmd.Context()), "kinds", c.Kinds, "lanes", c.Lanes, "after", c.After, "since", c.Since, "pr", c.PR, "seqs", len(c.Seqs), "took", took)
 			}
 			return out.Encode(answer)
 		}),
