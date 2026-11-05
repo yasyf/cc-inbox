@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -207,6 +208,18 @@ func TestAnOwnerNeverOffersTheRelayADottedKind(t *testing.T) {
 	testutil.Post(t, a.st, store.Record{Kind: kinds.Decision, Text: "crosses"})
 	if res, err := a.node.Push(context.Background(), configs(t, a)); err != nil || res.Pushed != 1 {
 		t.Fatalf("the next push = %+v, %v; want the decision", res, err)
+	}
+}
+
+func TestStatusNamesTheKindsAnOwnerKeepsLocal(t *testing.T) {
+	_, a, _, c := mesh(t)
+	owner, err := a.node.Status(context.Background())
+	if err != nil || !strings.Contains(owner.KeptLocal, "lr.note") || !strings.Contains(owner.KeptLocal, "board.card") {
+		t.Fatalf("owner status = %+v, %v; want the dotted kinds it keeps local named", owner, err)
+	}
+	paired, err := c.node.Status(context.Background())
+	if err != nil || paired.KeptLocal != "" {
+		t.Fatalf("paired status = %+v, %v; want no kept-local line", paired, err)
 	}
 }
 
