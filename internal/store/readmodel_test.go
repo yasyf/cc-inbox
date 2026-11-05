@@ -245,7 +245,7 @@ func TestReadModelKeepsItsCapWithEveryTextInItsFile(t *testing.T) {
 	if stats.SearchFloor <= first.Seq {
 		t.Errorf("search floor = %d, want it above the first record %d", stats.SearchFloor, first.Seq)
 	}
-	if _, answered, err := model.Answer(t.Context(), st, store.Filter{Drive: "d", Contains: []string{"first"}}); err != nil || answered {
+	if _, answered, err := model.Answer(t.Context(), st, store.Filter{Drive: "d", Contains: []string{"first"}, IncludeExpired: true}); err != nil || answered {
 		t.Errorf("a search below the floor answered = %t, err = %v; want it left to the store", answered, err)
 	}
 }
