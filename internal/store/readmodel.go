@@ -271,7 +271,8 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 }
 
 type servedModel struct {
-	model atomic.Pointer[ReadModel]
+	model   atomic.Pointer[ReadModel]
+	aliases aliasMemo
 }
 
 // HeldFrom is the lowest seq whose whole text the model holds, 0 when no model

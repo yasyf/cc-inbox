@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
@@ -131,6 +132,35 @@ ON CONFLICT (drive, lane, stem) DO UPDATE SET seen = max(seen, excluded.seen);
 END`, ""},
 }
 
+const laneHoldChangesKey = "lane_hold_changes"
+
+func laneHoldChangeTrigger(name, event string) physicalObject {
+	return physicalObject{
+		"trigger", name,
+		"CREATE TRIGGER " + name + " AFTER " + event + " ON lane_holds\nBEGIN\n" +
+			"INSERT INTO meta (key, value) VALUES ('" + laneHoldChangesKey + "', 1) ON CONFLICT (key) DO UPDATE SET value = value + 1;\nEND",
+		"",
+	}
+}
+
+var laneHoldChangeObjects = [...]physicalObject{
+	laneHoldChangeTrigger("lane_hold_changes_insert", "INSERT"),
+	laneHoldChangeTrigger("lane_hold_changes_update", "UPDATE"),
+	laneHoldChangeTrigger("lane_hold_changes_delete", "DELETE"),
+}
+
+type aliasKey struct {
+	drive, lane string
+}
+
+type aliasMemo struct {
+	mu      sync.Mutex
+	exact   bool
+	mark    uint64
+	changes [2]int64
+	lanes   map[aliasKey][]string
+}
+
 // ErrNoLaneRegistry is what a registry read returns on a store whose lane
 // registry cci maintain-indexes has not installed yet.
 var ErrNoLaneRegistry = errors.New("this store has no lane registry yet; cci maintain-indexes installs it")
@@ -251,13 +281,81 @@ type rowsQuerier interface {
 // ends at one of those. The query walks indexes from lane, so its cost does not
 // grow with the drive's other lanes.
 func (s *Store) Aliases(ctx context.Context, drive, lane string) ([]string, error) {
-	switch err := s.laneRegistry(ctx); {
-	case errors.Is(err, ErrNoLaneRegistry):
+	if RootName(lane) {
 		return nil, nil
-	case err != nil:
+	}
+	changes, exact, err := s.aliasChanges(ctx)
+	if err != nil {
 		return nil, err
 	}
-	return aliases(ctx, s.db, drive, lane)
+	if !exact {
+		switch err := s.laneRegistry(ctx); {
+		case errors.Is(err, ErrNoLaneRegistry):
+			return nil, nil
+		case err != nil:
+			return nil, err
+		}
+		return aliases(ctx, s.db, drive, lane)
+	}
+	memo, key := &s.reads.aliases, aliasKey{drive, lane}
+	memo.mu.Lock()
+	names, held := memo.lanes[key]
+	memo.mu.Unlock()
+	if held {
+		return slices.Clone(names), nil
+	}
+	if names, err = aliases(ctx, s.db, drive, lane); err != nil {
+		return nil, err
+	}
+	memo.mu.Lock()
+	defer memo.mu.Unlock()
+	if memo.changes == changes {
+		if memo.lanes == nil {
+			memo.lanes = map[aliasKey][]string{}
+		}
+		memo.lanes[key] = names
+	}
+	return slices.Clone(names), nil
+}
+
+func readAliasChanges(ctx context.Context, q querier) ([2]int64, error) {
+	var changes [2]int64
+	if err := q.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM meta WHERE key = ?1), 0), COALESCE((SELECT value FROM meta WHERE key = ?2), 0)", laneHoldChangesKey, recordMutationsKey).Scan(&changes[0], &changes[1]); err != nil {
+		return changes, fmt.Errorf("read lane hold changes: %w", err)
+	}
+	return changes, nil
+}
+
+func (s *Store) aliasChanges(ctx context.Context) ([2]int64, bool, error) {
+	memo := &s.reads.aliases
+	var mark uint64
+	model := s.reads.model.Load()
+	if model != nil {
+		mark = model.committed()
+	}
+	memo.mu.Lock()
+	exact, held, known := memo.exact, memo.changes, memo.exact && model != nil && memo.mark == mark
+	memo.mu.Unlock()
+	if known {
+		return held, true, nil
+	}
+	if !exact {
+		installed, err := projectionInstalled(ctx, s.db, laneHoldChangeObjects[:], "lane hold change")
+		if err != nil || !installed {
+			return held, false, err
+		}
+	}
+	changes, err := readAliasChanges(ctx, s.db)
+	if err != nil {
+		return changes, false, err
+	}
+	memo.mu.Lock()
+	defer memo.mu.Unlock()
+	if memo.changes != changes {
+		clear(memo.lanes)
+	}
+	memo.exact, memo.mark, memo.changes = true, mark, changes
+	return changes, true, nil
 }
 
 func (s *Store) readerAliases(ctx context.Context, f Filter, reader string) ([]string, error) {
