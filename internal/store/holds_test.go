@@ -400,6 +400,7 @@ func TestAliasesFollowEveryHoldChange(t *testing.T) {
 		t.Run(fmt.Sprintf("read model %t", served), func(t *testing.T) {
 			st, _ := testutil.Store(t)
 			testutil.Post(t, st, store.Record{Lane: "desk-7", Kind: kinds.State, Text: "up"})
+			ask := testutil.Post(t, st, store.Record{Lane: "desk-7", Kind: kinds.Ask, Text: "which one?"})
 			if served {
 				model, err := st.BuildReadModel(t.Context(), noPace)
 				if err != nil {
@@ -421,6 +422,12 @@ func TestAliasesFollowEveryHoldChange(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				if _, err := st.Holding(t.Context(), "d", []string{"desk-7", "desk-8"}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := st.OpenSeqsAmong(t.Context(), "d", []int64{ask.Seq}); err != nil {
+					t.Fatal(err)
+				}
 				testutil.Post(t, st, step)
 				fresh, err := store.Open(t.Context(), st.HomeDir())
 				if err != nil {
@@ -438,6 +445,29 @@ func TestAliasesFollowEveryHoldChange(t *testing.T) {
 					if !slices.Equal(got, want) {
 						t.Errorf("after %s %s: Aliases(%s) = %q, a fresh store reads %q", step.Lane, step.Kind, lane, got, want)
 					}
+				}
+				lanes := []string{"desk-7", "desk-8"}
+				gotHolding, err := st.Holding(t.Context(), "d", lanes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantHolding, err := fresh.Holding(t.Context(), "d", lanes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(gotHolding, wantHolding) {
+					t.Errorf("after %s %s: Holding = %q, a fresh store reads %q", step.Lane, step.Kind, gotHolding, wantHolding)
+				}
+				gotOpen, err := st.OpenSeqsAmong(t.Context(), "d", []int64{ask.Seq})
+				if err != nil {
+					t.Fatal(err)
+				}
+				wantOpen, err := fresh.OpenSeqsAmong(t.Context(), "d", []int64{ask.Seq})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !slices.Equal(gotOpen, wantOpen) {
+					t.Errorf("after %s %s: open = %v, a fresh store reads %v", step.Lane, step.Kind, gotOpen, wantOpen)
 				}
 				if err := fresh.Close(); err != nil {
 					t.Fatal(err)

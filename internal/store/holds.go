@@ -159,6 +159,9 @@ type aliasMemo struct {
 	mark    uint64
 	changes [2]int64
 	lanes   map[aliasKey][]string
+	holding map[aliasKey]bool
+	unheard map[string]map[string]bool
+	heardAt uint64
 }
 
 // ErrNoLaneRegistry is what a registry read returns on a store whose lane
@@ -166,6 +169,13 @@ type aliasMemo struct {
 var ErrNoLaneRegistry = errors.New("this store has no lane registry yet; cci maintain-indexes installs it")
 
 func (s *Store) laneRegistry(ctx context.Context) error {
+	memo := &s.reads.aliases
+	memo.mu.Lock()
+	exact := memo.exact
+	memo.mu.Unlock()
+	if exact {
+		return nil
+	}
 	var installed bool
 	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'lane_holds')").Scan(&installed); err != nil {
 		return fmt.Errorf("look for the lane registry: %w", err)
@@ -353,6 +363,7 @@ func (s *Store) aliasChanges(ctx context.Context) ([2]int64, bool, error) {
 	defer memo.mu.Unlock()
 	if memo.changes != changes {
 		clear(memo.lanes)
+		clear(memo.holding)
 	}
 	memo.exact, memo.mark, memo.changes = true, mark, changes
 	return changes, true, nil
@@ -498,6 +509,48 @@ func (s *Store) Holding(ctx context.Context, drive string, lanes []string) ([]st
 	case err != nil:
 		return nil, err
 	}
+	changes, exact, err := s.aliasChanges(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !exact {
+		return s.holdingOf(ctx, drive, lanes)
+	}
+	memo := &s.reads.aliases
+	var out, missing []string
+	memo.mu.Lock()
+	for _, lane := range lanes {
+		held, known := memo.holding[aliasKey{drive, lane}]
+		switch {
+		case !known:
+			missing = append(missing, lane)
+		case held:
+			out = append(out, lane)
+		}
+	}
+	memo.mu.Unlock()
+	if len(missing) > 0 {
+		found, err := s.holdingOf(ctx, drive, missing)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, found...)
+		memo.mu.Lock()
+		if memo.changes == changes {
+			if memo.holding == nil {
+				memo.holding = map[aliasKey]bool{}
+			}
+			for _, lane := range missing {
+				memo.holding[aliasKey{drive, lane}] = slices.Contains(found, lane)
+			}
+		}
+		memo.mu.Unlock()
+	}
+	slices.Sort(out)
+	return out, nil
+}
+
+func (s *Store) holdingOf(ctx context.Context, drive string, lanes []string) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT h.lane FROM lane_holds h WHERE h.drive = ? AND h.lane IN (`+strings.Repeat("?,", len(lanes)-1)+`?) AND h.stem != h.lane AND `+liveOf("h")+`
 	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = h.drive AND o.stem = h.stem AND o.lane != h.lane AND `+liveOf("o")+` AND (`+writtenLater("o.held", "h.held")+` OR o.held = h.held AND o.lane < h.lane))
 	ORDER BY h.lane`, append([]any{drive}, toAny(lanes)...)...)
@@ -608,11 +661,42 @@ func (s *Store) heardAsks(ctx context.Context, q rowsQuerier, drive string, open
 	case err != nil:
 		return nil, err
 	}
-	gone, err := unheard(ctx, q, drive, askers)
+	gone, err := s.unheardNow(ctx, q, drive, askers)
 	if err != nil {
 		return nil, err
 	}
 	return slices.DeleteFunc(open, func(o Record) bool { return o.Kind == kinds.Ask && gone[o.Lane] }), nil
+}
+
+func (s *Store) unheardNow(ctx context.Context, q rowsQuerier, drive string, lanes []string) (map[string]bool, error) {
+	model := s.reads.model.Load()
+	if model == nil || q != rowsQuerier(s.db) {
+		return unheard(ctx, q, drive, lanes)
+	}
+	memo, key, mark := &s.reads.aliases, drive+"\x00"+strings.Join(lanes, "\x00"), model.committed()
+	memo.mu.Lock()
+	if memo.heardAt != mark {
+		clear(memo.unheard)
+		memo.heardAt = mark
+	}
+	gone, known := memo.unheard[key]
+	memo.mu.Unlock()
+	if known {
+		return gone, nil
+	}
+	gone, err := unheard(ctx, q, drive, lanes)
+	if err != nil {
+		return nil, err
+	}
+	memo.mu.Lock()
+	defer memo.mu.Unlock()
+	if memo.heardAt == mark {
+		if memo.unheard == nil {
+			memo.unheard = map[string]map[string]bool{}
+		}
+		memo.unheard[key] = gone
+	}
+	return gone, nil
 }
 
 func unheard(ctx context.Context, q rowsQuerier, drive string, lanes []string) (map[string]bool, error) {
