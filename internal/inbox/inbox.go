@@ -185,6 +185,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			t.mark(r, folded[index[r.Seq]])
 			t.directSent = r.Seq
 			t.first++
+			t.direct++
 		}
 		t.done = true
 		for _, r := range records {
@@ -218,6 +219,9 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if t.first > 0 && !opts.JSON {
 		first := "to " + f.For
 		if f.For == "" {
+			first = "from root"
+		}
+		if t.direct > 0 {
 			first = "to " + f.To + " or from root"
 		}
 		trailer(fmt.Sprintf("... %d %s first", t.first, first), false)
@@ -278,7 +282,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if t.sent > ahead.sent {
 		res.Ack = append(res.Ack, store.CursorMove{Name: addressedCursor(opts.Cursor), Drive: f.Drive, Seq: t.sent})
 	}
-	if t.directSent > direct.sent {
+	if t.direct > 0 && t.directSent > direct.sent {
 		res.Ack = append(res.Ack, store.CursorMove{Name: directCursor(opts.Cursor), Drive: f.Drive, Seq: t.directSent})
 	}
 	if _, err := out.WriteTo(w); err != nil {
@@ -379,6 +383,7 @@ type tailRun struct {
 	sent       int64
 	directSent int64
 	first      int
+	direct     int
 	shortened  int
 	done       bool
 }
