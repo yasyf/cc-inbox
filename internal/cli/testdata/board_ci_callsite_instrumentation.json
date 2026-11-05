@@ -19,10 +19,10 @@
       "functions": [
         {
           "symbol": "Store.owners",
-          "preimage_sha256": "558dcd954bc407dbc2eb557ad2c6d5bd3a59844114a5a3964a22846cec2fd3e5",
-          "postimage_sha256": "ece935c19d443d5e4a4c9ae1ec672774b4e6710111c70fff7fb3ce1f8f3cfe97",
-          "preimage_b64": "ZnVuYyAocyAqU3RvcmUpIG93bmVycyhjdHggY29udGV4dC5Db250ZXh0KSAobWFwW3N0cmluZ11ib29sLCBlcnJvcikgewoJcm93cywgZXJyIDo9IHMuZGIuUXVlcnlDb250ZXh0KGN0eCwgIlNFTEVDVCBub2RlIEZST00gbWVtYmVycyBXSEVSRSB0aWVyID0gPyIsIHN0cmluZyhub2RlLlRpZXJPd25lcikpCglpZiBlcnIgIT0gbmlsIHsKCQlyZXR1cm4gbmlsLCBmbXQuRXJyb3JmKCJyZWFkIG93bmVyIG1lbWJlcnM6ICV3IiwgZXJyKQoJfQoJZGVmZXIgZnVuYygpIHsgXyA9IHJvd3MuQ2xvc2UoKSB9KCkKCW91dCA6PSBtYXBbc3RyaW5nXWJvb2x7cy5TZWxmKCk6IHMub3duZXJ9Cglmb3Igcm93cy5OZXh0KCkgewoJCXZhciBuIHN0cmluZwoJCWlmIGVyciA6PSByb3dzLlNjYW4oJm4pOyBlcnIgIT0gbmlsIHsKCQkJcmV0dXJuIG5pbCwgZm10LkVycm9yZigic2NhbiBvd25lciBtZW1iZXI6ICV3IiwgZXJyKQoJCX0KCQlvdXRbbl0gPSB0cnVlCgl9CglyZXR1cm4gb3V0LCByb3dzLkVycigpCn0K",
-          "postimage_b64": "ZnVuYyAocyAqU3RvcmUpIG93bmVycyhjdHggY29udGV4dC5Db250ZXh0KSAobWFwW3N0cmluZ11ib29sLCBlcnJvcikgewoJcm93cywgZXJyIDo9IHMuZGIuUXVlcnlDb250ZXh0KGN0eCwgIlNFTEVDVCBub2RlIEZST00gbWVtYmVycyBXSEVSRSB0aWVyID0gPyIsIHN0cmluZyhub2RlLlRpZXJPd25lcikpCglpZiBlcnIgIT0gbmlsIHsKCQlyZXR1cm4gbmlsLCBmbXQuRXJyb3JmKCJyZWFkIG93bmVyIG1lbWJlcnM6ICV3IiwgZXJyKQoJfQoJYm9hcmREaWFnbm9zdGljUXVlcmllcy5BZGQoMSkKCWRlZmVyIGZ1bmMoKSB7IF8gPSByb3dzLkNsb3NlKCkgfSgpCglvdXQgOj0gbWFwW3N0cmluZ11ib29se3MuU2VsZigpOiBzLm93bmVyfQoJZm9yIHJvd3MuTmV4dCgpIHsKCQl2YXIgbiBzdHJpbmcKCQlpZiBlcnIgOj0gcm93cy5TY2FuKCZuKTsgZXJyICE9IG5pbCB7CgkJCXJldHVybiBuaWwsIGZtdC5FcnJvcmYoInNjYW4gb3duZXIgbWVtYmVyOiAldyIsIGVycikKCQl9CgkJb3V0W25dID0gdHJ1ZQoJfQoJcmV0dXJuIG91dCwgcm93cy5FcnIoKQp9Cg=="
+          "preimage_sha256": "199c72bdeef56de878a3f43491394bf77445240efa186fb6ec2453313e43257a",
+          "postimage_sha256": "090ec4f564f427628033970d682a044b4748fabcf9cc7fb1582dc2cdf92df831",
+          "preimage_b64": "ZnVuYyAocyAqU3RvcmUpIG93bmVycyhjdHggY29udGV4dC5Db250ZXh0KSAobWFwW3N0cmluZ11ib29sLCBlcnJvcikgewoJcmV0dXJuIHJlYWRPd25lcnMoY3R4LCBzLmRiLCBzKQp9Cg==",
+          "postimage_b64": "ZnVuYyAocyAqU3RvcmUpIG93bmVycyhjdHggY29udGV4dC5Db250ZXh0KSAobWFwW3N0cmluZ11ib29sLCBlcnJvcikgewoJb3duZXJzLCBlcnIgOj0gcmVhZE93bmVycyhjdHgsIHMuZGIsIHMpCglpZiBlcnIgIT0gbmlsIHsKCQlyZXR1cm4gbmlsLCBlcnIKCX0KCWJvYXJkRGlhZ25vc3RpY1F1ZXJpZXMuQWRkKDEpCglyZXR1cm4gb3duZXJzLCBuaWwKfQo="
         },
         {
           "symbol": "Store.names",
