@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `cci cursor show <name>` prints where a named reader cursor stands without
   moving it, so a lane can read a cursor before it decides to `cci cursor set`
   it. A cursor that was never set is refused rather than printed as `#0`.
+- `client.WholeText(record)` returns a record's whole text the way `cci show`
+  reads it: its text joined to the body file it names or spilled to, and a
+  missing file named in place of its body. A file that exists and cannot be
+  read is an error, never the clipped text. A caller in another module reads a
+  record whole through it instead of keeping its own copy of the rule.
 
 ### Fixed
 
