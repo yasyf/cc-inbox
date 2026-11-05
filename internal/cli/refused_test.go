@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yasyf/cc-inbox/client"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -61,19 +62,7 @@ func TestAThreadCannotPostAsALaneNothingLaunched(t *testing.T) {
 	}
 	thread := func(lane, id string, extra ...string) string {
 		t.Helper()
-		cmd := exec.Command(os.Args[0], "-test.run=^TestAThreadCannotPostAsALaneNothingLaunched$", "codex")
-		cmd.Env = append(os.Environ(), "CCI_TEST_UNREGISTERED="+lane, "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+t.TempDir(), "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CLAUDE_LONG_RUNNING_LANE=", "CODEX_THREAD_ID="+id)
-		for _, name := range peers.IdentityEnv {
-			if name != "CODEX_THREAD_ID" {
-				cmd.Env = append(cmd.Env, name+"=")
-			}
-		}
-		cmd.Env = append(cmd.Env, extra...)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("%s: %v\n%s", lane, err, out)
-		}
-		return string(out)
+		return inWindow(t, "TestAThreadCannotPostAsALaneNothingLaunched", home, id, append([]string{"CCI_TEST_UNREGISTERED=" + lane}, extra...)...)
 	}
 	for range 2 {
 		if out := thread("stray-lane", "019a3c3e-stray"); !strings.Contains(out, "has no registry row") || !strings.Contains(out, "--kind spawn --lane-ref stray-lane") {
@@ -86,4 +75,53 @@ func TestAThreadCannotPostAsALaneNothingLaunched(t *testing.T) {
 	if out := thread("window-lane", "019a3c3e-window", "CLAUDE_LONG_RUNNING_LANE=window-lane"); !strings.Contains(out, "err=<nil>") {
 		t.Fatalf("a lane its launcher named in the window's environment = %s", out)
 	}
+}
+
+func TestAnLrVerbPostsAsItsOwnLaneAndBindsTheSessionThatRanItOnlyToThatSessionsLane(t *testing.T) {
+	if lane := os.Getenv("CCI_TEST_EMBEDDED"); lane != "" {
+		_, err := client.Post(context.Background(), client.Draft{Drive: "d", Lane: lane, Kind: "report", Text: "one-pager for the owner"})
+		fmt.Printf("err=%v\n", err)
+		return
+	}
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	verb := func(lane, id string, extra ...string) {
+		t.Helper()
+		if out := inWindow(t, "TestAnLrVerbPostsAsItsOwnLaneAndBindsTheSessionThatRanItOnlyToThatSessionsLane", home, id, append([]string{"CCI_TEST_EMBEDDED=" + lane}, extra...)...); !strings.Contains(out, "err=<nil>") {
+			t.Fatalf("a verb posting as %s = %s", lane, out)
+		}
+	}
+	verb("lr-explain", "019a3c3e-explain")
+	verb("grade-first", "019a3c3e-first")
+	verb("window-lane", "019a3c3e-window", "CLAUDE_LONG_RUNNING_LANE=window-lane")
+	verb("lr-explain", "019a3c3e-relay", "CLAUDE_LONG_RUNNING_LANE=owner-relay")
+
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	for lane, want := range map[string]int{"lr-explain": 0, "grade-first": 0, "owner-relay": 0, "window-lane": 1} {
+		if bound, err := st.LanePeers(ctx, []string{lane}); err != nil || len(bound) != want {
+			t.Errorf("sessions bound as %s = %v, %v; want %d", lane, bound, err, want)
+		}
+	}
+}
+
+func inWindow(t *testing.T, test, home, id string, env ...string) string {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^"+test+"$", "codex")
+	cmd.Env = append(os.Environ(), "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+t.TempDir(), "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CLAUDE_LONG_RUNNING_LANE=", "CODEX_THREAD_ID="+id)
+	for _, name := range peers.IdentityEnv {
+		if name != "CODEX_THREAD_ID" {
+			cmd.Env = append(cmd.Env, name+"=")
+		}
+	}
+	cmd.Env = append(cmd.Env, env...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s: %v\n%s", id, err, out)
+	}
+	return string(out)
 }

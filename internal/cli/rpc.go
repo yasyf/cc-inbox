@@ -42,6 +42,7 @@ type invocation struct {
 	cwd        string
 	pid        int
 	stdoutChar bool
+	embedder   bool
 	st         *store.Store
 }
 
@@ -57,7 +58,7 @@ func WithStore(ctx context.Context, st *store.Store) (context.Context, error) {
 		return nil, fmt.Errorf("stat stdout: %w", err)
 	}
 	return context.WithValue(ctx, invocationKey{}, &invocation{
-		env: requestEnv(os.Environ()), cwd: cwd, pid: os.Getpid(), stdoutChar: info.Mode()&os.ModeCharDevice != 0, st: st,
+		env: requestEnv(os.Environ()), cwd: cwd, pid: os.Getpid(), stdoutChar: info.Mode()&os.ModeCharDevice != 0, embedder: true, st: st,
 	}), nil
 }
 
@@ -169,7 +170,7 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	root.SetIn(&inputStream{replies: replies})
 	env := requestEnv(request.Env)
 	err = root.ExecuteContext(channel.Hosted(context.WithValue(harness.WithConfigDir(ctx, env["CLAUDE_CONFIG_DIR"]), invocationKey{}, &invocation{
-		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
+		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, embedder: request.Embedder, st: &view,
 	})))
 	if parent.Err() != nil && wire.Stream(request.Argv) && request.Argv[1] != "channel" {
 		return parent.Err()

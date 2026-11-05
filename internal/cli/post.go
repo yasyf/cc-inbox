@@ -290,7 +290,7 @@ func newPostCmd() *cobra.Command {
 				bind   *store.LaneBinding
 				binder string
 			)
-			if self, window, err := peerIdentity(cmd.Context()); getenv(cmd.Context(), unsentEnv) == "" && err == nil && window.PID != 0 {
+			if self, window, err := peerIdentity(cmd.Context()); getenv(cmd.Context(), unsentEnv) == "" && err == nil && window.PID != 0 && bindsCaller(cmd.Context(), lane) {
 				if err := refuseUnregistered(cmd.Context(), st, r.Drive, lane); err != nil {
 					return err
 				}

@@ -11,6 +11,11 @@ import (
 
 const launcherLaneEnv = "CLAUDE_LONG_RUNNING_LANE"
 
+func bindsCaller(ctx context.Context, lane string) bool {
+	inv := invoked(ctx)
+	return inv == nil || !inv.embedder || getenv(ctx, launcherLaneEnv) == lane
+}
+
 // refuseUnregistered refuses a thread's first post as a lane nothing launched,
 // which no supervisor would ever notice going quiet.
 func refuseUnregistered(ctx context.Context, st *store.Store, drive, lane string) error {
