@@ -183,6 +183,39 @@ func TestShowAndTailOnAReplicaKeepTheErrorForANumberNoHubHolds(t *testing.T) {
 	}
 }
 
+func TestPostOnAReplicaResolvesARecordOnlyTheHubHoldsAndItsLaterDeliveryDoesNotDuplicateIt(t *testing.T) {
+	r := newReplica(t,
+		[]store.Record{{Lane: "desk", Kind: kinds.Ask, Text: "older than the sprite"}},
+		[]store.Record{{Lane: "root", Kind: kinds.Decision, Text: "after the join"}})
+
+	for _, flag := range []string{"--resolves", "--re"} {
+		before := held(t, r.sprite)
+		if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "answer", flag, "#1", "--text", "answered through "+flag); err != nil {
+			t.Fatalf("post %s #1 on the replica: %v", flag, err)
+		}
+		if got := held(t, r.sprite); got < before+1 {
+			t.Errorf("replica holds %d records after post %s, want the answer added to %d", got, flag, before)
+		}
+	}
+	out, err := run(t, "show", "--drive", "d", "#1")
+	if err != nil || !strings.Contains(out, "older than the sprite") {
+		t.Fatalf("show #1 = %q, %v; want the stored hub record", out, err)
+	}
+
+	rows, err := r.mac.Export(context.Background(), r.mac.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := held(t, r.sprite)
+	applied, err := r.sprite.Apply(context.Background(), rows, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applied.Inserted != 0 || applied.Buffered != 0 || held(t, r.sprite) != total {
+		t.Errorf("relay delivery of the hub's rows after post = %+v with %d held, want all duplicates and %d held", applied, held(t, r.sprite), total)
+	}
+}
+
 func routed(t *testing.T, st *store.Store, routes ...string) {
 	t.Helper()
 	cfg, _, err := relay.LoadConfig(st.HomeDir(), relay.DefaultMesh)

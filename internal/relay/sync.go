@@ -824,6 +824,14 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 	return applied, n.client().Call(ctx, http.MethodPost, "/v1/ack", ackRequest{Mesh: n.Config.Mesh, Receipts: acks, Tap: n.Config.Tap}, nil)
 }
 
+func (n *Node) Hold(ctx context.Context, row store.Row) error {
+	rows := []store.Row{row}
+	if _, err := n.Store.Apply(ctx, rows, nil); err != nil {
+		return err
+	}
+	return n.fillAwaited(ctx, rows)
+}
+
 func (n *Node) fillAwaited(ctx context.Context, rows []store.Row) error {
 	for len(rows) > 0 {
 		waits, err := n.Store.Awaiting(ctx, rows)
