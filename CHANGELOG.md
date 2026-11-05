@@ -41,11 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it holds now names that thread on the record, so another node reads the lane
   as held for 15 minutes after its last post. A second thread there that posts
   as the lane, or claims it with `cci announce --lane`, is refused with exit 76,
-  naming the holder and its node and the stand-down that passes the name on;
-  a thread already bound to the lane is refused the same way once another
-  node's holder appears. Before, a Mac session and a Sprite copy both posted as
-  restate-redis-1 for 40 minutes, because each node checked only its own
-  sessions.
+  naming the holder and its node and the stand-down that passes the name on,
+  the same refusal a second thread on one machine already got. Before, a Mac
+  session and a Sprite copy both posted as restate-redis-1 for 40 minutes,
+  because each node checked only its own sessions.
 - A record posted again after its twin was resolved is stored as a new record.
   The duplicate check now skips twins another record resolved, so a withdraw
   re-posted after a cancel answered it is no longer returned as the cancelled

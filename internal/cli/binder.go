@@ -36,14 +36,7 @@ func refuseSecondBinder(ctx context.Context, st *store.Store, self store.PeerKey
 	case ok && (b.Root || b.Drive != drive || b.Lane != "" && b.Lane != lane):
 		return false, nil
 	case ok && b.Lane == lane:
-		holder, held, err := remoteHolder(ctx, st, drive, lane)
-		if err != nil || !held {
-			return true, err
-		}
-		if _, standDown, err := st.Successors(ctx, drive, lane); err != nil || standDown != 0 {
-			return true, err
-		}
-		return true, refuseHolder(ctx, st, self, drive, lane, holder, at)
+		return true, nil
 	}
 	return true, refuseHeldLane(ctx, st, self, window, drive, lane, at)
 }
@@ -111,10 +104,6 @@ func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey,
 			return v, true, nil
 		}
 	}
-	return remoteHolder(ctx, st, drive, lane)
-}
-
-func remoteHolder(ctx context.Context, st *store.Store, drive, lane string) (peers.View, bool, error) {
 	r, ok, err := st.RemoteBinder(ctx, drive, lane, st.Now().Add(-peers.StaleAfter))
 	if err != nil || !ok || r.Kind == kinds.Done || r.Kind == kinds.Stopped {
 		return peers.View{}, false, err
