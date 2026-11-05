@@ -8,14 +8,12 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
-	"math"
 	"net"
 	"net/http"
 	"net/http/pprof"
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/debug"
 	"sync"
 	"time"
 
@@ -297,7 +295,7 @@ func keepHotWindow(ctx context.Context, st *store.Store, home string) {
 const (
 	readModelRetry    = 5 * time.Minute
 	readModelSessions = time.Second
-	readModelMemory   = 350 << 20
+	readModelProcs    = 2
 )
 
 func keepReadModel(ctx context.Context, st *store.Store, home string) {
@@ -320,10 +318,10 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 		on := store.ReadModelOn(home)
 		if on {
 			harness.KeepSessions(readModelSessions)
-			debug.SetMemoryLimit(readModelMemory)
+			runtime.GOMAXPROCS(min(readModelProcs, runtime.NumCPU()))
 		} else {
 			harness.KeepSessions(0)
-			debug.SetMemoryLimit(math.MaxInt64)
+			runtime.GOMAXPROCS(min(schedulerProcs, runtime.NumCPU()))
 		}
 		if model != nil && (!on || model.Stale()) {
 			drop()
