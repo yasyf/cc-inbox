@@ -30,6 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attr's value swallowed the rest after its first `=`. A post carrying two
   attrs, one of them a refusal reason with `=` and `,`, was stored with one
   attr.
+- A replica now stores a reply to a record the relay never carries, such as an
+  owner's `lr.escalation`, which stays on the owner's machine. The reply used to
+  wait for its target forever, and every reply to it waited behind it, so a
+  landing host never saw a grade answering such a thread. The reply is stored
+  with that pointer unresolved, its own replies thread under it, and the next
+  pull, even one that brings nothing new, stores every reply an earlier version
+  held this way.
 - `cci watch` now follows across a daemon restart. When the daemon stopped for a
   newer install, it told each watch it had been cut short and sent exit 1, so a
   Monitor on the watch ended and the lane stopped hearing its mail. Now the

@@ -17,8 +17,8 @@ import (
 )
 
 type replica struct {
-	mac, sprite *store.Store
-	macNode     *relay.Node
+	mac, sprite         *store.Store
+	macNode, spriteNode *relay.Node
 }
 
 func joinedNode(t *testing.T, srv *relaytest.Server, tier node.Tier) (*store.Store, *relay.Node) {
@@ -73,7 +73,7 @@ func newReplica(t *testing.T, before, after []store.Record) replica {
 	}
 	r.push(t)
 	sprite, spriteNode := joinedNode(t, srv, node.TierPaired)
-	r.sprite = sprite
+	r.sprite, r.spriteNode = sprite, spriteNode
 	pinned(t, sprite, mac, node.TierOwner)
 	pinned(t, mac, sprite, node.TierPaired)
 	if err := spriteNode.Join(ctx); err != nil {
@@ -209,12 +209,9 @@ func TestBareShowOnAReplicaReadsThroughTheDriveItsRelayCarries(t *testing.T) {
 	}
 }
 
-func TestAReplyToARecordOlderThanTheReplicaArrivesWithItsTarget(t *testing.T) {
-	r := newReplica(t,
-		[]store.Record{{Lane: "root", Kind: kinds.Decide, Text: "ship the relay?"}},
-		[]store.Record{{Lane: "root", Kind: kinds.Go, Text: "go", Re: 1}})
-
-	records, err := r.sprite.Query(context.Background(), store.Filter{Drive: "d"})
+func replies(t *testing.T, st *store.Store) map[string]string {
+	t.Helper()
+	records, err := st.Query(context.Background(), store.Filter{Drive: "d"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +219,60 @@ func TestAReplyToARecordOlderThanTheReplicaArrivesWithItsTarget(t *testing.T) {
 	for _, rec := range records {
 		got[rec.Text] = rec.ReNum
 	}
+	return got
+}
+
+func TestAReplyToARecordOlderThanTheReplicaArrivesWithItsTarget(t *testing.T) {
+	r := newReplica(t,
+		[]store.Record{{Lane: "root", Kind: kinds.Decide, Text: "ship the relay?"}},
+		[]store.Record{{Lane: "root", Kind: kinds.Go, Text: "go", Re: 1}})
+
+	got := replies(t, r.sprite)
 	if _, ok := got["ship the relay?"]; !ok || got["go"] != "#1" {
 		t.Fatalf("replica holds %v; want the go answering #1 and #1 itself, fetched from the hub", got)
+	}
+}
+
+var keptLocalThread = []store.Record{
+	{Lane: "supervisor", Kind: kinds.Kind("lr.escalation"), Text: "green and ungraded", To: []string{"root"}, Body: []byte(`{"subject":"Forge-AI/monorepo#50699","cause":"green and ungraded"}`)},
+	{Lane: "root", Kind: kinds.Decide, Text: "grade #50699 now", Re: 1},
+	{Lane: "fidelity-desk", Kind: kinds.Review, Text: "fidelity: ok 72ff491", Topic: "50699", Re: 2},
+}
+
+func TestAReplyToARecordTheOwnerKeepsLocalIsStoredWithItsRepliesUnderIt(t *testing.T) {
+	r := newReplica(t, nil, keptLocalThread)
+
+	got := replies(t, r.sprite)
+	if len(got) != 2 || got["grade #50699 now"] != "" || got["fidelity: ok 72ff491"] != "#2" {
+		t.Fatalf("replica holds %v; want the decide answering a record no relay carries, and the review answering #2", got)
+	}
+}
+
+func TestAReplyToTheEndOfAnOlderThreadOnAKeptLocalRecordArrivesWithTheWholeThread(t *testing.T) {
+	r := newReplica(t, keptLocalThread, []store.Record{{Lane: "desk-runner", Kind: kinds.Note, Text: "folded the grade", Re: 3}})
+
+	got := replies(t, r.sprite)
+	if len(got) != 3 || got["grade #50699 now"] != "" || got["fidelity: ok 72ff491"] != "#2" || got["folded the grade"] != "#3" {
+		t.Fatalf("replica holds %v; want the decide, the review answering #2, and the note answering #3, each fetched from the hub", got)
+	}
+}
+
+func TestTheNextPullStoresRepliesAnEarlierVersionHeldForARecordTheOwnerKeepsLocal(t *testing.T) {
+	ctx := context.Background()
+	r := newReplica(t, keptLocalThread, nil)
+	rows, err := r.mac.Export(ctx, r.mac.Self(), 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a, err := r.sprite.Apply(ctx, rows, nil); err != nil || a.Buffered != 2 {
+		t.Fatalf("replaying the earlier version's pull = %+v, %v; want the decide and the review held", a, err)
+	}
+
+	if _, err := r.spriteNode.Pull(ctx, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := replies(t, r.sprite)
+	if len(got) != 2 || got["grade #50699 now"] != "" || got["fidelity: ok 72ff491"] != "#2" {
+		t.Fatalf("replica holds %v after a pull that brought nothing new; want the decide, and the review answering #2", got)
 	}
 }

@@ -576,11 +576,15 @@ func ExportDrive(ctx context.Context, st *store.Store, drive string, to io.Write
 // Find reads the record num names on drive from the relay's log: an owner's
 // record for a bare number, else the record of the origin num's tag starts.
 func (n *Node) Find(ctx context.Context, drive string, num store.Number) (store.Row, bool, error) {
-	origins, err := n.origins(ctx, drive)
+	l, err := n.logReader(ctx)
 	if err != nil {
 		return store.Row{}, false, err
 	}
-	l, err := n.logReader(ctx)
+	return l.find(ctx, drive, num)
+}
+
+func (l logReader) find(ctx context.Context, drive string, num store.Number) (store.Row, bool, error) {
+	origins, err := l.n.origins(ctx, drive)
 	if err != nil {
 		return store.Row{}, false, err
 	}
@@ -763,7 +767,7 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 		return store.Applied{}, err
 	}
 	if len(pr.Messages) == 0 {
-		return store.Applied{}, nil
+		return store.Applied{}, n.fillAwaited(ctx)
 	}
 	members, err := n.Members(ctx)
 	if err != nil {
@@ -814,7 +818,7 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 	if err != nil {
 		return applied, err
 	}
-	if err := n.fillAwaited(ctx, rows); err != nil {
+	if err := n.fillAwaited(ctx); err != nil {
 		return applied, err
 	}
 	acks = append(acks, rowAcks...)
@@ -824,27 +828,55 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 	return applied, n.client().Call(ctx, http.MethodPost, "/v1/ack", ackRequest{Mesh: n.Config.Mesh, Receipts: acks, Tap: n.Config.Tap}, nil)
 }
 
-func (n *Node) fillAwaited(ctx context.Context, rows []store.Row) error {
-	for len(rows) > 0 {
-		waits, err := n.Store.Awaiting(ctx, rows)
-		if err != nil {
-			return err
-		}
-		rows = nil
+func (n *Node) fillAwaited(ctx context.Context) error {
+	configs, err := Configs(n.Home)
+	if err != nil {
+		return err
+	}
+	awaited := func() ([]store.Wait, error) {
+		waits, err := n.Store.Awaiting(ctx)
+		return slices.DeleteFunc(waits, func(w store.Wait) bool { return Route(configs, w.Drive) != n.Config.Mesh }), err
+	}
+	waits, err := awaited()
+	if err != nil || len(waits) == 0 {
+		return err
+	}
+	l, err := n.logReader(ctx)
+	if err != nil {
+		return err
+	}
+	tried := map[store.Pointer]bool{}
+	for {
+		var found []store.Row
 		for _, w := range waits {
-			row, ok, err := n.Find(ctx, w.Drive, store.Number{Seq: w.Seq, Tag: w.Origin})
+			if tried[w.Pointer] || w.Seq < 1 {
+				continue
+			}
+			tried[w.Pointer] = true
+			row, ok, err := l.find(ctx, w.Drive, store.Number{Seq: w.Seq, Tag: w.Origin})
 			if err != nil {
 				return err
 			}
 			if ok {
-				rows = append(rows, row)
+				found = append(found, row)
 			}
 		}
-		if _, err := n.Store.Apply(ctx, rows, nil); err != nil {
+		if len(found) == 0 {
+			break
+		}
+		if _, err := n.Store.Apply(ctx, found, nil); err != nil {
+			return err
+		}
+		if waits, err = awaited(); err != nil {
 			return err
 		}
 	}
-	return nil
+	absent := make([]store.Pointer, len(waits))
+	for i, w := range waits {
+		absent[i] = w.Pointer
+	}
+	_, err = n.Store.Settle(ctx, absent)
+	return err
 }
 
 func (n *Node) open(e e2e.Envelope, keys map[uint64]e2e.GroupKey, members map[string]e2e.Member) (store.Row, error) {

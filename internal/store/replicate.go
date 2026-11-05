@@ -134,7 +134,7 @@ func (s *Store) scanExportRow(row scanner) (Row, error) {
 	return Row{
 		Origin: s.origin(r.Origin), OriginSeq: originSeq(r), ID: r.ID,
 		Drive: r.Drive, Lane: r.Lane, Kind: r.Kind, At: r.At, Text: r.Text, Topic: r.Topic, To: r.To,
-		Re: pointer(r.Re, re), Resolves: pointer(r.Resolves, resolves), AlsoResolves: also,
+		Re: pointer(re), Resolves: pointer(resolves), AlsoResolves: also,
 		Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body, PathBody: body,
 	}, nil
 }
@@ -191,8 +191,8 @@ func originSeq(r Record) int64 {
 	return r.OriginSeq
 }
 
-func pointer(seq int64, p Pointer) *Pointer {
-	if seq == 0 {
+func pointer(p Pointer) *Pointer {
+	if p.Origin == "" {
 		return nil
 	}
 	return &p
@@ -211,7 +211,7 @@ func (s *Store) Apply(ctx context.Context, rows []Row, receipt *Receipt) (Applie
 	defer func() { _ = tx.Rollback() }()
 	var a Applied
 	for _, row := range rows {
-		if err := s.apply(ctx, tx, row, &a, false); err != nil {
+		if err := s.apply(ctx, tx, row, &a, false, nil); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -228,7 +228,34 @@ ON CONFLICT (channel, origin) DO UPDATE SET change_id = excluded.change_id, revi
 	return a, nil
 }
 
-func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, released bool) error {
+// Settle stores every row pending holds for a record in absent, which no node
+// will send. A pointer to an absent record that this store neither holds nor
+// holds in pending is stored unresolved: the row keeps the pointer's origin
+// and origin_seq, and its re or resolves stays 0. A row waiting on an absent
+// record still in pending is stored once that record is.
+func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
+	tx, err := s.rw.BeginTx(ctx, nil)
+	if err != nil {
+		return Applied{}, fmt.Errorf("begin settle: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	gone := make(map[Pointer]bool, len(absent))
+	for _, p := range absent {
+		gone[p] = true
+	}
+	var a Applied
+	for _, p := range absent {
+		if err := s.release(ctx, tx, p, &a, gone); err != nil {
+			return Applied{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return Applied{}, fmt.Errorf("commit settle: %w", err)
+	}
+	return a, nil
+}
+
+func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, released bool, absent map[Pointer]bool) error {
 	if row.Origin == "" || row.OriginSeq <= 0 {
 		return fmt.Errorf("apply: row has no origin identity (%q, %d)", row.Origin, row.OriginSeq)
 	}
@@ -254,16 +281,16 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 				return fmt.Errorf("alias %s/%d: %w", row.Origin, row.OriginSeq, err)
 			}
 			a.Duplicate++
-			return s.release(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a)
+			return s.release(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a, absent)
 		case !errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
 		}
 	}
-	re, waiting, err := s.target(ctx, tx, row.Re)
+	re, waiting, err := s.target(ctx, tx, row.Re, absent)
 	if err != nil {
 		return err
 	}
-	resolves, waitingResolves, err := s.target(ctx, tx, row.Resolves)
+	resolves, waitingResolves, err := s.target(ctx, tx, row.Resolves, absent)
 	if err != nil {
 		return err
 	}
@@ -272,7 +299,7 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 	}
 	also := make([]int64, 0, len(row.AlsoResolves))
 	for _, p := range row.AlsoResolves {
-		seq, waitingAlso, err := s.target(ctx, tx, &p)
+		seq, waitingAlso, err := s.target(ctx, tx, &p, absent)
 		if err != nil {
 			return err
 		}
@@ -321,10 +348,10 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 	} else {
 		a.Inserted++
 	}
-	return s.release(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a)
+	return s.release(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a, absent)
 }
 
-func (s *Store) release(ctx context.Context, tx *sql.Tx, arrived Pointer, a *Applied) error {
+func (s *Store) release(ctx context.Context, tx *sql.Tx, arrived Pointer, a *Applied, absent map[Pointer]bool) error {
 	rows, err := tx.QueryContext(ctx, "DELETE FROM pending WHERE wait_origin = ? AND wait_seq = ? RETURNING row", arrived.Origin, arrived.Seq)
 	if err != nil {
 		return fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
@@ -347,7 +374,7 @@ func (s *Store) release(ctx context.Context, tx *sql.Tx, arrived Pointer, a *App
 		return fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
 	}
 	for _, row := range held {
-		if err := s.apply(ctx, tx, row, a, true); err != nil {
+		if err := s.apply(ctx, tx, row, a, true, absent); err != nil {
 			return err
 		}
 	}
@@ -361,18 +388,9 @@ type Wait struct {
 	Pointer
 }
 
-// Awaiting returns the records that rows, among those Apply holds in pending,
-// still wait for.
-func (s *Store) Awaiting(ctx context.Context, rows []Row) ([]Wait, error) {
-	ids := make([]Pointer, len(rows))
-	for i, r := range rows {
-		ids[i] = Pointer{Origin: r.Origin, Seq: r.OriginSeq}
-	}
-	raw, err := json.Marshal(ids)
-	if err != nil {
-		return nil, fmt.Errorf("encode held rows: %w", err)
-	}
-	held, err := s.db.QueryContext(ctx, "SELECT DISTINCT json_extract(p.row, '$.drive'), p.wait_origin, p.wait_seq FROM json_each(?) j JOIN pending p ON p.origin = json_extract(j.value, '$.origin') AND p.origin_seq = json_extract(j.value, '$.seq')", string(raw))
+// Awaiting returns the records the rows Apply holds in pending still wait for.
+func (s *Store) Awaiting(ctx context.Context) ([]Wait, error) {
+	held, err := s.db.QueryContext(ctx, "SELECT DISTINCT json_extract(row, '$.drive'), wait_origin, wait_seq FROM pending")
 	if err != nil {
 		return nil, fmt.Errorf("read held rows: %w", err)
 	}
@@ -388,8 +406,8 @@ func (s *Store) Awaiting(ctx context.Context, rows []Row) ([]Wait, error) {
 	return out, held.Err()
 }
 
-func (s *Store) target(ctx context.Context, tx *sql.Tx, p *Pointer) (int64, *Pointer, error) {
-	if p == nil {
+func (s *Store) target(ctx context.Context, tx *sql.Tx, p *Pointer, absent map[Pointer]bool) (int64, *Pointer, error) {
+	if p == nil || p.Seq < 1 {
 		return 0, nil, nil
 	}
 	if p.Origin == s.Self() {
@@ -398,12 +416,21 @@ func (s *Store) target(ctx context.Context, tx *sql.Tx, p *Pointer) (int64, *Poi
 	var seq int64
 	err := tx.QueryRowContext(ctx, "SELECT seq FROM records WHERE origin = ? AND origin_seq = ? UNION ALL SELECT seq FROM aliases WHERE origin = ? AND origin_seq = ? LIMIT 1", p.Origin, p.Seq, p.Origin, p.Seq).Scan(&seq)
 	switch {
-	case errors.Is(err, sql.ErrNoRows):
+	case err == nil:
+		return seq, nil, nil
+	case !errors.Is(err, sql.ErrNoRows):
+		return 0, nil, fmt.Errorf("resolve %s/%d: %w", p.Origin, p.Seq, err)
+	case !absent[*p]:
 		return 0, p, nil
-	case err != nil:
+	}
+	var held int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM pending WHERE origin = ? AND origin_seq = ?", p.Origin, p.Seq).Scan(&held); err != nil {
 		return 0, nil, fmt.Errorf("resolve %s/%d: %w", p.Origin, p.Seq, err)
 	}
-	return seq, nil, nil
+	if held > 0 {
+		return 0, p, nil
+	}
+	return 0, nil, nil
 }
 
 func pointerOrigin(p *Pointer) string {
