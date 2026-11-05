@@ -86,6 +86,7 @@ type capturedRequest struct {
 	StdoutChar bool              `json:"stdout_char,omitempty"`
 	Hook       string            `json:"hook,omitempty"`
 	Payload    []byte            `json:"payload,omitempty"`
+	Stdin      []byte            `json:"stdin,omitempty"`
 }
 
 func capture(home string, entry capturedRequest) {
@@ -106,17 +107,39 @@ func capture(home string, entry capturedRequest) {
 	_, _ = file.Write(append(line, '\n'))
 }
 
-func captureCommand(home string, request wire.Request) {
-	if _, err := os.Stat(filepath.Join(home, captureFile)); err != nil {
-		return
-	}
+func capturedEnvOf(all map[string]string) map[string]string {
 	env := map[string]string{}
-	for name, value := range requestEnv(request.Env) {
+	for name, value := range all {
 		if capturedEnv.MatchString(name) && !secretEnv.MatchString(name) {
 			env[name] = value
 		}
 	}
-	capture(home, capturedRequest{Argv: request.Argv, Env: env, Cwd: request.Cwd, PID: request.PID, StdoutChar: request.StdoutChar})
+	return env
+}
+
+func captureCommand(home string, request wire.Request) {
+	if _, err := os.Stat(filepath.Join(home, captureFile)); err != nil {
+		return
+	}
+	if len(request.Argv) > 1 && request.Argv[1] == "embed" {
+		return
+	}
+	capture(home, capturedRequest{Argv: request.Argv, Env: capturedEnvOf(requestEnv(request.Env)), Cwd: request.Cwd, PID: request.PID, StdoutChar: request.StdoutChar})
+}
+
+func captureEmbedded(ctx context.Context, home, op string, c EmbedCall) {
+	if _, err := os.Stat(filepath.Join(home, captureFile)); err != nil {
+		return
+	}
+	inv := invoked(ctx)
+	if inv == nil {
+		return
+	}
+	stdin, err := json.Marshal(c)
+	if err != nil {
+		return
+	}
+	capture(home, capturedRequest{Argv: []string{"cci", "embed", op}, Env: capturedEnvOf(inv.env), Cwd: inv.cwd, PID: inv.pid, Stdin: stdin})
 }
 
 func captureHook(home, event string, payload []byte) {
@@ -155,7 +178,7 @@ func replay(ctx context.Context, st *store.Store, home string, entry capturedReq
 		root.SetArgs(entry.Argv[1:])
 		root.SetOut(&stdout)
 		root.SetErr(&stderr)
-		root.SetIn(strings.NewReader(""))
+		root.SetIn(bytes.NewReader(entry.Stdin))
 		run = root.ExecuteContext(hosted)
 	}
 	out := replayed{stdout: stdout.String(), stderr: stderr.String()}
