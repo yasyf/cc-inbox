@@ -481,7 +481,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `-F`, `--fixed-strings` | `grep` | Match the pattern literally. The default reads it as a regular expression, so `a\|b` matches either alternative. |
 | `-i`, `--ignore-case` | `grep` | Match case-insensitively, the default; `--ignore-case=false` matches case exactly. |
 | `--kind <kind>` | `tail`, `watch`, `grep` | Select kinds; repeat the flag or separate kinds with commas. |
-| `--lane <lane>` | `tail`, `watch`, `grep`, `state` | Select posting lanes; repeat for multiple lanes. |
+| `--lane <lane>` | `tail`, `watch`, `grep`, `state` | Select posting lanes; repeat for multiple lanes. A name with no number, such as `sv`, reads every lane that has held it, as `--to sv` reaches it; `sv-2` reads that lane alone. |
 | `--topic <topic>` | `tail`, `watch`, `grep`, `state` | Select topics; repeat for multiple topics. |
 | `--stack <project>/<env>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.stacks`. |
 | `--target <name>` | `tail`, `watch`, `grep`, `state` | Match a member of `refs.targets`. |

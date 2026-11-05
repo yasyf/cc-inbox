@@ -39,6 +39,7 @@ type Filter struct {
 	FirstOnly      []kinds.Kind
 	RepeatWindow   time.Duration
 	Lanes          []string
+	LaneAliases    bool
 	To             string
 	BroadcastFloor string
 	broadcastAfter *int64
@@ -144,9 +145,15 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		params = append(params, kindParams...)
 	}
 	if readers := f.readerAddresses(); len(readers) > 0 {
-		branch, kindParams := f.addressedKinds("EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(readers)) + "))")
+		clause := "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(readers)) + "))"
+		params = append(params, readers...)
+		if f.For == "" {
+			clause = "(" + strings.Join(append([]string{clause}, selectors...), " AND ") + ")"
+			params = append(params, selected...)
+		}
+		branch, kindParams := f.addressedKinds(clause)
 		branches = append(branches, branch)
-		params = append(append(params, readers...), kindParams...)
+		params = append(params, kindParams...)
 	}
 	for _, follow := range f.Follow {
 		branches = append(branches, "(drive = ? AND kind IN ("+placeholders(len(follow.Kinds))+") AND (recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all')))")
@@ -426,11 +433,16 @@ func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 			return f, err
 		}
 	}
+	var err error
+	if f.LaneAliases {
+		if f.Lanes, err = s.lanesAnswering(ctx, f.Drive, f.Lanes); err != nil {
+			return f, err
+		}
+	}
 	reader := cmp.Or(f.To, f.For, f.Addressed)
 	if reader == "" || f.Drive == "" {
 		return f, nil
 	}
-	var err error
 	if f.Aliases, err = s.Aliases(ctx, f.Drive, reader); err != nil || !f.AliasFloor || len(f.Aliases) == 0 {
 		return f, err
 	}

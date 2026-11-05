@@ -21,6 +21,10 @@ func Stem(lane string) string {
 	return lane
 }
 
+func AnswersTo(lane, name string) bool {
+	return lane == name || Stem(lane) == name
+}
+
 func stemSQL(lane string) string {
 	trimmed := "rtrim(" + lane + ", '0123456789')"
 	return "CASE WHEN " + trimmed + " != " + lane + " AND " + trimmed + " GLOB '?*-' THEN substr(" + trimmed + ", 1, length(" + trimmed + ") - 1) ELSE " + lane + " END"
@@ -327,6 +331,24 @@ func (s *Store) Generations(ctx context.Context, drive, stem string) ([]string, 
 		out = append(out, lane)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) lanesAnswering(ctx context.Context, drive string, names []string) ([]string, error) {
+	out := slices.Clone(names)
+	for _, name := range names {
+		if Stem(name) != name {
+			continue
+		}
+		held, err := s.Generations(ctx, drive, name)
+		if errors.Is(err, ErrNoLaneRegistry) {
+			return names, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, held...)
+	}
+	return out, nil
 }
 
 // Holding returns which of lanes on drive hold their stem: a numbered lane that

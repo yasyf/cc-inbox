@@ -102,7 +102,7 @@ type badRequest struct{ error }
 
 func (s *Server) filter(r *http.Request) (store.Filter, error) {
 	q := r.URL.Query()
-	f := store.Filter{Drive: q.Get("drive"), Lanes: q["lane"], To: q.Get("to"), For: q.Get("reader"), Topics: q["topic"], Stack: q.Get("stack"), Target: q.Get("target")}
+	f := store.Filter{Drive: q.Get("drive"), Lanes: q["lane"], LaneAliases: true, To: q.Get("to"), For: q.Get("reader"), Topics: q["topic"], Stack: q.Get("stack"), Target: q.Get("target")}
 	if f.Drive == "" {
 		return store.Filter{}, badRequest{errors.New("drive is required")}
 	}
