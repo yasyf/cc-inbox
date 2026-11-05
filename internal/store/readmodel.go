@@ -1193,7 +1193,8 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 		return false, true
 	}
 	if sel.firstOnly[v.kind] && f.To != "" && (len(v.addressees.to) == 0 || !slices.Contains(sel.to, v.addressees.to[0])) {
-		return false, true
+		refs, held := sel.m.refsOf(r)
+		return false, v.kind != string(kinds.Review) || held && len(refs.ints)+len(refs.texts) == 0
 	}
 	if f.RepeatWindow > 0 && r.kind == sel.urgent && v.topic != "" && sel.repeats(r) {
 		return false, true

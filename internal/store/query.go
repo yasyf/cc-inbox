@@ -205,8 +205,8 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	}
 	if len(f.FirstOnly) > 0 && f.To != "" {
 		names := f.addressees(f.To)
-		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.FirstOnly))+") AND json_extract(recipients, '$[0]') NOT IN ("+placeholders(len(names))+"))")
-		params = append(append(params, kindArgs(f.FirstOnly)...), names...)
+		clauses = append(clauses, "NOT (kind IN ("+placeholders(len(f.FirstOnly))+") AND json_extract(recipients, '$[0]') NOT IN ("+placeholders(len(names))+") AND NOT (kind = ? AND "+ownPR+" IN ("+placeholders(len(names))+"))))")
+		params = append(append(append(append(params, kindArgs(f.FirstOnly)...), names...), string(kinds.Review)), names...)
 	}
 	if f.RepeatWindow > 0 {
 		clauses = append(clauses, "NOT (kind = ? AND topic != '' AND EXISTS (SELECT 1 FROM records prior WHERE prior.drive = records.drive AND prior.kind = records.kind AND prior.lane = records.lane AND prior.topic = records.topic AND prior.seq < records.seq AND prior.at > records.at - ?))")
@@ -802,6 +802,8 @@ func BroadcastCursor(k PeerKey) string {
 func broadcastStart(floor string) string {
 	return floor + "-start"
 }
+
+const ownPR = `EXISTS (SELECT 1 FROM json_each(records.refs, '$.prs') graded JOIN records own ON own.drive = records.drive AND own.kind = 'opened' JOIN json_each(own.refs, '$.prs') opened ON CASE opened.type WHEN 'integer' THEN CAST(opened.value AS TEXT) ELSE substr(opened.value, instr(opened.value, '#') + 1) END = CASE graded.type WHEN 'integer' THEN CAST(graded.value AS TEXT) ELSE substr(graded.value, instr(graded.value, '#') + 1) END WHERE own.lane`
 
 func LaneMail(k PeerKey, b Binding) Filter {
 	f := Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
