@@ -65,6 +65,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returning `read cursor <name>: context canceled`. A channel stopped in its
   first moments, as `TestABatchHeldAcrossARestartArrivesOnce` does after 50 ms,
   failed with that error.
+- `cci tail --mail --to <stem>` from a thread bound as a numbered lane that
+  holds that stem now reads the lane's mail through the cursor the
+  `PostToolUse` hook advances, as `--to <lane>` does. Before, it read the stem
+  through its own cursor, so a record the hook had already shown the lane woke
+  the lane's `lr wait` on its stem a second time.
 - `cci watch` now follows across a daemon restart. When the daemon stopped for a
   newer install, it told each watch it had been cut short and sent exit 1, so a
   Monitor on the watch ended and the lane stopped hearing its mail. Now the

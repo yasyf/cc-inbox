@@ -196,6 +196,56 @@ func TestTheHookDeliversAnAliasOrderToTheLaneHoldingIt(t *testing.T) {
 	}
 }
 
+func TestAStemOrderTheHookShowedDoesNotWakeTheLanesStemWait(t *testing.T) {
+	st := heldPastAFinishedFallback(t)
+	if err := st.SetCursor(context.Background(), "bugs-2-stem-wake", "d", 0); err != nil {
+		t.Fatal(err)
+	}
+	hookReads := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		window := func() (store.Window, error) { return store.Window{PID: 1}, nil }
+		if err := hook.PostToolUse(context.Background(), st, hook.Payload{SessionID: "session-1", Event: "PostToolUse"}, window, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	stemWait := func() string {
+		t.Helper()
+		out, err := run(t, "tail", "--drive", "d", "--cursor", "bugs-2-stem-wake", "--seed", "bugs-2-stem-wake", "--to", "bugs", "--mail")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	order := func(text string) {
+		t.Helper()
+		if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "bugs", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := hookReads(); !strings.Contains(got, "the order for the alias") {
+		t.Fatalf("hook = %q; want the order addressed to bugs", got)
+	}
+	if got := stemWait(); strings.Contains(got, "the order for the alias") {
+		t.Fatalf("stem wait = %q; the hook already showed this order", got)
+	}
+	order("the hook shows this one")
+	if got := hookReads(); !strings.Contains(got, "the hook shows this one") {
+		t.Fatalf("hook = %q", got)
+	}
+	if got := stemWait(); got != "" {
+		t.Fatalf("stem wait after the hook showed the order = %q; want nothing", got)
+	}
+	order("the wait reads this one")
+	if got := stemWait(); !strings.Contains(got, "the wait reads this one") {
+		t.Fatalf("stem wait = %q; want the new order", got)
+	}
+	if got := hookReads(); strings.Contains(got, "the wait reads this one") {
+		t.Fatalf("hook redelivered what the stem wait printed: %q", got)
+	}
+}
+
 func TestALaneFilterReadsEveryLaneThatHeldTheAlias(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
