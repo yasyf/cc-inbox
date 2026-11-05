@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -89,3 +92,29 @@ func (f *headsFlag) String() string {
 }
 
 func (*headsFlag) Type() string { return "head" }
+
+type attrsFlag struct {
+	attrs *map[string]string
+}
+
+func (f *attrsFlag) Set(s string) error {
+	key, value, ok := strings.Cut(s, "=")
+	if !ok {
+		return fmt.Errorf("%s must be formatted as key=value", s)
+	}
+	if *f.attrs == nil {
+		*f.attrs = map[string]string{}
+	}
+	(*f.attrs)[key] = value
+	return nil
+}
+
+func (f *attrsFlag) String() string {
+	pairs := make([]string, 0, len(*f.attrs))
+	for _, key := range slices.Sorted(maps.Keys(*f.attrs)) {
+		pairs = append(pairs, key+"="+(*f.attrs)[key])
+	}
+	return "[" + strings.Join(pairs, ",") + "]"
+}
+
+func (*attrsFlag) Type() string { return "stringToString" }
