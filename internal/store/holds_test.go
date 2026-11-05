@@ -293,7 +293,7 @@ func TestASuccessorOwesItsPredecessorsOpenAsk(t *testing.T) {
 	g.up("sv-2")
 	ask := g.post(store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"sv-2"}, Text: "ready to land?"})
 	g.standDown("sv-2", "sv-3")
-	open, err := g.st.OpenTo(context.Background(), "d", "sv-3", []kinds.Kind{kinds.Ask})
+	open, err := g.st.OpenTo(context.Background(), store.PeerKey{}, "d", "sv-3", []kinds.Kind{kinds.Ask})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func TestAnAskReadsOpenOnlyWhileALaneCanHearItsAnswer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	toRoot, err := g.st.OpenTo(ctx, "d", "root", []kinds.Kind{kinds.Ask})
+	toRoot, err := g.st.OpenTo(ctx, store.PeerKey{}, "d", "root", []kinds.Kind{kinds.Ask})
 	if err != nil {
 		t.Fatal(err)
 	}

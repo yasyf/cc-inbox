@@ -74,3 +74,36 @@ func TestTailOpenListsTheAsksTheBoundLaneOwes(t *testing.T) {
 		t.Fatalf("tail --open on a drive this thread is not bound to = %q, %v", out, err)
 	}
 }
+
+func TestALanesWaitAndOpenAsksSkipWhatARelayBackfilledAfterItBound(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	t.Setenv("CCI_AGENT_ID", "")
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.BindLane(ctx, store.PeerKey{Session: "session-1"}, "d", "api", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	backfilled := time.Now().Add(-time.Hour)
+	if _, err := st.Apply(ctx, []store.Row{
+		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: "ask", At: backfilled, Text: "a backfilled ask", To: []string{"api"}, Source: "post"},
+		{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: "go", At: backfilled, Text: "a backfilled go", To: []string{"api"}, Source: "post"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "ask", "--to", "api", "--text", "asked since the lane started"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "tail", "--drive", "d", "--to", "api", "--cursor", "api-wake", "--seed", "api", "--mail")
+	if err != nil || !strings.Contains(out, "asked since the lane started") || strings.Contains(out, "backfilled") {
+		t.Fatalf("the lane's wait = %q, %v; want the new ask and nothing a relay backfilled after the lane bound", out, err)
+	}
+	if out, err := run(t, "tail", "--open"); err != nil || !strings.Contains(out, "asked since the lane started") || strings.Contains(out, "backfilled") {
+		t.Fatalf("tail --open = %q, %v; want the new ask and no ask a relay backfilled after the lane bound", out, err)
+	}
+}

@@ -312,7 +312,7 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 	out.WriteString(note)
 	ack := res.Ack
 	if b.Lane != "" {
-		open, err := Owed(ctx, st, b.Drive, b.Lane)
+		open, err := Owed(ctx, st, k, b.Drive, b.Lane)
 		if err != nil {
 			return err
 		}
@@ -335,9 +335,11 @@ func acknowledge(ctx context.Context, st *store.Store, w io.Writer, event, text 
 
 // Owed returns, in seq order, the open asks, blockers and question-ending
 // decides that name reader or one of its aliases first and came from another
-// lane: the asks the hook lists and cci tail --open prints.
-func Owed(ctx context.Context, st *store.Store, drive, reader string) ([]store.Record, error) {
-	open, err := st.OpenTo(ctx, drive, reader, askKinds)
+// lane: the asks the hook lists and cci tail --open prints. The thread k bound
+// as reader owes none of the backfill a relay seed or sync applied after it
+// bound.
+func Owed(ctx context.Context, st *store.Store, k store.PeerKey, drive, reader string) ([]store.Record, error) {
+	open, err := st.OpenTo(ctx, k, drive, reader, askKinds)
 	if err != nil {
 		return nil, err
 	}
@@ -448,7 +450,7 @@ func nudgeOverdue(ctx context.Context, st *store.Store, p Payload, b store.Bindi
 	if !ok {
 		return false, watermark(ctx, st, cursor, b.Drive)
 	}
-	open, err := Owed(ctx, st, b.Drive, b.Lane)
+	open, err := Owed(ctx, st, p.Key(), b.Drive, b.Lane)
 	if err != nil {
 		return false, err
 	}

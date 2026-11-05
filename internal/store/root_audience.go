@@ -58,7 +58,7 @@ func (f Filter) rootAudienceScope() bool {
 	return RootName(f.For) && f.Drive != "" && f.Since.IsZero() && f.Until.IsZero() &&
 		f.To == "" && f.Addressed == "" && f.Origin == "" && f.Stack == "" && f.Target == "" &&
 		f.PeerAfter == 0 && f.PR.Number == 0 && len(f.Lanes) == 0 && len(f.Topics) == 0 &&
-		len(f.FirstOnly) == 0 && len(f.Follow) == 0 && len(f.TopicKinds) == 0 && f.BroadcastFloor == "" &&
+		len(f.FirstOnly) == 0 && len(f.Follow) == 0 && len(f.TopicKinds) == 0 && f.LaneFloor == "" &&
 		(f.RepeatWindow == 0 || f.RepeatWindow == UrgentRepeat)
 }
 

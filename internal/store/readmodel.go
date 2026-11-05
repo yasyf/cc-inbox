@@ -845,16 +845,25 @@ func (m *ReadModel) withinCap() error {
 }
 
 func (m *ReadModel) prepared(ctx context.Context, s *Store, f Filter) (Filter, bool) {
-	if f.BroadcastFloor != "" {
-		after, _, err := s.Cursor(ctx, f.BroadcastFloor, f.Drive)
+	if f.LaneFloor != "" {
+		after, _, err := s.Cursor(ctx, f.LaneFloor, f.Drive)
 		if err != nil {
 			m.failures.Add(1)
 			return f, false
 		}
 		f.broadcastAfter = &after
-		if f.broadcastSince, _, err = s.Cursor(ctx, broadcastStart(f.BroadcastFloor), f.Drive); err != nil {
+		if f.laneStart, _, err = s.Cursor(ctx, startCursor(f.LaneFloor), f.Drive); err != nil {
 			m.failures.Add(1)
 			return f, false
+		}
+		head, bound, err := s.Cursor(ctx, headCursor(f.LaneFloor), f.Drive)
+		if err != nil {
+			m.failures.Add(1)
+			return f, false
+		}
+		f.laneHead = math.MaxInt64
+		if bound {
+			f.laneHead = head
 		}
 	}
 	if err := m.catchUp(ctx); err != nil {
@@ -983,22 +992,23 @@ func (f Filter) modelable() bool {
 }
 
 type modelSelection struct {
-	m                             *ReadModel
-	f                             Filter
-	now                           int64
-	forNames, forHooks            []string
-	addressed, to                 []string
-	peers, readers                []string
-	kindSet, muteSet, toKinds     map[string]bool
-	firstOnly                     map[string]bool
-	orders                        map[string]bool
-	wordsLower                    [][]byte
-	wordsNumeric                  []bool
-	since, until                  int64
-	broadcastAfter, broadcastFrom int64
-	broadcastBound                bool
-	urgent                        int32
-	stack, target, repoPR         int32
+	m                         *ReadModel
+	f                         Filter
+	now                       int64
+	forNames, forHooks        []string
+	addressed, to             []string
+	peers, readers            []string
+	kindSet, muteSet, toKinds map[string]bool
+	firstOnly                 map[string]bool
+	orders                    map[string]bool
+	wordsLower                [][]byte
+	wordsNumeric              []bool
+	since, until              int64
+	broadcastAfter            int64
+	laneStart, laneHead       int64
+	laneBound                 bool
+	urgent                    int32
+	stack, target, repoPR     int32
 }
 
 func stringsOf(values []any) []string {
@@ -1056,7 +1066,7 @@ func newModelSelection(m *ReadModel, s *Store, f Filter, now time.Time) *modelSe
 		sel.until = f.Until.UnixMilli()
 	}
 	if f.broadcastAfter != nil {
-		sel.broadcastBound, sel.broadcastAfter, sel.broadcastFrom = true, *f.broadcastAfter, f.broadcastSince
+		sel.laneBound, sel.broadcastAfter, sel.laneStart, sel.laneHead = true, *f.broadcastAfter, f.laneStart, f.laneHead
 	}
 	return sel
 }
@@ -1201,6 +1211,9 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 	if f.RepeatWindow > 0 && r.kind == sel.urgent && v.topic != "" && sel.repeats(r) {
 		return false, true
 	}
+	if sel.laneBound && r.seq > sel.laneHead && r.at < sel.laneStart {
+		return false, true
+	}
 	if f.After > 0 && r.seq <= f.After || f.Before > 0 && r.seq >= f.Before {
 		return false, true
 	}
@@ -1291,8 +1304,8 @@ func (sel *modelSelection) toMatches(v *modelView) bool {
 		recipient = anyOf(v.addressees.to, sel.to[:1]) || sel.fresh(v) && anyOf(v.addressees.to, sel.to[1:])
 	}
 	all := v.addressees.all && !slices.Contains(sel.to, v.lane)
-	if all && sel.broadcastBound {
-		all = v.row.seq > sel.broadcastAfter && v.row.at >= sel.broadcastFrom
+	if all && sel.laneBound {
+		all = v.row.seq > sel.broadcastAfter && v.row.at >= sel.laneStart
 	}
 	return (recipient || all) && sel.addressedKinds(v)
 }

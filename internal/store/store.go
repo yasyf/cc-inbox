@@ -277,7 +277,8 @@ type Record struct {
 	ReNum        string          `json:"-"`
 	CloseNums    []string        `json:"-"`
 
-	alsoOrigins []Pointer
+	alsoOrigins              []Pointer
+	reOrigin, resolvesOrigin *Pointer
 }
 
 // Name is how every node names r, or its local seq for a record no store numbered.
@@ -1057,8 +1058,8 @@ func expiry(r Record, ttl time.Duration) *time.Time {
 	return &t
 }
 
-const insertSQL = `INSERT INTO records (origin, origin_seq, id, drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash, body, also_resolves, also_resolves_origin)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+const insertSQL = `INSERT INTO records (origin, origin_seq, id, drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, hash, line_hash, body, also_resolves, also_resolves_origin, re_origin, re_origin_seq, resolves_origin, resolves_origin_seq)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
 const reparseSQL = `UPDATE records SET lane = ?, kind = ?, text = ?, topic = ?, recipients = ?, refs = ?, hash = ?, expires_at = at + ?
 WHERE line_hash = ?`
@@ -1109,7 +1110,10 @@ func (s *Store) args(r Record, hash string, lineHash *string) []any {
 		raw, _ = json.Marshal(r.alsoOrigins)
 		alsoOrigins = string(raw)
 	}
-	return []any{s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), redact(r.Text), redact(r.Topic), string(recipients), r.Re, r.Resolves, redact(string(refs)), redact(string(fields)), expires, r.Source, hash, line, body, also, alsoOrigins}
+	return []any{
+		s.origin(r.Origin), r.OriginSeq, id, r.Drive, r.Lane, string(r.Kind), r.At.UnixMilli(), redact(r.Text), redact(r.Topic), string(recipients), r.Re, r.Resolves, redact(string(refs)), redact(string(fields)), expires, r.Source, hash, line, body, also, alsoOrigins,
+		pointerOrigin(r.reOrigin), pointerSeq(r.reOrigin), pointerOrigin(r.resolvesOrigin), pointerSeq(r.resolvesOrigin),
+	}
 }
 
 const recordColumns = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source"

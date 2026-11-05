@@ -534,7 +534,7 @@ func directAhead(ctx context.Context, st *store.Store, f store.Filter, opts Tail
 		return ahead{}, nil
 	}
 	a := ahead{filter: f, delivered: map[int64]bool{}}
-	a.filter.To, a.filter.Addressed, a.filter.BroadcastFloor = "", f.To, ""
+	a.filter.To, a.filter.Addressed = "", f.To
 	a.filter.Peer, a.filter.PeerAfter = "", 0
 	a.filter.Limit = 0
 	sent, _, err := st.Cursor(ctx, directCursor(opts.Cursor), f.Drive)

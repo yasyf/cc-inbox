@@ -42,9 +42,10 @@ type Filter struct {
 	Lanes          []string
 	LaneAliases    bool
 	To             string
-	BroadcastFloor string
+	LaneFloor      string
 	broadcastAfter *int64
-	broadcastSince int64
+	laneStart      int64
+	laneHead       int64
 	AliasFloor     bool
 	aliasSince     int64
 	aliasOrders    int64
@@ -124,10 +125,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		switch {
 		case f.broadcastAfter != nil:
 			all += " AND seq > ? AND at >= ?"
-			allParams = append(slices.Clone(names), *f.broadcastAfter, f.broadcastSince)
-		case f.BroadcastFloor != "":
+			allParams = append(slices.Clone(names), *f.broadcastAfter, f.laneStart)
+		case f.LaneFloor != "":
 			all += " AND seq > COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0) AND at >= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0)"
-			allParams = append(slices.Clone(names), f.BroadcastFloor, f.Drive, broadcastStart(f.BroadcastFloor), f.Drive)
+			allParams = append(slices.Clone(names), f.LaneFloor, f.Drive, startCursor(f.LaneFloor), f.Drive)
 		}
 		recipient, recipientParams := f.addressedRecipient(names)
 		addressed, kindParams := f.addressedKinds("(" + recipient + " OR (" + all + "))")
@@ -211,6 +212,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	if f.RepeatWindow > 0 {
 		clauses = append(clauses, "NOT (kind = ? AND topic != '' AND EXISTS (SELECT 1 FROM records prior WHERE prior.drive = records.drive AND prior.kind = records.kind AND prior.lane = records.lane AND prior.topic = records.topic AND prior.seq < records.seq AND prior.at > records.at - ?))")
 		params = append(params, string(kinds.Urgent), f.RepeatWindow.Milliseconds())
+	}
+	if f.LaneFloor != "" {
+		clauses = append(clauses, "(seq <= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), seq) OR at >= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0))")
+		params = append(params, headCursor(f.LaneFloor), f.Drive, startCursor(f.LaneFloor), f.Drive)
 	}
 	if f.After > 0 {
 		clauses = append(clauses, "seq > ?")
@@ -799,16 +804,23 @@ func BroadcastCursor(k PeerKey) string {
 	return LaneCursor(k) + "#all"
 }
 
-func broadcastStart(floor string) string {
+func startCursor(floor string) string {
 	return floor + "-start"
+}
+
+func headCursor(floor string) string {
+	return floor + "-head"
 }
 
 const ownPR = `EXISTS (SELECT 1 FROM json_each(records.refs, '$.prs') graded JOIN records own ON own.drive = records.drive AND own.kind = 'opened' JOIN json_each(own.refs, '$.prs') opened ON CASE opened.type WHEN 'integer' THEN CAST(opened.value AS TEXT) ELSE substr(opened.value, instr(opened.value, '#') + 1) END = CASE graded.type WHEN 'integer' THEN CAST(graded.value AS TEXT) ELSE substr(graded.value, instr(graded.value, '#') + 1) END WHERE own.lane`
 
+// LaneMail is what the thread k bound as b reads as mail. A bound lane hears
+// no broadcast from before it started, and no record a relay seed or sync
+// applied after it bound that is stamped before it started.
 func LaneMail(k PeerKey, b Binding) Filter {
 	f := Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
 	if b.Lane != "" {
-		f.FirstOnly, f.BroadcastFloor, f.AliasFloor = kinds.Broadcasts(), BroadcastCursor(k), true
+		f.FirstOnly, f.LaneFloor, f.AliasFloor = kinds.Broadcasts(), BroadcastCursor(k), true
 	}
 	return f
 }
@@ -892,8 +904,13 @@ ON CONFLICT (name, drive) DO NOTHING`, BroadcastCursor(k), drive, k.Session, k.A
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, MIN(?, COALESCE(NULLIF((SELECT announced_at FROM sessions WHERE session = ? AND agent = ? AND origin = ?), 0), ?))
 WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
-ON CONFLICT (name, drive) DO NOTHING`, broadcastStart(BroadcastCursor(k)), drive, s.Now().UnixMilli(), k.Session, k.Agent, s.Self(), spawned, broadcastStart(BroadcastCursor(k)), drive); err != nil {
+ON CONFLICT (name, drive) DO NOTHING`, startCursor(BroadcastCursor(k)), drive, s.Now().UnixMilli(), k.Session, k.Agent, s.Self(), spawned, startCursor(BroadcastCursor(k)), drive); err != nil {
 		return fmt.Errorf("start lane broadcast start: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO cursors (name, drive, seq) SELECT ?, ?, (SELECT COALESCE(MAX(seq), 0) FROM records)
+WHERE NOT EXISTS (SELECT 1 FROM cursors WHERE name = ? AND drive = ?)
+ON CONFLICT (name, drive) DO NOTHING`, headCursor(BroadcastCursor(k)), drive, headCursor(BroadcastCursor(k)), drive); err != nil {
+		return fmt.Errorf("start lane head: %w", err)
 	}
 	return nil
 }
