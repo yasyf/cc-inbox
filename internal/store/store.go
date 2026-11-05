@@ -762,12 +762,12 @@ func Validate(r Record) error {
 	}
 	if spec.NeedsMentionedPRs && len(r.Refs.PRs) == 0 {
 		if missing := UnboundPRs(r); len(missing) > 0 {
-			named, flags := make([]string, len(missing)), make([]string, len(missing))
+			named := make([]string, len(missing))
 			for i, n := range missing {
-				named[i], flags[i] = fmt.Sprintf("#%d", n), fmt.Sprintf("--pr %d", n)
+				named[i] = fmt.Sprintf("#%d", n)
 			}
-			return fmt.Errorf("%s names %s without --pr: add %s so guards that read the record's pull requests see it (write a record seq without its #)",
-				r.Kind, strings.Join(named, ", "), strings.Join(flags, " "))
+			return fmt.Errorf("%s names %s without --pr, and a hold holds only its --pr targets: add --pr for each pull request this hold stops, such as --pr %d, and leave one it names as context in the text unheld (write a record seq without its #)",
+				r.Kind, strings.Join(named, ", "), missing[0])
 		}
 	}
 	if len(r.AlsoResolves) > 0 && r.Resolves == 0 {

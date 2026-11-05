@@ -253,6 +253,20 @@ func newPostCmd() *cobra.Command {
 				}
 				r.Refs.PRs = append(r.Refs.PRs, prs...)
 			}
+			if k == kinds.Hold && len(r.Refs.PRs) > 0 {
+				if unheld := store.UnboundPRs(store.Record{Topic: r.Topic, Text: text, Refs: r.Refs}); len(unheld) > 0 {
+					held, named := make([]string, len(r.Refs.PRs)), make([]string, len(unheld))
+					for i, pr := range r.Refs.PRs {
+						held[i] = "#" + strconv.Itoa(pr.Number)
+					}
+					for i, n := range unheld {
+						named[i] = "#" + strconv.Itoa(n)
+					}
+					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: this hold holds %s only; its text also names %s, which it does not hold\n", strings.Join(held, ", "), strings.Join(named, ", ")); err != nil {
+						return err
+					}
+				}
+			}
 			records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
 			if err != nil {
 				return err
