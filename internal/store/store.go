@@ -1116,43 +1116,52 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
+type rawRecord struct {
+	record                         Record
+	kind, recipients, refs, fields string
+	body, also                     string
+	at                             int64
+	expires                        sql.NullInt64
+}
+
 func (s *Store) scan(row scanner) (Record, error) {
-	var (
-		r                                      Record
-		kind, recipients, refs, fs, body, also string
-		at                                     int64
-		expires                                sql.NullInt64
-	)
-	if err := row.Scan(&r.Seq, &r.Origin, &r.OriginSeq, &r.ID, &r.Drive, &r.Lane, &kind, &at, &r.Text, &r.Topic, &recipients, &r.Re, &r.Resolves, &refs, &fs, &expires, &r.Source, &body, &also); err != nil {
+	var raw rawRecord
+	r := &raw.record
+	if err := row.Scan(&r.Seq, &r.Origin, &r.OriginSeq, &r.ID, &r.Drive, &r.Lane, &raw.kind, &raw.at, &r.Text, &r.Topic, &raw.recipients, &r.Re, &r.Resolves, &raw.refs, &raw.fields, &raw.expires, &r.Source, &raw.body, &raw.also); err != nil {
 		return Record{}, fmt.Errorf("scan record: %w", err)
 	}
-	if also != "" {
-		if err := json.Unmarshal([]byte(also), &r.AlsoResolves); err != nil {
+	return s.decoded(raw)
+}
+
+func (s *Store) decoded(raw rawRecord) (Record, error) {
+	r := raw.record
+	if raw.also != "" {
+		if err := json.Unmarshal([]byte(raw.also), &r.AlsoResolves); err != nil {
 			return Record{}, fmt.Errorf("decode also_resolves of #%d: %w", r.Seq, err)
 		}
 	}
 	if r.Origin = s.local(r.Origin); r.Origin == "" {
 		r.OriginSeq = 0
 	}
-	if body != "" {
-		r.Body = json.RawMessage(body)
+	if raw.body != "" {
+		r.Body = json.RawMessage(raw.body)
 	}
-	r.Kind = kinds.Kind(kind)
-	r.At = time.UnixMilli(at).UTC()
-	if expires.Valid {
-		t := time.UnixMilli(expires.Int64).UTC()
+	r.Kind = kinds.Kind(raw.kind)
+	r.At = time.UnixMilli(raw.at).UTC()
+	if raw.expires.Valid {
+		t := time.UnixMilli(raw.expires.Int64).UTC()
 		r.ExpiresAt = &t
 	}
-	if err := json.Unmarshal([]byte(recipients), &r.To); err != nil {
+	if err := json.Unmarshal([]byte(raw.recipients), &r.To); err != nil {
 		return Record{}, fmt.Errorf("decode recipients of #%d: %w", r.Seq, err)
 	}
 	if len(r.To) == 0 {
 		r.To = nil
 	}
-	if err := json.Unmarshal([]byte(refs), &r.Refs); err != nil {
+	if err := json.Unmarshal([]byte(raw.refs), &r.Refs); err != nil {
 		return Record{}, fmt.Errorf("decode refs of #%d: %w", r.Seq, err)
 	}
-	if err := json.Unmarshal([]byte(fs), &r.Fields); err != nil {
+	if err := json.Unmarshal([]byte(raw.fields), &r.Fields); err != nil {
 		return Record{}, fmt.Errorf("decode fields of #%d: %w", r.Seq, err)
 	}
 	return r, nil

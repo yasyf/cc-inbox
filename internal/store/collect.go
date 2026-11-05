@@ -692,17 +692,11 @@ ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)`, through); e
 	if _, err := tx.ExecContext(ctx, "DELETE FROM aliases WHERE seq IN (SELECT value FROM json_each(?))", string(ids)); err != nil {
 		return 0, fmt.Errorf("delete forgotten aliases: %w", err)
 	}
-	var newest sql.NullInt64
-	if err := tx.QueryRowContext(ctx, "SELECT MAX(at) FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids)).Scan(&newest); err != nil {
-		return 0, fmt.Errorf("read the newest forgotten record: %w", err)
-	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids)); err != nil {
 		return 0, fmt.Errorf("delete forgotten records: %w", err)
 	}
-	if newest.Int64 >= s.Now().Add(-2*hotWindowSpan).UnixMilli() {
-		if err := countRecordsDeleted(ctx, tx); err != nil {
-			return 0, err
-		}
+	if err := countRecordsDeleted(ctx, tx); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("commit forget: %w", err)

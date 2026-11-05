@@ -148,11 +148,11 @@ func TestHotWindowBoundsSinceAndKnowsWhatItCovers(t *testing.T) {
 func TestHotWindowStaysUnderItsCap(t *testing.T) {
 	st, _ := testutil.Store(t)
 	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "first"})
-	text := strings.Repeat("x", 1024)
+	text := strings.Repeat("x", 390)
 	for range 4200 {
 		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: text})
 	}
-	const limit = 2 << 20
+	const limit = 1 << 20
 	window, err := st.BuildHotWindowUnder(t.Context(), noPace, limit)
 	if err != nil {
 		t.Fatal(err)
