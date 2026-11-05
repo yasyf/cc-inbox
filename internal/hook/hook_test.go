@@ -272,6 +272,32 @@ func TestPostToolUseDeliversBroadcastKindsOnlyToTheirFirstAddressee(t *testing.T
 	}
 }
 
+func TestPostToolUseDeliversAReviewOfALanesOwnPREvenWhenItIsOnlyCopied(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	started := clock.Now()
+	clock.Advance(time.Minute)
+	pr := func(n int) store.Refs { return store.Refs{PRs: []store.PR{{Repo: "o/r", Number: n}}} }
+	for _, r := range []store.Record{
+		{Lane: "lane-x", Kind: kinds.Opened, Refs: pr(7), Text: "opened o/r#7"},
+		{Lane: "desk", Kind: kinds.Review, To: []string{"root", "lane-x"}, Refs: pr(7), Text: "fidelity missing on lane-x's own PR"},
+		{Lane: "desk", Kind: kinds.Review, To: []string{"root", "lane-x"}, Refs: pr(8), Text: "review of a PR lane-x never opened"},
+	} {
+		testutil.Post(t, st, r)
+	}
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "lane-x", started); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "fidelity missing on lane-x's own PR") || strings.Contains(got, "never opened") {
+		t.Fatalf("additionalContext = %q; want the review of lane-x's own PR and not the one it is only copied on", got)
+	}
+}
+
 func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
