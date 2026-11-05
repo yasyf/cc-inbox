@@ -590,7 +590,7 @@ func TestLaneMailDeliversRootRecordsBeforeABacklogFromOtherLanes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(first.String(), fmt.Sprintf("#%d ", order.Seq)) || !strings.Contains(first.String(), "... 1 from root first") {
+	if !strings.HasPrefix(first.String(), fmt.Sprintf("#%d ", order.Seq)) || !strings.Contains(first.String(), "from root first") {
 		t.Fatalf("root's order does not lead a capped page of lane mail:\n%s", first.String())
 	}
 	seen := map[string]int{}
@@ -642,5 +642,55 @@ func TestATeammateBoundBeforeItsAnnounceHearsRecordsToAllOnlyFromItsBind(t *test
 	}
 	if got := out.String(); !strings.Contains(got, "order waiting for the lane") || !strings.Contains(got, "correction after the bind") || strings.Contains(got, "correction before the teammate") {
 		t.Fatalf("a teammate bound on its first post replays records to all from its parent's process start, or drops its waiting order:\n%s", got)
+	}
+}
+
+func TestARecordAddressedToALaneLeadsACappedPageOfBroadcasts(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	for i := range 60 {
+		testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"all"}, Text: fmt.Sprintf("owner pick %02d, replayed", i)})
+		clock.Advance(time.Second)
+	}
+	stand := testutil.Post(t, st, store.Record{Lane: "supervisor", Kind: kinds.StandDown, To: []string{"landing"}, Text: "landing stood down"})
+	opts := inbox.TailOptions{Filter: store.LaneMail(store.PeerKey{Session: "s1"}, store.Binding{Drive: "d", Lane: "landing"}), Cursor: "landing", Budget: 400}
+	var first bytes.Buffer
+	if _, err := inbox.Tail(ctx, st, opts, &first); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(first.String(), fmt.Sprintf("#%d ", stand.Seq)) {
+		t.Fatalf("the stand-down does not lead a capped page of broadcasts:\n%s", first.String())
+	}
+	picks := map[string]int{}
+	stands := 0
+	read := func(page string) {
+		for _, line := range strings.Split(page, "\n") {
+			if m := regexp.MustCompile(`owner pick \d\d`).FindString(line); m != "" && strings.HasPrefix(line, "#") {
+				picks[m]++
+			}
+			if strings.HasPrefix(line, fmt.Sprintf("#%d ", stand.Seq)) {
+				stands++
+			}
+		}
+	}
+	read(first.String())
+	for range 80 {
+		var next bytes.Buffer
+		res, err := inbox.Tail(ctx, st, opts, &next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		read(next.String())
+		if res.Printed == 0 && res.More == 0 {
+			break
+		}
+	}
+	if stands != 1 || len(picks) != 60 {
+		t.Fatalf("stand-down delivered %d times, %d of 60 broadcasts delivered", stands, len(picks))
+	}
+	for pick, n := range picks {
+		if n != 1 {
+			t.Fatalf("%s delivered %d times", pick, n)
+		}
 	}
 }

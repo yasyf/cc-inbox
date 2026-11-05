@@ -129,10 +129,14 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if err != nil {
 		return TailResult{}, err
 	}
+	direct, err := directAhead(ctx, st, f, opts, records, paged)
+	if err != nil {
+		return TailResult{}, err
+	}
 	all := slices.Clone(records)
 	var later []store.Record
-	for _, r := range ahead.pending {
-		if len(records) == 0 || r.Seq > records[len(records)-1].Seq {
+	for _, r := range slices.Concat(ahead.pending, direct.pending) {
+		if (len(records) == 0 || r.Seq > records[len(records)-1].Seq) && !slices.ContainsFunc(later, func(l store.Record) bool { return l.Seq == r.Seq }) {
 			later = append(later, r)
 		}
 	}
@@ -142,11 +146,12 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	all, rendered, folded = append(all, later...), append(rendered, laterLines...), append(folded, laterFolded...)
 	maps.Copy(skipped, ahead.delivered)
+	maps.Copy(skipped, direct.delivered)
 	index := make(map[int64]int, len(all))
 	for i, r := range all {
 		index[r.Seq] = i
 	}
-	run := func(first []store.Record) (*bytes.Buffer, *render.Budget, tailRun) {
+	run := func(first, second []store.Record) (*bytes.Buffer, *render.Budget, tailRun) {
 		var out bytes.Buffer
 		b := render.NewBudget(&out, opts.Budget)
 		wire := render.Wire{Now: st.Now()}
@@ -157,12 +162,28 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 			return wire.Headed(r.At, rendered[index[r.Seq]])
 		}
 		t := tailRun{res: TailResult{Last: f.After}, printed: map[int64]bool{}}
+		fits := true
 		for _, r := range first {
-			if !b.Line(line(r)) {
+			if fits = b.Line(line(r)); !fits {
 				break
 			}
 			t.mark(r, folded[index[r.Seq]])
 			t.sent = r.Seq
+			t.first++
+		}
+		for _, r := range second {
+			if !fits {
+				break
+			}
+			if t.printed[r.Seq] || skipped[r.Seq] {
+				t.directSent = r.Seq
+				continue
+			}
+			if fits = b.Line(line(r)); !fits {
+				break
+			}
+			t.mark(r, folded[index[r.Seq]])
+			t.directSent = r.Seq
 			t.first++
 		}
 		t.done = true
@@ -180,9 +201,9 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		}
 		return &out, b, t
 	}
-	out, b, t := run(nil)
-	if len(ahead.pending) > 0 && (!t.done || paged) {
-		out, b, t = run(ahead.pending)
+	out, b, t := run(nil, nil)
+	if len(ahead.pending)+len(direct.pending) > 0 && (!t.done || paged) {
+		out, b, t = run(ahead.pending, direct.pending)
 	}
 	res, shortened := t.res, t.shortened
 	var notes []string
@@ -197,7 +218,7 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	if t.first > 0 && !opts.JSON {
 		first := "to " + f.For
 		if f.For == "" {
-			first = "from root"
+			first = "to " + f.To + " or from root"
 		}
 		trailer(fmt.Sprintf("... %d %s first", t.first, first), false)
 	}
@@ -228,6 +249,15 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		}
 		res.More -= n
 	}
+	if sent := max(direct.sent, t.directSent); sent > res.Last && direct.delivered != nil {
+		early := direct.filter
+		early.After, early.Before = res.Last, sent+1
+		n, err := st.Count(ctx, early)
+		if err != nil {
+			return TailResult{}, err
+		}
+		res.More -= n
+	}
 	if res.More > 0 {
 		resume := fmt.Sprintf("--since %d", res.Last)
 		if res.Last < 1 {
@@ -247,6 +277,9 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	if t.sent > ahead.sent {
 		res.Ack = append(res.Ack, store.CursorMove{Name: addressedCursor(opts.Cursor), Drive: f.Drive, Seq: t.sent})
+	}
+	if t.directSent > direct.sent {
+		res.Ack = append(res.Ack, store.CursorMove{Name: directCursor(opts.Cursor), Drive: f.Drive, Seq: t.directSent})
 	}
 	if _, err := out.WriteTo(w); err != nil {
 		return TailResult{}, fmt.Errorf("write tail: %w", err)
@@ -341,12 +374,13 @@ func tailPages(ctx context.Context, st *store.Store, f store.Filter, v view, bud
 }
 
 type tailRun struct {
-	res       TailResult
-	printed   map[int64]bool
-	sent      int64
-	first     int
-	shortened int
-	done      bool
+	res        TailResult
+	printed    map[int64]bool
+	sent       int64
+	directSent int64
+	first      int
+	shortened  int
+	done       bool
 }
 
 func (t *tailRun) mark(r store.Record, folded bool) {
@@ -367,6 +401,10 @@ func seedOf(ctx context.Context, st *store.Store, seed, drive string) (int64, er
 
 func addressedCursor(cursor string) string {
 	return cursor + "#addressed"
+}
+
+func directCursor(cursor string) string {
+	return cursor + "#direct"
 }
 
 type ahead struct {
@@ -398,6 +436,59 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 	if laneMail && !paged {
 		for _, r := range page {
 			if !slices.Contains(a.filter.Lanes, r.Lane) {
+				continue
+			}
+			if r.Seq <= a.sent {
+				a.delivered[r.Seq] = true
+			} else {
+				a.pending = append(a.pending, r)
+			}
+		}
+		return a, nil
+	}
+	if a.sent > f.After {
+		done := a.filter
+		done.Before = a.sent + 1
+		records, err := st.QueryText(ctx, done)
+		if err != nil {
+			return ahead{}, err
+		}
+		for _, r := range records {
+			a.delivered[r.Seq] = true
+		}
+	}
+	waiting := a.filter
+	waiting.After = max(f.After, a.sent)
+	waiting.Limit = pageRows
+	pending, err := st.Query(ctx, waiting)
+	if err != nil {
+		return ahead{}, err
+	}
+	a.pending = pending
+	return a, nil
+}
+
+func directAhead(ctx context.Context, st *store.Store, f store.Filter, opts TailOptions, page []store.Record, paged bool) (ahead, error) {
+	if f.For != "" || f.To == "" || store.RootName(f.To) || f.Descending || opts.Cursor == "" || len(page) == 0 {
+		return ahead{}, nil
+	}
+	a := ahead{filter: f, delivered: map[int64]bool{}}
+	a.filter.To, a.filter.Addressed, a.filter.BroadcastFloor = "", f.To, ""
+	a.filter.Peer, a.filter.PeerAfter = "", 0
+	a.filter.Limit = 0
+	sent, _, err := st.Cursor(ctx, directCursor(opts.Cursor), f.Drive)
+	if err != nil {
+		return ahead{}, err
+	}
+	a.sent = sent
+	if !paged {
+		aliases, err := st.Aliases(ctx, f.Drive, f.To)
+		if err != nil {
+			return ahead{}, err
+		}
+		names := append([]string{f.To}, aliases...)
+		for _, r := range page {
+			if !slices.ContainsFunc(r.To, func(to string) bool { return slices.Contains(names, to) }) {
 				continue
 			}
 			if r.Seq <= a.sent {

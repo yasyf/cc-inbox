@@ -43,6 +43,8 @@ type Filter struct {
 	BroadcastFloor string
 	broadcastAfter *int64
 	broadcastSince int64
+	AliasFloor     bool
+	aliasSince     int64
 	For            string
 	Aliases        []string
 	Addressed      string
@@ -100,8 +102,14 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	}
 	if f.Addressed != "" {
 		names := f.addressees(f.Addressed)
-		scoped = append(scoped, addressedTo("("+placeholders(len(names))+")"))
-		params = append(append(params, names...), names...)
+		if f.aliasSince > 0 && len(names) > 1 {
+			aliases := names[1:]
+			scoped = append(scoped, "("+addressedTo("(?)")+" OR (at >= ? AND "+addressedTo("("+placeholders(len(aliases))+")")+"))")
+			params = append(append(append(params, names[0], names[0], f.aliasSince), aliases...), aliases...)
+		} else {
+			scoped = append(scoped, addressedTo("("+placeholders(len(names))+")"))
+			params = append(append(params, names...), names...)
+		}
 	}
 	if f.To != "" {
 		names := f.addressees(f.To)
@@ -116,9 +124,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 			all += " AND seq > COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0) AND at >= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0)"
 			allParams = append(slices.Clone(names), f.BroadcastFloor, f.Drive, broadcastStart(f.BroadcastFloor), f.Drive)
 		}
-		addressed, kindParams := f.addressedKinds("(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR (" + all + "))")
+		recipient, recipientParams := f.addressedRecipient(names)
+		addressed, kindParams := f.addressedKinds("(" + recipient + " OR (" + all + "))")
 		scoped = append(scoped, addressed)
-		params = append(append(append(params, names...), allParams...), kindParams...)
+		params = append(append(append(params, recipientParams...), allParams...), kindParams...)
 	}
 	branches := []string{"(" + strings.Join(scoped, " AND ") + ")"}
 	if peers := f.peerAddresses(self); len(peers) > 0 {
@@ -318,6 +327,14 @@ func kindArgs(ks []kinds.Kind) []any {
 	return out
 }
 
+func (f Filter) addressedRecipient(names []any) (string, []any) {
+	if f.aliasSince == 0 || len(names) < 2 {
+		return "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(names)) + "))", names
+	}
+	aliases := names[1:]
+	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?) OR (at >= ? AND EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(aliases)) + "))))", append([]any{names[0], f.aliasSince}, aliases...)
+}
+
 func addressedTo(in string) string {
 	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR EXISTS (SELECT 1 FROM records own WHERE own.seq = records.re AND own.lane IN " + in + " AND records.lane <> own.lane))"
 }
@@ -406,8 +423,23 @@ func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 		return f, nil
 	}
 	var err error
-	f.Aliases, err = s.Aliases(ctx, f.Drive, reader)
+	if f.Aliases, err = s.Aliases(ctx, f.Drive, reader); err != nil || !f.AliasFloor || len(f.Aliases) == 0 {
+		return f, err
+	}
+	f.aliasSince, err = s.aliasMailSince(ctx, f.Drive, reader)
 	return f, err
+}
+
+func (s *Store) aliasMailSince(ctx context.Context, drive, lane string) (int64, error) {
+	var since int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE((SELECT at FROM records WHERE drive = ?1 AND lane = (
+	SELECT other.lane FROM lane_holds own CROSS JOIN lane_holds other INDEXED BY lane_holds_stem ON other.drive = own.drive AND other.stem = own.stem
+	WHERE own.drive = ?1 AND own.lane = ?2 AND other.lane != ?2 ORDER BY other.held DESC LIMIT 1
+) AND kind != 'digest' ORDER BY at * 1000000 + seq DESC LIMIT 1), 0)`, drive, lane).Scan(&since)
+	if err != nil {
+		return 0, fmt.Errorf("read the last post of %s's predecessor on %s: %w", lane, drive, err)
+	}
+	return since, nil
 }
 
 func HookSource(reader string) string {
@@ -737,7 +769,7 @@ func broadcastStart(floor string) string {
 func LaneMail(k PeerKey, b Binding) Filter {
 	f := Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
 	if b.Lane != "" {
-		f.FirstOnly, f.BroadcastFloor = kinds.Broadcasts(), BroadcastCursor(k)
+		f.FirstOnly, f.BroadcastFloor, f.AliasFloor = kinds.Broadcasts(), BroadcastCursor(k), true
 	}
 	return f
 }
