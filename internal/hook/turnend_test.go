@@ -68,7 +68,7 @@ func TestALaunchedLaneCannotEndItsTurnOnAPromise(t *testing.T) {
 	testutil.Post(t, st, store.Record{Lane: quietLane, Kind: kinds.Report, To: []string{"meta-desk-1"}, Text: "pushed the branch"})
 
 	reason := stopReason(t, st, p)
-	for _, want := range []string{"--lane fix-lane-1 --kind done", "--kind stopped", "--kind blocked --pr <n>", "--kind ask --to <who>"} {
+	for _, want := range []string{"--lane fix-lane-1 --kind done", "--kind stopped", "--kind blocked --pr <n>", "--kind blocked --attr until=", "--kind ask --to <who>"} {
 		if !strings.Contains(reason, want) {
 			t.Fatalf("refusal %q lacks %q", reason, want)
 		}

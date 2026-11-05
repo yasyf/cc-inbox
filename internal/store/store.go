@@ -779,6 +779,11 @@ func Validate(r Record) error {
 	if err := validateFields(r.Fields); err != nil {
 		return err
 	}
+	if until, ok := r.Fields.Attrs["until"]; r.Kind == kinds.Blocked && ok {
+		if span, err := time.ParseDuration(until); err != nil || span <= 0 {
+			return fmt.Errorf("blocked --attr until=%q is not a span such as 45m", until)
+		}
+	}
 	if r.Kind == kinds.Spawn && (len(r.Refs.Lanes) != 1 || !strings.HasPrefix(r.Fields.Attrs["brief"], "/") || r.Fields.Attrs["model"] == "") {
 		return errors.New("kind spawn names one lane, its brief and its model: --lane-ref <lane> --attr brief=<absolute path> --attr model=<model>, with --attr effort=<effort> and --attr task=<task id> when known")
 	}

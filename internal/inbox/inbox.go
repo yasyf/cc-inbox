@@ -64,12 +64,12 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		}
 		f.After = seq
 		switch {
-		case ok:
 		case opts.Seed != "":
-			if f.After, err = seedOf(ctx, st, opts.Seed, f.Drive); err != nil {
+			if f.After, err = seedOf(ctx, st, opts.Seed, f.Drive, seq, ok); err != nil {
 				return TailResult{}, err
 			}
-			seeded = true
+			seeded = !ok || f.After != seq
+		case ok:
 		default:
 			f.Since = st.Now().Add(-FreshCursor)
 		}
@@ -396,10 +396,10 @@ func (t *tailRun) mark(r store.Record, folded bool) {
 	}
 }
 
-func seedOf(ctx context.Context, st *store.Store, seed, drive string) (int64, error) {
-	seq, ok, err := st.Cursor(ctx, seed, drive)
-	if err != nil || ok {
-		return seq, err
+func seedOf(ctx context.Context, st *store.Store, seed, drive string, own int64, exists bool) (int64, error) {
+	floor, ok, err := st.Cursor(ctx, seed, drive)
+	if err != nil || ok || exists {
+		return max(own, floor), err
 	}
 	return st.MaxSeq(ctx)
 }

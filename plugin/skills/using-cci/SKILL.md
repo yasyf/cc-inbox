@@ -66,6 +66,9 @@ every other stop and prints the commands. The records that end a turn are
 `done`, `stopped`, `stand-down`, a `handoff` with no doc, and an open `ask`,
 `blocker` or `blocked`. To wait on an event, post `blocked` with `--pr`,
 `--target`, `--lane-ref`, or a `card-` id in the text; that event wakes the lane.
+To wait on a monitor or clock the lane armed itself, post `blocked` with
+`--attr until=<span>`, such as `45m`; no event wakes it, and past the span the
+supervisor pages it as overdue.
 A second stop with nothing new posted writes the blocker for the lane.
 A refused `cci post` stores a `blocker` to the posting lane holding the refusal
 and the refused words, and the lane's next stored post closes it. Root, or the

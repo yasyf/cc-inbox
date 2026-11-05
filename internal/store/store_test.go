@@ -44,6 +44,7 @@ func TestPostValidation(t *testing.T) {
 		{"hold names a pr in text", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "HOLD #39489 until the canary clears"}, "hold names #39489 without --pr: add --pr 39489"},
 		{"hold names a pr in topic", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold"}, "add --pr 39489"},
 		{"hold names an owner/repo pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold yasyf/cc-inbox#93"}, "hold names #93"},
+		{"blocked until is not a span", store.Record{Drive: "d", Lane: "l", Kind: kinds.Blocked, Text: "lr wait on the canary", Fields: store.Fields{Attrs: map[string]string{"until": "45"}}}, `until="45" is not a span`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -63,6 +64,7 @@ func TestPostValidation(t *testing.T) {
 		{Drive: "d", Lane: "l", Kind: kinds.Note, Text: "watching #39489"},
 		{Drive: "d", Lane: "l", Kind: kinds.Blocker, Text: "waits on #89603 and #7"},
 		{Drive: "d", Lane: "l", Kind: kinds.Blocked, Topic: "#89604", Text: "blocked per #89603"},
+		{Drive: "d", Lane: "l", Kind: kinds.Blocked, Text: "lr wait on the canary", Fields: store.Fields{Attrs: map[string]string{"until": "45m"}}},
 	} {
 		if _, _, err := st.Post(context.Background(), r, 0); err != nil {
 			t.Fatalf("Post(%+v) = %v", r, err)

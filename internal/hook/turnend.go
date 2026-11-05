@@ -148,6 +148,7 @@ func openWork(b store.Binding, newest store.Record, found bool) string {
 		post + " --kind landed --pr <n> --text '<what merged>'   # merged; it ends the turn once no PR, ask or blocker of yours is open",
 		post + " --kind stopped --text '<why>'   # ended on purpose; it gets no successor",
 		post + " --kind blocked --pr <n> | --target <target> | --lane-ref <lane> --text '<what you wait on>'   # the supervisor resumes you when that lands, releases or ends",
+		post + " --kind blocked --attr until=<span such as 45m> --text '<the monitor or lr wait --wake you armed>'   # your own monitor wakes you and no release does; past the span the supervisor pages you as overdue",
 		post + " --kind ask --to <who> --text '<question>'   # the answer resumes you",
 		"Stop again with nothing new and cci writes the blocker for you.",
 	}, "\n")
