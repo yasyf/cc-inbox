@@ -2,6 +2,7 @@ package wire
 
 import (
 	"bufio"
+	"encoding/json"
 	"io"
 	"net"
 	"slices"
@@ -116,6 +117,46 @@ func TestAChannelThatLosesItsDaemonResumesOnTheNext(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(resumedArgv, " "), "--resumed") {
 		t.Errorf("resumed request = %v, want --resumed", resumedArgv)
+	}
+}
+
+func TestAWatchThatLosesItsDaemonResumesFromItsCursorOnTheNext(t *testing.T) {
+	pump := &stdinPump{in: strings.NewReader(""), needs: make(chan struct{}, 1)}
+	go pump.run()
+	argv := []string{"cci", "watch", "--drive", "d", "--cursor=watch-1"}
+	lost := fakeDaemon(t, func(t *testing.T, r *bufio.Reader, w io.Writer) {
+		if err := WriteFrame(w, FrameStdout, []byte("first\n")); err != nil {
+			t.Errorf("stdout: %v", err)
+			return
+		}
+		if kind, _, err := ReadFrame(r); err != nil || kind != FrameAck {
+			t.Errorf("frame = %q, %v; want the client's ack", kind, err)
+		}
+	})
+	var resumed Request
+	next := func() io.ReadWriteCloser {
+		client, daemon := net.Pipe()
+		go func() {
+			defer func() { _ = daemon.Close() }()
+			_, payload, err := ReadFrame(bufio.NewReader(daemon))
+			if err != nil {
+				t.Errorf("resumed request: %v", err)
+				return
+			}
+			if err := json.Unmarshal(payload, &resumed); err != nil {
+				t.Errorf("resumed request: %v", err)
+			}
+			_ = WriteFrame(daemon, FrameExit, ExitPayload(0))
+		}()
+		return client
+	}
+	var stdout, stderr strings.Builder
+	code, ok, _ := relay(lost, Request{Argv: argv}, pump, next, &stdout, &stderr)
+	if !ok || code != 0 || stdout.String() != "first\n" || stderr.Len() != 0 {
+		t.Errorf("relay = %d, %v, stdout %q, stderr %q; want the second daemon's exit with nothing said of the loss", code, ok, stdout.String(), stderr.String())
+	}
+	if !slices.Equal(resumed.Argv, argv) {
+		t.Errorf("resumed argv = %v, want %v", resumed.Argv, argv)
 	}
 }
 
