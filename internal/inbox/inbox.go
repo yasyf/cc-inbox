@@ -744,7 +744,7 @@ func ShowBodies(records []store.Record, drive string, budget int, w io.Writer) e
 		share = max(budget/len(records), 1)
 	}
 	for _, r := range records {
-		text, err := wholeText(r)
+		text, err := WholeText(r)
 		if err != nil {
 			return fmt.Errorf("show %s: %w", r.Name(), err)
 		}
@@ -772,7 +772,7 @@ func onDrive(records []store.Record, drive string) error {
 	return nil
 }
 
-func wholeText(r store.Record) ([]byte, error) {
+func WholeText(r store.Record) ([]byte, error) {
 	rest, err := shownBody(r)
 	if err != nil {
 		return nil, err

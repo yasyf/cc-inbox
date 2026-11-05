@@ -6,6 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `client.WholeText(record)` returns a record's whole text the way `cci show`
+  reads it: its text joined to the body file it names or spilled to, and a
+  missing file named in place of its body. A file that exists and cannot be
+  read is an error, never the clipped text. A caller in another module reads a
+  record whole through it instead of keeping its own copy of the rule.
+
 ### Fixed
 
 - An ask now reads closed once the lane that asked it has ended, by a stand-down

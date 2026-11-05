@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
+	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -26,6 +27,15 @@ const typedPrefix = "lr."
 
 // Record is one stored record, the value cci tail --json prints.
 type Record = store.Record
+
+// WholeText is the record's whole text as cci show reads it: the text with the
+// body a --path file or the record's body adds, a spilled text joined to its
+// file, and a missing file named in place of its body. It errors when the file
+// exists and cannot be read, never returning the clipped text in its place.
+func WholeText(r Record) (string, error) {
+	text, err := inbox.WholeText(r)
+	return string(text), err
+}
 
 // BusDown is the error Post returns when the store did not take a post. With
 // Path set, the next post that reaches the bus stores the copy kept there.

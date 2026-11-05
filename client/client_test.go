@@ -445,3 +445,28 @@ func TestAPostCarriesTheFileHoldingItsWholeBody(t *testing.T) {
 		t.Fatalf("Refs.Path = %q, want %q", stored.Refs.Path, whole)
 	}
 }
+
+func TestWholeTextJoinsASpilledTextToItsFileAndNeverClipsOnAFailedRead(t *testing.T) {
+	dir := t.TempDir()
+	whole := filepath.Join(dir, "whole.txt")
+	if err := os.WriteFile(whole, []byte("a long finding that spills past the cap\nand its second line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name   string
+		record client.Record
+		want   string
+	}{
+		{"no file", client.Record{Text: "short"}, "short"},
+		{"spilled", client.Record{Text: "a long finding…", Refs: store.Refs{Path: whole}}, "a long finding that spills past the cap\nand its second line\n"},
+		{"file missing", client.Record{Text: "short", Refs: store.Refs{Path: filepath.Join(dir, "gone.txt")}}, "short\n" + filepath.Join(dir, "gone.txt") + " is not on this machine"},
+	} {
+		got, err := client.WholeText(tt.record)
+		if err != nil || got != tt.want {
+			t.Errorf("%s: WholeText = %q, %v; want %q", tt.name, got, err, tt.want)
+		}
+	}
+	if got, err := client.WholeText(client.Record{Text: "clipped…", Refs: store.Refs{Path: dir}}); err == nil {
+		t.Errorf("a path that cannot be read returned %q, nil; want an error", got)
+	}
+}
