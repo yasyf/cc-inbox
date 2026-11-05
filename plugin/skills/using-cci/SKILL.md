@@ -275,7 +275,7 @@ binder's post is. A post never defaults to `root`: the root passes `--lane root`
 an unnamed thread bound to no lane is refused. From
 then every record addressed to the lane arrives as hook context after the
 next tool call, including records posted since the window started. A
-`head`, `review`, `state`, `report`, `claim` or `matrix` record arrives only
+`head`, `review`, `state`, `claim` or `matrix` record arrives only
 when the lane is its first addressee; read the ones it is copied on with
 `cci tail --reader <lane>`, which also moves the hook past what it printed. The open asks the lane owes lead that
 context only when the set changed since the last list; otherwise one line

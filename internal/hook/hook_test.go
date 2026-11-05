@@ -293,6 +293,26 @@ func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.
 	}
 }
 
+func TestPostToolUseDeliversAReportToEveryLaneItNames(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	if err := st.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "bugs-2", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "regressions", Kind: kinds.Report, To: []string{"root", "bugs", "owner-relay"}, Text: "item 36 not fixed as seen"})
+	testutil.Post(t, st, store.Record{Lane: "regressions", Kind: kinds.Review, To: []string{"root", "bugs"}, Text: "a review bugs is copied on"})
+
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	if !strings.Contains(got, "item 36 not fixed as seen") || strings.Contains(got, "a review bugs is copied on") {
+		t.Fatalf("additionalContext = %q; want the report that names bugs after root, and never the copied review", got)
+	}
+}
+
 func TestALanesHookFeedsNoAliasMailItsPredecessorCouldHaveRead(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
@@ -303,7 +323,7 @@ func TestALanesHookFeedsNoAliasMailItsPredecessorCouldHaveRead(t *testing.T) {
 	}
 	clock.Advance(time.Minute)
 	testutil.Post(t, st, store.Record{Lane: "desk-1", Kind: kinds.State, Text: "desk-1 up"})
-	clock.Advance(time.Minute)
+	clock.Advance(10 * time.Minute)
 	testutil.Post(t, st, store.Record{Lane: "desk-1", Kind: kinds.State, Text: "desk-1 still working"})
 	clock.Advance(time.Minute)
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.StandDown, To: []string{"desk-1"}, Text: "desk-1 stands down"})
@@ -318,7 +338,10 @@ func TestALanesHookFeedsNoAliasMailItsPredecessorCouldHaveRead(t *testing.T) {
 	}
 	clock.Advance(-10 * time.Minute)
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"desk"}, Text: "an order desk-1 read"})
-	clock.Advance(20 * time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"desk"}, Text: "a decide desk-1 may have missed"})
+	clock.Advance(-5 * time.Minute)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"desk"}, Text: "a decide from before desk-1"})
+	clock.Advance(25 * time.Minute)
 	note("root", "desk", "an order for desk-2")
 
 	var out bytes.Buffer
@@ -326,8 +349,8 @@ func TestALanesHookFeedsNoAliasMailItsPredecessorCouldHaveRead(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := hookContext(t, &out, "PostToolUse")
-	if strings.Contains(got, "an order desk-1 read") || !strings.Contains(got, "an order while no one held desk") || !strings.Contains(got, "an order for desk-2") {
-		t.Fatalf("desk-2's hook = %q; want no mail from before desk-1's last post, and the rest", got)
+	if strings.Contains(got, "an order desk-1 read") || strings.Contains(got, "a decide from before desk-1") || !strings.Contains(got, "a decide desk-1 may have missed") || !strings.Contains(got, "an order while no one held desk") || !strings.Contains(got, "an order for desk-2") {
+		t.Fatalf("desk-2's hook = %q; want no other mail from before desk-1's last post, no order from before desk-1 started, and the rest", got)
 	}
 	older, err := st.Query(ctx, store.Filter{Drive: "d", To: "desk-2", Kinds: []kinds.Kind{kinds.Note}})
 	if err != nil || !slices.ContainsFunc(older, func(r store.Record) bool { return r.Text == "an order desk-1 read" }) {
