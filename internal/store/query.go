@@ -147,7 +147,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	if readers := f.readerAddresses(); len(readers) > 0 {
 		clause := "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(readers)) + "))"
 		params = append(params, readers...)
-		if f.For == "" {
+		if f.For == "" && f.LaneAliases {
 			clause = "(" + strings.Join(append([]string{clause}, selectors...), " AND ") + ")"
 			params = append(params, selected...)
 		}
