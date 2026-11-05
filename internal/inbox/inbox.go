@@ -426,7 +426,7 @@ func addressedAhead(ctx context.Context, st *store.Store, f store.Filter, opts T
 	}
 	a := ahead{filter: f, delivered: map[int64]bool{}}
 	if laneMail {
-		a.filter.Lanes = []string{"root", "main"}
+		a.filter.Lanes, a.filter.LaneAliases = []string{"root", "main"}, false
 	} else {
 		a.filter.For, a.filter.Addressed = "", f.For
 		a.filter.Kinds, a.filter.Lanes, a.filter.Topics = nil, nil, nil

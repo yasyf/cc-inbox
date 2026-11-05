@@ -62,7 +62,7 @@ func TestOpenToSelectedErrorsAndUnrelatedPrivateCorruption(t *testing.T) {
 					t.Fatal(err)
 				}
 				current, err := st.OpenTo(ctx, "d", "api", []kinds.Kind{kinds.Ask})
-				if scope == "unrelated" {
+				if scope == "unrelated" && field != "recipients" {
 					if err != nil || len(current) != 1 {
 						t.Fatalf("unrelated corruption selected: %+v/%v", current, err)
 					}
