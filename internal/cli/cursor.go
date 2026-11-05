@@ -34,6 +34,27 @@ func newCursorCmd() *cobra.Command {
 		}),
 	}
 	set.Flags().StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
-	cmd.AddCommand(set)
+	show := &cobra.Command{
+		Use:   "show NAME",
+		Short: "Print where cursor NAME stands without moving it",
+		Args:  cobra.ExactArgs(1),
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			d, err := resolveDrive(cmd.Context(), st, drive)
+			if err != nil {
+				return err
+			}
+			seq, ok, err := st.Cursor(cmd.Context(), args[0], d)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("cursor %s in %s has not been set", args[0], d)
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "cursor %s in %s = #%d\n", args[0], d, seq)
+			return err
+		}),
+	}
+	show.Flags().StringVar(&drive, "drive", "", "drive (default: the drive bound to this session)")
+	cmd.AddCommand(set, show)
 	return cmd
 }

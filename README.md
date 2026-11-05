@@ -431,6 +431,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
 | `cci compact` | Fold records older than 48 hours by default into daily digests, then delete the folded rows. Still-open items remain, and so does any record a peer node has not acked. |
 | `cci cursor set <name> <seq>` | Move a named cursor to `seq`, backwards included, so a restarted reader replays from the point it committed. |
+| `cci cursor show <name>` | Print the seq a named cursor stands at without moving it; refuses when the cursor was never set. |
 | `cci drive use` | Bind the current Claude Code session, or the Codex session named by `CODEX_THREAD_ID` when `CLAUDE_CODE_SESSION_ID` is unset, and reset its cursor to the drive's latest record in one transaction. `--root` enables owner-prompt capture. |
 | `cci drive ls` | List drives by their most recent activity. |
 | `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. `--lane <lane>` binds the thread to that lane over any lane its posts gave it, so its hooks deliver and block for that lane alone. |

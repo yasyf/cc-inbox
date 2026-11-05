@@ -39,6 +39,20 @@ func TestPostRejectsInvalidArgumentsBeforeOpeningStore(t *testing.T) {
 	}
 }
 
+func TestPostNamesTheTextFlagWhenALaneReachesForASubjectLine(t *testing.T) {
+	t.Setenv("CCI_HOME", filepath.Join(t.TempDir(), "cci"))
+	for _, name := range []string{"subject", "title", "message", "summary"} {
+		_, err := run(t, "post", "--kind", "note", "--"+name, "x")
+		if err == nil || !strings.Contains(err.Error(), "unknown flag: --"+name) || !strings.Contains(err.Error(), "--text") {
+			t.Errorf("post --%s = %v; want the unknown flag and --text named", name, err)
+		}
+	}
+	_, err := run(t, "post", "--kind", "note", "--nonsense", "x")
+	if err == nil || err.Error() != "unknown flag: --nonsense" {
+		t.Errorf("post --nonsense = %v; want cobra's own refusal", err)
+	}
+}
+
 type postInput struct {
 	reads int
 }

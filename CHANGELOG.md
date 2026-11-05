@@ -6,8 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cci cursor show <name>` prints where a named reader cursor stands without
+  moving it, so a lane can read a cursor before it decides to `cci cursor set`
+  it. A cursor that was never set is refused rather than printed as `#0`.
+
 ### Fixed
 
+- `cci post` now says what to use when a lane reaches for `--subject`,
+  `--title`, `--message` or `--summary`: a record has no line of its own beside
+  its text, which is the one quoted argument or `--text`, with a longer body in
+  a `--path` file. Before, the refusal read only `unknown flag: --subject`.
 - An ask now reads closed once the lane that asked it has ended, by a stand-down
   or by its own newest record being `done`, `stopped` or `handoff`, and no lane
   hears its mail: no live successor down its stand-downs and no live lane under
