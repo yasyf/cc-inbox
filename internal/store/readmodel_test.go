@@ -322,7 +322,7 @@ func TestReadModelLeavesWhatItCannotProveToTheStore(t *testing.T) {
 		{"fields that do not decode", `fields='{"attrs":123}'`},
 		{"refs with a repeated key", `refs='{"stacks":["a"],"stacks":["b"]}'`},
 		{"refs with a key in another case", `refs='{"STACKS":["a"]}'`},
-		{"a surrogate escape in refs", `refs='{"path":"😀"}'`},
+		{"a surrogate escape in refs", `refs='{"path":"\ud83d\ude00"}'`},
 		{"recipients that are not strings", `recipients='[1]'`},
 		{"also_resolves that is not numbers", `also_resolves='["x"]'`},
 	}
