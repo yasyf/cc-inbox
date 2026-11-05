@@ -374,6 +374,8 @@ state or conclusion as its outcome. A pull request record names its author as
 status record names its repository as `repo`. A pull request push and a default-branch
 push carry the commit they replaced as `before`, and a check run or status
 carries GitHub's id as `id`, which orders two that finished in the same second.
+An opened, reopened or edited pull request record carries the pull request's
+description as its JSON body `{"body": ...}`, clipped to its first 30,000 bytes.
 A redelivery of the same `X-GitHub-Delivery` stays one record, a bad signature
 answers 401, and a relay failure answers 502 for GitHub to mark the delivery
 failed.
