@@ -134,7 +134,7 @@ SELECT n+1,'d','root','decide',?,'ignored #999','post','board-unselected-'||n,'[
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved.db = probe
+	saved.db, saved.rw = probe, probe
 	st = &saved
 	defer func() { _ = st.Close() }()
 	st.Now = func() time.Time { return now }
@@ -270,7 +270,7 @@ SELECT n+1,'d','root','decide',?,'ignored #999','post','board-unselected-'||n,'[
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved.db = probe
+	saved.db, saved.rw = probe, probe
 	st = &saved
 	defer func() { _ = st.Close() }()
 	st.Now = func() time.Time { return now }
