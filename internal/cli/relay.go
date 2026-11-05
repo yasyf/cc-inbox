@@ -20,7 +20,7 @@ import (
 
 func newRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relay", Short: "Replicate records end-to-end encrypted through the wide-area relay"}
-	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd())
+	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd(), newRelayScopeCmd())
 	return cmd
 }
 
@@ -468,6 +468,49 @@ func newRelayStatusCmd() *cobra.Command {
 				}
 				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s %s node %s %s, epoch %d, drives %s, pushed through %d, %d unpushed; %s\n",
 					r.Mesh, r.URL, r.Node, r.Tier, r.Epoch, routes, r.Pushed, r.Unpushed, remote); err != nil {
+					return err
+				}
+			}
+			return nil
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", "", "mesh to show (default: every joined mesh)")
+	cmd.Flags().BoolVar(&asJSON, "json", false, "print JSON")
+	return cmd
+}
+
+func newRelayScopeCmd() *cobra.Command {
+	var (
+		mesh   string
+		asJSON bool
+	)
+	cmd := &cobra.Command{
+		Use:   "scope",
+		Short: "Print the drives this node's key reads and the kinds it writes on each joined mesh, as the relay grants them",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			nodes, _, err := relayNodes(st, mesh)
+			if err != nil {
+				return err
+			}
+			var reps []relay.ScopeReport
+			for _, n := range nodes {
+				rep, err := n.Scope(cmd.Context())
+				if err != nil {
+					return err
+				}
+				reps = append(reps, rep)
+			}
+			if asJSON {
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(reps)
+			}
+			for _, r := range reps {
+				expires := ""
+				if r.Expires != "" {
+					expires = ", delegation expires " + r.Expires
+				}
+				if _, err := fmt.Fprintf(cmd.OutOrStdout(), "%s node %s %s: reads drives %s; writes kinds %s%s\n",
+					r.Mesh, r.Node, r.Tier, cmp.Or(strings.Join(r.Drives, ","), "none"), cmp.Or(strings.Join(r.Kinds, ","), "none"), expires); err != nil {
 					return err
 				}
 			}
