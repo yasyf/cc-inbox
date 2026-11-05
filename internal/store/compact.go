@@ -123,7 +123,7 @@ func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([
 			open = append(open, o)
 		}
 	}
-	return open, nil
+	return s.heardAsks(ctx, s.db, drive, open)
 }
 
 func (s *Store) withoutIncidentUpdates(ctx context.Context, drive string, openers []Record) ([]Record, error) {
@@ -204,7 +204,7 @@ func (s *Store) OpenSince(ctx context.Context, drive string, since time.Time) (o
 	return open, untracked, older, nil
 }
 
-const closureColumns = "seq, kind, at, topic, re, resolves, COALESCE(also_resolves, ''), refs, source"
+const closureColumns = "seq, lane, kind, at, topic, re, resolves, COALESCE(also_resolves, ''), refs, source"
 
 // closureRows reads drive's records of ks in seq order, with only the columns
 // that open or close an item, for reads that touch every opener and closer.
@@ -221,7 +221,7 @@ func (s *Store) closureRows(ctx context.Context, drive string, ks []kinds.Kind) 
 			kind, also, ref string
 			at              int64
 		)
-		if err := rows.Scan(&r.Seq, &kind, &at, &r.Topic, &r.Re, &r.Resolves, &also, &ref, &r.Source); err != nil {
+		if err := rows.Scan(&r.Seq, &r.Lane, &kind, &at, &r.Topic, &r.Re, &r.Resolves, &also, &ref, &r.Source); err != nil {
 			return nil, fmt.Errorf("scan closure row: %w", err)
 		}
 		r.Kind = kinds.Kind(kind)

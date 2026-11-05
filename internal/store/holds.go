@@ -3,11 +3,14 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/yasyf/cc-inbox/internal/kinds"
 )
 
 var generation = regexp.MustCompile(`^(.+)-\d+$`)
@@ -478,6 +481,59 @@ UNION SELECT lane, held, down, `+liveOf("lane_holds")+` FROM lane_holds WHERE dr
 		params = append(params, name, max(floor, downs[name]))
 	}
 	return " OR " + strings.Join(arms, " OR "), params, nil
+}
+
+func (s *Store) heardAsks(ctx context.Context, q rowsQuerier, drive string, open []Record) ([]Record, error) {
+	var askers []string
+	for _, o := range open {
+		if o.Kind == kinds.Ask && !slices.Contains(askers, o.Lane) {
+			askers = append(askers, o.Lane)
+		}
+	}
+	if len(askers) == 0 {
+		return open, nil
+	}
+	switch err := s.laneRegistry(ctx); {
+	case errors.Is(err, ErrNoLaneRegistry):
+		return open, nil
+	case err != nil:
+		return nil, err
+	}
+	gone, err := unheard(ctx, q, drive, askers)
+	if err != nil {
+		return nil, err
+	}
+	return slices.DeleteFunc(open, func(o Record) bool { return o.Kind == kinds.Ask && gone[o.Lane] }), nil
+}
+
+func unheard(ctx context.Context, q rowsQuerier, drive string, lanes []string) (map[string]bool, error) {
+	names, _ := json.Marshal(lanes)
+	rows, err := q.QueryContext(ctx, `WITH RECURSIVE
+asker(lane) AS (SELECT value FROM json_each(?2)),
+chain(asker, lane) AS (
+	SELECT lane, lane FROM asker
+	UNION SELECT chain.asker, h.successor FROM chain JOIN lane_holds h ON h.drive = ?1 AND h.lane = chain.lane WHERE h.successor != ''
+),
+stems(asker, stem) AS (SELECT DISTINCT chain.asker, h.stem FROM chain JOIN lane_holds h ON h.drive = ?1 AND h.lane = chain.lane)
+SELECT a.lane FROM asker a WHERE EXISTS (SELECT 1 FROM lane_holds h WHERE h.drive = ?1 AND h.lane = a.lane)
+	AND NOT EXISTS (SELECT 1 FROM stems CROSS JOIN lane_holds h INDEXED BY lane_holds_stem ON h.drive = ?1 AND h.stem = stems.stem WHERE stems.asker = a.lane AND `+liveOf("h")+` AND NOT `+endedSQL("h")+`)`, drive, string(names))
+	if err != nil {
+		return nil, fmt.Errorf("read which askers on %s no lane hears: %w", drive, err)
+	}
+	defer func() { _ = rows.Close() }()
+	out := map[string]bool{}
+	for rows.Next() {
+		var lane string
+		if err := rows.Scan(&lane); err != nil {
+			return nil, fmt.Errorf("scan an asker on %s no lane hears: %w", drive, err)
+		}
+		out[lane] = true
+	}
+	return out, rows.Err()
+}
+
+func endedSQL(table string) string {
+	return "COALESCE((SELECT kind FROM records r WHERE r.drive = " + table + ".drive AND r.lane = " + table + ".lane AND r.kind NOT IN ('claim', 'peer', 'digest') AND NOT (r.kind = 'handoff' AND json_extract(r.refs, '$.ccn') IS NOT NULL) ORDER BY r.at * 1000000 + r.seq DESC LIMIT 1) IN ('done', 'stopped', 'handoff', 'stand-down'), 0)"
 }
 
 func toAny(ss []string) []any {

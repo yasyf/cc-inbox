@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An ask now reads closed once the lane that asked it has ended, by a stand-down
+  or by its own newest record being `done`, `stopped` or `handoff`, and no lane
+  hears its mail: no live successor down its stand-downs and no live lane under
+  its alias. Before, such an ask stayed open in `cci digest`, in every open-ask
+  read and in the overdue checks built on them, and re-fired with nobody left to
+  hear the answer. An ask whose lane handed over to a live successor, or whose
+  alias another live lane holds, stays open for that lane.
 - On a Sprite, `cci show <n>` and `cci post --re <n>` now find the record the
   same Sprite printed as `#<n>@<node>`. Before, a bare number there named only
   an owner node's record, so a lane that dropped the `@<node>` got "no record
