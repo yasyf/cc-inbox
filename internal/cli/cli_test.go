@@ -1528,6 +1528,48 @@ func TestShowPrintsEachRecordsTextOnceWithinItsBudget(t *testing.T) {
 	}
 }
 
+func TestShowBodyPrintsTheWholeTextWithNoHeader(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	long := "OPENING " + strings.Repeat("a long finding about the stack cap ", 20) + "THE END"
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", long); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", "short words"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "show", "1", "--body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != long+"\n" {
+		t.Errorf("show 1 --body = %q, want the spilled text whole and nothing else", out)
+	}
+	out, err = run(t, "show", "1", "2", "--body", "--budget", "0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "#1\n"+long+"\n#2\nshort words\n" {
+		t.Errorf("show 1 2 --body = %q, want each text under its seq", out)
+	}
+}
+
+func TestShowBodySaysWhereABudgetCutIt(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	long := "OPENING " + strings.Repeat("a long finding about the stack cap ", 20) + "THE END"
+	if _, err := run(t, "post", "--drive", "release-v3", "--lane", "root", "--kind", "note", "--text", long); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "show", "1", "--body", "--budget", "100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "THE END") || !strings.Contains(out, "cci show #1 --body --budget 0 reads it whole") {
+		t.Errorf("show 1 --body --budget 100 = %q, want a cut that names the read past it", out)
+	}
+}
+
 func TestPostDefaultsOnlyToABoundLaneNeverToRoot(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)

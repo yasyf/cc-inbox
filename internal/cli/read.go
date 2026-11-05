@@ -386,9 +386,12 @@ func newFindCmd() *cobra.Command {
 	return cmd
 }
 
+const defaultBodyBudget = 16000
+
 func newShowCmd() *cobra.Command {
 	var (
 		asJSON bool
+		body   bool
 		drive  string
 		budget int
 	)
@@ -406,12 +409,20 @@ func newShowCmd() *cobra.Command {
 				}
 				records[i] = r
 			}
+			if body {
+				if !cmd.Flags().Changed("budget") {
+					budget = defaultBodyBudget
+				}
+				return inbox.ShowBodies(records, drive, budget, cmd.OutOrStdout())
+			}
 			return inbox.Show(cmd.Context(), st, records, drive, budget, asJSON, cmd.OutOrStdout())
 		}),
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "one JSON record per line, the body file not inlined")
 	cmd.Flags().StringVar(&drive, "drive", "", "refuse a seq that is not on this drive")
-	cmd.Flags().IntVar(&budget, "budget", 0, "bytes of body to print, split evenly across the seqs asked; each cut body names the show that reads it whole (default: whole bodies)")
+	cmd.Flags().IntVar(&budget, "budget", 0, "bytes of body to print, split evenly across the seqs asked; each cut body names the show that reads it whole (default: whole bodies; with --body, 16000, and 0 prints them whole)")
+	cmd.Flags().BoolVar(&body, "body", false, "print only each record's whole text, with no header line; several seqs each open on a #SEQ line")
+	cmd.MarkFlagsMutuallyExclusive("body", "json")
 	return cmd
 }
 
