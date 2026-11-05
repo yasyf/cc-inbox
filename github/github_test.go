@@ -9,6 +9,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"net/http"
@@ -243,5 +244,38 @@ func TestARelayFailureAsksGitHubToRedeliver(t *testing.T) {
 	srv.Close()
 	if code := h.Handle(context.Background(), sign("pull_request", "d1", merged), []byte(merged)); code/100 == 2 {
 		t.Fatalf("handle = %d with the relay down, want a failure code", code)
+	}
+}
+
+func TestAnEditedBodyReachesTheOwnerWhileAPushCarriesNone(t *testing.T) {
+	h, st, owner, _ := handler(t)
+	long := "## Summary\n\nnew <b>summary</b>\n\n" + strings.Repeat("é\"\n", 40_000)
+	edited, err := json.Marshal(map[string]any{
+		"action": "edited", "number": 45700, "repository": map[string]string{"full_name": "acme/app"},
+		"pull_request": map[string]any{"body": long, "updated_at": "2026-11-03T15:10:00Z", "head": map[string]string{"sha": "abc1234567890"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for id, body := range map[string]string{"d4": string(edited), "d5": synchronized} {
+		if code := h.Handle(context.Background(), sign("pull_request", id, body), []byte(body)); code != http.StatusOK {
+			t.Fatalf("handle %s = %d, want 200", id, code)
+		}
+	}
+	bodies := map[string]string{}
+	for _, r := range records(t, st, owner) {
+		var carried struct{ Body string }
+		if len(r.Body) > 0 {
+			if err := json.Unmarshal(r.Body, &carried); err != nil {
+				t.Fatal(err)
+			}
+		}
+		bodies[r.Fields.Outcome] = carried.Body
+	}
+	if got := bodies["edited"]; !strings.HasPrefix(long, got) || !strings.Contains(got, "new <b>summary</b>") || len(got) > 30_000 {
+		t.Fatalf("edited body = %d bytes, want the clipped head of the new body", len(got))
+	}
+	if got, pushed := bodies["synchronize"]; !pushed || got != "" {
+		t.Fatalf("synchronize body = %q, %v, want a record with no body", got, pushed)
 	}
 }
