@@ -384,6 +384,35 @@ func TestASeqFromTailNamesAnotherNodesRecordOnANodeThatIsNoOwner(t *testing.T) {
 	}
 }
 
+func TestAnOpenHoldAnotherNodeWroteIsNamedByItsOriginNumberNotThisNodesSeq(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	ctx := context.Background()
+	if err := relay.SaveConfig(home, relay.Config{Mesh: "machine", URL: "https://relay.invalid", Tier: "service"}); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hold := store.Row{Origin: "bbbbbbbbbbbbbbbb", OriginSeq: 457668, Drive: "d", Lane: "tp-desc-vector-b-1", Kind: kinds.Hold, At: time.Now(), Text: "Hold #50325 until the code_hashes index is built", To: []string{"root"}, Source: "post"}
+	if _, err := st.Apply(ctx, []store.Row{hold}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	open, err := client.Open(ctx, "d", "hold")
+
+	if err != nil || len(open) != 1 {
+		t.Fatalf("open = %+v, %v", open, err)
+	}
+	if name := open[0].Name(); name != "#457668@bbbbbbbb" {
+		t.Fatalf("Name() = %s, want the origin's #457668@bbbbbbbb, never this node's seq #%d", name, open[0].Seq)
+	}
+}
+
 func TestAResolvesClosesItsOpener(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	blocker := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "blocker", Text: "LANDED-NOT-LIVE sand", To: []string{"root"}})

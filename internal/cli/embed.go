@@ -100,10 +100,16 @@ func EmbedRecordsFrom(ctx context.Context, st *store.Store, c EmbedCall) ([]stor
 			return nil, err
 		}
 		seqs := make([]int64, 0, len(openers))
+		named := make(map[int64]store.Record, len(openers))
 		for _, r := range openers {
 			seqs = append(seqs, r.Seq)
+			named[r.Seq] = r
 		}
-		return st.OpenAmong(ctx, c.Drive, seqs)
+		open, err := st.OpenAmong(ctx, c.Drive, seqs)
+		for i, r := range open {
+			open[i].Num, open[i].ReNum, open[i].CloseNums = named[r.Seq].Num, named[r.Seq].ReNum, named[r.Seq].CloseNums
+		}
+		return open, err
 	}
 	return nil, fmt.Errorf("no embedded read %q", c.Op)
 }
