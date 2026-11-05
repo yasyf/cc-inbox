@@ -15,7 +15,7 @@ import (
 
 func closed(opener Record, closers []Record) bool {
 	for _, c := range closers {
-		if c.Seq > opener.Seq && c.Kind.Closes(opener.Kind) && (c.Re == opener.Seq || (c.Topic != "" && c.Topic == opener.Topic)) {
+		if c.Seq > opener.Seq && c.Kind.Closes(opener.Kind) && (c.Re == opener.Seq || (c.Topic != "" && c.Topic == opener.Topic && !ownReply(opener, c))) {
 			return true
 		}
 		if closesByRef(opener, c) {
@@ -26,7 +26,7 @@ func closed(opener Record, closers []Record) bool {
 }
 
 func closesByRef(opener, c Record) bool {
-	pairs := c.Kind.Closes(opener.Kind) || c.Kind.ClosesByRef() && strings.HasPrefix(opener.Source, "import:")
+	pairs := c.Kind.Closes(opener.Kind) && !ownReply(opener, c) || c.Kind.ClosesByRef() && strings.HasPrefix(opener.Source, "import:")
 	later := c.At.After(opener.At) || c.At.Equal(opener.At) && c.Seq > opener.Seq
 	if !pairs || !later {
 		return false
@@ -35,6 +35,10 @@ func closesByRef(opener, c Record) bool {
 		return slices.ContainsFunc(opener.Refs.Stacks, func(s string) bool { return slices.Contains(c.Refs.Stacks, s) })
 	}
 	return slices.ContainsFunc(opener.Refs.Targets, func(t string) bool { return slices.Contains(c.Refs.Targets, t) })
+}
+
+func ownReply(opener, c Record) bool {
+	return (c.Kind == kinds.Answer || c.Kind == kinds.Go) && c.Lane != "" && SameLane(c.Lane, opener.Lane)
 }
 
 var (
@@ -58,6 +62,7 @@ func TestClosureIndexAgreesWithTheOracleOnEdgeCases(t *testing.T) {
 	api, web := []string{"api"}, []string{"web"}
 	ask := Record{Seq: 5, Kind: kinds.Ask, At: at}
 	decide := Record{Seq: 5, Kind: kinds.Decide, At: at, Topic: "#1"}
+	rootAsk := Record{Seq: 5, Kind: kinds.Ask, Lane: "root", At: at, Topic: "m814"}
 	incident := Record{Seq: 5, Kind: kinds.Incident, At: at, Refs: Refs{Targets: api}}
 	importedAsk := Record{Seq: 5, Kind: kinds.Ask, At: at, Source: "import:/inbox/a.md", Refs: Refs{Targets: api}}
 	refs := func(stacks, targets []string) Record {
@@ -134,6 +139,14 @@ func TestClosureIndexAgreesWithTheOracleOnEdgeCases(t *testing.T) {
 			{Seq: 6, Kind: kinds.Answer, Re: 5},
 			{Seq: 9, Kind: kinds.Lift, Re: 5},
 		}, true},
+		{"the asker's own answer to another lane on its topic leaves the ask open", rootAsk, []Record{{Seq: 6, Kind: kinds.Answer, Lane: "root", Topic: "m814"}}, false},
+		{"main's answer on root's topic leaves root's ask open", rootAsk, []Record{{Seq: 6, Kind: kinds.Go, Lane: "main", Topic: "m814"}}, false},
+		{"the addressee's answer on the ask's topic closes it", rootAsk, []Record{{Seq: 6, Kind: kinds.Answer, Lane: "fidelity-shard-5", Topic: "m814"}}, true},
+		{"the asker's own answer does not hide a later reply on the topic", rootAsk, []Record{{Seq: 6, Kind: kinds.Answer, Lane: "fidelity-shard-5", Topic: "m814"}, {Seq: 7, Kind: kinds.Answer, Lane: "root", Topic: "m814"}}, true},
+		{"the asker's own withdraw on its topic closes the ask", rootAsk, []Record{{Seq: 6, Kind: kinds.Withdraw, Lane: "root", Topic: "m814"}}, true},
+		{"the asker's own answer re its ask closes it", rootAsk, []Record{{Seq: 6, Kind: kinds.Answer, Lane: "root", Re: 5}}, true},
+		{"the asker's own answer on its target leaves the ask open", Record{Seq: 5, Kind: kinds.Ask, Lane: "root", At: at, Refs: Refs{Targets: api}}, []Record{{Seq: 6, Kind: kinds.Answer, Lane: "root", At: later, Refs: Refs{Targets: api}}}, false},
+		{"another lane's answer on the ask's target closes it", Record{Seq: 5, Kind: kinds.Ask, Lane: "root", At: at, Refs: Refs{Targets: api}}, []Record{{Seq: 6, Kind: kinds.Answer, Lane: "api", At: later, Refs: Refs{Targets: api}}}, true},
 		{"no closers leave the ask open", ask, nil, false},
 	}
 	for _, tt := range tests {
@@ -181,6 +194,7 @@ func TestClosureIndexPairsEveryOpenerWithItsClosers(t *testing.T) {
 
 type recordGen struct {
 	r       *rand.Rand
+	lanes   []string
 	sources []string
 	topics  []string
 	stacks  []string
@@ -197,6 +211,7 @@ func (g recordGen) record(kind kinds.Kind, seq int64) Record {
 	return Record{
 		Seq:    seq,
 		Kind:   kind,
+		Lane:   pick(g.r, g.lanes),
 		At:     at,
 		Topic:  pick(g.r, g.topics),
 		Re:     g.r.Int64N(g.seqs),
@@ -232,6 +247,7 @@ func numbered(format string, n int) []string {
 func TestClosureIndexMatchesTheOracleOnCollidingRecords(t *testing.T) {
 	g := recordGen{
 		r:       rand.New(rand.NewPCG(20261017, 1)),
+		lanes:   []string{"", "root", "main", "lane-a", "lane-b"},
 		sources: []string{"", "post", "import:/inbox/a.md", "import:", "imported/a.md"},
 		topics:  []string{"", "#1", "#2"},
 		stacks:  []string{"", "a/x", "b/y"},
@@ -270,6 +286,7 @@ func TestClosureIndexMatchesTheOracleAtDriveScale(t *testing.T) {
 	const openerCount, closerCount = 1500, 2000
 	g := recordGen{
 		r:       rand.New(rand.NewPCG(20261017, 2)),
+		lanes:   numbered("lane-%d", 20),
 		sources: []string{"", "post", "import:/inbox/a.md"},
 		topics:  slices.Concat([]string{""}, numbered("#%d", 2000)),
 		stacks:  slices.Concat([]string{""}, numbered("p%d/prod", 1000)),
@@ -329,6 +346,7 @@ func TestOpenQueriesReturnWhatTheOracleComputes(t *testing.T) {
 	const n = 400
 	g := recordGen{
 		r:       rand.New(rand.NewPCG(20261017, 3)),
+		lanes:   []string{"lane-a", "lane-b"},
 		sources: []string{"", "post", "import:/inbox/a.md", "import:"},
 		topics:  []string{"", "", "", "#1", "#2"},
 		stacks:  slices.Concat([]string{""}, numbered("p%d/prod", 40)),
@@ -340,7 +358,7 @@ func TestOpenQueriesReturnWhatTheOracleComputes(t *testing.T) {
 	items := make([]Ingestion, n)
 	for i := range items {
 		r := g.record(pick(g.r, vocabulary), 0)
-		r.Drive, r.Lane, r.Text = "d", "lane-a", fmt.Sprintf("record %d", i)
+		r.Drive, r.Text = "d", fmt.Sprintf("record %d", i)
 		if r.Re != 0 {
 			r.Re += base
 		}

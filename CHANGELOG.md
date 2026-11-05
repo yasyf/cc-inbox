@@ -34,6 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an owner node's record, so a lane that dropped the `@<node>` got "no record
   has this number" for its own post. A bare number an owner node's record holds
   still names that record.
+- An ask stays open, and reaches its addressee's wait and hook, when its asker
+  answers another lane on the same topic. Before, root's answer to owner-relay
+  on a topic closed root's own ask to a lane on that topic, so `lr wait` and the
+  hook skipped the ask as answered and moved the lane's cursor past it unread.
+  An answer or go now closes an opener by topic or ref only when another lane
+  wrote it; `--re`, `--resolves` and a withdraw close as before.
 - A session now has cci's tools loaded from its first turn and after every
   compaction. Before, they sat behind tool search, and a call made without first
   fetching the schema failed with "input schema was not in your prompt".

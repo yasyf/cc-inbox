@@ -2299,3 +2299,43 @@ func TestCursorShowPrintsWhereACursorStandsWithoutMovingIt(t *testing.T) {
 		t.Fatal("cursor show on another drive found the cursor")
 	}
 }
+
+func TestABoundWaitPrintsAnAskItsAskerAnsweredSomeoneElseOnTheSameTopic(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	k := store.PeerKey{Session: "session-1"}
+	if err := st.BindLane(ctx, k, "d", "fidelity-shard-5", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetCursor(ctx, store.LaneCursor(k), "d", 0); err != nil {
+		t.Fatal(err)
+	}
+	for _, post := range [][]string{
+		{"--lane", "root", "--kind", "ask", "--to", "fidelity-shard-5", "--topic", "m814", "--text", "what are these four parked on"},
+		{"--lane", "root", "--kind", "answer", "--to", "owner-relay", "--topic", "m814", "--text", "item 3 needs no revive"},
+		{"--lane", "answer-wakes-grade-2", "--kind", "ask", "--to", "fidelity-shard-5", "--text", "what did you change"},
+	} {
+		if _, err := run(t, append([]string{"post", "--drive", "d"}, post...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, "tail", "--drive", "d", "--cursor", "fidelity-shard-5-wake", "--seed", "fidelity-shard-5", "--to", "fidelity-shard-5", "--mail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"what are these four parked on", "what did you change"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the wait printed %q, want %q", out, want)
+		}
+	}
+	if strings.Contains(out, "item 3 needs no revive") {
+		t.Errorf("the wait printed %q, want no answer addressed to owner-relay", out)
+	}
+}

@@ -296,21 +296,38 @@ func indexClosers(closers []Record) closerIndex {
 		byUnstackedTarget: stampBuckets{},
 	}
 	for _, c := range closers {
-		ix.byRe.add(c.Re, c)
+		ix.byRe.add(c.Re, closer{kind: c.Kind}, c.Seq)
+		paired := closer{kind: c.Kind, replyLane: replyLane(c)}
 		if c.Topic != "" {
-			ix.byTopic.add(c.Topic, c)
+			ix.byTopic.add(c.Topic, paired, c.Seq)
 		}
 		for _, stack := range c.Refs.Stacks {
-			ix.byStack.add(stack, c)
+			ix.byStack.add(stack, paired, c)
 		}
 		for _, target := range c.Refs.Targets {
-			ix.byTarget.add(target, c)
+			ix.byTarget.add(target, paired, c)
 			if len(c.Refs.Stacks) == 0 {
-				ix.byUnstackedTarget.add(target, c)
+				ix.byUnstackedTarget.add(target, paired, c)
 			}
 		}
 	}
 	return ix
+}
+
+type closer struct {
+	kind      kinds.Kind
+	replyLane string
+}
+
+func replyLane(c Record) string {
+	if c.Kind == kinds.Answer || c.Kind == kinds.Go {
+		return c.Lane
+	}
+	return ""
+}
+
+func (c closer) pairs(opener Record) bool {
+	return c.kind.Closes(opener.Kind) && (c.replyLane == "" || !SameLane(c.replyLane, opener.Lane))
 }
 
 func (ix closerIndex) closed(opener Record) bool {
@@ -327,22 +344,22 @@ func (ix closerIndex) closed(opener Record) bool {
 	return byTarget.closes(opener.Refs.Targets, opener)
 }
 
-type seqBuckets[K comparable] map[K]map[kinds.Kind]int64
+type seqBuckets[K comparable] map[K]map[closer]int64
 
-func (b seqBuckets[K]) add(key K, c Record) {
+func (b seqBuckets[K]) add(key K, c closer, seq int64) {
 	latest, ok := b[key]
 	if !ok {
-		latest = map[kinds.Kind]int64{}
+		latest = map[closer]int64{}
 		b[key] = latest
 	}
-	if seq, ok := latest[c.Kind]; !ok || c.Seq > seq {
-		latest[c.Kind] = c.Seq
+	if cur, ok := latest[c]; !ok || seq > cur {
+		latest[c] = seq
 	}
 }
 
 func (b seqBuckets[K]) closes(key K, opener Record) bool {
-	for kind, seq := range b[key] {
-		if seq > opener.Seq && kind.Closes(opener.Kind) {
+	for c, seq := range b[key] {
+		if seq > opener.Seq && c.pairs(opener) {
 			return true
 		}
 	}
@@ -358,25 +375,25 @@ func (a stamp) after(b stamp) bool {
 	return a.at.After(b.at) || a.at.Equal(b.at) && a.seq > b.seq
 }
 
-type stampBuckets map[string]map[kinds.Kind]stamp
+type stampBuckets map[string]map[closer]stamp
 
-func (b stampBuckets) add(key string, c Record) {
+func (b stampBuckets) add(key string, c closer, r Record) {
 	latest, ok := b[key]
 	if !ok {
-		latest = map[kinds.Kind]stamp{}
+		latest = map[closer]stamp{}
 		b[key] = latest
 	}
-	at := stamp{c.At, c.Seq}
-	if cur, ok := latest[c.Kind]; !ok || at.after(cur) {
-		latest[c.Kind] = at
+	at := stamp{r.At, r.Seq}
+	if cur, ok := latest[c]; !ok || at.after(cur) {
+		latest[c] = at
 	}
 }
 
 func (b stampBuckets) closes(keys []string, opener Record) bool {
 	since := stamp{opener.At, opener.Seq}
 	for _, key := range keys {
-		for kind, at := range b[key] {
-			if at.after(since) && pairsByRef(kind, opener) {
+		for c, at := range b[key] {
+			if at.after(since) && pairsByRef(c, opener) {
 				return true
 			}
 		}
@@ -384,8 +401,8 @@ func (b stampBuckets) closes(keys []string, opener Record) bool {
 	return false
 }
 
-func pairsByRef(kind kinds.Kind, opener Record) bool {
-	return kind.Closes(opener.Kind) || kind.ClosesByRef() && strings.HasPrefix(opener.Source, "import:")
+func pairsByRef(c closer, opener Record) bool {
+	return c.pairs(opener) || c.kind.ClosesByRef() && strings.HasPrefix(opener.Source, "import:")
 }
 
 type CompactResult struct {
