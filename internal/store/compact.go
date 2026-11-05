@@ -40,6 +40,11 @@ func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, err
 // returned. seqs travels as one JSON array parameter, so its length is not
 // bounded by SQLite's limit on bound variables.
 func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
+	if m := s.window.model.Load(); m != nil {
+		if open, ok := m.openAmong(ctx, s, drive, seqs); ok {
+			return s.RecordsAmong(ctx, drive, open)
+		}
+	}
 	openers, err := s.openersAmong(ctx, drive, seqs)
 	if err != nil {
 		return nil, err
@@ -74,6 +79,25 @@ AND EXISTS (SELECT 1 FROM records l WHERE l.drive = r.drive AND l.kind = r.kind 
 		replaced[seq] = true
 	}
 	return replaced, rows.Err()
+}
+
+// OpenSeqsAmong is the seqs of OpenAmong's answer, for a reader that needs no
+// more than which are open.
+func (s *Store) OpenSeqsAmong(ctx context.Context, drive string, seqs []int64) ([]int64, error) {
+	if m := s.window.model.Load(); m != nil {
+		if open, ok := m.openAmong(ctx, s, drive, seqs); ok {
+			return open, nil
+		}
+	}
+	open, err := s.OpenAmong(ctx, drive, seqs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]int64, len(open))
+	for i, o := range open {
+		out[i] = o.Seq
+	}
+	return out, nil
 }
 
 func (s *Store) openersAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {

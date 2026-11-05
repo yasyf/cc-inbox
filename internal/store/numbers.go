@@ -21,7 +21,11 @@ func (s *Store) SetOwner(owner bool) {
 }
 
 func (s *Store) owners(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT node FROM members WHERE tier = ?", string(node.TierOwner))
+	return readOwners(ctx, s.db, s)
+}
+
+func readOwners(ctx context.Context, q rowsQuerier, s *Store) (map[string]bool, error) {
+	rows, err := q.QueryContext(ctx, "SELECT node FROM members WHERE tier = ?", string(node.TierOwner))
 	if err != nil {
 		return nil, fmt.Errorf("read owner members: %w", err)
 	}
@@ -51,16 +55,12 @@ func (s *Store) numbered(ctx context.Context, records []Record) error {
 	if len(records) == 0 {
 		return nil
 	}
-	owners, err := s.owners(ctx)
-	if err != nil {
-		return err
-	}
 	var targets []int64
 	for _, r := range records {
 		targets = append(targets, r.Re, r.Resolves)
 		targets = append(targets, r.AlsoResolves...)
 	}
-	names, err := s.names(ctx, owners, targets)
+	owners, names, err := s.ownersAndNames(ctx, targets)
 	if err != nil {
 		return err
 	}
@@ -72,6 +72,20 @@ func (s *Store) numbered(ctx context.Context, records []Record) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) ownersAndNames(ctx context.Context, targets []int64) (map[string]bool, map[int64]string, error) {
+	if m := s.window.model.Load(); m != nil {
+		if owners, names, ok := m.namesOf(s, targets); ok {
+			return owners, names, nil
+		}
+	}
+	owners, err := s.owners(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	names, err := s.names(ctx, owners, targets)
+	return owners, names, err
 }
 
 func (s *Store) name(owners map[string]bool, r Record) string {
@@ -200,6 +214,14 @@ func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
 
 func (s *Store) unambiguous(ctx context.Context, ref string, n int64) error {
 	var lane, kind, origin string
+	if m := s.window.model.Load(); m != nil {
+		if other, ok := m.otherNumbered(ctx, n); ok {
+			if other == nil {
+				return nil
+			}
+			return s.ambiguous(ref, n, other.lane, other.kind, other.from)
+		}
+	}
 	err := s.db.QueryRowContext(ctx, `SELECT other.lane, other.kind, other.origin FROM records own, (SELECT DISTINCT origin FROM records) known JOIN records other INDEXED BY records_origin ON other.origin = known.origin AND other.origin_seq = ? WHERE own.seq = ? AND other.drive = own.drive AND other.origin != own.origin LIMIT 1`, n, n).Scan(&lane, &kind, &origin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
@@ -207,6 +229,10 @@ func (s *Store) unambiguous(ctx context.Context, ref string, n int64) error {
 	if err != nil {
 		return fmt.Errorf("resolve %s: %w", ref, err)
 	}
+	return s.ambiguous(ref, n, lane, kind, origin)
+}
+
+func (s *Store) ambiguous(ref string, n int64, lane, kind, origin string) error {
 	other := origin[:min(tagLen, len(origin))]
 	return fmt.Errorf("%s names two records in its drive, this node's #%d and %s's %s #%d@%s; pass #%d@%s for this node's or #%d@%s for %s's", ref, n, lane, kind, n, other, n, s.Self()[:min(tagLen, len(s.Self()))], n, other, lane)
 }

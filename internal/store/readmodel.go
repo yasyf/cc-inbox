@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -30,6 +31,11 @@ const (
 	readModelTrimRows = 1000
 	readModelTrimAge  = 10 * time.Minute
 	readModelColumns  = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, ''), re_origin_seq, resolves_origin_seq"
+)
+
+var (
+	modelClosers = kindSet(kinds.Closers())
+	modelOpeners = kindSet(kinds.Openers())
 )
 
 var errReadModelStale = errors.New("a stored record changed under the read model")
@@ -72,16 +78,16 @@ type modelRefs struct {
 
 type modelText struct {
 	id, text, refs, fields, body, also string
-	originSeq, resolves                int64
 	reOriginSeq, resolvesOriginSeq     sql.NullInt64
 }
 
 type modelRow struct {
-	seq, at, expires, re                   int64
-	drive, lane, kind, topic, source, from string
-	addressees                             *modelAddressees
-	refs                                   *modelRefs
-	text                                   *modelText
+	seq, at, expires, re, resolves, originSeq int64
+	drive, lane, kind, topic, source, from    string
+	addressees                                *modelAddressees
+	refs                                      *modelRefs
+	also                                      []int64
+	text                                      *modelText
 }
 
 // ReadModel answers record selections from memory: every record's selection
@@ -104,7 +110,12 @@ type ReadModel struct {
 	byKind     map[string][]int32
 	byAddress  map[string][]int32
 	byPR       map[string][]int32
+	closers    map[string][]int32
+	resolvedBy map[int64]int64
+	foreign    map[int64][]int32
+	owners     map[string]bool
 	wrong      []int32
+	judged     []int64
 	interned   map[string]string
 	addressees map[string]*modelAddressees
 	textFrom   int
@@ -154,7 +165,7 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 	}
 	m := &ReadModel{
 		source: s, observer: observer, limit: limit, mutations: tip.Mutations,
-		byDrive: map[string][]int32{}, byLane: map[string][]int32{}, byKind: map[string][]int32{}, byAddress: map[string][]int32{}, byPR: map[string][]int32{},
+		byDrive: map[string][]int32{}, byLane: map[string][]int32{}, byKind: map[string][]int32{}, byAddress: map[string][]int32{}, byPR: map[string][]int32{}, closers: map[string][]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
 		interned: map[string]string{}, addressees: map[string]*modelAddressees{},
 	}
 	for {
@@ -261,6 +272,9 @@ func (m *ReadModel) catchUpBatch(ctx context.Context) (bool, error) {
 		m.stale.Store(true)
 		return false, errReadModelStale
 	}
+	if m.owners, err = readOwners(ctx, snapshot, m.source); err != nil {
+		return false, err
+	}
 	rows, err := snapshot.QueryContext(ctx, "SELECT "+readModelColumns+" FROM records WHERE seq > ? ORDER BY seq LIMIT ?", m.head, readModelBatch)
 	if err != nil {
 		return false, fmt.Errorf("read records for the read model: %w", err)
@@ -293,22 +307,28 @@ func (m *ReadModel) intern(s string) string {
 
 func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
 	var (
-		text              modelText
-		seq, at, re       int64
-		origin, recipient string
-		drive, lane, kind string
-		topic, source     string
-		expires           sql.NullInt64
+		text                  modelText
+		seq, at, re, resolves int64
+		originSeq             int64
+		origin, recipient     string
+		drive, lane, kind     string
+		topic, source         string
+		expires               sql.NullInt64
 	)
-	if err := rows.Scan(&seq, &origin, &text.originSeq, &text.id, &drive, &lane, &kind, &at, &text.text, &topic, &recipient, &re, &text.resolves, &text.refs, &text.fields, &expires, &source, &text.body, &text.also, &text.reOriginSeq, &text.resolvesOriginSeq); err != nil {
+	if err := rows.Scan(&seq, &origin, &originSeq, &text.id, &drive, &lane, &kind, &at, &text.text, &topic, &recipient, &re, &resolves, &text.refs, &text.fields, &expires, &source, &text.body, &text.also, &text.reOriginSeq, &text.resolvesOriginSeq); err != nil {
 		return fmt.Errorf("scan a record for the read model: %w", err)
 	}
-	row := modelRow{seq: seq, at: at, re: re, drive: m.intern(drive), lane: m.intern(lane), kind: m.intern(kind), topic: m.intern(topic), source: m.intern(source), from: m.intern(origin)}
+	row := modelRow{seq: seq, at: at, re: re, resolves: resolves, originSeq: originSeq, drive: m.intern(drive), lane: m.intern(lane), kind: m.intern(kind), topic: m.intern(topic), source: m.intern(source), from: m.intern(origin)}
 	if expires.Valid {
 		row.expires = expires.Int64
 	}
 	row.addressees = m.parsedAddressees(recipient)
 	row.refs = parsedModelRefs(text.refs)
+	wrong := row.addressees.wrong || row.refs != nil && row.refs.wrong || text.fields != "{}" && !json.Valid([]byte(text.fields))
+	if text.also != "" {
+		wrong = json.Unmarshal([]byte(text.also), &row.also) != nil || wrong
+		m.bytes += int64(len(row.also)) * 8
+	}
 	index := int32(len(m.rows)) //nolint:gosec // G115: a store never holds 2^31 records.
 	if at >= cold || len(m.rows) > m.textFrom {
 		row.text = &text
@@ -339,11 +359,44 @@ func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
 			m.byPR[key+number] = appendRowOnce(m.byPR[key+number], index)
 		}
 	}
-	if row.addressees.wrong || row.refs != nil && row.refs.wrong {
+	if wrong {
 		m.wrong = append(m.wrong, index)
+		m.judged = append(m.judged, seq)
 	}
+	m.indexClosure(&row, index)
 	m.held.Store(m.bytes)
 	return nil
+}
+
+func (m *ReadModel) indexClosure(row *modelRow, index int32) {
+	if row.resolves != 0 {
+		m.resolvedBy[row.resolves] = row.seq
+	}
+	for _, target := range row.also {
+		m.resolvedBy[target] = row.seq
+	}
+	if row.from != m.source.Self() {
+		m.foreign[row.originSeq] = append(m.foreign[row.originSeq], index)
+	}
+	if !modelClosers[row.kind] {
+		return
+	}
+	key := row.drive + "\x00"
+	if row.re != 0 {
+		add := key + "re\x00" + strconv.FormatInt(row.re, 10)
+		m.closers[add] = append(m.closers[add], index)
+	}
+	if row.topic != "" {
+		add := key + "topic\x00" + row.topic
+		m.closers[add] = append(m.closers[add], index)
+	}
+	if row.refs == nil {
+		return
+	}
+	for _, ref := range slices.Concat(row.refs.stacks, row.refs.targets) {
+		add := key + "ref\x00" + ref
+		m.closers[add] = appendRowOnce(m.closers[add], index)
+	}
 }
 
 func appendRowOnce(rows []int32, index int32) []int32 {
@@ -392,47 +445,53 @@ func (m *ReadModel) parsedAddressees(raw string) *modelAddressees {
 }
 
 func parsedModelRefs(raw string) *modelRefs {
-	if !strings.Contains(raw, `"prs"`) && !strings.Contains(raw, `"stacks"`) && !strings.Contains(raw, `"targets"`) {
-		if json.Valid([]byte(raw)) {
-			return nil
-		}
-		return &modelRefs{wrong: true}
+	if raw == "{}" {
+		return nil
 	}
-	var decoded struct {
-		PRs     []json.RawMessage `json:"prs"`
-		Stacks  []json.RawMessage `json:"stacks"`
-		Targets []json.RawMessage `json:"targets"`
-	}
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &keys); err != nil || strings.Contains(strings.ToLower(raw), `\u`) {
 		return &modelRefs{wrong: true}
 	}
 	refs := &modelRefs{}
-	for _, value := range decoded.PRs {
+	held := false
+	for key, value := range keys {
+		switch {
+		case key == "prs":
+			held = true
+			refs.wrong = !refs.parsePRs(value) || refs.wrong
+		case key == "stacks":
+			held = true
+			refs.wrong = json.Unmarshal(value, &refs.stacks) != nil || refs.wrong
+		case key == "targets":
+			held = true
+			refs.wrong = json.Unmarshal(value, &refs.targets) != nil || refs.wrong
+		case strings.EqualFold(key, "prs"), strings.EqualFold(key, "stacks"), strings.EqualFold(key, "targets"):
+			refs.wrong = true
+		}
+	}
+	if !held && !refs.wrong {
+		return nil
+	}
+	return refs
+}
+
+func (r *modelRefs) parsePRs(raw json.RawMessage) bool {
+	var values []json.RawMessage
+	if err := json.Unmarshal(raw, &values); err != nil {
+		return false
+	}
+	for _, value := range values {
 		if number, err := strconv.ParseInt(string(value), 10, 64); err == nil {
-			refs.ints = append(refs.ints, number)
+			r.ints = append(r.ints, number)
 			continue
 		}
 		var text string
 		if err := json.Unmarshal(value, &text); err != nil {
-			refs.wrong = true
-			continue
+			return false
 		}
-		refs.texts = append(refs.texts, text)
+		r.texts = append(r.texts, text)
 	}
-	strs := func(values []json.RawMessage) []string {
-		out := make([]string, 0, len(values))
-		for _, value := range values {
-			var text string
-			if err := json.Unmarshal(value, &text); err != nil {
-				refs.wrong = true
-				continue
-			}
-			out = append(out, text)
-		}
-		return out
-	}
-	refs.stacks, refs.targets = strs(decoded.Stacks), strs(decoded.Targets)
-	return refs
+	return true
 }
 
 func (r *modelRefs) numbers() []string {
@@ -944,7 +1003,7 @@ func (sel *modelSelection) holdsAWord(r *modelRow) bool {
 			continue
 		}
 		numbers := [...]string{
-			strconv.FormatInt(r.seq, 10), strconv.FormatInt(r.text.originSeq, 10), nullableNumber(r.text.reOriginSeq), nullableNumber(r.text.resolvesOriginSeq), r.text.also,
+			strconv.FormatInt(r.seq, 10), strconv.FormatInt(r.originSeq, 10), nullableNumber(r.text.reOriginSeq), nullableNumber(r.text.resolvesOriginSeq), r.text.also,
 		}
 		for _, column := range numbers {
 			if containsFoldASCII(column, word) {
@@ -1067,11 +1126,163 @@ func (s *Store) modelRecord(row *modelRow, projection string) (Record, error) {
 		body = ""
 	}
 	raw := rawRecord{
-		record: Record{Seq: row.seq, Origin: row.from, OriginSeq: row.text.originSeq, ID: row.text.id, Drive: row.drive, Lane: row.lane, Text: row.text.text, Topic: row.topic, Re: row.re, Resolves: row.text.resolves, Source: row.source},
+		record: Record{Seq: row.seq, Origin: row.from, OriginSeq: row.originSeq, ID: row.text.id, Drive: row.drive, Lane: row.lane, Text: row.text.text, Topic: row.topic, Re: row.re, Resolves: row.resolves, Source: row.source},
 		kind:   row.kind, at: row.at, recipients: row.addressees.raw, refs: row.text.refs, fields: row.text.fields, body: body, also: row.text.also,
 	}
 	if row.expires != 0 {
 		raw.expires = sql.NullInt64{Int64: row.expires, Valid: true}
 	}
 	return s.decoded(raw)
+}
+
+func (m *ReadModel) rowOf(seq int64) *modelRow {
+	at, found := slices.BinarySearchFunc(m.rows, seq, func(r modelRow, seq int64) int { return cmp.Compare(r.seq, seq) })
+	if !found {
+		return nil
+	}
+	return &m.rows[at]
+}
+
+func (r *modelRow) closure() Record {
+	record := Record{Seq: r.seq, Lane: r.lane, Kind: kinds.Kind(r.kind), At: time.UnixMilli(r.at).UTC(), Topic: r.topic, Re: r.re, Resolves: r.resolves, AlsoResolves: r.also, Source: r.source}
+	if r.refs != nil {
+		record.Refs.Stacks, record.Refs.Targets = r.refs.stacks, r.refs.targets
+	}
+	return record
+}
+
+// openAmong is the seqs of OpenAmong's answer: it reads no record's text, and
+// false leaves the question to the store.
+func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs []int64) ([]int64, bool) {
+	if err := m.catchUp(ctx); err != nil {
+		m.failures.Add(1)
+		return nil, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stale.Load() || len(m.wrong) > 0 {
+		m.misses.Add(1)
+		return nil, false
+	}
+	openers := make([]Record, 0, len(seqs))
+	for _, seq := range seqs {
+		if row := m.rowOf(seq); row != nil && row.drive == drive && modelOpeners[row.kind] {
+			if opener := row.closure(); opener.Tracked() {
+				openers = append(openers, opener)
+			}
+		}
+	}
+	openers = slices.DeleteFunc(openers, func(o Record) bool {
+		return o.Kind == kinds.Incident && slices.ContainsFunc(incidentTargets(o), func(seq int64) bool {
+			row := m.rowOf(seq)
+			return row != nil && row.drive == drive && row.kind == string(kinds.Incident)
+		})
+	})
+	if len(openers) == 0 {
+		m.hits.Add(1)
+		return nil, true
+	}
+	ix := indexClosers(m.closersOf(drive, openers))
+	var open []Record
+	for _, o := range openers {
+		if by, ok := m.resolvedBy[o.Seq]; ok && by > o.Seq {
+			continue
+		}
+		if !ix.closed(o) {
+			open = append(open, o)
+		}
+	}
+	open, err := s.heardAsks(ctx, s.db, drive, open)
+	if err != nil {
+		m.failures.Add(1)
+		return nil, false
+	}
+	out := make([]int64, len(open))
+	for i, o := range open {
+		out[i] = o.Seq
+	}
+	m.hits.Add(1)
+	return out, true
+}
+
+func (m *ReadModel) closersOf(drive string, openers []Record) []Record {
+	key := drive + "\x00"
+	seen := map[int32]bool{}
+	var out []Record
+	add := func(lookup string) {
+		for _, index := range m.closers[lookup] {
+			if !seen[index] {
+				seen[index] = true
+				out = append(out, m.rows[index].closure())
+			}
+		}
+	}
+	for _, o := range openers {
+		add(key + "re\x00" + strconv.FormatInt(o.Seq, 10))
+		if o.Topic != "" {
+			add(key + "topic\x00" + o.Topic)
+		}
+		for _, ref := range slices.Concat(o.Refs.Stacks, o.Refs.Targets) {
+			add(key + "ref\x00" + ref)
+		}
+	}
+	return out
+}
+
+// otherNumbered is the record of another origin that #n also names in its
+// drive, nil when none does; false when only the store can say which is first.
+func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelRow, bool) {
+	if err := m.catchUp(ctx); err != nil {
+		m.failures.Add(1)
+		return nil, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stale.Load() {
+		return nil, false
+	}
+	own := m.rowOf(n)
+	if own == nil {
+		return nil, true
+	}
+	if own.from != m.source.Self() {
+		return nil, false
+	}
+	var other *modelRow
+	for _, index := range m.foreign[n] {
+		row := &m.rows[index]
+		if row.drive != own.drive || row.from == own.from {
+			continue
+		}
+		if other != nil {
+			return nil, false
+		}
+		other = row
+	}
+	return other, true
+}
+
+// namesOf is names answered from memory, false when a target is past what the
+// model holds.
+func (m *ReadModel) namesOf(s *Store, seqs []int64) (map[string]bool, map[int64]string, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stale.Load() || m.owners == nil {
+		return nil, nil, false
+	}
+	owners := maps.Clone(m.owners)
+	owners[s.Self()] = s.owner
+	out := make(map[int64]string, len(seqs))
+	for _, seq := range seqs {
+		if seq == 0 {
+			continue
+		}
+		if seq > m.head {
+			return nil, nil, false
+		}
+		if row := m.rowOf(seq); row != nil {
+			out[seq] = s.name(owners, Record{Seq: row.seq, Origin: s.local(row.from), OriginSeq: row.originSeq})
+		}
+	}
+	return owners, out, true
 }
