@@ -1,6 +1,7 @@
 package inbox
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -20,9 +21,10 @@ import (
 )
 
 const (
-	pageRows     = 500
-	DigestWindow = 24 * time.Hour
-	FreshCursor  = time.Hour
+	pageRows        = 500
+	tailStreamBytes = 64 << 10
+	DigestWindow    = 24 * time.Hour
+	FreshCursor     = time.Hour
 )
 
 type TailOptions struct {
@@ -86,6 +88,9 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	}
 	f.Descending = newest || opts.Limit > 0
 	v := view{JSON: opts.JSON, Width: opts.Width, Fold: opts.Fold, Compact: opts.Compact, Reader: opts.Reader}
+	if opts.Cursor == "" && opts.JSON && opts.Limit == 0 && !opts.Open && len(opts.Older) == 0 {
+		return tailJSON(ctx, st, opts, f, v, w)
+	}
 	records, rendered, folded, paged, err := tailPages(ctx, st, f, v, opts.Budget, opts.Limit > 0)
 	if err != nil {
 		return TailResult{}, err
@@ -300,6 +305,57 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		return TailResult{}, err
 	}
 	res.Ack = nil
+	return res, nil
+}
+
+func tailJSON(ctx context.Context, st *store.Store, opts TailOptions, f store.Filter, v view, w io.Writer) (TailResult, error) {
+	read, err := st.BoundSince(ctx, f)
+	if err != nil {
+		return TailResult{}, err
+	}
+	out := bufio.NewWriterSize(w, tailStreamBytes)
+	b := render.NewBudget(out, opts.Budget)
+	res := TailResult{Last: f.After}
+	var last store.Record
+	for fits := true; fits; {
+		page, err := st.Query(ctx, read)
+		if err != nil {
+			return TailResult{}, err
+		}
+		rendered, _, err := lines(ctx, st, page, v)
+		if err != nil {
+			return TailResult{}, err
+		}
+		for i, r := range page {
+			if fits = b.Line(rendered[i]); !fits {
+				break
+			}
+			res.Printed++
+			res.Last, last = r.Seq, r
+		}
+		if err := out.Flush(); err != nil {
+			return TailResult{}, fmt.Errorf("write tail: %w", err)
+		}
+		if len(page) < read.Limit {
+			break
+		}
+		read.After = page[len(page)-1].Seq
+	}
+	rest := f
+	rest.Limit, rest.After = 0, res.Last
+	if res.More, err = st.Count(ctx, rest); err != nil {
+		return TailResult{}, err
+	}
+	if res.More == 0 {
+		return res, nil
+	}
+	resume := fmt.Sprintf("--since %d", res.Last)
+	if res.Last < 1 {
+		resume = "--since " + last.Name()
+	}
+	if _, err := fmt.Fprintf(opts.Notes, "... %d more; resume with %s\n", res.More, resume); err != nil {
+		return TailResult{}, fmt.Errorf("write tail: %w", err)
+	}
 	return res, nil
 }
 
