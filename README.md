@@ -436,8 +436,6 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. `--lane <lane>` binds the thread to that lane over any lane its posts gave it, so its hooks deliver and block for that lane alone. |
 | `cci me` | Print this session's registry line, ending with the `uds:` address `SendMessage` accepts. |
 | `cci node` | Print this machine's node id, key fingerprint, and Secure Enclave endorsement; `--json` adds the public key. `cci node endorse` signs the node key with the authkit Secure Enclave key, one Touch ID tap. |
-| `cci mesh enable` | Write the synckit manifest for service `cci`, register it with `synckitd`, and ensure the daemon, which then runs the mesh helper. The manifest keeps the watch debounce of the registration `synckitd` already holds, or 5s on a first registration. Each Mac in the synckit mesh runs it once, and again after an upgrade that changes the schema fingerprint. |
-| `cci mesh status` | Print this node, its latest record, and per synckit host the enrolled node, the acked record, the delivery state, and the last error; `--json` emits the report. |
 | `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Subagents and teammates list as their own peers, and sessions replicated from other nodes list too, live while seen in the last 15 minutes and addressed as `peer:<node>/<session>`. Narrow with `--session <id or prefix>`, `--agent <id or name>`, `--origin <node prefix>`, where `-` selects this machine, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
 | `cci pair` | Join an owner's mesh as a read-only node. Prints a one-time code and this node's fingerprint, then waits up to `--wait` (default 10 minutes) for an owner to accept. `--url` names the relay, `--mesh` the mesh (default `default`). On acceptance it pins the owners from the accepting owner's signed roster and prints that owner's fingerprint to compare with `cci node` there. |
 | `cci pair accept CODE` | Owner side. Shows the joining node's fingerprint, then asks for Touch ID through `synckitd consent request`, which prompts here or on another attended owner host. The sheet shows the code and the full fingerprint. `--tier service --allow '<drives>\|<kinds>' --label <name>` admits a scoped writer instead of a reader. |
@@ -765,37 +763,6 @@ The daemon also pushes this node's records to every joined relay mesh and
 pulls the mesh's records into the store. A failed push or pull retries with
 backoff that doubles up to a minute, so a node that joined a relay needs no
 `cci relay push` or `cci relay pull` loop of its own.
-
-### Mesh
-
-After `cci mesh enable`, the daemon spawns `cci mesh helper`, the resident
-synckit consumer `cci`, and stops itself if the helper exits. `synckitd` sends
-each mesh host a delta of the records after the one it acknowledged. A host that
-is new, missed compacted records, or is too far behind gets a snapshot of the
-newest records that fit in 7 MiB instead. Every change carries
-this node's sessions and claims, so a session change alone also reaches every
-host, and is signed with the node key. A receiver
-applies a change only when its signer is pinned at tier `owner` for the host that
-delivered it, and fences it against the last change it applied from that node.
-`synckitd host add <user@node>` pins both hosts' node keys once each has run
-`cci node endorse`; `synckitd host
-enroll <user@node>` pins a host that joined the mesh before `cci mesh enable`.
-Two hosts replicate only when their schema fingerprints match. The fingerprint
-covers the store migrations and the change wire format, and `cci mesh enable`
-registers it, so each Mac re-runs `cci mesh enable` after an upgrade that
-changes it.
-
-A re-run keeps the watch debounce `synckitd` has registered for `cci`, so a
-debounce tuned in `~/.config/synckit/manifests/cci.json` survives it. A first
-registration gets 5s. A registered manifest that fails to load stops the
-command instead of being replaced.
-
-`synckitd` checks the `records` item for changes when `inbox.db` or
-`inbox.db-wal` in the cci home changes. It watches the home without its
-subdirectories, so writes to blobs, subscriptions, relay state, and the mesh
-helper's own bookkeeping never wake the item. That narrowing needs synckitd
-0.42.0 or newer. An older synckitd ignores it and keeps watching the whole home
-recursively.
 
 ## Plugin hooks
 
