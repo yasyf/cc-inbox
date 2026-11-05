@@ -149,6 +149,12 @@ func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) 
 			}
 		}
 		out[i].Aliases = f.Aliases
+		if m := s.reads.model.Load(); m != nil {
+			if seq, ok := m.first(ctx, s, f, now); ok {
+				out[i].Seq = seq
+				continue
+			}
+		}
 		rootAudience := rootInstalled && f.rootAudienceScope()
 		if rootAudience {
 			arms, candidates := f.candidateArmsAudience(s.Self(), true)

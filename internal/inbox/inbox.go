@@ -546,8 +546,17 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		return err
 	}
 	f.Contains = requiredWords(pattern.String())
+	var rest *store.Filter
 	if !st.Covers(f) {
-		f.Trigrams = st.TrigramsNarrow(ctx, f.Contains, everyWord(pattern.String()))
+		narrowed := f
+		narrowed.Trigrams = st.TrigramsNarrow(ctx, f.Contains, everyWord(pattern.String()))
+		if held := st.HeldFrom(); held > 1 && held > f.After+1 && (f.Before == 0 || f.Before > held) {
+			narrowed.Before = held
+			rest = &narrowed
+			f.After = held - 1
+		} else {
+			f = narrowed
+		}
 	}
 	now := st.Now()
 	for {
@@ -579,8 +588,15 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		if len(hits) > 0 {
 			selected = append(selected, hits)
 		}
-		if more || len(records) < pageRows {
+		if more {
 			break
+		}
+		if len(records) < pageRows {
+			if rest == nil {
+				break
+			}
+			f, rest = *rest, nil
+			continue
 		}
 		f.Before = records[len(records)-1].Seq
 	}
