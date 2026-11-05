@@ -19,7 +19,9 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -45,6 +47,7 @@ type tailFlags struct {
 	all    bool
 	oldest bool
 	mail   bool
+	open   bool
 	seqs   []string
 
 	lanePrefixes []string
@@ -66,6 +69,7 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	cmd.Flags().StringVar(&f.seed, "seed", "", "start --cursor no earlier than where this cursor stands, so it never replays what this one read, and a --cursor that does not exist yet at the newest record when this one does not exist either, instead of an hour back")
 	cmd.Flags().BoolVar(&f.oldest, "oldest", false, "when the budget cuts a text --since window, keep its oldest records instead of its newest, as --json reads always do")
 	cmd.Flags().BoolVar(&f.mail, "mail", false, "when this thread is bound as --to, read its lane mail through the cursor the PostToolUse hook advances, so a record reaches the window once")
+	cmd.Flags().BoolVar(&f.open, "open", false, "print every open ask, blocker and question-ending decide that names --to, or the lane this thread is bound as, first, newest first at any age; reads no cursor")
 	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")
 	_ = cmd.Flags().MarkHidden("seqs")
 	cmd.Flags().StringSliceVar(&f.lanePrefixes, "lane-prefix", nil, "only lanes whose name starts with this (repeatable); reads no cursor")
@@ -79,6 +83,9 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 func (f *tailFlags) run(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
 	if cmd.Flags().Changed("seqs") {
 		return f.runSelected(ctx, cmd, st)
+	}
+	if f.open {
+		return f.runOpen(ctx, cmd, st, peer)
 	}
 	if len(f.lanePrefixes) > 0 {
 		return f.runLanePrefix(ctx, cmd, st, peer)
@@ -134,6 +141,54 @@ func (f *tailFlags) runMail(ctx context.Context, cmd *cobra.Command, st *store.S
 	}
 	_, err = inbox.Tail(ctx, st, inbox.TailOptions{Filter: mail, Cursor: store.LaneCursor(peer), Seed: f.seed, Budget: f.rf.budget, Compact: true, Reader: b.Lane, Open: true, Notes: tailNotes(ctx, cmd, false)}, cmd.OutOrStdout())
 	return true, err
+}
+
+func (f *tailFlags) runOpen(ctx context.Context, cmd *cobra.Command, st *store.Store, peer store.PeerKey) error {
+	var unsupported []string
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		switch flag.Name {
+		case "open", "to", "kind", "drive", "budget", "width":
+		default:
+			unsupported = append(unsupported, "--"+flag.Name)
+		}
+	})
+	if len(unsupported) > 0 {
+		return fmt.Errorf("--open does not support %s; it takes --to, --kind, --drive, --budget and --width", strings.Join(unsupported, ", "))
+	}
+	drive, err := resolveDrive(ctx, st, f.rf.drive)
+	if err != nil {
+		return err
+	}
+	lane := f.rf.to
+	if lane == "" {
+		b, bound, err := st.Binding(ctx, peer)
+		if err != nil {
+			return err
+		}
+		if !bound || b.Drive != drive || b.Lane == "" {
+			return fmt.Errorf("--open needs --to <lane>: this thread is bound as no lane of %s", drive)
+		}
+		lane = b.Lane
+	}
+	only, err := kinds.ParseAll(f.rf.kinds)
+	if err != nil {
+		return err
+	}
+	open, err := hook.Owed(ctx, st, drive, lane)
+	if err != nil {
+		return err
+	}
+	open = slices.DeleteFunc(open, func(r store.Record) bool { return len(only) > 0 && !slices.Contains(only, r.Kind) })
+	now := st.Now()
+	out := render.NewBudget(cmd.OutOrStdout(), f.rf.budget)
+	out.Line(fmt.Sprintf("open asks addressed to %s (%d, newest first):", lane, len(open)))
+	for i, r := range slices.Backward(open) {
+		if !out.Line(fmt.Sprintf("%s (open %dm)", render.Brief(r, now, f.rf.width), int(now.Sub(r.At).Minutes()))) {
+			out.Trailer(fmt.Sprintf("... %d older open asks; raise --budget", i+1))
+			break
+		}
+	}
+	return nil
 }
 
 func (f *tailFlags) runSelected(ctx context.Context, cmd *cobra.Command, st *store.Store) error {

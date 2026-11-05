@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci tail --open` prints every open ask, blocker and question-ending decide
+  the lane this thread is bound as owes, newest first at any age, in one call;
+  `--to <lane>` reads another lane's and `--kind ask` narrows it. A lane read
+  them before by filtering `cci digest` for its name. The hook's "open asks
+  changed" line now names it in place of `cci digest`, which lists the whole
+  drive.
 - `cci cursor show <name>` prints where a named reader cursor stands without
   moving it, so a lane can read a cursor before it decides to `cci cursor set`
   it. A cursor that was never set is refused rather than printed as `#0`.
