@@ -1,0 +1,30 @@
+name: Release tag
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  release:
+    uses: yasyf/cc-skills/.github/workflows/plugin-release-tag.yml@c94a8c8ee7ee44e41ebdd5a1ad37a4678b4822a8
+    with:
+      release-workflow: release.yml
+      ci-workflow: ci.yml
+      script-ref: c94a8c8ee7ee44e41ebdd5a1ad37a4678b4822a8
+      paths: |
+        client
+        cmd
+        github
+        internal
+        service
+        trunk
+        go.mod
+        go.sum
+        .goreleaser.yaml
+        :(exclude,glob)**/*_test.go
+        :(exclude,glob)**/testdata/**
