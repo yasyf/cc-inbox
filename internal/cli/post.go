@@ -351,8 +351,16 @@ func newPostCmd() *cobra.Command {
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space, or the whole text when no other is given; cci replaces no {at} and checks no withdrawal in them, and keeps checking the text's own words")
 	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
+		if name, ok := strings.CutPrefix(err.Error(), "unknown flag: --"); ok && slices.Contains(textFlagSlips, name) {
+			return fmt.Errorf("%w: a record has no %s of its own; its one line is the text, given as the one quoted argument or --text, and a longer body goes in a --path file", err, name)
+		}
+		return err
+	})
 	return cmd
 }
+
+var textFlagSlips = []string{"subject", "title", "message", "summary"}
 
 const batchFlag = "batch"
 

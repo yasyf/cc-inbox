@@ -2281,3 +2281,21 @@ func TestABoundWaitSkipsWhatTheLaneReadThroughItsOwnCursorWhateverItsWakeCursorS
 		t.Fatalf("the wait after a new record = %q, %v", out, err)
 	}
 }
+
+func TestCursorShowPrintsWhereACursorStandsWithoutMovingIt(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	if _, err := run(t, "cursor", "show", "api-wake", "--drive", "d"); err == nil || !strings.Contains(err.Error(), "has not been set") {
+		t.Fatalf("cursor show before any set = %v; want it unset", err)
+	}
+	if _, err := run(t, "cursor", "set", "api-wake", "7", "--drive", "d"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if out, err := run(t, "cursor", "show", "api-wake", "--drive", "d"); err != nil || out != "cursor api-wake in d = #7\n" {
+			t.Fatalf("cursor show = %q, %v; want #7 both times", out, err)
+		}
+	}
+	if _, err := run(t, "cursor", "show", "api-wake", "--drive", "other"); err == nil {
+		t.Fatal("cursor show on another drive found the cursor")
+	}
+}
