@@ -106,6 +106,17 @@ func TestALaneLaunchedWithoutTheServerIsNeverDown(t *testing.T) {
 	}
 }
 
+func TestAHandRunServerInAStrictLaneNeverReadsAsDown(t *testing.T) {
+	f := channelSession(t, false)
+	if err := f.st.BeatChannel(f.window); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(time.Hour)
+	if note := f.notice(); note != "" || len(f.blockers()) != 0 || len(f.reached) != 0 {
+		t.Fatalf("a strict lane with a stale beat: note %q, blockers %v, reconnects %v; want nothing", note, f.blockers(), f.reached)
+	}
+}
+
 func TestAServerThatNeverStartedIsDownOnlyAfterTheGrace(t *testing.T) {
 	f := channelSession(t, true)
 	f.clock.Advance(time.Minute)

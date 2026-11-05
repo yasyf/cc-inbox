@@ -32,8 +32,10 @@ const (
 // NoticeChannel checks that the session's channel server is running, once per
 // tool call on the root thread of a lane. A server gone stale, or one that
 // never started where the launch named it, opens one blocker from the lane and
-// starts a typed reconnect through Orca; a server back up closes the blocker. It
-// returns the line telling the session when the outage opens.
+// starts a typed reconnect through Orca; a server back up closes the blocker. A
+// session whose launch flags can never mount the server is never down, even
+// when a hand-run channel server stamped its window. It returns the line telling
+// the session when the outage opens.
 func NoticeChannel(ctx context.Context, st *store.Store, p Payload, wired func(pid int) bool, reconnect func(orcaDir, terminal string)) (string, error) {
 	if p.AgentID != "" {
 		return "", nil
@@ -65,7 +67,7 @@ func NoticeChannel(ctx context.Context, st *store.Store, p Payload, wired func(p
 		}
 		return "", closeOutage(ctx, st, b, window, outage)
 	}
-	if !seen && (now.Sub(time.UnixMilli(window.Started)) < channelGrace || !wired(window.PID)) {
+	if !wired(window.PID) || (!seen && now.Sub(time.UnixMilli(window.Started)) < channelGrace) {
 		return "", nil
 	}
 	note := ""
