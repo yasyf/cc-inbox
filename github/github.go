@@ -95,8 +95,10 @@ type checkRunEvent struct {
 		ID           int64     `json:"id"`
 		Name         string    `json:"name"`
 		HeadSHA      string    `json:"head_sha"`
+		Status       string    `json:"status"`
 		Conclusion   string    `json:"conclusion"`
 		DetailsURL   string    `json:"details_url"`
+		StartedAt    time.Time `json:"started_at"`
 		CompletedAt  time.Time `json:"completed_at"`
 		PullRequests []struct {
 			Number int `json:"number"`
@@ -192,25 +194,27 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		if err := json.Unmarshal(body, &e); err != nil {
 			return r, false, err
 		}
-		if e.Action != "completed" {
+		c := e.CheckRun
+		switch e.Action {
+		case "completed":
+			r.At, r.Outcome = c.CompletedAt, c.Conclusion
+		case "created":
+			r.At, r.Outcome = c.StartedAt, c.Status
+		default:
 			return r, false, nil
 		}
-		c := e.CheckRun
 		for _, pr := range c.PullRequests {
 			r.PRs = append(r.PRs, ref(e.Repository, pr.Number))
 		}
-		r.At, r.URL, r.Outcome, r.Commit = c.CompletedAt, c.DetailsURL, c.Conclusion, c.HeadSHA
+		r.URL, r.Commit = c.DetailsURL, c.HeadSHA
 		r.Topic = "check"
 		r.Attrs = map[string]string{"check": c.Name, "id": fmt.Sprint(c.ID), "repo": e.Repository.FullName}
-		r.Text = fmt.Sprintf("%s %s %s %s", e.Repository.FullName, short(c.HeadSHA), c.Name, c.Conclusion)
+		r.Text = fmt.Sprintf("%s %s %s %s", e.Repository.FullName, short(c.HeadSHA), c.Name, r.Outcome)
 		return r, true, nil
 	case "status":
 		var e statusEvent
 		if err := json.Unmarshal(body, &e); err != nil {
 			return r, false, err
-		}
-		if e.State == "pending" {
-			return r, false, nil
 		}
 		r.At, r.URL, r.Outcome, r.Commit = e.UpdatedAt, e.TargetURL, e.State, e.SHA
 		r.Topic = "check"

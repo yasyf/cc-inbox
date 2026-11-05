@@ -97,6 +97,19 @@ func TestRecordShapes(t *testing.T) {
 			map[string]string{"author": "lane-bot", "base": "dev", "branch": "lane/fix", "draft": "false", "labels": "", "merge": "def456"},
 		},
 		{
+			"a rerun's new check run, still queued", "check_run",
+			`{"action":"created","check_run":{"id":7002,"name":"lint","head_sha":"abc1234567890","status":"queued","details_url":"https://ci/2","started_at":"2026-11-03T14:45:00Z","pull_requests":[{"number":45700}]},"repository":{"full_name":"acme/app"}}`,
+			"queued", "abc1234567890", "acme/app abc1234567 lint queued",
+			[]string{"acme/app#45700"},
+			map[string]string{"check": "lint", "id": "7002", "repo": "acme/app"},
+		},
+		{
+			"a commit status still pending", "status", strings.Replace(greenStatus, `"success"`, `"pending"`, 1), "pending", "abc1234567890",
+			"acme/app abc1234567 buildkite/ci pending",
+			nil,
+			map[string]string{"check": "buildkite/ci", "id": "9001", "repo": "acme/app"},
+		},
+		{
 			"a commit status, which names no pull request", "status", greenStatus, "success", "abc1234567890",
 			"acme/app abc1234567 buildkite/ci success", nil,
 			map[string]string{"check": "buildkite/ci", "id": "9001", "repo": "acme/app"},
@@ -144,8 +157,7 @@ func TestRecordShapes(t *testing.T) {
 func TestEventsNoReaderActsOnMakeNoRecord(t *testing.T) {
 	for _, tc := range []struct{ event, body string }{
 		{"ping", `{"zen":"Keep it logically awesome."}`},
-		{"status", strings.Replace(greenStatus, `"success"`, `"pending"`, 1)},
-		{"check_run", `{"action":"created","check_run":{"name":"lint"},"repository":{"full_name":"acme/app"}}`},
+		{"check_run", `{"action":"requested_action","check_run":{"name":"lint"},"repository":{"full_name":"acme/app"}}`},
 		{"pull_request", strings.Replace(synchronized, "synchronize", "assigned", 1)},
 		{"push", strings.Replace(squashed, "refs/heads/dev", "refs/heads/lane/fix", 1)},
 	} {
