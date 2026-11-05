@@ -374,7 +374,7 @@ func (s *Store) dropRefusedLanes(ctx context.Context) error {
 	if !found {
 		return nil
 	}
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM lane_holds WHERE "+refusedOnly, RefusedPostTopic); err != nil {
+	if _, err := s.rw.ExecContext(ctx, "DELETE FROM lane_holds WHERE "+refusedOnly, RefusedPostTopic); err != nil {
 		return fmt.Errorf("drop lanes only a refused post registered: %w", err)
 	}
 	return nil

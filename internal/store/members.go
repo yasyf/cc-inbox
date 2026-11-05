@@ -43,7 +43,7 @@ func (s *Store) PutMember(ctx context.Context, m Member) error {
 	if m.At.IsZero() {
 		m.At = s.Now().UTC()
 	}
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO members (node, public_key, tier, via, host, by, at) VALUES (?, ?, ?, ?, ?, ?, ?)
+	if _, err := s.rw.ExecContext(ctx, `INSERT INTO members (node, public_key, tier, via, host, by, at) VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (node) DO UPDATE SET public_key = excluded.public_key, tier = excluded.tier, via = excluded.via, host = excluded.host, by = excluded.by, at = excluded.at`,
 		m.Node, m.PublicKey, string(m.Tier), m.Via, m.Host, m.By, m.At.UnixMilli()); err != nil {
 		return fmt.Errorf("pin member %s: %w", m.Node, err)
@@ -82,7 +82,7 @@ func (s *Store) Members(ctx context.Context) ([]Member, error) {
 
 // DropMember unpins a node and forgets its watermark, sessions and claims.
 func (s *Store) DropMember(ctx context.Context, id string) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("drop member %s: %w", id, err)
 	}
@@ -176,7 +176,7 @@ func (s *Store) ApplyPresence(ctx context.Context, p Presence) error {
 	if p.Origin == "" || p.Origin == s.Self() {
 		return fmt.Errorf("apply presence: origin %q is not another node", p.Origin)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("apply presence of %s: %w", p.Origin, err)
 	}

@@ -128,7 +128,7 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		return report, fmt.Errorf("open index maintenance store: %w", err)
 	}
 	defer func() { _ = db.Close() }()
-	s := &Store{db: db, home: home, window: &hotWindowSlot{}}
+	s := &Store{db: db, rw: db, home: home, window: &hotWindowSlot{}}
 	var schema int
 	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
 		return report, fmt.Errorf("read index maintenance schema: %w", err)
@@ -250,7 +250,7 @@ func lockMaintenance(home string) (*os.File, error) {
 }
 
 func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, mutations, incidents bool) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin projection maintenance: %w", err)
 	}
@@ -297,7 +297,7 @@ func (s *Store) installProjections(ctx context.Context, memberships, closers, ro
 }
 
 func (s *Store) buildPhysicalIndex(ctx context.Context, index int) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin physical index %s: %w", physicalIndexes[index].name, err)
 	}

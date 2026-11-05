@@ -74,7 +74,7 @@ func (s *Store) InstallBoardProjection(ctx context.Context) error {
 	if err != nil || installed {
 		return err
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}

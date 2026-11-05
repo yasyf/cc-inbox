@@ -124,7 +124,7 @@ func (s *Store) openHotWindow(ctx context.Context) (*MemWindow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open hot window: %w", err)
 	}
-	w := &MemWindow{source: s, mem: &Store{db: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now, floors: &sinceFloors{}, window: &hotWindowSlot{}}}
+	w := &MemWindow{source: s, mem: &Store{db: db, rw: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now, floors: &sinceFloors{}, window: &hotWindowSlot{}}}
 	db.SetMaxOpenConns(hotWindowConns)
 	if w.pin, err = db.Conn(ctx); err != nil {
 		return nil, errors.Join(fmt.Errorf("pin the hot window: %w", err), db.Close())
@@ -178,7 +178,7 @@ func (w *MemWindow) copySchema(ctx context.Context) error {
 	}
 	for _, kind := range []string{"table", "index", "trigger"} {
 		for _, statement := range byType[kind] {
-			if _, err := w.mem.db.ExecContext(ctx, statement); err != nil {
+			if _, err := w.mem.rw.ExecContext(ctx, statement); err != nil {
 				return fmt.Errorf("copy %q to the hot window: %w", statement, err)
 			}
 		}
@@ -288,7 +288,7 @@ func (w *MemWindow) catchUpBatch(ctx context.Context) (bool, error) {
 	if err != nil || len(rows) == 0 {
 		return false, err
 	}
-	tx, err := w.mem.db.BeginTx(ctx, nil)
+	tx, err := w.mem.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin hot window batch: %w", err)
 	}
@@ -379,7 +379,7 @@ func (w *MemWindow) trim(ctx context.Context) error {
 }
 
 func (w *MemWindow) dropBelow(ctx context.Context, floor int64) error {
-	if _, err := w.mem.db.ExecContext(ctx, "DELETE FROM records WHERE seq < ? AND seq NOT IN (SELECT re FROM records WHERE seq >= ?)", floor, floor); err != nil {
+	if _, err := w.mem.rw.ExecContext(ctx, "DELETE FROM records WHERE seq < ? AND seq NOT IN (SELECT re FROM records WHERE seq >= ?)", floor, floor); err != nil {
 		return fmt.Errorf("trim the hot window: %w", err)
 	}
 	return w.moveFloor(ctx, floor)

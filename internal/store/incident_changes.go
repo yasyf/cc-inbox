@@ -84,7 +84,7 @@ func (s *Store) publishIncidentChanges(ctx context.Context, changes []incidentCh
 	if len(changes) == 0 {
 		return paths, nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}

@@ -227,7 +227,7 @@ func pointer(seq int64, p Pointer) *Pointer {
 // pending until it does. The caller has already verified each row's
 // provenance; Apply stores what it is given, keeping its time and source.
 func (s *Store) Apply(ctx context.Context, rows []Row, receipt *Receipt) (Applied, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
 	}
@@ -459,7 +459,7 @@ func (s *Store) Receipt(ctx context.Context, channel, origin string) (Receipt, b
 // Ack records that peer holds this node's rows through originSeq. A
 // watermark only rises.
 func (s *Store) Ack(ctx context.Context, peer string, originSeq int64) error {
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO watermarks (peer, origin_seq) VALUES (?, ?)
+	if _, err := s.rw.ExecContext(ctx, `INSERT INTO watermarks (peer, origin_seq) VALUES (?, ?)
 ON CONFLICT (peer) DO UPDATE SET origin_seq = MAX(origin_seq, excluded.origin_seq)`, peer, originSeq); err != nil {
 		return fmt.Errorf("ack %s: %w", peer, err)
 	}
@@ -490,7 +490,7 @@ func (s *Store) Watermarks(ctx context.Context) (map[string]int64, error) {
 // ForgetPeer drops what this node holds for a peer that left: its watermark,
 // so compaction no longer waits on it, and its replicated sessions and claims.
 func (s *Store) ForgetPeer(ctx context.Context, peer string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("forget %s: %w", peer, err)
 	}

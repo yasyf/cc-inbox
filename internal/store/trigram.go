@@ -31,7 +31,7 @@ var trigramObjects = []string{
 // records already stored, a batch at a time, with pause between batches. The
 // triggers cover every record stored after it starts.
 func (s *Store) IndexTrigrams(ctx context.Context, pause func(context.Context) error) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin trigram install: %w", err)
 	}
@@ -56,7 +56,7 @@ func (s *Store) IndexTrigrams(ctx context.Context, pause func(context.Context) e
 }
 
 func (s *Store) fillTrigrams(ctx context.Context) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return false, fmt.Errorf("begin trigram fill: %w", err)
 	}
