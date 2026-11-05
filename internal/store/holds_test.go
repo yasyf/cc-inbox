@@ -411,9 +411,9 @@ func TestAliasesFollowEveryHoldChange(t *testing.T) {
 			steps := []store.Record{
 				{Lane: "other", Kind: kinds.Note, Text: "changes no hold"},
 				{Lane: "desk-8", Kind: kinds.State, Text: "registers"},
-				{Lane: "root", Kind: kinds.StandDown, To: []string{"desk-7"}, Fields: store.Fields{Attrs: map[string]string{"successor": "desk-8"}}},
+				{Lane: "root", Kind: kinds.StandDown, Text: "hands over", To: []string{"desk-7"}, Fields: store.Fields{Attrs: map[string]string{"successor": "desk-8"}}},
 				{Lane: "desk-7", Kind: kinds.Report, Text: "came back"},
-				{Lane: "root", Kind: kinds.StandDown, To: []string{"desk-8"}},
+				{Lane: "root", Kind: kinds.StandDown, Text: "ends", To: []string{"desk-8"}},
 			}
 			for _, step := range steps {
 				for _, lane := range []string{"desk", "desk-7", "desk-8"} {
