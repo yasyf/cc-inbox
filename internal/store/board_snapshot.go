@@ -177,7 +177,7 @@ func (s *BoardSnapshot) unclosedAmong(ctx context.Context, drive string, openers
 			open = append(open, o)
 		}
 	}
-	return open, nil
+	return s.store.heardAsks(ctx, s.tx, drive, open)
 }
 
 func (s *BoardSnapshot) closersAmong(ctx context.Context, drive string, openers []Record) ([]Record, error) {

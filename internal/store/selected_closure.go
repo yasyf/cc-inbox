@@ -57,7 +57,7 @@ func (s *Store) unclosedAmong(ctx context.Context, drive string, openers []Recor
 			open = append(open, o)
 		}
 	}
-	return open, nil
+	return s.heardAsks(ctx, s.db, drive, open)
 }
 
 func (s *Store) closersAmong(ctx context.Context, drive string, openers []Record) ([]Record, error) {

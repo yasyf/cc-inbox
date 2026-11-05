@@ -337,3 +337,60 @@ func TestAReplicaKnowsTheHolderWhateverOrderTheRecordsArrived(t *testing.T) {
 		t.Fatalf("Aliases(desk-8) = %q; want desk and desk-7", aliases)
 	}
 }
+
+func TestAnAskReadsOpenOnlyWhileALaneCanHearItsAnswer(t *testing.T) {
+	g := newRegistry(t)
+	ctx := context.Background()
+	ask := func(lane string) int64 {
+		return g.post(store.Record{Lane: lane, Kind: kinds.Ask, To: []string{"root"}, Text: "which head?"})
+	}
+	g.up("probe-1")
+	orphaned := ask("probe-1")
+	g.standDown("probe-1", "")
+	g.up("relay-3")
+	handed := ask("relay-3")
+	g.standDown("relay-3", "relay-4")
+	g.up("pool-1")
+	g.up("pool-2")
+	pooled := ask("pool-1")
+	g.standDown("pool-1", "")
+	g.up("parked-1")
+	parked := ask("parked-1")
+	g.standDown("parked-1", "")
+	g.up("parked-1")
+	g.up("answered-1")
+	answered := ask("answered-1")
+	g.post(store.Record{Lane: "root", Kind: kinds.Answer, Re: answered, To: []string{"answered-1"}, Text: "dev head"})
+	g.up("shipped-1")
+	finished := ask("shipped-1")
+	g.post(store.Record{Lane: "shipped-1", Kind: kinds.Done, To: []string{"root"}, Text: "PR merged"})
+	g.up("resting-1")
+	resumed := ask("resting-1")
+	g.post(store.Record{Lane: "resting-1", Kind: kinds.Stopped, To: []string{"root"}, Text: "parked"})
+	g.up("resting-1")
+	want := []int64{handed, pooled, parked, resumed}
+
+	among, err := g.st.OpenAmong(ctx, "d", []int64{orphaned, handed, pooled, parked, answered, finished, resumed})
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest, _, _, err := g.st.OpenSince(ctx, "d", time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	toRoot, err := g.st.OpenTo(ctx, "d", "root", []kinds.Kind{kinds.Ask})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, got := range map[string][]store.Record{"OpenAmong": among, "OpenSince": digest, "OpenTo": toRoot} {
+		seqs := []int64{}
+		for _, r := range got {
+			if r.Kind == kinds.Ask {
+				seqs = append(seqs, r.Seq)
+			}
+		}
+		if !slices.Equal(seqs, want) {
+			t.Errorf("%s open asks = %v; want %v: the successor's, the stem holder's and the lanes seen again keep theirs, the orphan's, the done lane's and the answered one close", name, seqs, want)
+		}
+	}
+}
