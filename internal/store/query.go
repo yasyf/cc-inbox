@@ -36,6 +36,7 @@ type Filter struct {
 	Kinds          []kinds.Kind
 	Mute           []kinds.Kind
 	ToKinds        []kinds.Kind
+	TopicKinds     []kinds.Kind
 	FirstOnly      []kinds.Kind
 	RepeatWindow   time.Duration
 	Lanes          []string
@@ -96,8 +97,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		in := "(" + placeholders(len(names)) + ")"
 		broadcast := append([]string{"(recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all'))", "lane NOT IN " + in, "source NOT IN " + in}, selectors...)
 		addressed, kindParams := f.addressedKinds(addressedTo(in))
-		scoped = append(scoped, "("+addressed+" OR ("+strings.Join(broadcast, " AND ")+"))")
-		params = append(append(append(append(append(append(params, names...), names...), kindParams...), names...), hookSources(names)...), selected...)
+		held, heldParams := f.heldTopics(in, names)
+		scoped = append(scoped, "("+addressed+" OR ("+strings.Join(broadcast, " AND ")+")"+held+")")
+		params = append(append(append(append(append(append(append(params, names...), names...), kindParams...), names...), hookSources(names)...), selected...), heldParams...)
 	} else {
 		scoped = append(scoped, selectors...)
 		params = append(params, selected...)
@@ -326,6 +328,15 @@ func (f Filter) addressedKinds(clause string) (string, []any) {
 		return clause, nil
 	}
 	return "(" + clause + " AND kind IN (" + placeholders(len(f.ToKinds)) + "))", kindArgs(f.ToKinds)
+}
+
+func (f Filter) heldTopics(in string, names []any) (string, []any) {
+	if len(f.TopicKinds) == 0 {
+		return "", nil
+	}
+	clause := " OR (kind IN (" + placeholders(len(f.TopicKinds)) + ") AND topic != '' AND lane NOT IN " + in +
+		" AND EXISTS (SELECT 1 FROM records held WHERE held.drive = records.drive AND held.topic = records.topic AND EXISTS (SELECT 1 FROM json_each(held.recipients) WHERE value IN " + in + ")))"
+	return clause, slices.Concat(kindArgs(f.TopicKinds), names, names)
 }
 
 func kindArgs(ks []kinds.Kind) []any {

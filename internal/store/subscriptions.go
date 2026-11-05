@@ -23,17 +23,18 @@ type Window struct {
 }
 
 type Subscription struct {
-	Session string       `json:"session"`
-	Window  Window       `json:"window"`
-	Drive   string       `json:"drive"`
-	Follow  []Follow     `json:"follow,omitempty"`
-	Reader  string       `json:"reader"`
-	Kinds   []kinds.Kind `json:"kinds"`
-	Mute    []kinds.Kind `json:"mute,omitempty"`
-	ToKinds []kinds.Kind `json:"to_kinds,omitempty"`
-	Batch   []kinds.Kind `json:"batch,omitempty"`
-	Cursor  string       `json:"cursor"`
-	At      time.Time    `json:"at"`
+	Session    string       `json:"session"`
+	Window     Window       `json:"window"`
+	Drive      string       `json:"drive"`
+	Follow     []Follow     `json:"follow,omitempty"`
+	Reader     string       `json:"reader"`
+	Kinds      []kinds.Kind `json:"kinds"`
+	Mute       []kinds.Kind `json:"mute,omitempty"`
+	ToKinds    []kinds.Kind `json:"to_kinds,omitempty"`
+	TopicKinds []kinds.Kind `json:"topic_kinds,omitempty"`
+	Batch      []kinds.Kind `json:"batch,omitempty"`
+	Cursor     string       `json:"cursor"`
+	At         time.Time    `json:"at"`
 }
 
 // UrgentRepeat is how long an urgent record's lane and topic stay delivered:
@@ -48,7 +49,7 @@ func DefaultToKinds(reader string) []kinds.Kind {
 }
 
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.held(), ToKinds: s.ToKinds, RepeatWindow: UrgentRepeat}
+	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.held(), ToKinds: s.ToKinds, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
 }
 
 func (s Subscription) held() []kinds.Kind {
