@@ -125,6 +125,11 @@ func (s *Store) openersAmong(ctx context.Context, drive string, seqs []int64) ([
 }
 
 func (s *Store) unclosed(ctx context.Context, drive string, openers []Record) ([]Record, error) {
+	if m := s.window.model.Load(); m != nil {
+		if open, ok := m.unclosed(ctx, s, drive, openers); ok {
+			return open, nil
+		}
+	}
 	openers, err := s.withoutIncidentUpdates(ctx, drive, openers)
 	if err != nil {
 		return nil, err
@@ -178,7 +183,7 @@ func incidentTargets(r Record) []int64 {
 }
 
 func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) ([]Record, error) {
-	openers, err := s.closureRows(ctx, drive, kinds.Openers())
+	openers, err := s.servedClosureRows(ctx, drive, kinds.Openers())
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +202,7 @@ func (s *Store) open(ctx context.Context, drive string, keep func(Record) bool) 
 // opened since since, tracked and untracked holds apart, and how many tracked
 // ones are older, read from one pass over the drive's openers and closers.
 func (s *Store) OpenSince(ctx context.Context, drive string, since time.Time) (open, untracked []Record, older int, err error) {
-	openers, err := s.closureRows(ctx, drive, kinds.Openers())
+	openers, err := s.servedClosureRows(ctx, drive, kinds.Openers())
 	if err != nil {
 		return nil, nil, 0, err
 	}
@@ -232,6 +237,15 @@ const closureColumns = "seq, lane, kind, at, topic, re, resolves, COALESCE(also_
 
 // closureRows reads drive's records of ks in seq order, with only the columns
 // that open or close an item, for reads that touch every opener and closer.
+func (s *Store) servedClosureRows(ctx context.Context, drive string, ks []kinds.Kind) ([]Record, error) {
+	if m := s.window.model.Load(); m != nil {
+		if rows, ok := m.closureRows(ctx, drive, ks); ok {
+			return rows, nil
+		}
+	}
+	return s.closureRows(ctx, drive, ks)
+}
+
 func (s *Store) closureRows(ctx context.Context, drive string, ks []kinds.Kind) ([]Record, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT "+closureColumns+" FROM records WHERE drive = ? AND kind IN ("+placeholders(len(ks))+") ORDER BY seq", append([]any{drive}, kindArgs(ks)...)...)
 	if err != nil {

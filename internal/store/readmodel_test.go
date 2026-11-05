@@ -379,3 +379,38 @@ func TestReadModelReadsUnderATrigramNarrowingStayOnTheStore(t *testing.T) {
 		t.Errorf("answered = %t, err = %v; want the store", answered, err)
 	}
 }
+
+func TestReadModelOpenItemsMatchTheStore(t *testing.T) {
+	st, clock := testutil.Store(t)
+	readModelFixture(t, st)
+	since := clock.Now().Add(-time.Hour)
+	wantOpen, wantUntracked, wantOlder, err := st.OpenSince(t.Context(), "d", since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantItems, err := st.OpenItems(t.Context(), "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	st.ServeReadModel(model)
+	t.Cleanup(func() { st.ServeReadModel(nil) })
+	open, untracked, older, err := st.OpenSince(t.Context(), "d", since)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRecords(t, open, wantOpen)
+	sameRecords(t, untracked, wantUntracked)
+	if older != wantOlder {
+		t.Errorf("older = %d, want %d", older, wantOlder)
+	}
+	items, err := st.OpenItems(t.Context(), "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRecords(t, items, wantItems)
+}

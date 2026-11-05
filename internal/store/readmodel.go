@@ -25,11 +25,11 @@ const (
 	readModelFile = "model.on"
 	// ReadModelBytes caps what a read model holds: every record's selection
 	// columns, and the whole text of the newest records that fit.
-	ReadModelBytes     = 256 << 20
+	ReadModelBytes     = 150 << 20
 	readModelSpan      = 36 * time.Hour
 	readModelBatch     = 1000
 	readModelRowBytes  = 300
-	readModelTextBytes = 400
+	readModelTextBytes = 800
 	readModelTrimRows  = 1000
 	readModelTrimAge   = 10 * time.Minute
 	readModelMetaHeld  = 1 << 10
@@ -1280,6 +1280,20 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 			}
 		}
 	}
+	open, err := m.unclosedLocked(ctx, s, drive, openers)
+	if err != nil {
+		m.failures.Add(1)
+		return nil, false
+	}
+	out := make([]int64, len(open))
+	for i, o := range open {
+		out[i] = o.Seq
+	}
+	m.hits.Add(1)
+	return out, true
+}
+
+func (m *ReadModel) unclosedLocked(ctx context.Context, s *Store, drive string, openers []Record) ([]Record, error) {
 	openers = slices.DeleteFunc(openers, func(o Record) bool {
 		return o.Kind == kinds.Incident && slices.ContainsFunc(incidentTargets(o), func(seq int64) bool {
 			row := m.rowOf(seq)
@@ -1287,8 +1301,7 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 		})
 	})
 	if len(openers) == 0 {
-		m.hits.Add(1)
-		return nil, true
+		return nil, nil
 	}
 	ix := indexClosers(m.closersOf(drive, openers))
 	var open []Record
@@ -1300,14 +1313,52 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 			open = append(open, o)
 		}
 	}
-	open, err := s.heardAsks(ctx, s.db, drive, open)
+	return s.heardAsks(ctx, s.db, drive, open)
+}
+
+// unclosed is what stays open among openers of drive, false when only the store
+// can judge.
+func (m *ReadModel) unclosed(ctx context.Context, s *Store, drive string, openers []Record) ([]Record, bool) {
+	if err := m.catchUp(ctx); err != nil {
+		m.failures.Add(1)
+		return nil, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stale.Load() || len(m.wrong) > 0 {
+		m.misses.Add(1)
+		return nil, false
+	}
+	open, err := m.unclosedLocked(ctx, s, drive, openers)
 	if err != nil {
 		m.failures.Add(1)
 		return nil, false
 	}
-	out := make([]int64, len(open))
-	for i, o := range open {
-		out[i] = o.Seq
+	m.hits.Add(1)
+	return open, true
+}
+
+// closureRows is the store's closureRows for ks, false when only the store can
+// judge.
+func (m *ReadModel) closureRows(ctx context.Context, drive string, ks []kinds.Kind) ([]Record, bool) {
+	if err := m.catchUp(ctx); err != nil {
+		m.failures.Add(1)
+		return nil, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stale.Load() || len(m.wrong) > 0 {
+		m.misses.Add(1)
+		return nil, false
+	}
+	var indexes []int32
+	for _, k := range ks {
+		indexes = append(indexes, m.byKind[drive+"\x00"+string(k)]...)
+	}
+	slices.Sort(indexes)
+	out := make([]Record, len(indexes))
+	for i, index := range indexes {
+		out[i] = m.rows[index].closure()
 	}
 	m.hits.Add(1)
 	return out, true
