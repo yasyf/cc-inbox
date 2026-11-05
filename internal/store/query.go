@@ -45,6 +45,7 @@ type Filter struct {
 	broadcastSince int64
 	AliasFloor     bool
 	aliasSince     int64
+	aliasOrders    int64
 	For            string
 	Aliases        []string
 	Addressed      string
@@ -104,8 +105,9 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		names := f.addressees(f.Addressed)
 		if f.aliasSince > 0 && len(names) > 1 {
 			aliases := names[1:]
-			scoped = append(scoped, "("+addressedTo("(?)")+" OR (at >= ? AND "+addressedTo("("+placeholders(len(aliases))+")")+"))")
-			params = append(append(append(params, names[0], names[0], f.aliasSince), aliases...), aliases...)
+			fresh, freshParams := f.aliasFresh()
+			scoped = append(scoped, "("+addressedTo("(?)")+" OR ("+fresh+" AND "+addressedTo("("+placeholders(len(aliases))+")")+"))")
+			params = append(append(append(append(params, names[0], names[0]), freshParams...), aliases...), aliases...)
 		} else {
 			scoped = append(scoped, addressedTo("("+placeholders(len(names))+")"))
 			params = append(append(params, names...), names...)
@@ -332,7 +334,13 @@ func (f Filter) addressedRecipient(names []any) (string, []any) {
 		return "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(names)) + "))", names
 	}
 	aliases := names[1:]
-	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?) OR (at >= ? AND EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(aliases)) + "))))", append([]any{names[0], f.aliasSince}, aliases...)
+	fresh, freshParams := f.aliasFresh()
+	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?) OR (" + fresh + " AND EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(aliases)) + "))))", slices.Concat([]any{names[0]}, freshParams, aliases)
+}
+
+func (f Filter) aliasFresh() (string, []any) {
+	orders := kinds.Orders()
+	return "(at >= ? OR (at >= ? AND kind IN (" + placeholders(len(orders)) + ")))", append([]any{f.aliasSince, f.aliasOrders}, kindArgs(orders)...)
 }
 
 func addressedTo(in string) string {
@@ -426,20 +434,21 @@ func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 	if f.Aliases, err = s.Aliases(ctx, f.Drive, reader); err != nil || !f.AliasFloor || len(f.Aliases) == 0 {
 		return f, err
 	}
-	f.aliasSince, err = s.aliasMailSince(ctx, f.Drive, reader)
+	f.aliasSince, f.aliasOrders, err = s.aliasMailSince(ctx, f.Drive, reader)
 	return f, err
 }
 
-func (s *Store) aliasMailSince(ctx context.Context, drive, lane string) (int64, error) {
-	var since int64
-	err := s.db.QueryRowContext(ctx, `SELECT COALESCE((SELECT at FROM records WHERE drive = ?1 AND lane = (
+func (s *Store) aliasMailSince(ctx context.Context, drive, lane string) (lastPost, started int64, err error) {
+	err = s.db.QueryRowContext(ctx, `WITH predecessor(lane) AS (
 	SELECT other.lane FROM lane_holds own CROSS JOIN lane_holds other INDEXED BY lane_holds_stem ON other.drive = own.drive AND other.stem = own.stem
 	WHERE own.drive = ?1 AND own.lane = ?2 AND other.lane != ?2 ORDER BY other.held DESC LIMIT 1
-) AND kind != 'digest' ORDER BY at * 1000000 + seq DESC LIMIT 1), 0)`, drive, lane).Scan(&since)
+)
+SELECT COALESCE((SELECT at FROM records WHERE drive = ?1 AND lane = (SELECT lane FROM predecessor) AND kind != 'digest' ORDER BY at * 1000000 + seq DESC LIMIT 1), 0),
+	COALESCE((SELECT at FROM records WHERE drive = ?1 AND lane = (SELECT lane FROM predecessor) AND kind != 'digest' ORDER BY at * 1000000 + seq ASC LIMIT 1), 0)`, drive, lane).Scan(&lastPost, &started)
 	if err != nil {
-		return 0, fmt.Errorf("read the last post of %s's predecessor on %s: %w", lane, drive, err)
+		return 0, 0, fmt.Errorf("read the posts of %s's predecessor on %s: %w", lane, drive, err)
 	}
-	return since, nil
+	return lastPost, started, nil
 }
 
 func HookSource(reader string) string {

@@ -109,7 +109,7 @@ var specs = map[Kind]Spec{
 	Note:       {TTL: EphemeralTTL},
 	State:      {TTL: EphemeralTTL, Latest: true, Broadcast: true},
 	Matrix:     {TTL: EphemeralTTL, Broadcast: true},
-	Report:     {TTL: EphemeralTTL, Latest: true, Broadcast: true},
+	Report:     {TTL: EphemeralTTL, Latest: true},
 	Peer:       {TTL: EphemeralTTL},
 	Blocked:    {},
 	Unblock:    {NeedsRef: true},
@@ -245,6 +245,11 @@ func Latests() []Kind {
 	}
 	slices.Sort(out)
 	return out
+}
+
+// Orders lists the kinds that tell a lane to act or answer it.
+func Orders() []Kind {
+	return []Kind{Go, Decide, StandDown, Ask, Correction, Answer}
 }
 
 func Broadcasts() []Kind {
