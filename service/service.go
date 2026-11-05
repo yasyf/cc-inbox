@@ -44,6 +44,7 @@ type Record struct {
 	Outcome string
 	Commit  string
 	Attrs   map[string]string
+	Body    json.RawMessage
 }
 
 // Post seals records under one group key read and pushes them in one call, in
@@ -63,7 +64,7 @@ func (w Writer) Post(ctx context.Context, records ...Record) error {
 		rec := row{
 			Origin: w.Key.ID(), OriginSeq: now.UnixMicro() + int64(i), ID: r.ID, Drive: r.Drive, Lane: w.Lane, Kind: string(kind), At: r.At.UTC(),
 			Text: r.Text, Topic: r.Topic, To: r.To, Refs: refs{URL: r.URL, PRs: r.PRs},
-			Fields: fields{Attrs: r.Attrs, Outcome: r.Outcome, Commit: r.Commit}, Source: "service",
+			Fields: fields{Attrs: r.Attrs, Outcome: r.Outcome, Commit: r.Commit}, Source: "service", Body: r.Body,
 		}
 		pt, err := json.Marshal(rec)
 		if err != nil {
@@ -160,19 +161,20 @@ func (w Writer) call(ctx context.Context, method, path string, in, out any) erro
 }
 
 type row struct {
-	Origin    string    `json:"origin"`
-	OriginSeq int64     `json:"origin_seq"`
-	ID        string    `json:"id,omitempty"`
-	Drive     string    `json:"drive"`
-	Lane      string    `json:"lane"`
-	Kind      string    `json:"kind"`
-	At        time.Time `json:"at"`
-	Text      string    `json:"text"`
-	Topic     string    `json:"topic,omitempty"`
-	To        []string  `json:"to,omitempty"`
-	Refs      refs      `json:"refs"`
-	Fields    fields    `json:"fields"`
-	Source    string    `json:"source"`
+	Origin    string          `json:"origin"`
+	OriginSeq int64           `json:"origin_seq"`
+	ID        string          `json:"id,omitempty"`
+	Drive     string          `json:"drive"`
+	Lane      string          `json:"lane"`
+	Kind      string          `json:"kind"`
+	At        time.Time       `json:"at"`
+	Text      string          `json:"text"`
+	Topic     string          `json:"topic,omitempty"`
+	To        []string        `json:"to,omitempty"`
+	Refs      refs            `json:"refs"`
+	Fields    fields          `json:"fields"`
+	Source    string          `json:"source"`
+	Body      json.RawMessage `json:"body,omitempty"`
 }
 
 type refs struct {

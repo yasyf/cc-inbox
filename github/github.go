@@ -54,6 +54,7 @@ type pullRequestEvent struct {
 	} `json:"label"`
 	PullRequest struct {
 		HTMLURL   string    `json:"html_url"`
+		Body      string    `json:"body"`
 		Draft     bool      `json:"draft"`
 		Merged    bool      `json:"merged"`
 		MergeSHA  string    `json:"merge_commit_sha"`
@@ -129,7 +130,12 @@ type pushEvent struct {
 	} `json:"repository"`
 }
 
-var pullRequestActions = []string{"opened", "reopened", "synchronize", "closed", "edited", "ready_for_review", "converted_to_draft", "labeled", "unlabeled"}
+const bodyBytes = 30_000
+
+var (
+	pullRequestActions = []string{"opened", "reopened", "synchronize", "closed", "edited", "ready_for_review", "converted_to_draft", "labeled", "unlabeled"}
+	bodyActions        = []string{"opened", "reopened", "edited"}
+)
 
 // Record is the github record for delivery id of an event named by the
 // X-GitHub-Event header, false for an event or action no reader acts on.
@@ -170,6 +176,14 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		if e.Label != nil {
 			r.Attrs["label"] = e.Label.Name
 			r.Text += ": " + e.Label.Name
+		}
+		if slices.Contains(bodyActions, e.Action) {
+			body := e.PullRequest.Body
+			b, err := json.Marshal(map[string]string{"body": strings.ToValidUTF8(body[:min(len(body), bodyBytes)], "")})
+			if err != nil {
+				return r, false, err
+			}
+			r.Body = b
 		}
 		return r, true, nil
 	case "pull_request_review":
