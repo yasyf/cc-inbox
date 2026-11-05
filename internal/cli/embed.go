@@ -170,6 +170,7 @@ func newEmbedCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			captureEmbedded(cmd.Context(), st.HomeDir(), args[0], c)
 			out := json.NewEncoder(cmd.OutOrStdout())
 			if args[0] == "follow" {
 				peer := SelfPeer(cmd.Context()).String()
