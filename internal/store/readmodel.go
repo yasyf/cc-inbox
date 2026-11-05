@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +17,9 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
 )
@@ -28,13 +31,24 @@ const (
 	ReadModelBytes     = 150 << 20
 	readModelSpan      = 36 * time.Hour
 	readModelBatch     = 1000
-	readModelRowBytes  = 300
-	readModelTextBytes = 800
+	readModelRowBytes  = 170
+	readModelKeyBytes  = 64
+	readModelChunk     = 4 << 20
+	readModelMinChunk  = 64 << 10
 	readModelTrimRows  = 1000
 	readModelTrimAge   = 10 * time.Minute
 	readModelMetaHeld  = 1 << 10
+	readModelMetaSlots = 1 << 13
 	modelNoExpiry      = math.MinInt64
+	modelNoText        = -1
+	modelNone          = -1
 	readModelColumns   = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, ''), re_origin_seq, resolves_origin_seq"
+)
+
+const (
+	closerRe = iota + 1
+	closerTopic
+	closerRef
 )
 
 var (
@@ -72,7 +86,7 @@ type modelAddressees struct {
 	wrong bool
 }
 
-type modelRefs struct {
+type parsedRefs struct {
 	ints    []int64
 	texts   []string
 	stacks  []string
@@ -80,59 +94,89 @@ type modelRefs struct {
 	wrong   bool
 }
 
+type modelRefs struct {
+	ints, texts, stacks, targets []int32
+}
+
 type modelText struct {
 	id, text, refs, fields, body, also string
 	reOriginSeq, resolvesOriginSeq     sql.NullInt64
-	meta                               atomic.Pointer[modelMeta]
 }
 
 type modelMeta struct {
+	seq    int64
 	refs   Refs
 	fields Fields
 }
 
+// modelRow holds no pointers, so the collector never scans the rows.
 type modelRow struct {
 	seq, at, expires, re, resolves, originSeq int64
-	drive, lane, kind, topic, source, from    string
-	addressees                                *modelAddressees
-	refs                                      *modelRefs
-	also                                      []int64
-	text                                      *modelText
+	textAt                                    int64
+	drive, lane, kind, topic, source, from    int32
+	addressees, refs, also                    int32
+	wrong                                     bool
+}
+
+type modelView struct {
+	row                                    *modelRow
+	drive, lane, kind, topic, source, from string
+	addressees                             *modelAddressees
+}
+
+type modelChunk struct {
+	memory  []byte
+	used    int
+	lastSeq int64
+	maxAt   int64
+}
+
+type modelCloser struct {
+	row, next int32
 }
 
 // ReadModel answers record selections from memory: every record's selection
-// columns, indexed, and the whole text of the newest ones. A read it cannot
-// answer exactly goes to the store, so whatever it returns is what the store
-// would have.
+// columns, indexed, and the whole text of the newest ones, mapped outside the
+// heap. A read it cannot answer exactly goes to the store, so whatever it
+// returns is what the store would have.
 type ReadModel struct {
-	source   *Store
-	observer *ChangeVersion
-	limit    int64
+	source    *Store
+	observer  *ChangeVersion
+	limit     int64
+	chunkSize int
 
-	mu         sync.RWMutex
-	version    int64
-	head       int64
-	mutations  int64
-	rows       []modelRow
-	atHigh     []int64
-	byDrive    map[string][]int32
-	byLane     map[string][]int32
-	byKind     map[string][]int32
-	byAddress  map[string][]int32
-	byPR       map[string][]int32
-	closers    map[string][]int32
-	resolvedBy map[int64]int64
-	foreign    map[int64][]int32
-	owners     map[string]bool
-	wrong      []int32
-	judged     []int64
-	interned   map[string]string
-	addressees map[string]*modelAddressees
-	textFrom   int
-	coldAt     int64
-	bytes      int64
-	inserted   int
-	trimmed    time.Time
+	mu          sync.RWMutex
+	version     int64
+	head        int64
+	mutations   int64
+	rows        []modelRow
+	atHigh      []int64
+	byDrive     map[int32][]int32
+	byLane      map[uint64][]int32
+	byKind      map[uint64][]int32
+	byAddress   map[int32][]int32
+	byPR        map[uint64][]int32
+	closerHead  map[uint64]int32
+	closerLinks []modelCloser
+	resolvedBy  map[int64]int64
+	foreign     map[int64][]int32
+	owners      map[string]bool
+	wrong       []int32
+	ids         map[string]int32
+	strs        []string
+	addrIDs     map[string]int32
+	addrs       []*modelAddressees
+	refPool     []int32
+	alsoPool    []int64
+	chunks      []modelChunk
+	chunkBase   int64
+	scratch     []byte
+	textStarted bool
+	coldAt      int64
+	bytes       int64
+	inserted    int
+	trimmed     time.Time
+	metas       [readModelMetaSlots]atomic.Pointer[modelMeta]
 
 	stale    atomic.Bool
 	hotFloor atomic.Int64
@@ -175,8 +219,10 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 	}
 	m := &ReadModel{
 		source: s, observer: observer, limit: limit, mutations: tip.Mutations,
-		byDrive: map[string][]int32{}, byLane: map[string][]int32{}, byKind: map[string][]int32{}, byAddress: map[string][]int32{}, byPR: map[string][]int32{}, closers: map[string][]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
-		interned: map[string]string{}, addressees: map[string]*modelAddressees{},
+		chunkSize: int(max(readModelMinChunk, min(readModelChunk, limit/16))),
+		byDrive:   map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
+		closerHead: map[uint64]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
+		ids: map[string]int32{}, addrIDs: map[string]int32{},
 	}
 	for {
 		m.mu.Lock()
@@ -213,8 +259,15 @@ func (s *Store) ServedReadModel() *ReadModel {
 
 // Close frees the model; a read still on it fails and goes to the store.
 func (m *ReadModel) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.stale.Store(true)
-	return m.observer.Close()
+	var failed error
+	for _, chunk := range m.chunks {
+		failed = errors.Join(failed, syscall.Munmap(chunk.memory))
+	}
+	m.chunks = nil
+	return errors.Join(failed, m.observer.Close())
 }
 
 // Stale reports that a stored record changed under the model, which must be rebuilt.
@@ -244,6 +297,9 @@ func (m *ReadModel) CatchUp(ctx context.Context) error {
 func (m *ReadModel) catchUp(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if m.stale.Load() {
+		return errReadModelStale
+	}
 	version, err := m.observer.Read(ctx)
 	if err != nil {
 		return err
@@ -305,14 +361,24 @@ func (m *ReadModel) catchUpBatch(ctx context.Context) (bool, error) {
 	return copied == readModelBatch, nil
 }
 
-func (m *ReadModel) intern(s string) string {
-	if held, ok := m.interned[s]; ok {
-		return held
+func (m *ReadModel) intern(s string) int32 {
+	if id, ok := m.ids[s]; ok {
+		return id
 	}
 	s = strings.Clone(s)
-	m.interned[s] = s
-	m.bytes += int64(len(s)) + 32
-	return s
+	id := int32(len(m.strs)) //nolint:gosec // G115: fewer distinct strings than records, which never reach 2^31.
+	m.ids[s] = id
+	m.strs = append(m.strs, s)
+	m.bytes += int64(len(s)) + readModelKeyBytes
+	return id
+}
+
+func pairKey(a, b int32) uint64 {
+	return uint64(uint32(a))<<32 | uint64(uint32(b)) //nolint:gosec // G115: the bits are the key.
+}
+
+func closerKey(drive int32, axis int, value int64) uint64 {
+	return uint64(uint32(drive))<<40 | uint64(axis)<<38 | uint64(value)&(1<<38-1) //nolint:gosec // G115: the bits are the key.
 }
 
 func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
@@ -328,24 +394,41 @@ func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
 	if err := rows.Scan(&seq, &origin, &originSeq, &text.id, &drive, &lane, &kind, &at, &text.text, &topic, &recipient, &re, &resolves, &text.refs, &text.fields, &expires, &source, &text.body, &text.also, &text.reOriginSeq, &text.resolvesOriginSeq); err != nil {
 		return fmt.Errorf("scan a record for the read model: %w", err)
 	}
-	row := modelRow{expires: modelNoExpiry, seq: seq, at: at, re: re, resolves: resolves, originSeq: originSeq, drive: m.intern(drive), lane: m.intern(lane), kind: m.intern(kind), topic: m.intern(topic), source: m.intern(source), from: m.intern(origin)}
+	row := modelRow{
+		seq: seq, at: at, re: re, resolves: resolves, originSeq: originSeq, expires: modelNoExpiry, textAt: modelNoText, refs: modelNone, also: modelNone,
+		drive: m.intern(drive), lane: m.intern(lane), kind: m.intern(kind), topic: m.intern(topic), source: m.intern(source), from: m.intern(origin),
+	}
 	if expires.Valid {
 		row.expires = expires.Int64
 	}
-	row.addressees = m.parsedAddressees(recipient)
-	row.refs = parsedModelRefs(text.refs)
-	wrong := row.addressees.wrong || row.refs != nil && row.refs.wrong || !text.decodes()
+	row.addressees = m.internAddressees(recipient)
+	addressees := m.addrs[row.addressees]
+	refs := parsedModelRefs(text.refs)
+	_, undecodable := text.decode(0)
+	row.wrong = addressees.wrong || undecodable != nil
+	if refs != nil {
+		row.wrong = row.wrong || refs.wrong || !fitsRefPool(refs)
+		if !row.wrong {
+			row.refs = m.storeRefs(refs)
+		}
+	}
+	var also []int64
 	if text.also != "" {
-		wrong = json.Unmarshal([]byte(text.also), &row.also) != nil || wrong
-		row.also = slices.Clip(row.also)
-		m.bytes += int64(len(row.also)) * 8
+		if err := json.Unmarshal([]byte(text.also), &also); err != nil {
+			row.wrong = true
+		} else {
+			row.also = int32(len(m.alsoPool)) //nolint:gosec // G115: the pool never reaches 2^31 entries.
+			m.alsoPool = append(append(m.alsoPool, int64(len(also))), also...)
+			m.bytes += int64(len(also)+1) * 8
+		}
 	}
 	index := int32(len(m.rows)) //nolint:gosec // G115: a store never holds 2^31 records.
-	if at >= cold || len(m.rows) > m.textFrom {
-		row.text = &text
-		m.bytes += text.size()
+	if at >= cold || m.textStarted {
+		m.textStarted = true
+		if err := m.place(&row, &text); err != nil {
+			return err
+		}
 	} else {
-		m.textFrom = len(m.rows) + 1
 		m.coldAt = max(m.coldAt, at)
 		m.hotFloor.Store(seq + 1)
 		m.hotAt.Store(m.coldAt)
@@ -357,57 +440,68 @@ func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
 	}
 	m.atHigh = append(m.atHigh, at)
 	m.head = seq
-	key := row.drive + "\x00"
 	m.byDrive[row.drive] = append(m.byDrive[row.drive], index)
-	m.byLane[key+row.lane] = append(m.byLane[key+row.lane], index)
-	m.byKind[key+row.kind] = append(m.byKind[key+row.kind], index)
-	for _, address := range row.addressees.to {
-		m.byAddress[address] = appendRowOnce(m.byAddress[address], index)
+	m.byLane[pairKey(row.drive, row.lane)] = append(m.byLane[pairKey(row.drive, row.lane)], index)
+	m.byKind[pairKey(row.drive, row.kind)] = append(m.byKind[pairKey(row.drive, row.kind)], index)
+	for _, address := range addressees.to {
+		id := m.intern(address)
+		m.byAddress[id] = appendRowOnce(m.byAddress[id], index)
 	}
-	if row.refs != nil {
-		m.bytes += row.refs.size()
-		for _, number := range row.refs.numbers() {
-			m.byPR[key+number] = appendRowOnce(m.byPR[key+number], index)
+	if refs != nil && row.refs != modelNone {
+		for _, number := range refs.numbers() {
+			key := pairKey(row.drive, number)
+			if m.byPR[key] == nil {
+				m.bytes += readModelKeyBytes
+			}
+			m.byPR[key] = appendRowOnce(m.byPR[key], index)
 		}
 	}
-	if wrong {
+	if row.wrong {
 		m.wrong = append(m.wrong, index)
-		m.judged = append(m.judged, seq)
 	}
-	m.indexClosure(&row, index)
+	m.indexClosure(&row, kind, refs, also, index)
 	m.held.Store(m.bytes)
 	return nil
 }
 
-func (m *ReadModel) indexClosure(row *modelRow, index int32) {
+func (m *ReadModel) indexClosure(row *modelRow, kind string, refs *parsedRefs, also []int64, index int32) {
 	if row.resolves != 0 {
 		m.resolvedBy[row.resolves] = row.seq
+		m.bytes += readModelKeyBytes
 	}
-	for _, target := range row.also {
+	for _, target := range also {
 		m.resolvedBy[target] = row.seq
+		m.bytes += readModelKeyBytes
 	}
-	if row.from != m.source.Self() {
+	if m.strs[row.from] != m.source.Self() {
 		m.foreign[row.originSeq] = append(m.foreign[row.originSeq], index)
+		m.bytes += readModelKeyBytes
 	}
-	if !modelClosers[row.kind] {
+	if !modelClosers[kind] {
 		return
 	}
-	key := row.drive + "\x00"
 	if row.re != 0 {
-		add := key + "re\x00" + strconv.FormatInt(row.re, 10)
-		m.closers[add] = append(m.closers[add], index)
+		m.linkCloser(closerKey(row.drive, closerRe, row.re), index)
 	}
-	if row.topic != "" {
-		add := key + "topic\x00" + row.topic
-		m.closers[add] = append(m.closers[add], index)
+	if m.strs[row.topic] != "" {
+		m.linkCloser(closerKey(row.drive, closerTopic, int64(row.topic)), index)
 	}
-	if row.refs == nil {
+	if refs == nil || row.refs == modelNone {
 		return
 	}
-	for _, ref := range slices.Concat(row.refs.stacks, row.refs.targets) {
-		add := key + "ref\x00" + ref
-		m.closers[add] = appendRowOnce(m.closers[add], index)
+	for _, ref := range slices.Concat(refs.stacks, refs.targets) {
+		m.linkCloser(closerKey(row.drive, closerRef, int64(m.intern(ref))), index)
 	}
+}
+
+func (m *ReadModel) linkCloser(key uint64, index int32) {
+	next, held := m.closerHead[key]
+	if !held {
+		next = modelNone
+	}
+	m.closerHead[key] = int32(len(m.closerLinks)) //nolint:gosec // G115: the links never reach 2^31 entries.
+	m.closerLinks = append(m.closerLinks, modelCloser{row: index, next: next})
+	m.bytes += readModelKeyBytes
 }
 
 func appendRowOnce(rows []int32, index int32) []int32 {
@@ -417,23 +511,9 @@ func appendRowOnce(rows []int32, index int32) []int32 {
 	return append(rows, index)
 }
 
-func (r *modelRefs) size() int64 {
-	total := int64(96)
-	for _, values := range [...][]string{r.texts, r.stacks, r.targets} {
-		for _, value := range values {
-			total += int64(len(value)) + 16
-		}
-	}
-	return total + int64(len(r.ints))*8
-}
-
-func (t *modelText) size() int64 {
-	return int64(len(t.id)+len(t.text)+len(t.refs)+len(t.fields)+len(t.body)+len(t.also)) + readModelTextBytes
-}
-
-func (m *ReadModel) parsedAddressees(raw string) *modelAddressees {
-	if held, ok := m.addressees[raw]; ok {
-		return held
+func (m *ReadModel) internAddressees(raw string) int32 {
+	if id, ok := m.addrIDs[raw]; ok {
+		return id
 	}
 	parsed := &modelAddressees{raw: strings.Clone(raw)}
 	var values []any
@@ -446,30 +526,32 @@ func (m *ReadModel) parsedAddressees(raw string) *modelAddressees {
 			parsed.wrong = true
 			continue
 		}
-		address = m.intern(address)
+		address = m.strs[m.intern(address)]
 		parsed.to = append(parsed.to, address)
 		parsed.all = parsed.all || address == "all"
 	}
 	parsed.to = slices.Clip(parsed.to)
-	m.addressees[parsed.raw] = parsed
-	m.bytes += int64(len(raw)) + int64(len(parsed.to))*16 + 64
-	return parsed
+	id := int32(len(m.addrs)) //nolint:gosec // G115: fewer distinct recipient lists than records.
+	m.addrIDs[parsed.raw] = id
+	m.addrs = append(m.addrs, parsed)
+	m.bytes += int64(len(raw)) + int64(len(parsed.to))*16 + 2*readModelKeyBytes
+	return id
 }
 
-func parsedModelRefs(raw string) *modelRefs {
+func parsedModelRefs(raw string) *parsedRefs {
 	if raw == "{}" {
 		return nil
 	}
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &keys); err != nil || strings.Contains(strings.ToLower(raw), `\ud`) {
-		return &modelRefs{wrong: true}
+		return &parsedRefs{wrong: true}
 	}
 	for _, name := range [...]string{`"prs"`, `"stacks"`, `"targets"`} {
 		if strings.Count(raw, name) > 1 {
-			return &modelRefs{wrong: true}
+			return &parsedRefs{wrong: true}
 		}
 	}
-	refs := &modelRefs{}
+	refs := &parsedRefs{}
 	held := false
 	for key, value := range keys {
 		switch {
@@ -492,7 +574,7 @@ func parsedModelRefs(raw string) *modelRefs {
 	return refs
 }
 
-func (r *modelRefs) parsePRs(raw json.RawMessage) bool {
+func (r *parsedRefs) parsePRs(raw json.RawMessage) bool {
 	var values []json.RawMessage
 	if err := json.Unmarshal(raw, &values); err != nil {
 		return false
@@ -511,17 +593,143 @@ func (r *modelRefs) parsePRs(raw json.RawMessage) bool {
 	return true
 }
 
-func (r *modelRefs) numbers() []string {
-	out := make([]string, 0, len(r.ints)+len(r.texts))
+func fitsRefPool(r *parsedRefs) bool {
+	return !slices.ContainsFunc(r.ints, func(number int64) bool { return number < math.MinInt32 || number > math.MaxInt32 })
+}
+
+// numbers is every PR number the refs can be asked for, as canonical decimals
+// a filter's number renders to.
+func (r *parsedRefs) numbers() []int32 {
+	out := make([]int32, 0, len(r.ints)+len(r.texts))
 	for _, number := range r.ints {
-		out = append(out, strconv.FormatInt(number, 10))
+		out = append(out, int32(number)) //nolint:gosec // G115: fitsRefPool held these to 32 bits.
 	}
 	for _, text := range r.texts {
-		if at := strings.LastIndexByte(text, '#'); at >= 0 {
-			out = append(out, text[at+1:])
+		at := strings.LastIndexByte(text, '#')
+		if at < 0 {
+			continue
+		}
+		number, err := strconv.ParseInt(text[at+1:], 10, 32)
+		if err == nil && strconv.FormatInt(number, 10) == text[at+1:] {
+			out = append(out, int32(number))
 		}
 	}
 	return out
+}
+
+func (m *ReadModel) storeRefs(r *parsedRefs) int32 {
+	at := int32(len(m.refPool))                                                                                         //nolint:gosec // G115: the pool never reaches 2^31 entries.
+	m.refPool = append(m.refPool, int32(len(r.ints)), int32(len(r.texts)), int32(len(r.stacks)), int32(len(r.targets))) //nolint:gosec // G115: refs hold far fewer than 2^31 entries.
+	for _, number := range r.ints {
+		m.refPool = append(m.refPool, int32(number)) //nolint:gosec // G115: fitsRefPool held these to 32 bits.
+	}
+	for _, list := range [...][]string{r.texts, r.stacks, r.targets} {
+		for _, value := range list {
+			m.refPool = append(m.refPool, m.intern(value))
+		}
+	}
+	m.bytes += int64(4+len(r.ints)+len(r.texts)+len(r.stacks)+len(r.targets)) * 4
+	return at
+}
+
+func (m *ReadModel) refsOf(r *modelRow) (modelRefs, bool) {
+	if r.refs == modelNone {
+		return modelRefs{}, false
+	}
+	pool := m.refPool[r.refs:]
+	ints, texts, stacks, targets := pool[0], pool[1], pool[2], pool[3]
+	pool = pool[4:]
+	return modelRefs{
+		ints:    pool[:ints:ints],
+		texts:   pool[ints : ints+texts : ints+texts],
+		stacks:  pool[ints+texts : ints+texts+stacks : ints+texts+stacks],
+		targets: pool[ints+texts+stacks : ints+texts+stacks+targets : ints+texts+stacks+targets],
+	}, true
+}
+
+func (m *ReadModel) alsoOf(r *modelRow) []int64 {
+	if r.also == modelNone {
+		return nil
+	}
+	n := m.alsoPool[r.also]
+	return m.alsoPool[int64(r.also)+1 : int64(r.also)+1+n : int64(r.also)+1+n]
+}
+
+func (m *ReadModel) stringsOf(ids []int32) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = m.strs[id]
+	}
+	return out
+}
+
+func (m *ReadModel) view(r *modelRow) modelView {
+	return modelView{row: r, drive: m.strs[r.drive], lane: m.strs[r.lane], kind: m.strs[r.kind], topic: m.strs[r.topic], source: m.strs[r.source], from: m.strs[r.from], addressees: m.addrs[r.addressees]}
+}
+
+func (m *ReadModel) place(row *modelRow, text *modelText) error {
+	blob := m.scratch[:0]
+	for _, field := range [...]string{text.id, text.text, text.refs, text.fields, text.body, text.also} {
+		blob = append(binary.AppendUvarint(blob, uint64(len(field))), field...)
+	}
+	for _, number := range [...]sql.NullInt64{text.reOriginSeq, text.resolvesOriginSeq} {
+		if number.Valid {
+			blob = binary.AppendVarint(append(blob, 1), number.Int64)
+		} else {
+			blob = append(blob, 0)
+		}
+	}
+	m.scratch = blob
+	if len(blob) > m.chunkSize {
+		return nil
+	}
+	if len(m.chunks) == 0 || m.chunks[len(m.chunks)-1].used+len(blob) > m.chunkSize {
+		memory, err := syscall.Mmap(-1, 0, m.chunkSize, syscall.PROT_READ|syscall.PROT_WRITE, syscall.MAP_ANON|syscall.MAP_PRIVATE)
+		if err != nil {
+			return fmt.Errorf("map read model text: %w", err)
+		}
+		m.chunks = append(m.chunks, modelChunk{memory: memory})
+		m.bytes += int64(m.chunkSize)
+	}
+	chunk := &m.chunks[len(m.chunks)-1]
+	row.textAt = (m.chunkBase+int64(len(m.chunks)-1))<<32 | int64(chunk.used)
+	copy(chunk.memory[chunk.used:], blob)
+	chunk.used += len(blob)
+	chunk.lastSeq, chunk.maxAt = row.seq, max(chunk.maxAt, row.at)
+	return nil
+}
+
+func (m *ReadModel) textOf(r *modelRow) (modelText, bool) {
+	if r.textAt == modelNoText {
+		return modelText{}, false
+	}
+	which := r.textAt>>32 - m.chunkBase
+	if which < 0 {
+		return modelText{}, false
+	}
+	blob := m.chunks[which].memory[r.textAt&math.MaxUint32:]
+	field := func() string {
+		n, read := binary.Uvarint(blob)
+		value := unsafe.String(unsafe.SliceData(blob[read:]), n)
+		blob = blob[uint64(read)+n:]
+		return value
+	}
+	number := func() sql.NullInt64 {
+		held := blob[0] == 1
+		blob = blob[1:]
+		if !held {
+			return sql.NullInt64{}
+		}
+		value, read := binary.Varint(blob)
+		blob = blob[read:]
+		return sql.NullInt64{Int64: value, Valid: true}
+	}
+	text := modelText{id: field(), text: field(), refs: field(), fields: field(), body: field(), also: field()}
+	text.reOriginSeq, text.resolvesOriginSeq = number(), number()
+	return text, true
 }
 
 func (m *ReadModel) trim() error {
@@ -531,15 +739,16 @@ func (m *ReadModel) trim() error {
 	}
 	m.inserted, m.trimmed = 0, now
 	cold := now.Add(-readModelSpan).UnixMilli()
-	for m.textFrom < len(m.rows) && (m.rows[m.textFrom].at < cold || m.bytes > m.limit) {
-		row := &m.rows[m.textFrom]
-		if row.text != nil {
-			m.bytes -= row.text.size()
-			row.text = nil
+	for len(m.chunks) > 0 && (m.chunks[0].maxAt < cold && len(m.chunks) > 1 || m.bytes > m.limit) {
+		oldest := m.chunks[0]
+		if err := syscall.Munmap(oldest.memory); err != nil {
+			return fmt.Errorf("unmap read model text: %w", err)
 		}
-		m.coldAt = max(m.coldAt, row.at)
-		m.textFrom++
-		m.hotFloor.Store(row.seq + 1)
+		m.chunks = m.chunks[1:]
+		m.chunkBase++
+		m.bytes -= int64(m.chunkSize)
+		m.coldAt = max(m.coldAt, oldest.maxAt)
+		m.hotFloor.Store(max(m.hotFloor.Load(), oldest.lastSeq+1))
 	}
 	m.hotAt.Store(m.coldAt)
 	m.held.Store(m.bytes)
@@ -677,6 +886,8 @@ type modelSelection struct {
 	since, until                  int64
 	broadcastAfter, broadcastFrom int64
 	broadcastBound                bool
+	urgent                        int32
+	stack, target, repoPR         int32
 }
 
 func stringsOf(values []any) []string {
@@ -698,6 +909,13 @@ func kindSet(ks []kinds.Kind) map[string]bool {
 	return out
 }
 
+func (m *ReadModel) idOf(s string) int32 {
+	if id, ok := m.ids[s]; ok {
+		return id
+	}
+	return modelNone
+}
+
 func newModelSelection(m *ReadModel, s *Store, f Filter, now time.Time) *modelSelection {
 	sel := &modelSelection{m: m, f: f, now: now.UnixMilli(), kindSet: kindSet(f.Kinds), muteSet: kindSet(f.Mute), toKinds: kindSet(f.ToKinds), firstOnly: kindSet(f.FirstOnly), orders: kindSet(kinds.Orders())}
 	if f.For != "" {
@@ -711,6 +929,11 @@ func newModelSelection(m *ReadModel, s *Store, f Filter, now time.Time) *modelSe
 		sel.to = stringsOf(f.addressees(f.To))
 	}
 	sel.peers, sel.readers = stringsOf(f.peerAddresses(s.Self())), stringsOf(f.readerAddresses())
+	sel.urgent, sel.stack, sel.target = m.idOf(string(kinds.Urgent)), m.idOf(f.Stack), m.idOf(f.Target)
+	sel.repoPR = modelNone
+	if f.PR.Number != 0 && f.PR.Repo != "" {
+		sel.repoPR = m.idOf(f.PR.String())
+	}
 	for _, word := range f.Contains {
 		sel.wordsLower = append(sel.wordsLower, lowerASCII(word))
 		sel.wordsNumeric = append(sel.wordsNumeric, strings.Trim(word, "0123456789") == "")
@@ -729,32 +952,36 @@ func newModelSelection(m *ReadModel, s *Store, f Filter, now time.Time) *modelSe
 
 func (sel *modelSelection) candidates() [][]int32 {
 	m, f := sel.m, sel.f
-	key := f.Drive + "\x00"
+	drive := m.idOf(f.Drive)
+	byAddress := func(address string) []int32 { return m.byAddress[m.idOf(address)] }
 	var lists [][]int32
 	switch {
 	case f.To != "":
 		for _, address := range append(slices.Clone(sel.to), "all") {
-			lists = append(lists, m.byAddress[address])
+			lists = append(lists, byAddress(address))
 		}
 	case f.PR.Number != 0:
-		lists = append(lists, m.byPR[key+strconv.Itoa(f.PR.Number)])
+		if f.PR.Number >= math.MinInt32 && f.PR.Number <= math.MaxInt32 {
+			lists = append(lists, m.byPR[pairKey(drive, int32(f.PR.Number))]) //nolint:gosec // G115: the bounds just checked.
+		}
 	case f.For == "" && len(f.Lanes) > 0:
 		for _, lane := range f.Lanes {
-			lists = append(lists, m.byLane[key+lane])
+			lists = append(lists, m.byLane[pairKey(drive, m.idOf(lane))])
 		}
 	case f.For == "" && len(f.Kinds) > 0:
 		for _, k := range f.Kinds {
-			lists = append(lists, m.byKind[key+string(k)])
+			lists = append(lists, m.byKind[pairKey(drive, m.idOf(string(k)))])
 		}
 	default:
-		lists = append(lists, m.byDrive[f.Drive])
+		lists = append(lists, m.byDrive[drive])
 	}
 	for _, address := range slices.Concat(sel.peers, sel.readers) {
-		lists = append(lists, m.byAddress[address])
+		lists = append(lists, byAddress(address))
 	}
 	for _, follow := range f.Follow {
+		followed := m.idOf(follow.Drive)
 		for _, k := range follow.Kinds {
-			lists = append(lists, m.byKind[follow.Drive+"\x00"+string(k)])
+			lists = append(lists, m.byKind[pairKey(followed, m.idOf(string(k)))])
 		}
 	}
 	return append(lists, m.wrong)
@@ -833,32 +1060,35 @@ func rowAtOrAfter(list []int32, row int) int {
 
 func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 	f := sel.f
-	if r.addressees.wrong || r.refs != nil && r.refs.wrong {
+	if r.wrong {
 		return false, false
 	}
-	branch := sel.scoped(r) || sel.peerBranch(r) || sel.readerBranch(r) || sel.followBranch(r)
-	if !branch {
+	v := sel.m.view(r)
+	if !sel.scoped(&v) && !sel.peerBranch(&v) && !sel.readerBranch(&v) && !sel.followBranch(&v) {
 		return false, true
 	}
-	if f.Origin != "" && r.from != f.Origin {
+	if f.Origin != "" && v.from != f.Origin {
 		return false, true
 	}
-	if f.Stack != "" && (r.refs == nil || !slices.Contains(r.refs.stacks, f.Stack)) {
+	if f.Stack != "" || f.Target != "" || f.PR.Number != 0 {
+		refs, held := sel.m.refsOf(r)
+		if f.Stack != "" && (!held || !slices.Contains(refs.stacks, sel.stack)) {
+			return false, true
+		}
+		if f.Target != "" && (!held || !slices.Contains(refs.targets, sel.target)) {
+			return false, true
+		}
+		if f.PR.Number != 0 && (!held || !sel.namesPR(refs)) {
+			return false, true
+		}
+	}
+	if sel.muteSet[v.kind] {
 		return false, true
 	}
-	if f.Target != "" && (r.refs == nil || !slices.Contains(r.refs.targets, f.Target)) {
+	if sel.firstOnly[v.kind] && f.To != "" && (len(v.addressees.to) == 0 || !slices.Contains(sel.to, v.addressees.to[0])) {
 		return false, true
 	}
-	if f.PR.Number != 0 && !sel.namesPR(r) {
-		return false, true
-	}
-	if sel.muteSet[r.kind] {
-		return false, true
-	}
-	if sel.firstOnly[r.kind] && f.To != "" && (len(r.addressees.to) == 0 || !slices.Contains(sel.to, r.addressees.to[0])) {
-		return false, true
-	}
-	if f.RepeatWindow > 0 && r.kind == string(kinds.Urgent) && r.topic != "" && sel.repeats(r) {
+	if f.RepeatWindow > 0 && r.kind == sel.urgent && v.topic != "" && sel.repeats(r) {
 		return false, true
 	}
 	if f.After > 0 && r.seq <= f.After || f.Before > 0 && r.seq >= f.Before {
@@ -873,21 +1103,22 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 	if len(sel.wordsLower) == 0 {
 		return true, true
 	}
-	if r.text == nil {
+	text, held := sel.m.textOf(r)
+	if !held {
 		return false, false
 	}
-	return sel.holdsAWord(r), true
+	return sel.holdsAWord(&v, &text), true
 }
 
-func (sel *modelSelection) selectors(r *modelRow) bool {
+func (sel *modelSelection) selectors(v *modelView) bool {
 	f := sel.f
-	return (len(f.Kinds) == 0 || sel.kindSet[r.kind]) &&
-		(len(f.Lanes) == 0 || slices.Contains(f.Lanes, r.lane)) &&
-		(len(f.Topics) == 0 || slices.Contains(f.Topics, r.topic))
+	return (len(f.Kinds) == 0 || sel.kindSet[v.kind]) &&
+		(len(f.Lanes) == 0 || slices.Contains(f.Lanes, v.lane)) &&
+		(len(f.Topics) == 0 || slices.Contains(f.Topics, v.topic))
 }
 
-func (sel *modelSelection) addressedKinds(r *modelRow) bool {
-	return len(sel.f.ToKinds) == 0 || sel.toKinds[r.kind]
+func (sel *modelSelection) addressedKinds(v *modelView) bool {
+	return len(sel.f.ToKinds) == 0 || sel.toKinds[v.kind]
 }
 
 func anyOf(values, names []string) bool {
@@ -899,107 +1130,101 @@ func anyOf(values, names []string) bool {
 	return false
 }
 
-func (sel *modelSelection) addressedTo(r *modelRow, names []string) bool {
-	if anyOf(r.addressees.to, names) {
+func (sel *modelSelection) addressedTo(v *modelView, names []string) bool {
+	if anyOf(v.addressees.to, names) {
 		return true
 	}
-	if r.re == 0 {
+	if v.row.re == 0 {
 		return false
 	}
-	at, found := slices.BinarySearchFunc(sel.m.rows, r.re, func(row modelRow, seq int64) int { return cmp.Compare(row.seq, seq) })
-	return found && slices.Contains(names, sel.m.rows[at].lane) && r.lane != sel.m.rows[at].lane
+	own := sel.m.rowOf(v.row.re)
+	return own != nil && slices.Contains(names, sel.m.strs[own.lane]) && v.row.lane != own.lane
 }
 
-func (sel *modelSelection) fresh(r *modelRow) bool {
-	return r.at >= sel.f.aliasSince || r.at >= sel.f.aliasOrders && sel.orders[r.kind]
+func (sel *modelSelection) fresh(v *modelView) bool {
+	return v.row.at >= sel.f.aliasSince || v.row.at >= sel.f.aliasOrders && sel.orders[v.kind]
 }
 
-func (sel *modelSelection) scoped(r *modelRow) bool {
+func (sel *modelSelection) scoped(v *modelView) bool {
 	f := sel.f
-	if r.drive != f.Drive {
+	if v.drive != f.Drive {
 		return false
 	}
 	if f.For != "" {
-		addressed := sel.addressedTo(r, sel.forNames) && sel.addressedKinds(r)
-		broadcast := (r.addressees.raw == "[]" || r.addressees.all) &&
-			!slices.Contains(sel.forNames, r.lane) && !slices.Contains(sel.forHooks, r.source) && sel.selectors(r)
+		addressed := sel.addressedTo(v, sel.forNames) && sel.addressedKinds(v)
+		broadcast := (v.addressees.raw == "[]" || v.addressees.all) &&
+			!slices.Contains(sel.forNames, v.lane) && !slices.Contains(sel.forHooks, v.source) && sel.selectors(v)
 		if !addressed && !broadcast {
 			return false
 		}
-	} else if !sel.selectors(r) {
+	} else if !sel.selectors(v) {
 		return false
 	}
 	if f.Addressed != "" {
 		if f.aliasSince > 0 && len(sel.addressed) > 1 {
-			if !sel.addressedTo(r, sel.addressed[:1]) && (!sel.fresh(r) || !sel.addressedTo(r, sel.addressed[1:])) {
+			if !sel.addressedTo(v, sel.addressed[:1]) && (!sel.fresh(v) || !sel.addressedTo(v, sel.addressed[1:])) {
 				return false
 			}
-		} else if !sel.addressedTo(r, sel.addressed) {
+		} else if !sel.addressedTo(v, sel.addressed) {
 			return false
 		}
 	}
-	if f.To != "" && !sel.toMatches(r) {
-		return false
-	}
-	return true
+	return f.To == "" || sel.toMatches(v)
 }
 
-func (sel *modelSelection) toMatches(r *modelRow) bool {
+func (sel *modelSelection) toMatches(v *modelView) bool {
 	f := sel.f
 	var recipient bool
 	if f.aliasSince == 0 || len(sel.to) < 2 {
-		recipient = anyOf(r.addressees.to, sel.to)
+		recipient = anyOf(v.addressees.to, sel.to)
 	} else {
-		recipient = anyOf(r.addressees.to, sel.to[:1]) || sel.fresh(r) && anyOf(r.addressees.to, sel.to[1:])
+		recipient = anyOf(v.addressees.to, sel.to[:1]) || sel.fresh(v) && anyOf(v.addressees.to, sel.to[1:])
 	}
-	all := r.addressees.all && !slices.Contains(sel.to, r.lane)
+	all := v.addressees.all && !slices.Contains(sel.to, v.lane)
 	if all && sel.broadcastBound {
-		all = r.seq > sel.broadcastAfter && r.at >= sel.broadcastFrom
+		all = v.row.seq > sel.broadcastAfter && v.row.at >= sel.broadcastFrom
 	}
-	return (recipient || all) && sel.addressedKinds(r)
+	return (recipient || all) && sel.addressedKinds(v)
 }
 
-func (sel *modelSelection) peerBranch(r *modelRow) bool {
-	return len(sel.peers) > 0 && anyOf(r.addressees.to, sel.peers) && (sel.f.PeerAfter <= 0 || r.seq > sel.f.PeerAfter) && sel.addressedKinds(r)
+func (sel *modelSelection) peerBranch(v *modelView) bool {
+	return len(sel.peers) > 0 && anyOf(v.addressees.to, sel.peers) && (sel.f.PeerAfter <= 0 || v.row.seq > sel.f.PeerAfter) && sel.addressedKinds(v)
 }
 
-func (sel *modelSelection) readerBranch(r *modelRow) bool {
-	if len(sel.readers) == 0 || !anyOf(r.addressees.to, sel.readers) {
+func (sel *modelSelection) readerBranch(v *modelView) bool {
+	if len(sel.readers) == 0 || !anyOf(v.addressees.to, sel.readers) {
 		return false
 	}
-	if sel.f.For == "" && sel.f.LaneAliases && !sel.selectors(r) {
+	if sel.f.For == "" && sel.f.LaneAliases && !sel.selectors(v) {
 		return false
 	}
-	return sel.addressedKinds(r)
+	return sel.addressedKinds(v)
 }
 
-func (sel *modelSelection) followBranch(r *modelRow) bool {
+func (sel *modelSelection) followBranch(v *modelView) bool {
 	for _, follow := range sel.f.Follow {
-		if r.drive == follow.Drive && (r.addressees.raw == "[]" || r.addressees.all) && slices.Contains(follow.Kinds, kinds.Kind(r.kind)) {
+		if v.drive == follow.Drive && (v.addressees.raw == "[]" || v.addressees.all) && slices.Contains(follow.Kinds, kinds.Kind(v.kind)) {
 			return true
 		}
 	}
 	return false
 }
 
-func (sel *modelSelection) namesPR(r *modelRow) bool {
-	if r.refs == nil {
-		return false
-	}
+func (sel *modelSelection) namesPR(refs modelRefs) bool {
 	pr := sel.f.PR
-	if slices.Contains(r.refs.ints, int64(pr.Number)) {
+	if pr.Number >= math.MinInt32 && pr.Number <= math.MaxInt32 && slices.Contains(refs.ints, int32(pr.Number)) { //nolint:gosec // G115: the bounds just checked.
 		return true
 	}
 	if pr.Repo != "" {
-		return slices.Contains(r.refs.texts, pr.String())
+		return slices.Contains(refs.texts, sel.repoPR)
 	}
 	suffix := "#" + strconv.Itoa(pr.Number)
-	return slices.ContainsFunc(r.refs.texts, func(text string) bool { return strings.HasSuffix(text, suffix) })
+	return slices.ContainsFunc(refs.texts, func(id int32) bool { return strings.HasSuffix(sel.m.strs[id], suffix) })
 }
 
 func (sel *modelSelection) repeats(r *modelRow) bool {
 	window := sel.f.RepeatWindow.Milliseconds()
-	for _, index := range sel.m.byKind[r.drive+"\x00"+r.kind] {
+	for _, index := range sel.m.byKind[pairKey(r.drive, r.kind)] {
 		prior := &sel.m.rows[index]
 		if prior.seq >= r.seq {
 			return false
@@ -1011,8 +1236,8 @@ func (sel *modelSelection) repeats(r *modelRow) bool {
 	return false
 }
 
-func (sel *modelSelection) holdsAWord(r *modelRow) bool {
-	columns := [...]string{r.text.text, r.lane, r.topic, r.kind, r.addressees.raw, r.text.refs, r.from}
+func (sel *modelSelection) holdsAWord(v *modelView, text *modelText) bool {
+	columns := [...]string{text.text, v.lane, v.topic, v.kind, v.addressees.raw, text.refs, v.from}
 	for i, word := range sel.wordsLower {
 		for _, column := range columns {
 			if containsFoldASCII(column, word) {
@@ -1023,7 +1248,7 @@ func (sel *modelSelection) holdsAWord(r *modelRow) bool {
 			continue
 		}
 		numbers := [...]string{
-			strconv.FormatInt(r.seq, 10), strconv.FormatInt(r.originSeq, 10), nullableNumber(r.text.reOriginSeq), nullableNumber(r.text.resolvesOriginSeq), r.text.also,
+			strconv.FormatInt(v.row.seq, 10), strconv.FormatInt(v.row.originSeq, 10), nullableNumber(text.reOriginSeq), nullableNumber(text.resolvesOriginSeq), text.also,
 		}
 		for _, column := range numbers {
 			if containsFoldASCII(column, word) {
@@ -1088,12 +1313,15 @@ func containsFoldASCII(hay string, lowerWord []byte) bool {
 func (m *ReadModel) hydrated(ctx context.Context, s *Store, chosen []*modelRow, projection string) ([]Record, error) {
 	out := make([]Record, len(chosen))
 	var coldSeqs []int64
+	var coldAt []int
 	for i, row := range chosen {
-		if row.text == nil {
+		text, held := m.textOf(row)
+		if !held {
 			coldSeqs = append(coldSeqs, row.seq)
+			coldAt = append(coldAt, i)
 			continue
 		}
-		record, err := s.modelRecord(row, projection)
+		record, err := m.record(s, row, &text, projection)
 		if err != nil {
 			return nil, err
 		}
@@ -1109,15 +1337,12 @@ func (m *ReadModel) hydrated(ctx context.Context, s *Store, chosen []*modelRow, 
 	if err != nil {
 		return nil, err
 	}
-	for i, row := range chosen {
-		if row.text != nil {
-			continue
-		}
-		record, ok := cold[row.seq]
+	for i, at := range coldAt {
+		record, ok := cold[coldSeqs[i]]
 		if !ok {
-			return nil, fmt.Errorf("record #%d left the store under the read model", row.seq)
+			return nil, fmt.Errorf("record #%d left the store under the read model", coldSeqs[i])
 		}
-		out[i] = record
+		out[at] = record
 	}
 	return out, nil
 }
@@ -1155,21 +1380,22 @@ func (m *ReadModel) recordsBySeq(ctx context.Context, s *Store, seqs []int64, pr
 	return out, rows.Err()
 }
 
-func (s *Store) modelRecord(row *modelRow, projection string) (Record, error) {
-	meta, err := row.text.decodedMeta(row.seq)
+func (m *ReadModel) record(s *Store, row *modelRow, text *modelText, projection string) (Record, error) {
+	meta, err := m.metaOf(row.seq, text)
 	if err != nil {
 		return Record{}, err
 	}
+	v := m.view(row)
 	r := Record{
-		Seq: row.seq, Origin: s.local(row.from), OriginSeq: row.originSeq, ID: row.text.id, Drive: row.drive, Lane: row.lane, Kind: kinds.Kind(row.kind),
-		At: time.UnixMilli(row.at).UTC(), Text: row.text.text, Topic: row.topic, To: row.addressees.to, Re: row.re, Resolves: row.resolves, AlsoResolves: row.also,
-		Refs: meta.refs, Fields: meta.fields, Source: row.source,
+		Seq: row.seq, Origin: s.local(v.from), OriginSeq: row.originSeq, ID: strings.Clone(text.id), Drive: v.drive, Lane: v.lane, Kind: kinds.Kind(v.kind),
+		At: time.UnixMilli(row.at).UTC(), Text: strings.Clone(text.text), Topic: v.topic, To: v.addressees.to, Re: row.re, Resolves: row.resolves, AlsoResolves: m.alsoOf(row),
+		Refs: meta.refs, Fields: meta.fields, Source: v.source,
 	}
 	if r.Origin == "" {
 		r.OriginSeq = 0
 	}
-	if projection != textColumns && row.text.body != "" {
-		r.Body = json.RawMessage(row.text.body)
+	if projection != textColumns && text.body != "" {
+		r.Body = json.RawMessage(text.body)
 	}
 	if row.expires != modelNoExpiry {
 		expires := time.UnixMilli(row.expires).UTC()
@@ -1178,13 +1404,8 @@ func (s *Store) modelRecord(row *modelRow, projection string) (Record, error) {
 	return r, nil
 }
 
-func (t *modelText) decodes() bool {
-	_, err := t.decode(0)
-	return err == nil
-}
-
 func (t *modelText) decode(seq int64) (*modelMeta, error) {
-	meta := &modelMeta{}
+	meta := &modelMeta{seq: seq}
 	if t.refs != "{}" {
 		if err := json.Unmarshal([]byte(t.refs), &meta.refs); err != nil {
 			return nil, fmt.Errorf("decode refs of #%d: %w", seq, err)
@@ -1195,25 +1416,23 @@ func (t *modelText) decode(seq int64) (*modelMeta, error) {
 			return nil, fmt.Errorf("decode fields of #%d: %w", seq, err)
 		}
 	}
-	clipRefs(&meta.refs)
+	refs := &meta.refs
+	refs.PRs, refs.Builds, refs.Stacks, refs.Targets, refs.Lanes = slices.Clip(refs.PRs), slices.Clip(refs.Builds), slices.Clip(refs.Stacks), slices.Clip(refs.Targets), slices.Clip(refs.Lanes)
 	meta.fields.Envs = slices.Clip(meta.fields.Envs)
 	return meta, nil
 }
 
-func clipRefs(refs *Refs) {
-	refs.PRs, refs.Builds, refs.Stacks, refs.Targets, refs.Lanes = slices.Clip(refs.PRs), slices.Clip(refs.Builds), slices.Clip(refs.Stacks), slices.Clip(refs.Targets), slices.Clip(refs.Lanes)
-}
-
-func (t *modelText) decodedMeta(seq int64) (*modelMeta, error) {
-	if meta := t.meta.Load(); meta != nil {
+func (m *ReadModel) metaOf(seq int64, text *modelText) (*modelMeta, error) {
+	slot := &m.metas[uint64(seq)%readModelMetaSlots] //nolint:gosec // G115: seqs are positive.
+	if meta := slot.Load(); meta != nil && meta.seq == seq {
 		return meta, nil
 	}
-	meta, err := t.decode(seq)
+	meta, err := text.decode(seq)
 	if err != nil {
 		return nil, err
 	}
-	if len(t.refs)+len(t.fields) <= readModelMetaHeld {
-		t.meta.Store(meta)
+	if len(text.refs)+len(text.fields) <= readModelMetaHeld {
+		slot.Store(meta)
 	}
 	return meta, nil
 }
@@ -1226,10 +1445,10 @@ func (m *ReadModel) rowOf(seq int64) *modelRow {
 	return &m.rows[at]
 }
 
-func (r *modelRow) closure() Record {
-	record := Record{Seq: r.seq, Lane: r.lane, Kind: kinds.Kind(r.kind), At: time.UnixMilli(r.at).UTC(), Topic: r.topic, Re: r.re, Resolves: r.resolves, AlsoResolves: r.also, Source: r.source}
-	if r.refs != nil {
-		record.Refs.Stacks, record.Refs.Targets = r.refs.stacks, r.refs.targets
+func (m *ReadModel) closure(r *modelRow) Record {
+	record := Record{Seq: r.seq, Lane: m.strs[r.lane], Kind: kinds.Kind(m.strs[r.kind]), At: time.UnixMilli(r.at).UTC(), Topic: m.strs[r.topic], Re: r.re, Resolves: r.resolves, AlsoResolves: m.alsoOf(r), Source: m.strs[r.source]}
+	if refs, held := m.refsOf(r); held {
+		record.Refs.Stacks, record.Refs.Targets = m.stringsOf(refs.stacks), m.stringsOf(refs.targets)
 	}
 	return record
 }
@@ -1242,6 +1461,9 @@ func (m *ReadModel) openRecordsAmong(ctx context.Context, s *Store, drive string
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
+	if m.stale.Load() {
+		return nil, false
+	}
 	chosen := make([]*modelRow, 0, len(open))
 	for _, seq := range open {
 		row := m.rowOf(seq)
@@ -1274,8 +1496,8 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 	seqs = slices.Compact(slices.Sorted(slices.Values(seqs)))
 	openers := make([]Record, 0, len(seqs))
 	for _, seq := range seqs {
-		if row := m.rowOf(seq); row != nil && row.drive == drive && modelOpeners[row.kind] {
-			if opener := row.closure(); opener.Tracked() {
+		if row := m.rowOf(seq); row != nil && m.strs[row.drive] == drive && modelOpeners[m.strs[row.kind]] {
+			if opener := m.closure(row); opener.Tracked() {
 				openers = append(openers, opener)
 			}
 		}
@@ -1297,7 +1519,7 @@ func (m *ReadModel) unclosedLocked(ctx context.Context, s *Store, drive string, 
 	openers = slices.DeleteFunc(openers, func(o Record) bool {
 		return o.Kind == kinds.Incident && slices.ContainsFunc(incidentTargets(o), func(seq int64) bool {
 			row := m.rowOf(seq)
-			return row != nil && row.drive == drive && row.kind == string(kinds.Incident)
+			return row != nil && m.strs[row.drive] == drive && m.strs[row.kind] == string(kinds.Incident)
 		})
 	})
 	if len(openers) == 0 {
@@ -1352,37 +1574,45 @@ func (m *ReadModel) closureRows(ctx context.Context, drive string, ks []kinds.Ki
 		return nil, false
 	}
 	var indexes []int32
+	held := m.idOf(drive)
 	for _, k := range ks {
-		indexes = append(indexes, m.byKind[drive+"\x00"+string(k)]...)
+		indexes = append(indexes, m.byKind[pairKey(held, m.idOf(string(k)))]...)
 	}
 	slices.Sort(indexes)
 	out := make([]Record, len(indexes))
 	for i, index := range indexes {
-		out[i] = m.rows[index].closure()
+		out[i] = m.closure(&m.rows[index])
 	}
 	m.hits.Add(1)
 	return out, true
 }
 
 func (m *ReadModel) closersOf(drive string, openers []Record) []Record {
-	key := drive + "\x00"
+	held := m.idOf(drive)
 	seen := map[int32]bool{}
 	var out []Record
-	add := func(lookup string) {
-		for _, index := range m.closers[lookup] {
-			if !seen[index] {
-				seen[index] = true
-				out = append(out, m.rows[index].closure())
+	add := func(key uint64) {
+		link, ok := m.closerHead[key]
+		for ok && link != modelNone {
+			entry := m.closerLinks[link]
+			if !seen[entry.row] {
+				seen[entry.row] = true
+				out = append(out, m.closure(&m.rows[entry.row]))
 			}
+			link = entry.next
 		}
 	}
 	for _, o := range openers {
-		add(key + "re\x00" + strconv.FormatInt(o.Seq, 10))
+		add(closerKey(held, closerRe, o.Seq))
 		if o.Topic != "" {
-			add(key + "topic\x00" + o.Topic)
+			if topic := m.idOf(o.Topic); topic != modelNone {
+				add(closerKey(held, closerTopic, int64(topic)))
+			}
 		}
 		for _, ref := range slices.Concat(o.Refs.Stacks, o.Refs.Targets) {
-			add(key + "ref\x00" + ref)
+			if id := m.idOf(ref); id != modelNone {
+				add(closerKey(held, closerRef, int64(id)))
+			}
 		}
 	}
 	return out
@@ -1390,7 +1620,7 @@ func (m *ReadModel) closersOf(drive string, openers []Record) []Record {
 
 // otherNumbered is the record of another origin that #n also names in its
 // drive, nil when none does; false when only the store can say which is first.
-func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelRow, bool) {
+func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelView, bool) {
 	if err := m.catchUp(ctx); err != nil {
 		m.failures.Add(1)
 		return nil, false
@@ -1404,10 +1634,10 @@ func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelRow, bool
 	if own == nil {
 		return nil, true
 	}
-	if own.from != m.source.Self() {
+	if m.strs[own.from] != m.source.Self() {
 		return nil, false
 	}
-	var other *modelRow
+	var other *modelView
 	for _, index := range m.foreign[n] {
 		row := &m.rows[index]
 		if row.drive != own.drive || row.from == own.from {
@@ -1416,7 +1646,8 @@ func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelRow, bool
 		if other != nil {
 			return nil, false
 		}
-		other = row
+		v := m.view(row)
+		other = &v
 	}
 	return other, true
 }
@@ -1444,7 +1675,7 @@ func (m *ReadModel) namesOf(ctx context.Context, s *Store, seqs []int64) (map[st
 			return nil, nil, false
 		}
 		if row := m.rowOf(seq); row != nil {
-			out[seq] = s.name(owners, Record{Seq: row.seq, Origin: s.local(row.from), OriginSeq: row.originSeq})
+			out[seq] = s.name(owners, Record{Seq: row.seq, Origin: s.local(m.strs[row.from]), OriginSeq: row.originSeq})
 		}
 	}
 	return owners, out, true
