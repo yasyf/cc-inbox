@@ -49,6 +49,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The duplicate check now skips twins another record resolved, so a withdraw
   re-posted after a cancel answered it is no longer returned as the cancelled
   record.
+- A watch stopped before it read its start cursor now ends cleanly instead of
+  returning `read cursor <name>: context canceled`. A channel stopped in its
+  first moments, as `TestABatchHeldAcrossARestartArrivesOnce` does after 50 ms,
+  failed with that error.
 - `cci watch` now follows across a daemon restart. When the daemon stopped for a
   newer install, it told each watch it had been cut short and sent exit 1, so a
   Monitor on the watch ended and the lane stopped hearing its mail. Now the

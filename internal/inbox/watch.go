@@ -34,6 +34,9 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 	f := opts.Filter
 	if f.After == 0 && f.Since.IsZero() {
 		start, err := watchStart(ctx, st, opts)
+		if ctx.Err() != nil {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -41,6 +44,9 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 	}
 	if strings.HasPrefix(opts.Cursor, wire.WatchCursorPrefix) {
 		resumed, found, err := st.Cursor(ctx, opts.Cursor, f.Drive)
+		if ctx.Err() != nil {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
