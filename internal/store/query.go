@@ -443,7 +443,7 @@ func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 	if reader == "" || f.Drive == "" {
 		return f, nil
 	}
-	if f.Aliases, err = s.Aliases(ctx, f.Drive, reader); err != nil || !f.AliasFloor || len(f.Aliases) == 0 {
+	if f.Aliases, err = s.readerAliases(ctx, f, reader); err != nil || !f.AliasFloor || len(f.Aliases) == 0 {
 		return f, err
 	}
 	f.aliasSince, f.aliasOrders, err = s.aliasMailSince(ctx, f.Drive, reader)
@@ -453,7 +453,7 @@ func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 func (s *Store) aliasMailSince(ctx context.Context, drive, lane string) (lastPost, started int64, err error) {
 	err = s.db.QueryRowContext(ctx, `WITH predecessor(lane) AS (
 	SELECT other.lane FROM lane_holds own CROSS JOIN lane_holds other INDEXED BY lane_holds_stem ON other.drive = own.drive AND other.stem = own.stem
-	WHERE own.drive = ?1 AND own.lane = ?2 AND other.lane != ?2 ORDER BY other.held DESC LIMIT 1
+	WHERE own.drive = ?1 AND own.lane = ?2 AND other.lane != ?2 ORDER BY `+writtenOrder("other.held")+` DESC LIMIT 1
 )
 SELECT COALESCE((SELECT at FROM records WHERE drive = ?1 AND lane = (SELECT lane FROM predecessor) AND kind != 'digest' ORDER BY at * 1000000 + seq DESC LIMIT 1), 0),
 	COALESCE((SELECT at FROM records WHERE drive = ?1 AND lane = (SELECT lane FROM predecessor) AND kind != 'digest' ORDER BY at * 1000000 + seq ASC LIMIT 1), 0)`, drive, lane).Scan(&lastPost, &started)

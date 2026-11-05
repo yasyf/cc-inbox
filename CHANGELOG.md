@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On a replica, a lane now holds its alias whatever order the records arrived in.
+  Before, a predecessor's backlog arriving after its stand-down read as the
+  predecessor still running, so a lane on a fresh Sprite heard nothing addressed
+  to its alias.
+- `cci tail --to <alias>` and `grep --to <alias>` now read what the lane holding
+  the alias reads, including mail addressed to its number.
+- `cci post --to <alias>` no longer refuses as a slip when a numbered lane on the
+  drive answers to that alias.
 - `cci post --to <alias>` now stays on the drive it names when a lane there holds
   the alias. Before, a live lane of that exact name on another drive took the
   mail, with one notice line and a clean exit.
