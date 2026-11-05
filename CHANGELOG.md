@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A session now has cci's tools loaded from its first turn and after every
+  compaction. Before, they sat behind tool search, and a call made without first
+  fetching the schema failed with "input schema was not in your prompt".
 - On a replica, a lane now holds its alias whatever order the records arrived in.
   Before, a predecessor's backlog arriving after its stand-down read as the
   predecessor still running, so a lane on a fresh Sprite heard nothing addressed

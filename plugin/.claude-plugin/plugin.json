@@ -12,7 +12,8 @@
       "command": "${CLAUDE_PLUGIN_ROOT}/bin/cci",
       "args": [
         "channel"
-      ]
+      ],
+      "alwaysLoad": true
     }
   },
   "channels": [
