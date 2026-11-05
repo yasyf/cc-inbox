@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- On a Sprite, `cci show <n>` and `cci post --re <n>` now find the record the
+  same Sprite printed as `#<n>@<node>`. Before, a bare number there named only
+  an owner node's record, so a lane that dropped the `@<node>` got "no record
+  has this number" for its own post. A bare number an owner node's record holds
+  still names that record.
 - A session now has cci's tools loaded from its first turn and after every
   compaction. Before, they sat behind tool search, and a call made without first
   fetching the schema failed with "input schema was not in your prompt".
