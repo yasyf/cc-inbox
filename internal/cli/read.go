@@ -63,7 +63,7 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	f.rf.registerWidth(cmd)
 	f.rf.registerLimit(cmd, "print only the newest this many records, like tail -n")
 	cmd.Flags().StringVar(&f.cursor, "cursor", peer, "cursor name, read and advanced when --since is absent")
-	cmd.Flags().StringVar(&f.seed, "seed", "", "start a --cursor that does not exist yet where this cursor stands, or at the newest record when this one does not exist either, instead of an hour back")
+	cmd.Flags().StringVar(&f.seed, "seed", "", "start --cursor no earlier than where this cursor stands, so it never replays what this one read, and a --cursor that does not exist yet at the newest record when this one does not exist either, instead of an hour back")
 	cmd.Flags().BoolVar(&f.oldest, "oldest", false, "when the budget cuts a text --since window, keep its oldest records instead of its newest, as --json reads always do")
 	cmd.Flags().BoolVar(&f.mail, "mail", false, "when this thread is bound as --to, read its lane mail through the cursor the PostToolUse hook advances, so a record reaches the window once")
 	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")

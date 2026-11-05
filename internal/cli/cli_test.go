@@ -2241,3 +2241,43 @@ func recordLines(out string) []string {
 	}
 	return lines
 }
+
+func TestABoundWaitSkipsWhatTheLaneReadThroughItsOwnCursorWhateverItsWakeCursorSays(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	k := store.PeerKey{Session: "session-1"}
+	if err := st.BindLane(ctx, k, "d", "api", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetCursor(ctx, store.LaneCursor(k), "d", 0); err != nil {
+		t.Fatal(err)
+	}
+	post := func(text string) {
+		t.Helper()
+		if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "api", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post("the lane already read this")
+	if out, err := run(t, "tail", "--drive", "d", "--cursor", "api", "--to", "api"); err != nil || !strings.Contains(out, "the lane already read this") {
+		t.Fatalf("the lane's own read = %q, %v", out, err)
+	}
+	if _, err := run(t, "cursor", "set", "api-wake", "0", "--drive", "d"); err != nil {
+		t.Fatal(err)
+	}
+	wait := []string{"tail", "--drive", "d", "--to", "api", "--cursor", "api-wake", "--seed", "api", "--mail"}
+	if out, err := run(t, wait...); err != nil || out != "" {
+		t.Fatalf("the wait replayed what the lane read: %q, %v", out, err)
+	}
+	post("this arrived after")
+	if out, err := run(t, wait...); err != nil || !strings.Contains(out, "this arrived after") || strings.Contains(out, "the lane already read this") {
+		t.Fatalf("the wait after a new record = %q, %v", out, err)
+	}
+}

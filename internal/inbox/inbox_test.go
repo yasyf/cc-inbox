@@ -99,6 +99,30 @@ func TestTailSeedStartsAFreshCursorWhereTheSeedStands(t *testing.T) {
 	}
 }
 
+func TestTailSeedSkipsWhatTheSeedCursorReadSinceTheLastTail(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	opts := inbox.TailOptions{Filter: store.Filter{Drive: "d"}, Cursor: "desk-wake", Seed: "desk"}
+	if _, err := inbox.Tail(ctx, st, opts, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	read := testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "read by the desk"})
+	if err := st.SetCursor(ctx, "desk", "d", read.Seq); err != nil {
+		t.Fatal(err)
+	}
+	var quiet, woke bytes.Buffer
+	if _, err := inbox.Tail(ctx, st, opts, &quiet); err != nil || quiet.Len() != 0 {
+		t.Fatalf("tail after the desk read printed %q (%v)", quiet.String(), err)
+	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Go, Text: "arrived between waits"})
+	if _, err := inbox.Tail(ctx, st, opts, &woke); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(woke.String(), "read by the desk") || !strings.Contains(woke.String(), "arrived between waits") {
+		t.Fatalf("tail after a new record:\n%s", woke.String())
+	}
+}
+
 func TestTailSeedWithNoSeedCursorStartsAtTheNewestRecord(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
