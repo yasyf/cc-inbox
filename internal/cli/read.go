@@ -271,7 +271,11 @@ others. cci tail reads every kind.`,
 			if len(f.ToKinds) == 0 {
 				f.ToKinds = store.DefaultToKinds(cmp.Or(f.For, f.To))
 			}
-			return inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, inbox.WriteLines(cmd.OutOrStdout(), rf.json))
+			err = inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, inbox.WriteLines(cmd.OutOrStdout(), rf.json))
+			if err == nil && cmd.Context().Err() != nil {
+				return fmt.Errorf("watch stopped before it ended: %w", context.Cause(cmd.Context()))
+			}
+			return err
 		}),
 	}
 	rf.register(cmd, "", true, render.DefaultBudget)
