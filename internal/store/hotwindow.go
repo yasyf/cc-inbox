@@ -81,6 +81,7 @@ type MemWindow struct {
 	floor     atomic.Int64
 	belowAt   atomic.Int64
 	bytes     atomic.Int64
+	limit     int64
 	hits      atomic.Int64
 	misses    atomic.Int64
 	failures  atomic.Int64
@@ -99,10 +100,16 @@ type HotWindowStats struct {
 // BuildHotWindow fills a window from the newest hotWindowSpan of s, in batches
 // that pace calls between, so readers keep the store while it fills.
 func (s *Store) BuildHotWindow(ctx context.Context, pace func(context.Context) error) (*MemWindow, error) {
+	return s.BuildHotWindowUnder(ctx, pace, HotWindowBytes)
+}
+
+// BuildHotWindowUnder is BuildHotWindow with its own cap on the bytes the window holds.
+func (s *Store) BuildHotWindowUnder(ctx context.Context, pace func(context.Context) error, limit int64) (*MemWindow, error) {
 	w, err := s.openHotWindow(ctx)
 	if err != nil {
 		return nil, err
 	}
+	w.limit = limit
 	if err := w.fill(ctx, pace); err != nil {
 		return nil, errors.Join(err, w.Close())
 	}
@@ -369,7 +376,7 @@ func (w *MemWindow) trim(ctx context.Context) error {
 		}
 		w.bytes.Store(used)
 		floor := w.floor.Load()
-		if used <= HotWindowBytes || floor > w.head {
+		if used <= w.limit || floor > w.head {
 			return nil
 		}
 		if err := w.dropBelow(ctx, min(floor+hotWindowTrim, w.head+1)); err != nil {

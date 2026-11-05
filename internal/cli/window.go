@@ -191,26 +191,28 @@ func parityClass(entry capturedRequest) string {
 
 func newWindowParityCmd() *cobra.Command {
 	var plain, windowed, traffic, report string
+	var limit int64
 	cmd := &cobra.Command{
 		Use:    "parity",
 		Short:  "Replay captured traffic through the store and the window on two copies of a store, and diff everything",
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWindowParity(cmd.Context(), cmd.OutOrStdout(), plain, windowed, traffic, report)
+			return runWindowParity(cmd.Context(), cmd.OutOrStdout(), plain, windowed, traffic, report, limit)
 		},
 	}
 	cmd.Flags().StringVar(&plain, "plain", "", "home of the copy that reads the store alone")
 	cmd.Flags().StringVar(&windowed, "windowed", "", "home of the copy that reads through the window")
 	cmd.Flags().StringVar(&traffic, "traffic", "", "captured requests, one JSON document a line")
 	cmd.Flags().StringVar(&report, "report", "", "file for each difference, one JSON document a line")
+	cmd.Flags().Int64Var(&limit, "cap", store.HotWindowBytes, "bytes the window may hold")
 	for _, name := range []string{"plain", "windowed", "traffic", "report"} {
 		_ = cmd.MarkFlagRequired(name)
 	}
 	return cmd
 }
 
-func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, traffic, report string) error {
+func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, traffic, report string, limit int64) error {
 	say := func(format string, args ...any) { _, _ = fmt.Fprintf(w, format, args...) }
 	plain, err := store.Open(ctx, plainHome)
 	if err != nil {
@@ -223,7 +225,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	}
 	defer func() { _ = windowed.Close() }()
 	built := time.Now()
-	window, err := windowed.BuildHotWindow(ctx, func(context.Context) error { return nil })
+	window, err := windowed.BuildHotWindowUnder(ctx, func(context.Context) error { return nil }, limit)
 	if err != nil {
 		return err
 	}
