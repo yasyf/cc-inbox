@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -67,18 +68,8 @@ func (e EmbedRecord) Unwrapped() store.Record {
 func EmbedRecordsFrom(ctx context.Context, st *store.Store, c EmbedCall) ([]store.Record, error) {
 	switch c.Op {
 	case "tail":
-		selected, err := kinds.ParseAll(c.Kinds)
+		filter, err := embedTailFilter(ctx, st, c)
 		if err != nil {
-			return nil, err
-		}
-		var pr store.PR
-		if c.PR != "" {
-			if pr, err = store.ParsePR(c.PR); err != nil {
-				return nil, err
-			}
-		}
-		filter := store.Filter{Drive: c.Drive, Kinds: selected, Lanes: c.Lanes, PR: pr, After: c.After, Since: c.Since, Limit: embedPageRows}
-		if filter, err = st.BoundSince(ctx, filter); err != nil {
 			return nil, err
 		}
 		var records []store.Record
@@ -133,6 +124,82 @@ func embedAnswer(ctx context.Context, st *store.Store, c EmbedCall) (any, error)
 	return EmbedRecords(records), nil
 }
 
+type embedWriter struct {
+	out   io.Writer
+	wrote bool
+	line  bytes.Buffer
+}
+
+func (w *embedWriter) records(records []store.Record) error {
+	for _, r := range records {
+		w.line.Reset()
+		if w.wrote {
+			w.line.WriteByte(',')
+		} else {
+			w.line.WriteByte('[')
+		}
+		w.wrote = true
+		encoded, err := json.Marshal(EmbedRecord{Record: r, ReNum: r.ReNum, CloseNums: r.CloseNums})
+		if err != nil {
+			return err
+		}
+		w.line.Write(encoded)
+		if _, err := w.out.Write(w.line.Bytes()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (w *embedWriter) close() error {
+	closing := "]\n"
+	if !w.wrote {
+		closing = "null\n"
+	}
+	_, err := io.WriteString(w.out, closing)
+	return err
+}
+
+// embedTailTo writes what embedAnswer answers for a tail, a page of records at a
+// time, so a long answer holds one page in memory rather than the whole answer.
+func embedTailTo(ctx context.Context, st *store.Store, c EmbedCall, out io.Writer) error {
+	filter, err := embedTailFilter(ctx, st, c)
+	if err != nil {
+		return err
+	}
+	writer := embedWriter{out: out}
+	for {
+		page, err := st.Query(ctx, filter)
+		if err != nil {
+			return err
+		}
+		if err := inbox.Annotate(ctx, st, page); err != nil {
+			return err
+		}
+		if err := writer.records(page); err != nil {
+			return err
+		}
+		if len(page) < embedPageRows {
+			return writer.close()
+		}
+		filter.After = page[len(page)-1].Seq
+	}
+}
+
+func embedTailFilter(ctx context.Context, st *store.Store, c EmbedCall) (store.Filter, error) {
+	selected, err := kinds.ParseAll(c.Kinds)
+	if err != nil {
+		return store.Filter{}, err
+	}
+	var pr store.PR
+	if c.PR != "" {
+		if pr, err = store.ParsePR(c.PR); err != nil {
+			return store.Filter{}, err
+		}
+	}
+	return st.BoundSince(ctx, store.Filter{Drive: c.Drive, Kinds: selected, Lanes: c.Lanes, PR: pr, After: c.After, Since: c.Since, Limit: embedPageRows})
+}
+
 // EmbedFollow calls emit with each record c selects as the store takes it.
 func EmbedFollow(ctx context.Context, st *store.Store, c EmbedCall, peer string, emit func(store.Record) error) error {
 	selected, err := kinds.ParseAll(c.Kinds)
@@ -179,12 +246,20 @@ func newEmbedCmd() *cobra.Command {
 				})
 			}
 			started := time.Now()
-			answer, err := embedAnswer(cmd.Context(), st, c)
+			var answer any
+			if c.Op == "tail" {
+				err = embedTailTo(cmd.Context(), st, c, cmd.OutOrStdout())
+			} else {
+				answer, err = embedAnswer(cmd.Context(), st, c)
+			}
 			if err != nil {
 				return err
 			}
 			if took := time.Since(started); took >= embedSlow {
 				slog.Info("slow embedded call", "op", c.Op, "pid", embedderPID(cmd.Context()), "kinds", c.Kinds, "lanes", c.Lanes, "after", c.After, "since", c.Since, "pr", c.PR, "seqs", len(c.Seqs), "took", took)
+			}
+			if c.Op == "tail" {
+				return nil
 			}
 			return out.Encode(answer)
 		}),
