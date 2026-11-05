@@ -366,6 +366,31 @@ func TestReadModelKeepsAnExpiryOfZero(t *testing.T) {
 	}
 }
 
+func TestReadModelSearchReadsAnUnderscoreAsLikeDoes(t *testing.T) {
+	st, _ := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "ci_fail here"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "ci-fail there"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "ciéfail wide"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "cifail none"})
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	for _, word := range []string{"ci_fail", "_fail", "CI_FAIL", "ci__ail"} {
+		f := store.Filter{Drive: "d", Contains: []string{word}}
+		got, answered, err := model.Answer(t.Context(), st, f)
+		if err != nil || !answered {
+			t.Fatalf("%s: answered = %t, err = %v", word, answered, err)
+		}
+		want, err := st.Query(t.Context(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sameRecords(t, got, want)
+	}
+}
+
 func TestReadModelSearchStopsAtANul(t *testing.T) {
 	st, _ := testutil.Store(t)
 	held := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "placeholder"})

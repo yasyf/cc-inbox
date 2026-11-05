@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -134,6 +135,14 @@ type modelChunk struct {
 	maxAt   int64
 }
 
+// walChange is the part of SQLite's WAL index header that moves on every commit:
+// iChange and mxFrame in the header's first copy.
+const (
+	walChangeOffset = 8
+	walFrameOffset  = 16
+	walHeaderBytes  = 48
+)
+
 type modelCloser struct {
 	row, next int32
 }
@@ -145,11 +154,11 @@ type modelCloser struct {
 type ReadModel struct {
 	source    *Store
 	observer  *ChangeVersion
+	walIndex  []byte
 	limit     int64
 	chunkSize int
 
 	mu          sync.RWMutex
-	version     int64
 	head        int64
 	mutations   int64
 	rows        []modelRow
@@ -183,6 +192,7 @@ type ReadModel struct {
 	metas       [readModelMetaSlots]atomic.Pointer[modelMeta]
 
 	stale    atomic.Bool
+	seen     atomic.Uint64
 	hotFloor atomic.Int64
 	hotAt    atomic.Int64
 	held     atomic.Int64
@@ -221,8 +231,12 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 	if err != nil {
 		return nil, err
 	}
+	walIndex, err := mapWALIndex(ctx, s)
+	if err != nil {
+		return nil, errors.Join(err, observer.Close())
+	}
 	m := &ReadModel{
-		source: s, observer: observer, limit: limit, mutations: tip.Mutations,
+		source: s, observer: observer, walIndex: walIndex, limit: limit, mutations: tip.Mutations,
 		chunkSize: int(max(readModelMinChunk, min(readModelChunk, limit/16))),
 		byDrive:   map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
 		closerHead: map[modelCloserKey]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
@@ -260,11 +274,46 @@ type servedModel struct {
 	model atomic.Pointer[ReadModel]
 }
 
+// HeldFrom is the lowest seq whose whole text the model holds, 0 when no model
+// serves.
+func (s *Store) HeldFrom() int64 {
+	m := s.reads.model.Load()
+	if m == nil || m.stale.Load() {
+		return 0
+	}
+	return m.hotFloor.Load()
+}
+
 // Covers reports whether the model holds the text of every record f can select,
 // so f needs no narrowing that exists to spare the store a scan.
 func (s *Store) Covers(f Filter) bool {
 	m := s.reads.model.Load()
 	return m != nil && !m.stale.Load() && (f.After >= m.hotFloor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > m.hotAt.Load())
+}
+
+func mapWALIndex(ctx context.Context, s *Store) ([]byte, error) {
+	var filename string
+	if err := s.db.QueryRowContext(ctx, "SELECT file FROM pragma_database_list WHERE name='main'").Scan(&filename); err != nil {
+		return nil, fmt.Errorf("find the store's file: %w", err)
+	}
+	file, err := os.Open(filename + "-shm") //nolint:gosec // G304: SQLite named this file.
+	if err != nil {
+		return nil, fmt.Errorf("open the WAL index: %w", err)
+	}
+	defer func() { _ = file.Close() }()
+	mapped, err := syscall.Mmap(int(file.Fd()), 0, walHeaderBytes, syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: a descriptor fits an int.
+	if err != nil {
+		return nil, fmt.Errorf("map the WAL index: %w", err)
+	}
+	return mapped, nil
+}
+
+// committed moves whenever a commit reaches the store, from any process, and
+// costs no system call. It reads what PRAGMA data_version reads, directly.
+func (m *ReadModel) committed() uint64 {
+	change := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walChangeOffset]))) //nolint:gosec // G103: the header's fields are aligned, shared memory.
+	frame := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walFrameOffset])))   //nolint:gosec // G103: the header's fields are aligned, shared memory.
+	return uint64(change)<<32 | uint64(frame)
 }
 
 // ServeReadModel has s's reads try m first; nil returns them to the store alone.
@@ -287,6 +336,10 @@ func (m *ReadModel) Close() error {
 		failed = errors.Join(failed, syscall.Munmap(chunk.memory))
 	}
 	m.chunks = nil
+	if m.walIndex != nil {
+		failed = errors.Join(failed, syscall.Munmap(m.walIndex))
+		m.walIndex = nil
+	}
 	return errors.Join(failed, m.observer.Close())
 }
 
@@ -315,16 +368,23 @@ func (m *ReadModel) CatchUp(ctx context.Context) error {
 }
 
 func (m *ReadModel) catchUp(ctx context.Context) error {
+	m.mu.RLock()
+	stale := m.stale.Load()
+	current := stale || m.committed() == m.seen.Load()
+	m.mu.RUnlock()
+	if stale {
+		return errReadModelStale
+	}
+	if current {
+		return nil
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.stale.Load() {
 		return errReadModelStale
 	}
-	version, err := m.observer.Read(ctx)
-	if err != nil {
-		return err
-	}
-	if version == m.version && m.version != 0 {
+	committed := m.committed()
+	if committed == m.seen.Load() {
 		return nil
 	}
 	for {
@@ -340,7 +400,7 @@ func (m *ReadModel) catchUp(ctx context.Context) error {
 			break
 		}
 	}
-	m.version = version
+	m.seen.Store(committed)
 	return nil
 }
 
@@ -870,6 +930,31 @@ func (m *ReadModel) Answer(ctx context.Context, s *Store, f Filter) ([]Record, b
 	return out, true, s.numbered(ctx, out)
 }
 
+// first is the seq of the first record f selects, 0 when there is none, false
+// when only the store can judge.
+func (m *ReadModel) first(ctx context.Context, s *Store, f Filter, now time.Time) (int64, bool) {
+	f, ok := m.prepared(ctx, s, f)
+	if !ok {
+		return 0, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stale.Load() || !f.modelable() {
+		m.misses.Add(1)
+		return 0, false
+	}
+	var seq int64
+	if !newModelSelection(m, s, f, now).walk(func(row *modelRow) bool {
+		seq = row.seq
+		return false
+	}) {
+		m.misses.Add(1)
+		return 0, false
+	}
+	m.hits.Add(1)
+	return seq, true
+}
+
 func (m *ReadModel) firstSince(at int64) sql.NullInt64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -888,7 +973,7 @@ func (f Filter) modelable() bool {
 		return false
 	}
 	for _, word := range f.Contains {
-		if strings.ContainsAny(word, "%_") {
+		if strings.Contains(word, "%") {
 			return false
 		}
 	}
@@ -1305,31 +1390,41 @@ func containsFoldASCII(hay string, lowerWord []byte) bool {
 	if len(lowerWord) == 0 {
 		return true
 	}
-	first := lowerWord[0]
-	for i := 0; i+len(lowerWord) <= len(hay); i++ {
-		c := hay[i]
-		if 'A' <= c && c <= 'Z' {
-			c += 'a' - 'A'
-		}
-		if c != first {
+	wildFirst := lowerWord[0] == '_'
+	for i := range len(hay) {
+		if wildFirst && hay[i]&0xC0 == 0x80 {
 			continue
 		}
-		matched := true
-		for j := 1; j < len(lowerWord); j++ {
-			d := hay[i+j]
-			if 'A' <= d && d <= 'Z' {
-				d += 'a' - 'A'
-			}
-			if d != lowerWord[j] {
-				matched = false
-				break
-			}
-		}
-		if matched {
+		if matchesFoldASCII(hay[i:], lowerWord) {
 			return true
 		}
 	}
 	return false
+}
+
+// matchesFoldASCII reports whether hay starts with word as LIKE reads it: ASCII
+// folds, and _ takes one UTF-8 character.
+func matchesFoldASCII(hay string, word []byte) bool {
+	at := 0
+	for _, want := range word {
+		if at >= len(hay) {
+			return false
+		}
+		if want == '_' {
+			_, size := utf8.DecodeRuneInString(hay[at:])
+			at += size
+			continue
+		}
+		c := hay[at]
+		if 'A' <= c && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != want {
+			return false
+		}
+		at++
+	}
+	return true
 }
 
 func (m *ReadModel) hydrated(ctx context.Context, s *Store, chosen []*modelRow, projection string) ([]Record, error) {

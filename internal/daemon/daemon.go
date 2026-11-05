@@ -266,9 +266,11 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 		on := store.ReadModelOn(home)
 		if on {
 			harness.KeepSessions(readModelSessions)
+			relay.KeepConfigs(readModelSessions)
 			runtime.GOMAXPROCS(min(readModelProcs, runtime.NumCPU()))
 		} else {
 			harness.KeepSessions(0)
+			relay.KeepConfigs(0)
 			runtime.GOMAXPROCS(min(schedulerProcs, runtime.NumCPU()))
 		}
 		if model != nil && (!on || model.Stale()) {

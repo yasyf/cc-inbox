@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/yasyf/cc-inbox/e2e"
 )
@@ -56,7 +57,41 @@ func LoadConfig(home, mesh string) (Config, bool, error) {
 	return c, ok, err
 }
 
+// KeepConfigs has Configs reuse a read for span; zero makes it read every time.
+func KeepConfigs(span time.Duration) {
+	configsKept.Lock()
+	defer configsKept.Unlock()
+	configsKept.span, configsKept.at = span, time.Time{}
+}
+
+// Configs is every mesh's config under home, at most KeepConfigs' span old.
 func Configs(home string) ([]Config, error) {
+	configsKept.Lock()
+	defer configsKept.Unlock()
+	kept := &configsKept
+	if kept.span != 0 && kept.home == home && time.Since(kept.at) < kept.span {
+		return slices.Clone(kept.read), nil
+	}
+	read, err := readConfigs(home)
+	if err != nil {
+		return nil, err
+	}
+	if kept.span != 0 {
+		kept.home, kept.at, kept.read = home, time.Now(), read
+		return slices.Clone(read), nil
+	}
+	return read, nil
+}
+
+var configsKept struct {
+	sync.Mutex
+	span time.Duration
+	home string
+	at   time.Time
+	read []Config
+}
+
+func readConfigs(home string) ([]Config, error) {
 	entries, err := os.ReadDir(root(home))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil
