@@ -211,14 +211,15 @@ func TestReadModelReadsItsOwnWrites(t *testing.T) {
 	}
 }
 
-func TestReadModelKeepsItsCapAndReadsOlderTextFromTheStore(t *testing.T) {
-	st, _ := testutil.Store(t)
+func TestReadModelKeepsItsCapWithEveryTextInItsFile(t *testing.T) {
+	st, clock := testutil.Store(t)
 	first := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "first"})
+	clock.Advance(37 * time.Hour)
 	text := strings.Repeat("x", 390)
 	for i := range 2000 {
 		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: fmt.Sprint(i, text)})
 	}
-	const limit = 1 << 20
+	const limit = 512 << 10
 	model, err := st.BuildReadModelUnder(t.Context(), noPace, limit)
 	if err != nil {
 		t.Fatal(err)
@@ -228,8 +229,8 @@ func TestReadModelKeepsItsCapAndReadsOlderTextFromTheStore(t *testing.T) {
 	if stats.Bytes == 0 || stats.Bytes > limit {
 		t.Errorf("bytes = %d, want some and at most %d", stats.Bytes, limit)
 	}
-	if stats.HotFloor <= first.Seq {
-		t.Errorf("hot floor = %d, want it above the first record %d", stats.HotFloor, first.Seq)
+	if stats.TextBytes <= limit {
+		t.Errorf("text bytes = %d, want them past the cap of %d", stats.TextBytes, limit)
 	}
 	f := store.Filter{Drive: "d"}
 	got, answered, err := model.Answer(t.Context(), st, f)
@@ -241,8 +242,11 @@ func TestReadModelKeepsItsCapAndReadsOlderTextFromTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameRecords(t, got, want)
+	if stats.SearchFloor <= first.Seq {
+		t.Errorf("search floor = %d, want it above the first record %d", stats.SearchFloor, first.Seq)
+	}
 	if _, answered, err := model.Answer(t.Context(), st, store.Filter{Drive: "d", Contains: []string{"first"}}); err != nil || answered {
-		t.Errorf("a search reaching older text answered = %t, err = %v; want it left to the store", answered, err)
+		t.Errorf("a search below the floor answered = %t, err = %v; want it left to the store", answered, err)
 	}
 }
 
