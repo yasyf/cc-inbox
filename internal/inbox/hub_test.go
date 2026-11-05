@@ -135,3 +135,17 @@ func TestHubReadsAgainWhenAFollowerGainsAnAlias(t *testing.T) {
 		t.Fatalf("wake = %+v, want first at or before %d", wake, mail.Seq)
 	}
 }
+
+func TestHubWakesALaneFilterForEveryLaneThatHeldTheStem(t *testing.T) {
+	st, _ := testutil.Store(t)
+	anchor := testutil.Post(t, st, store.Record{Lane: "fix-mac-2", Kind: kinds.Note, Text: "fix-mac-2 registers"})
+	hub := inbox.NewHub(st, time.Millisecond)
+	defer hub.Close()
+	comms := hub.Follow(store.Filter{Drive: "d", Lanes: []string{"fix-mac"}, LaneAliases: true, After: anchor.Seq})
+	defer comms.Leave()
+	testutil.Post(t, st, store.Record{Lane: "other", Kind: kinds.Note, Text: "from another lane"})
+	mechanism := testutil.Post(t, st, store.Record{Lane: "fix-mac-2", Kind: kinds.Mechanism, Text: "the cause"})
+	if wake := awaitWake(t, comms); wake.First != mechanism.Seq {
+		t.Fatalf("wake = %+v, want first %d", wake, mechanism.Seq)
+	}
+}

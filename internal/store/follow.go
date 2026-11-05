@@ -129,6 +129,15 @@ func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) 
 	for i, f := range filters {
 		f.Before, f.Limit, f.Descending = head+1, 1, false
 		f.prKeyed = refs && f.PR.Number != 0
+		if registry && f.LaneAliases && len(f.Lanes) > 0 {
+			if f.Lanes, err = lanesAnswering(ctx, tx, f.Drive, f.Lanes); err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				out[i].Seq = f.After + 1
+				continue
+			}
+		}
 		reader := cmp.Or(f.To, f.For, f.Addressed)
 		if registry && reader != "" && f.Drive != "" {
 			if f.Aliases, err = aliases(ctx, tx, f.Drive, reader); err != nil {

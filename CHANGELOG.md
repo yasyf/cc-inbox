@@ -40,6 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hook skipped the ask as answered and moved the lane's cursor past it unread.
   An answer or go now closes an opener by topic or ref only when another lane
   wrote it; `--re`, `--resolves` and a withdraw close as before.
+- `cci watch --lane <stem>` through the daemon now prints the records of every
+  numbered lane that held the stem. Before, the daemon's wake read matched only
+  the bare name, so a watch on `fix-mac` never woke for `fix-mac-2`'s records,
+  while `cci tail --lane fix-mac` listed them.
 - A session now has cci's tools loaded from its first turn and after every
   compaction. Before, they sat behind tool search, and a call made without first
   fetching the schema failed with "input schema was not in your prompt".
