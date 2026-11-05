@@ -63,7 +63,7 @@ func (s *Store) Dedicated(busy time.Duration) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open writer: %w", err)
 	}
-	return &Store{db: db, rw: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now, floors: s.floors, window: s.window}, nil
+	return &Store{db: db, rw: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now, floors: s.floors, reads: s.reads}, nil
 }
 
 // Commit applies w in one transaction, through the store's Writer when it

@@ -543,13 +543,8 @@ func (s *Store) query(ctx context.Context, f Filter, projection string) ([]Recor
 		return nil, err
 	}
 	now := s.Now()
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if out, ok := m.answer(ctx, s, f, projection, now); ok {
-			return out, s.numbered(ctx, out)
-		}
-	}
-	if w := s.window.current.Load(); w != nil {
-		if out, ok := w.answer(ctx, s, f, projection, now); ok {
 			return out, s.numbered(ctx, out)
 		}
 	}
@@ -662,11 +657,8 @@ func (s *Store) firstSince(ctx context.Context, at int64) (int64, error) {
 		return first, nil
 	}
 	var found sql.NullInt64
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		found = m.firstSince(at)
-	}
-	if w := s.window.current.Load(); w != nil && !found.Valid {
-		found = w.firstSince(ctx, at)
 	}
 	if !found.Valid {
 		if err := s.db.QueryRowContext(ctx, "SELECT MIN(seq) FROM records WHERE at >= ?", at).Scan(&found); err != nil || !found.Valid {
@@ -688,7 +680,7 @@ func (s *Store) Count(ctx context.Context, f Filter) (int, error) {
 		return 0, err
 	}
 	now := s.Now()
-	if m := s.window.model.Load(); m != nil {
+	if m := s.reads.model.Load(); m != nil {
 		if n, ok := m.count(ctx, s, f, now); ok {
 			return n, nil
 		}

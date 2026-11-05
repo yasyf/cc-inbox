@@ -41,7 +41,7 @@ var (
 func newWindowCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "window",
-		Short: "Turn the daemon's in-memory window of recent records on or off, or show it",
+		Short: "Turn the daemon's read model on or off, show it, or compare it with the store",
 	}
 	home := func(cmd *cobra.Command) (string, error) {
 		if inv := invoked(cmd.Context()); inv != nil && inv.st != nil {
@@ -49,35 +49,7 @@ func newWindowCmd() *cobra.Command {
 		}
 		return store.Home()
 	}
-	turn := func(on bool) func(*cobra.Command, []string) error {
-		return func(cmd *cobra.Command, _ []string) error {
-			at, err := home(cmd)
-			if err != nil {
-				return err
-			}
-			return store.SetHotWindow(at, on)
-		}
-	}
-	cmd.AddCommand(
-		&cobra.Command{Use: "on", Short: "Serve reads from the window; the daemon follows within a second", Args: cobra.NoArgs, RunE: turn(true)},
-		&cobra.Command{Use: "off", Short: "Serve every read from the store; the daemon follows within a second", Args: cobra.NoArgs, RunE: turn(false)},
-		&cobra.Command{Use: "status", Short: "Print what the window holds and how often it answered", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-			at, err := home(cmd)
-			if err != nil {
-				return err
-			}
-			inv := invoked(cmd.Context())
-			if inv == nil || inv.st == nil || inv.st.ServedHotWindow() == nil {
-				_, err := fmt.Fprintf(cmd.OutOrStdout(), "switch on=%t; no window is serving here\n", store.HotWindowOn(at))
-				return err
-			}
-			s := inv.st.ServedHotWindow().Stats()
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "switch on=%t floor=%d head=%d bytes=%d cap=%d hits=%d misses=%d failures=%d\n", store.HotWindowOn(at), s.Floor, s.Head, s.Bytes, store.HotWindowBytes, s.Hits, s.Misses, s.Failures)
-			return err
-		}},
-		newWindowParityCmd(),
-		newWindowModelCmd(home),
-	)
+	cmd.AddCommand(newWindowParityCmd(), newWindowModelCmd(home))
 	return cmd
 }
 
@@ -254,7 +226,7 @@ func newWindowParityCmd() *cobra.Command {
 	var opts parityOptions
 	cmd := &cobra.Command{
 		Use:    "parity",
-		Short:  "Replay captured traffic through the store and the window on two copies of a store, and diff everything",
+		Short:  "Replay captured traffic through the store and the read model on two copies of a store, and diff everything",
 		Args:   cobra.NoArgs,
 		Hidden: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -262,14 +234,13 @@ func newWindowParityCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&plain, "plain", "", "home of the copy that reads the store alone")
-	cmd.Flags().StringVar(&windowed, "windowed", "", "home of the copy that reads through the window")
+	cmd.Flags().StringVar(&windowed, "windowed", "", "home of the copy that reads through the read model")
 	cmd.Flags().StringVar(&traffic, "traffic", "", "captured requests, one JSON document a line")
 	cmd.Flags().StringVar(&report, "report", "", "file for each difference, one JSON document a line")
-	cmd.Flags().Int64Var(&limit, "cap", store.HotWindowBytes, "bytes the window may hold")
-	cmd.Flags().BoolVar(&opts.model, "model", false, "compare the read model rather than the window")
+	cmd.Flags().Int64Var(&limit, "cap", store.ReadModelBytes, "bytes the read model may hold")
 	cmd.Flags().BoolVar(&opts.replayOnly, "replay-only", false, "stop after the captured traffic, without the reader matrix")
 	cmd.Flags().BoolVar(&opts.matrixOnly, "matrix-only", false, "run the reader matrix without replaying the captured traffic")
-	cmd.Flags().StringVar(&opts.profile, "profile", "", "file for a CPU profile, labeled side=served on the read through the window or model")
+	cmd.Flags().StringVar(&opts.profile, "profile", "", "file for a CPU profile, labeled side=served on the read through the model")
 	for _, name := range []string{"plain", "windowed", "traffic", "report"} {
 		_ = cmd.MarkFlagRequired(name)
 	}
@@ -277,8 +248,8 @@ func newWindowParityCmd() *cobra.Command {
 }
 
 type parityOptions struct {
-	model, replayOnly, matrixOnly bool
-	profile                       string
+	replayOnly, matrixOnly bool
+	profile                string
 }
 
 func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, traffic, report string, limit int64, opts parityOptions) error {
@@ -297,43 +268,19 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	var heap0 runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&heap0)
-	var (
-		reads    parityReads
-		serve    func(on bool)
-		describe func() string
-	)
-	free := func(context.Context) error { return nil }
-	if opts.model {
-		model, err := windowed.BuildReadModelUnder(ctx, free, limit)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = model.Close() }()
-		reads = model
-		serve = func(on bool) {
-			if on {
-				windowed.ServeReadModel(model)
-			} else {
-				windowed.ServeReadModel(nil)
-			}
-		}
-		describe = func() string { return fmt.Sprintf("%+v", model.Stats()) }
-	} else {
-		window, err := windowed.BuildHotWindowUnder(ctx, free, limit)
-		if err != nil {
-			return err
-		}
-		defer func() { _ = window.Close() }()
-		reads = window
-		serve = func(on bool) {
-			if on {
-				windowed.ServeHotWindow(window)
-			} else {
-				windowed.ServeHotWindow(nil)
-			}
-		}
-		describe = func() string { return fmt.Sprintf("%+v", window.Stats()) }
+	model, err := windowed.BuildReadModelUnder(ctx, func(context.Context) error { return nil }, limit)
+	if err != nil {
+		return err
 	}
+	defer func() { _ = model.Close() }()
+	serve := func(on bool) {
+		if on {
+			windowed.ServeReadModel(model)
+		} else {
+			windowed.ServeReadModel(nil)
+		}
+	}
+	describe := func() string { return fmt.Sprintf("%+v", model.Stats()) }
 	serve(true)
 	var heap1 runtime.MemStats
 	runtime.GC()
@@ -391,15 +338,13 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 			return fmt.Errorf("replay %v on the store: %w", entry.Argv, err)
 		}
 		cpu1, faults1 := usage()
-		if opts.model {
-			harness.KeepSessions(time.Second)
-		}
+		harness.KeepSessions(time.Second)
 		var b replayed
 		pprof.Do(ctx, pprof.Labels("side", "served"), func(ctx context.Context) {
 			b, err = replay(ctx, windowed, windowedHome, entry)
 		})
 		if err != nil {
-			return fmt.Errorf("replay %v through the window: %w", entry.Argv, err)
+			return fmt.Errorf("replay %v through the read model: %w", entry.Argv, err)
 		}
 		cpu2, faults2 := usage()
 		class := parityClass(entry)
@@ -420,7 +365,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 		if err := differences.Encode(map[string]any{
 			"class": class, "argv": entry.Argv, "hook": entry.Hook, "at": entry.At,
 			"store":  map[string]any{"stdout": a.stdout, "stderr": a.stderr, "code": a.code, "cursors": a.cursors, "records": a.records},
-			"window": map[string]any{"stdout": b.stdout, "stderr": b.stderr, "code": b.code, "cursors": b.cursors, "records": b.records},
+			"served": map[string]any{"stdout": b.stdout, "stderr": b.stderr, "code": b.code, "cursors": b.cursors, "records": b.records},
 		}); err != nil {
 			return err
 		}
@@ -436,7 +381,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	for _, name := range names {
 		t := classes[name]
 		count := int64(t.same + t.different)
-		say("%-30s same=%-5d different=%-3d cpu/req store=%6.1fms window=%6.1fms faults/req store=%6d window=%6d\n", name, t.same, t.different,
+		say("%-30s same=%-5d different=%-3d cpu/req store=%6.1fms served=%6.1fms faults/req store=%6d served=%6d\n", name, t.same, t.different,
 			float64(t.storeNanos)/float64(count)/1e6, float64(t.windowNanos)/float64(count)/1e6, t.storeFaults/count, t.windowFaults/count)
 	}
 	var heapAfter runtime.MemStats
@@ -457,7 +402,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 		say("streams skipped=%d\nserved %s\n", skipped, describe())
 		return nil
 	}
-	matrix, mismatches, err := windowMatrix(ctx, windowed, reads, serve, differences)
+	matrix, mismatches, err := windowMatrix(ctx, windowed, model, serve, differences)
 	if err != nil {
 		return err
 	}
@@ -468,12 +413,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	return nil
 }
 
-type parityReads interface {
-	Answer(ctx context.Context, s *store.Store, f store.Filter) ([]store.Record, bool, error)
-	Bounds() (floor, head int64)
-}
-
-func windowMatrix(ctx context.Context, st *store.Store, reads parityReads, serve func(on bool), differences *json.Encoder) (int, int, error) {
+func windowMatrix(ctx context.Context, st *store.Store, reads *store.ReadModel, serve func(on bool), differences *json.Encoder) (int, int, error) {
 	frozen := *st
 	at := st.Now()
 	frozen.Now = func() time.Time { return at }

@@ -37,8 +37,8 @@ const (
 	Label           daemonkit.Label  = "com.yasyf.cc-inbox"
 	Schema          daemonkit.Schema = "cci.v1"
 	Addr                             = "127.0.0.1:7377"
-	hotWindowFollow                  = time.Second
-	hotWindowPace                    = 5 * time.Millisecond
+	readModelFollow                  = time.Second
+	readModelPace                    = 5 * time.Millisecond
 	schedulerProcs                   = 4
 	// Sessions is how many client sessions, and requests in flight, the
 	// daemon takes at once: every cci process that writes holds one.
@@ -188,7 +188,6 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	loops.Go(func() { maintainIndexes(syncCtx, r.home) })
 	loops.Go(func() { collect(syncCtx, st) })
 	loops.Go(func() { indexTrigrams(syncCtx, st) })
-	loops.Go(func() { keepHotWindow(syncCtx, st, r.home) })
 	loops.Go(func() { keepReadModel(syncCtx, st, r.home) })
 	if r.commands != nil {
 		loops.Go(func() {
@@ -241,57 +240,6 @@ func (r *Runtime) serveCommands(ctx context.Context, st *store.Store) error {
 	return r.commands(ctx, ln, st, r.home)
 }
 
-func keepHotWindow(ctx context.Context, st *store.Store, home string) {
-	var window *store.MemWindow
-	drop := func() {
-		if window == nil {
-			return
-		}
-		st.ServeHotWindow(nil)
-		if err := window.Close(); err != nil {
-			slog.Warn("cci daemon cannot close the hot window", "err", err)
-		}
-		window = nil
-	}
-	defer drop()
-	tick := time.NewTicker(hotWindowFollow)
-	defer tick.Stop()
-	for {
-		on := store.HotWindowOn(home)
-		if window != nil && (!on || window.Stale()) {
-			drop()
-		}
-		switch {
-		case on && window == nil:
-			built, err := st.BuildHotWindow(ctx, func(ctx context.Context) error {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(hotWindowPace):
-					return nil
-				}
-			})
-			if err != nil {
-				if ctx.Err() == nil {
-					slog.Warn("cci daemon cannot build the hot window; reads stay on the store", "err", err)
-				}
-				break
-			}
-			window = built
-			st.ServeHotWindow(window)
-		case window != nil:
-			if err := window.CatchUp(ctx); err != nil && !window.Stale() && ctx.Err() == nil {
-				slog.Warn("cci daemon cannot catch the hot window up", "err", err)
-			}
-		}
-		select {
-		case <-ctx.Done():
-			return
-		case <-tick.C:
-		}
-	}
-}
-
 const (
 	readModelRetry    = 5 * time.Minute
 	readModelSessions = time.Second
@@ -311,7 +259,7 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 		model = nil
 	}
 	defer drop()
-	tick := time.NewTicker(hotWindowFollow)
+	tick := time.NewTicker(readModelFollow)
 	defer tick.Stop()
 	var buildAfter time.Time
 	for {
@@ -332,7 +280,7 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-				case <-time.After(hotWindowPace):
+				case <-time.After(readModelPace):
 					return nil
 				}
 			})

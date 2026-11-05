@@ -256,14 +256,25 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 	return m, nil
 }
 
+type servedModel struct {
+	model atomic.Pointer[ReadModel]
+}
+
+// Covers reports whether the model holds the text of every record f can select,
+// so f needs no narrowing that exists to spare the store a scan.
+func (s *Store) Covers(f Filter) bool {
+	m := s.reads.model.Load()
+	return m != nil && !m.stale.Load() && (f.After >= m.hotFloor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > m.hotAt.Load())
+}
+
 // ServeReadModel has s's reads try m first; nil returns them to the store alone.
 func (s *Store) ServeReadModel(m *ReadModel) {
-	s.window.model.Store(m)
+	s.reads.model.Store(m)
 }
 
 // ServedReadModel is the read model s's reads try first, nil when there is none.
 func (s *Store) ServedReadModel() *ReadModel {
-	return s.window.model.Load()
+	return s.reads.model.Load()
 }
 
 // Close frees the model; a read still on it fails and goes to the store.
