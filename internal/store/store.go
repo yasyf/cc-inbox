@@ -699,6 +699,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := installProjection(ctx, tx, laneHoldObjects[:], "lane registry"); err != nil {
 		return err
 	}
+	if err := installProjection(ctx, tx, laneHoldChangeObjects[:], "lane hold change"); err != nil {
+		return err
+	}
 	if _, err := createQueryIndexes(ctx, tx); err != nil {
 		return err
 	}

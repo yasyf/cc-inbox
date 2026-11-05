@@ -394,3 +394,55 @@ func TestAnAskReadsOpenOnlyWhileALaneCanHearItsAnswer(t *testing.T) {
 		}
 	}
 }
+
+func TestAliasesFollowEveryHoldChange(t *testing.T) {
+	for _, served := range []bool{false, true} {
+		t.Run(fmt.Sprintf("read model %t", served), func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			testutil.Post(t, st, store.Record{Lane: "desk-7", Kind: kinds.State, Text: "up"})
+			if served {
+				model, err := st.BuildReadModel(t.Context(), noPace)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { st.ServeReadModel(nil); _ = model.Close() })
+				st.ServeReadModel(model)
+			}
+			steps := []store.Record{
+				{Lane: "other", Kind: kinds.Note, Text: "changes no hold"},
+				{Lane: "desk-8", Kind: kinds.State, Text: "registers"},
+				{Lane: "root", Kind: kinds.StandDown, To: []string{"desk-7"}, Fields: store.Fields{Attrs: map[string]string{"successor": "desk-8"}}},
+				{Lane: "desk-7", Kind: kinds.Report, Text: "came back"},
+				{Lane: "root", Kind: kinds.StandDown, To: []string{"desk-8"}},
+			}
+			for _, step := range steps {
+				for _, lane := range []string{"desk", "desk-7", "desk-8"} {
+					if _, err := st.Aliases(t.Context(), "d", lane); err != nil {
+						t.Fatal(err)
+					}
+				}
+				testutil.Post(t, st, step)
+				fresh, err := store.Open(t.Context(), st.HomeDir())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, lane := range []string{"desk", "desk-7", "desk-8"} {
+					got, err := st.Aliases(t.Context(), "d", lane)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want, err := fresh.Aliases(t.Context(), "d", lane)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !slices.Equal(got, want) {
+						t.Errorf("after %s %s: Aliases(%s) = %q, a fresh store reads %q", step.Lane, step.Kind, lane, got, want)
+					}
+				}
+				if err := fresh.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
+	}
+}

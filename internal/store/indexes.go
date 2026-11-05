@@ -172,6 +172,10 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	holdChangesInstalled, err := projectionInstalled(ctx, s.db, laneHoldChangeObjects[:], "lane hold change")
+	if err != nil {
+		return report, err
+	}
 	incidents, err := incidentProjectionInstalled(ctx, s.db)
 	if err != nil {
 		return report, err
@@ -181,8 +185,8 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !refsInstalled || !mutationsInstalled || !incidents {
-		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, refsInstalled, mutationsInstalled, incidents); err != nil {
+	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !refsInstalled || !mutationsInstalled || !holdChangesInstalled || !incidents {
+		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, refsInstalled, mutationsInstalled, holdChangesInstalled, incidents); err != nil {
 			return report, err
 		}
 		if !installed {
@@ -212,6 +216,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !mutationsInstalled {
 			for _, object := range recordMutationObjects {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !holdChangesInstalled {
+			for _, object := range laneHoldChangeObjects {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}
@@ -250,7 +259,7 @@ func lockMaintenance(home string) (*os.File, error) {
 	return lock, nil
 }
 
-func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, mutations, incidents bool) error {
+func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, mutations, holdChanges, incidents bool) error {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin projection maintenance: %w", err)
@@ -283,6 +292,11 @@ func (s *Store) installProjections(ctx context.Context, memberships, closers, ro
 	}
 	if !mutations {
 		if err := installProjection(ctx, tx, recordMutationObjects[:], "record mutation"); err != nil {
+			return err
+		}
+	}
+	if !holdChanges {
+		if err := installProjection(ctx, tx, laneHoldChangeObjects[:], "lane hold change"); err != nil {
 			return err
 		}
 	}

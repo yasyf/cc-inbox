@@ -98,6 +98,23 @@ type FirstMatch struct {
 // FirstMatches reads each filter's FirstMatch in (f.After, head] from one
 // snapshot on one connection, so a page the first filter loads serves the rest.
 func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) ([]FirstMatch, error) {
+	known, settled, err := s.aliasChanges(ctx)
+	if err != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	held := make([][]string, len(filters))
+	for i, f := range filters {
+		reader := cmp.Or(f.To, f.For, f.Addressed)
+		if !settled || reader == "" || f.Drive == "" {
+			continue
+		}
+		if held[i], err = s.Aliases(ctx, f.Drive, reader); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			settled = false
+		}
+	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open follow reader: %w", err)
@@ -124,6 +141,10 @@ func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) 
 	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'lane_holds'), EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'record_ref_keys')").Scan(&registry, &refs); err != nil {
 		return nil, fmt.Errorf("look for the follow indexes: %w", err)
 	}
+	if settled {
+		current, err := readAliasChanges(ctx, tx)
+		settled = err == nil && current == known
+	}
 	now := s.Now()
 	out := make([]FirstMatch, len(filters))
 	for i, f := range filters {
@@ -140,7 +161,9 @@ func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) 
 		}
 		reader := cmp.Or(f.To, f.For, f.Addressed)
 		if registry && reader != "" && f.Drive != "" {
-			if f.Aliases, err = aliases(ctx, tx, f.Drive, reader); err != nil {
+			if settled {
+				f.Aliases = held[i]
+			} else if f.Aliases, err = aliases(ctx, tx, f.Drive, reader); err != nil {
 				if ctx.Err() != nil {
 					return nil, ctx.Err()
 				}
