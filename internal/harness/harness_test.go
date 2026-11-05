@@ -95,3 +95,22 @@ func write(t *testing.T, dir, name, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestRecentSessionsKeepsAReadForItsSpan(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "one.json", `{"sessionId":"one"}`)
+	harness.KeepSessions(time.Hour)
+	t.Cleanup(func() { harness.KeepSessions(0) })
+	first, err := harness.RecentSessions(dir)
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first read = %v, %v", first, err)
+	}
+	write(t, dir, "two.json", `{"sessionId":"two"}`)
+	if kept, err := harness.RecentSessions(dir); err != nil || len(kept) != 1 {
+		t.Errorf("read inside the span = %v, %v; want the first read", kept, err)
+	}
+	harness.KeepSessions(0)
+	if fresh, err := harness.RecentSessions(dir); err != nil || len(fresh) != 2 {
+		t.Errorf("read with no span = %v, %v; want both files", fresh, err)
+	}
+}

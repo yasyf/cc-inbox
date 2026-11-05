@@ -20,6 +20,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/yasyf/cc-inbox/internal/channel"
+	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -336,7 +337,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 	var heap1 runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&heap1)
-	say("built in %s, heap %d MB: %s\n", time.Since(built).Round(time.Millisecond), (int64(heap1.HeapAlloc)-int64(heap0.HeapAlloc))/1e6, describe())
+	say("built in %s, heap %.0f MB: %s\n", time.Since(built).Round(time.Millisecond), (float64(heap1.HeapAlloc)-float64(heap0.HeapAlloc))/1e6, describe())
 	file, err := os.Open(traffic) //nolint:gosec // G304: the owner names the capture to replay.
 	if err != nil {
 		return err
@@ -382,12 +383,16 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 			skipped++
 			continue
 		}
+		harness.KeepSessions(0)
 		cpu0, faults0 := usage()
 		a, err := replay(ctx, plain, plainHome, entry)
 		if err != nil {
 			return fmt.Errorf("replay %v on the store: %w", entry.Argv, err)
 		}
 		cpu1, faults1 := usage()
+		if opts.model {
+			harness.KeepSessions(time.Second)
+		}
 		var b replayed
 		pprof.Do(ctx, pprof.Labels("side", "served"), func(ctx context.Context) {
 			b, err = replay(ctx, windowed, windowedHome, entry)

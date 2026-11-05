@@ -41,8 +41,8 @@ func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, err
 // bounded by SQLite's limit on bound variables.
 func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
 	if m := s.window.model.Load(); m != nil {
-		if open, ok := m.openAmong(ctx, s, drive, seqs); ok {
-			return s.RecordsAmong(ctx, drive, open)
+		if open, ok := m.openRecordsAmong(ctx, s, drive, seqs); ok {
+			return open, nil
 		}
 	}
 	openers, err := s.openersAmong(ctx, drive, seqs)

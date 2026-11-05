@@ -20,6 +20,7 @@ import (
 	"github.com/yasyf/daemonkit"
 	daemonversion "github.com/yasyf/daemonkit/version"
 
+	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
@@ -291,7 +292,10 @@ func keepHotWindow(ctx context.Context, st *store.Store, home string) {
 	}
 }
 
-const readModelRetry = 5 * time.Minute
+const (
+	readModelRetry    = 5 * time.Minute
+	readModelSessions = time.Second
+)
 
 func keepReadModel(ctx context.Context, st *store.Store, home string) {
 	var model *store.ReadModel
@@ -311,6 +315,11 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 	var buildAfter time.Time
 	for {
 		on := store.ReadModelOn(home)
+		if on {
+			harness.KeepSessions(readModelSessions)
+		} else {
+			harness.KeepSessions(0)
+		}
 		if model != nil && (!on || model.Stale()) {
 			drop()
 		}

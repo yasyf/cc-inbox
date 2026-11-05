@@ -24,13 +24,14 @@ const (
 	readModelFile = "model.on"
 	// ReadModelBytes caps what a read model holds: every record's selection
 	// columns, and the whole text of the newest records that fit.
-	ReadModelBytes    = 256 << 20
-	readModelSpan     = 36 * time.Hour
-	readModelBatch    = 1000
-	readModelRowBytes = 200
-	readModelTrimRows = 1000
-	readModelTrimAge  = 10 * time.Minute
-	readModelColumns  = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, ''), re_origin_seq, resolves_origin_seq"
+	ReadModelBytes     = 256 << 20
+	readModelSpan      = 36 * time.Hour
+	readModelBatch     = 1000
+	readModelRowBytes  = 200
+	readModelTextBytes = 400
+	readModelTrimRows  = 1000
+	readModelTrimAge   = 10 * time.Minute
+	readModelColumns   = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, ''), re_origin_seq, resolves_origin_seq"
 )
 
 var (
@@ -79,6 +80,12 @@ type modelRefs struct {
 type modelText struct {
 	id, text, refs, fields, body, also string
 	reOriginSeq, resolvesOriginSeq     sql.NullInt64
+	meta                               atomic.Pointer[modelMeta]
+}
+
+type modelMeta struct {
+	refs   Refs
+	fields Fields
 }
 
 type modelRow struct {
@@ -417,7 +424,7 @@ func (r *modelRefs) size() int64 {
 }
 
 func (t *modelText) size() int64 {
-	return int64(len(t.id)+len(t.text)+len(t.refs)+len(t.fields)+len(t.body)+len(t.also)) + 160
+	return int64(len(t.id)+len(t.text)+len(t.refs)+len(t.fields)+len(t.body)+len(t.also)) + readModelTextBytes
 }
 
 func (m *ReadModel) parsedAddressees(raw string) *modelAddressees {
@@ -449,7 +456,7 @@ func parsedModelRefs(raw string) *modelRefs {
 		return nil
 	}
 	var keys map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(raw), &keys); err != nil || strings.Contains(strings.ToLower(raw), `\u`) {
+	if err := json.Unmarshal([]byte(raw), &keys); err != nil || strings.Contains(strings.ToLower(raw), `\ud`) {
 		return &modelRefs{wrong: true}
 	}
 	refs := &modelRefs{}
@@ -1121,18 +1128,45 @@ func (s *Store) recordsBySeq(ctx context.Context, seqs []int64, projection strin
 }
 
 func (s *Store) modelRecord(row *modelRow, projection string) (Record, error) {
-	body := row.text.body
-	if projection == textColumns {
-		body = ""
+	meta, err := row.text.decodedMeta(row.seq)
+	if err != nil {
+		return Record{}, err
 	}
-	raw := rawRecord{
-		record: Record{Seq: row.seq, Origin: row.from, OriginSeq: row.originSeq, ID: row.text.id, Drive: row.drive, Lane: row.lane, Text: row.text.text, Topic: row.topic, Re: row.re, Resolves: row.resolves, Source: row.source},
-		kind:   row.kind, at: row.at, recipients: row.addressees.raw, refs: row.text.refs, fields: row.text.fields, body: body, also: row.text.also,
+	r := Record{
+		Seq: row.seq, Origin: s.local(row.from), OriginSeq: row.originSeq, ID: row.text.id, Drive: row.drive, Lane: row.lane, Kind: kinds.Kind(row.kind),
+		At: time.UnixMilli(row.at).UTC(), Text: row.text.text, Topic: row.topic, To: row.addressees.to, Re: row.re, Resolves: row.resolves, AlsoResolves: row.also,
+		Refs: meta.refs, Fields: meta.fields, Source: row.source,
+	}
+	if r.Origin == "" {
+		r.OriginSeq = 0
+	}
+	if projection != textColumns && row.text.body != "" {
+		r.Body = json.RawMessage(row.text.body)
 	}
 	if row.expires != 0 {
-		raw.expires = sql.NullInt64{Int64: row.expires, Valid: true}
+		expires := time.UnixMilli(row.expires).UTC()
+		r.ExpiresAt = &expires
 	}
-	return s.decoded(raw)
+	return r, nil
+}
+
+func (t *modelText) decodedMeta(seq int64) (*modelMeta, error) {
+	if meta := t.meta.Load(); meta != nil {
+		return meta, nil
+	}
+	meta := &modelMeta{}
+	if t.refs != "{}" {
+		if err := json.Unmarshal([]byte(t.refs), &meta.refs); err != nil {
+			return nil, fmt.Errorf("decode refs of #%d: %w", seq, err)
+		}
+	}
+	if t.fields != "{}" {
+		if err := json.Unmarshal([]byte(t.fields), &meta.fields); err != nil {
+			return nil, fmt.Errorf("decode fields of #%d: %w", seq, err)
+		}
+	}
+	t.meta.Store(meta)
+	return meta, nil
 }
 
 func (m *ReadModel) rowOf(seq int64) *modelRow {
@@ -1151,6 +1185,30 @@ func (r *modelRow) closure() Record {
 	return record
 }
 
+// openRecordsAmong is OpenAmong's answer, unnumbered as the store's is.
+func (m *ReadModel) openRecordsAmong(ctx context.Context, s *Store, drive string, seqs []int64) ([]Record, bool) {
+	open, ok := m.openAmong(ctx, s, drive, seqs)
+	if !ok {
+		return nil, false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	chosen := make([]*modelRow, 0, len(open))
+	for _, seq := range open {
+		row := m.rowOf(seq)
+		if row == nil {
+			return nil, false
+		}
+		chosen = append(chosen, row)
+	}
+	out, err := m.hydrated(ctx, s, chosen, columns)
+	if err != nil {
+		m.failures.Add(1)
+		return nil, false
+	}
+	return out, true
+}
+
 // openAmong is the seqs of OpenAmong's answer: it reads no record's text, and
 // false leaves the question to the store.
 func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs []int64) ([]int64, bool) {
@@ -1164,6 +1222,7 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 		m.misses.Add(1)
 		return nil, false
 	}
+	seqs = slices.Compact(slices.Sorted(slices.Values(seqs)))
 	openers := make([]Record, 0, len(seqs))
 	for _, seq := range seqs {
 		if row := m.rowOf(seq); row != nil && row.drive == drive && modelOpeners[row.kind] {
