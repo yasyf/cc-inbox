@@ -516,8 +516,9 @@ func TestPostNeverRefusesAClockInItsText(t *testing.T) {
 func TestPostAttrKeepsEveryCommaInItsValue(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	tap := "a scope change at 8afb275: HEAD #50894 8afb275 on dev, delta=scope, per his m1064 to m1066: no longer sits on #50177, which he closed"
-	got := postJSON(t, "--text", "row", "--attr", "tap_returned="+tap, "--attr", "step=one", "--attr", "step=two", "--attr", "step:1=6:30 PM answer his question, then post")
-	want := map[string]string{"tap_returned": tap, "step": "two", "step:1": "6:30 PM answer his question, then post"}
+	refusal := `go refused: "approve, then land" reads as key=value, not one reason`
+	got := postJSON(t, "--text", "row", "--attr", "tap_returned="+tap, "--attr", "step=one", "--attr", "step=two", "--attr", "step:1=6:30 PM answer his question, then post", "--attr", "refusal="+refusal)
+	want := map[string]string{"tap_returned": tap, "step": "two", "step:1": "6:30 PM answer his question, then post", "refusal": refusal}
 	if !reflect.DeepEqual(got.Fields.Attrs, want) {
 		t.Errorf("stored attrs %v, want %v", got.Fields.Attrs, want)
 	}

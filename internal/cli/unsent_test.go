@@ -49,7 +49,8 @@ func TestAPostTheBusCannotStoreTellsItsSenderAndTheNextPostStoresIt(t *testing.T
 		t.Fatal(err)
 	}
 
-	_, err = run(t, "post", "--drive", "d1", "--lane", "lane-a", "--kind", "note", "--to", "root", "--text", "the coordinator decision")
+	refusal := `go refused: "approve, then land" reads as key=value, not one reason`
+	_, err = run(t, "post", "--drive", "d1", "--lane", "lane-a", "--kind", "note", "--to", "root", "--text", "the coordinator decision", "--attr", "refusal="+refusal, "--attr", "step=two")
 	var down *cli.BusDown
 	if !errors.As(err, &down) || down.Path == "" || !strings.Contains(err.Error(), "NOT stored yet") {
 		t.Fatalf("a post the bus could not store = %v; want a BusDown naming the kept post", err)
@@ -69,9 +70,13 @@ func TestAPostTheBusCannotStoreTellsItsSenderAndTheNextPostStoresIt(t *testing.T
 	if kept, _ := filepath.Glob(filepath.Join(home, "unsent", "*")); len(kept) != 0 {
 		t.Fatalf("kept posts after the drain = %v; want none", kept)
 	}
-	out, err = run(t, "grep", "coordinator decision", "--drive", "d1")
-	if err != nil || !strings.Contains(out, "lane-a") {
+	out, err = run(t, "grep", "coordinator decision", "--drive", "d1", "--json")
+	var kept store.Record
+	if err != nil || json.Unmarshal([]byte(strings.TrimSpace(out)), &kept) != nil || kept.Lane != "lane-a" {
 		t.Fatalf("grep for the kept post = %q, %v; want lane-a's record", out, err)
+	}
+	if kept.Fields.Attrs["refusal"] != refusal || kept.Fields.Attrs["step"] != "two" {
+		t.Fatalf("the replayed post's attrs = %v; want each attr whole", kept.Fields.Attrs)
 	}
 }
 

@@ -109,12 +109,16 @@ func (f *attrsFlag) Set(s string) error {
 	return nil
 }
 
-func (f *attrsFlag) String() string {
+func (f *attrsFlag) Given() []string {
 	pairs := make([]string, 0, len(*f.attrs))
 	for _, key := range slices.Sorted(maps.Keys(*f.attrs)) {
 		pairs = append(pairs, key+"="+(*f.attrs)[key])
 	}
-	return "[" + strings.Join(pairs, ",") + "]"
+	return pairs
+}
+
+func (f *attrsFlag) String() string {
+	return "[" + strings.Join(f.Given(), ",") + "]"
 }
 
 func (*attrsFlag) Type() string { return "stringToString" }

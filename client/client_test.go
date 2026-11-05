@@ -269,9 +269,10 @@ func TestAnItemPostedToALaneByNameIsStored(t *testing.T) {
 func TestAPostCarriesItsAttrsLaneRefsAndURL(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 
-	stored := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "report", Text: "RELAUNCHED a-1 as a-2", To: []string{"root"}, LaneRefs: []string{"a-2"}, Attrs: map[string]string{"audience": "owner"}, URL: "https://example.com/x"})
+	refusal := `go refused: "approve, then land" reads as key=value, not one reason`
+	stored := post(t, client.Draft{Drive: "d", Lane: "supervisor", Kind: "report", Text: "RELAUNCHED a-1 as a-2", To: []string{"root"}, LaneRefs: []string{"a-2"}, Attrs: map[string]string{"audience": "owner", "refusal": refusal}, URL: "https://example.com/x"})
 
-	if stored.Text != "RELAUNCHED a-1 as a-2" || len(stored.Refs.Lanes) != 1 || stored.Refs.Lanes[0] != "a-2" || stored.Fields.Attrs["audience"] != "owner" || stored.Refs.URL != "https://example.com/x" {
+	if stored.Text != "RELAUNCHED a-1 as a-2" || len(stored.Refs.Lanes) != 1 || stored.Refs.Lanes[0] != "a-2" || stored.Fields.Attrs["audience"] != "owner" || stored.Fields.Attrs["refusal"] != refusal || stored.Refs.URL != "https://example.com/x" {
 		t.Fatalf("stored = %+v", stored)
 	}
 }
