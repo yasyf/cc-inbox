@@ -366,10 +366,11 @@ The receiver wraps `github.Handler` from `github.com/yasyf/cc-inbox/github`
 around a `service.Writer`, as the Trunk receiver does. A delivery that verifies
 under `X-Hub-Signature-256` becomes one `github` record on the `github` drive:
 a pull request's open, push, close, merge, draft, base and label changes, a
-submitted or dismissed review, a finished check run, a commit status that is no
-longer pending, and a push to the repository's default branch. Each carries the
+submitted or dismissed review, a created or finished check run, a commit status,
+and a push to the repository's default branch. Each carries the
 pull request when the event names one, the head commit, and the action, review
-state or conclusion as its outcome. A pull request record names its author as
+state or conclusion as its outcome; a check still running, such as a rerun at
+the same commit, carries its status, `queued`, `in_progress` or `pending`. A pull request record names its author as
 `author` and its labels, comma-separated, as `labels`, and a check run or
 status record names its repository as `repo`. A pull request push and a default-branch
 push carry the commit they replaced as `before`, and a check run or status
