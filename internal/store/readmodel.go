@@ -713,8 +713,8 @@ func (m *ReadModel) textOf(r *modelRow) (modelText, bool) {
 	blob := m.chunks[which].memory[r.textAt&math.MaxUint32:]
 	field := func() string {
 		n, read := binary.Uvarint(blob)
-		value := unsafe.String(unsafe.SliceData(blob[read:]), n)
-		blob = blob[uint64(read)+n:]
+		value := unsafe.String(unsafe.SliceData(blob[read:]), n) //nolint:gosec // G103, G115: a view of this chunk, copied before a record leaves the model.
+		blob = blob[uint64(read)+n:]                             //nolint:gosec // G115: read is a varint's length.
 		return value
 	}
 	number := func() sql.NullInt64 {
