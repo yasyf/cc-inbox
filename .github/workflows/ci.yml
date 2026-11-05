@@ -216,6 +216,7 @@ jobs:
           (cd .ci-urgent-repeat-old && go test -count=1 -race -run '^TestUrgentRepeatLegacyQueryCompatibility$' -v ./internal/store)
           cp internal/store/urgent_repeat_cost_internal_test.go .ci-urgent-repeat-baseline/internal/store/
           cp internal/store/index_cost_internal_test.go .ci-urgent-repeat-baseline/internal/store/
+          cp internal/store/testdata/urgent-repeat-baseline/use_handle_test.go .ci-urgent-repeat-baseline/internal/store/use_handle_internal_test.go
           test "$(git -C .ci-urgent-repeat-baseline rev-parse HEAD)" = 80a23237731d154e73b2ab9c908809316407ea80
           if (cd .ci-urgent-repeat-baseline && CCI_URGENT_REPEAT_REQUIRE_STOCK_BOUND=1 go test -count=1 -run '^TestUrgentRepeatIndexDiagnostic$' -v ./internal/store) > "$RUNNER_TEMP/urgent-repeat-old.log" 2>&1; then
             cat "$RUNNER_TEMP/urgent-repeat-old.log"
