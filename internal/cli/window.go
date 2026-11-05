@@ -485,8 +485,32 @@ func windowMatrix(ctx context.Context, st *store.Store, reads parityReads, serve
 	floor, head := reads.Bounds()
 	afters := []int64{floor - 1, max(floor-1, head-matrixSpan)}
 	compared, mismatched := 0, 0
+	seenDrives := map[string]bool{}
 	askKinds := []kinds.Kind{kinds.Ask, kinds.Decide, kinds.Blocker, kinds.Hold}
 	for _, reader := range readers {
+		if !seenDrives[reader.Drive] {
+			seenDrives[reader.Drive] = true
+			since := at.Add(-24 * time.Hour)
+			open, untracked, older, err := st.OpenSince(ctx, reader.Drive, since)
+			if err != nil {
+				return compared, mismatched, err
+			}
+			serve(false)
+			wantOpen, wantUntracked, wantOlder, err := st.OpenSince(ctx, reader.Drive, since)
+			serve(true)
+			if err != nil {
+				return compared, mismatched, err
+			}
+			compared++
+			a, _ := json.Marshal([]any{wantOpen, wantUntracked, wantOlder})
+			b, _ := json.Marshal([]any{open, untracked, older})
+			if !bytes.Equal(a, b) {
+				mismatched++
+				if err := differences.Encode(map[string]any{"class": "matrix-open-since", "drive": reader.Drive, "store": string(a), "served": string(b)}); err != nil {
+					return compared, mismatched, err
+				}
+			}
+		}
 		shapes := []store.Filter{
 			{Drive: reader.Drive, For: reader.Lane},
 			{Drive: reader.Drive, To: reader.Lane},
