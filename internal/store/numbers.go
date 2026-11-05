@@ -159,7 +159,9 @@ func ParseNumber(ref string) (Number, error) {
 }
 
 // Resolve turns a record number as any node prints it, #N or #N@node, into
-// this store's seq for that record.
+// this store's seq for that record. On a node that is not an owner, a bare #N
+// held from no owner node names this node's own record N, the number it printed
+// as #N@node.
 func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
 	num, err := ParseNumber(ref)
 	if err != nil {
@@ -178,12 +180,15 @@ func (s *Store) Resolve(ctx context.Context, ref string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if len(args) == 0 {
-		return 0, fmt.Errorf("%s: %w", ref, ErrNoNumber)
-	}
 	var seq int64
-	err = s.db.QueryRowContext(ctx, "SELECT seq FROM records WHERE "+match+" AND origin_seq = ? UNION ALL SELECT seq FROM aliases WHERE "+match+" AND origin_seq = ? LIMIT 1",
-		append(append(append([]any{}, args...), n), append(args, n)...)...).Scan(&seq)
+	err = sql.ErrNoRows
+	if len(args) > 0 {
+		err = s.db.QueryRowContext(ctx, "SELECT seq FROM records WHERE "+match+" AND origin_seq = ? UNION ALL SELECT seq FROM aliases WHERE "+match+" AND origin_seq = ? LIMIT 1",
+			append(append(append([]any{}, args...), n), append(args, n)...)...).Scan(&seq)
+	}
+	if errors.Is(err, sql.ErrNoRows) && !tagged {
+		err = s.db.QueryRowContext(ctx, "SELECT seq FROM records WHERE origin = ? AND origin_seq = ?", s.Self(), n).Scan(&seq)
+	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("%s: %w", ref, ErrNoNumber)
 	}
