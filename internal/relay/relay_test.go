@@ -301,6 +301,58 @@ func TestDelegatedInstancesWriteUnderTheirOwnOrigins(t *testing.T) {
 	}
 }
 
+func TestScopeReportsWhatTheRelayLetsEachKeyReadAndWrite(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	owner := newPeer(t, srv, node.TierOwner)
+	join(t, srv, owner)
+	st, _ := testutil.Store(t)
+	svc, err := node.Load(st.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.AddService(svc, relaytest.Allow{Drives: []string{"page:*", "github"}, Kinds: []string{"oncall.say"}})
+	enrolled := &peer{st: st, id: svc, tier: node.TierService}
+	join(t, srv, enrolled)
+	pemKey, err := os.ReadFile(filepath.Join(node.Dir(st.HomeDir()), "key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, string(pemKey))
+	instance, _ := testutil.Store(t)
+	id, err := node.Load(instance.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	delegated, err := relay.Open(instance.HomeDir(), instance, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Tier: string(node.TierService)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := delegated.Delegate([]string{"page:*"}, nil, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := delegated.Join(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for name, tc := range map[string]struct {
+		node         *relay.Node
+		drives, kind []string
+	}{
+		"owner":              {owner.node, []string{"*"}, []string{"*"}},
+		"enrolled service":   {enrolled.node, []string{"page:*", "github"}, []string{"oncall.say"}},
+		"delegated instance": {delegated, []string{"page:*"}, []string{"oncall.say"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			got, err := tc.node.Scope(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(got.Drives, tc.drives) || !slices.Equal(got.Kinds, tc.kind) {
+				t.Errorf("scope = drives %v kinds %v, want drives %v kinds %v", got.Drives, got.Kinds, tc.drives, tc.kind)
+			}
+		})
+	}
+}
+
 func mustConfig(t *testing.T, p *peer) relay.Config {
 	t.Helper()
 	c, ok, err := relay.LoadConfig(p.st.HomeDir(), relay.DefaultMesh)

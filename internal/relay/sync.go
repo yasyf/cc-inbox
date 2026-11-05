@@ -889,6 +889,47 @@ type StatusReport struct {
 	RemoteErr string        `json:"remote_error,omitempty"`
 }
 
+type ScopeReport struct {
+	Mesh    string   `json:"mesh"`
+	Node    string   `json:"node"`
+	Tier    string   `json:"tier"`
+	Drives  []string `json:"drives"`
+	Kinds   []string `json:"kinds"`
+	Expires string   `json:"expires,omitempty"`
+}
+
+func (n *Node) Scope(ctx context.Context) (ScopeReport, error) {
+	rep := ScopeReport{Mesh: n.Config.Mesh, Node: n.Identity.ID(), Tier: n.Config.Tier}
+	switch n.Config.Tier {
+	case e2e.TierOwner:
+		rep.Drives, rep.Kinds = []string{"*"}, []string{"*"}
+		return rep, nil
+	case e2e.TierPaired:
+		rep.Drives, rep.Kinds = []string{"*"}, []string{}
+		return rep, nil
+	}
+	enrolled, d := n.Identity.ID(), n.Config.Delegation
+	if d != nil {
+		enrolled, rep.Drives, rep.Kinds, rep.Expires = d.Service, d.Drives, d.Kinds, d.Expires
+		if len(d.Kinds) > 0 {
+			return rep, nil
+		}
+	}
+	var mr membersResponse
+	if err := n.client().Call(ctx, http.MethodGet, "/v1/members?"+url.Values{"mesh": {n.Config.Mesh}}.Encode(), nil, &mr); err != nil {
+		return ScopeReport{}, err
+	}
+	at := slices.IndexFunc(mr.Members, func(m RemoteMember) bool { return m.ID == enrolled })
+	if at < 0 || mr.Members[at].Allow == nil {
+		return ScopeReport{}, fmt.Errorf("relay: the relay lists no scope for service member %s", enrolled)
+	}
+	rep.Kinds = mr.Members[at].Allow.Kinds
+	if d == nil {
+		rep.Drives = mr.Members[at].Allow.Drives
+	}
+	return rep, nil
+}
+
 func (n *Node) Status(ctx context.Context) (StatusReport, error) {
 	marks, err := n.Store.Watermarks(ctx)
 	if err != nil {

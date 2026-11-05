@@ -68,12 +68,18 @@ type keysResponse struct {
 }
 
 type RemoteMember struct {
-	ID   string    `json:"id"`
-	Pub  []byte    `json:"pub"`
-	Name string    `json:"name"`
-	Tier string    `json:"tier"`
-	By   string    `json:"by"`
-	At   time.Time `json:"at"`
+	ID    string    `json:"id"`
+	Pub   []byte    `json:"pub"`
+	Name  string    `json:"name"`
+	Tier  string    `json:"tier"`
+	Allow *Allow    `json:"allow,omitempty"`
+	By    string    `json:"by"`
+	At    time.Time `json:"at"`
+}
+
+type Allow struct {
+	Drives []string `json:"drives"`
+	Kinds  []string `json:"kinds"`
 }
 
 type membersResponse struct {

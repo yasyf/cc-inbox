@@ -29,9 +29,15 @@ type Member struct {
 	Pub      []byte `json:"pub"`
 	Name     string `json:"name"`
 	Tier     string `json:"tier"`
+	Allow    *Allow `json:"allow,omitempty"`
 	By       string `json:"by"`
 	At       string `json:"at"`
 	keysFrom string
+}
+
+type Allow struct {
+	Drives []string `json:"drives"`
+	Kinds  []string `json:"kinds"`
 }
 
 type queued struct {
@@ -111,6 +117,12 @@ func (s *Server) AddMember(id e2e.Identity, tier string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.members[id.ID()] = Member{ID: id.ID(), Pub: id.PublicKey(), Tier: tier, At: time.Now().UTC().Format(time.RFC3339Nano)}
+}
+
+func (s *Server) AddService(id e2e.Identity, allow Allow) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.members[id.ID()] = Member{ID: id.ID(), Pub: id.PublicKey(), Tier: e2e.TierService, Allow: &allow, At: time.Now().UTC().Format(time.RFC3339Nano)}
 }
 
 func (s *Server) Epoch() uint64 {
