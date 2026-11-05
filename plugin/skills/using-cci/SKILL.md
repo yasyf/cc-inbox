@@ -284,7 +284,9 @@ next tool call, including records posted since the window started. A
 when the lane is its first addressee; read the ones it is copied on with
 `cci tail --reader <lane>`, which also moves the hook past what it printed. The open asks the lane owes lead that
 context only when the set changed since the last list; otherwise one line
-counts them and names `cci digest`. The first delivery after a session
+counts them and names `cci tail --open`, which prints every one, newest first
+at any age; `--kind ask` narrows it and `--to <lane>` reads another lane's. The
+first delivery after a session
 start or compaction lists them in full. A `stopped`, `hold`, or `owner` record
 addressed to you lands mid-task; act on it before your next edit.
 

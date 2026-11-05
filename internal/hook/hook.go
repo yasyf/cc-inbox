@@ -312,7 +312,7 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 	out.WriteString(note)
 	ack := res.Ack
 	if b.Lane != "" {
-		open, err := owed(ctx, st, b.Drive, b.Lane)
+		open, err := Owed(ctx, st, b.Drive, b.Lane)
 		if err != nil {
 			return err
 		}
@@ -333,7 +333,10 @@ func acknowledge(ctx context.Context, st *store.Store, w io.Writer, event, text 
 	return st.MoveCursors(ctx, ack)
 }
 
-func owed(ctx context.Context, st *store.Store, drive, reader string) ([]store.Record, error) {
+// Owed returns, in seq order, the open asks, blockers and question-ending
+// decides that name reader or one of its aliases first and came from another
+// lane: the asks the hook lists and cci tail --open prints.
+func Owed(ctx context.Context, st *store.Store, drive, reader string) ([]store.Record, error) {
 	open, err := st.OpenTo(ctx, drive, reader, askKinds)
 	if err != nil {
 		return nil, err
@@ -392,7 +395,7 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 		for i, r := range newest {
 			ids[len(newest)-1-i] = fmt.Sprintf("#%d %s %dm", r.Seq, r.Lane, int(now.Sub(r.At).Minutes()))
 		}
-		_, _ = fmt.Fprintf(w, "%d open asks addressed to %s, changed since the last list; newest: %s; cci show <seq> prints one, cci digest lists them\n", len(open), b.Lane, strings.Join(ids, ", "))
+		_, _ = fmt.Fprintf(w, "%d open asks addressed to %s, changed since the last list; newest: %s; cci show <seq> prints one, cci tail --open lists them\n", len(open), b.Lane, strings.Join(ids, ", "))
 		return ack, nil
 	}
 	_, _ = fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", b.Lane)
@@ -445,7 +448,7 @@ func nudgeOverdue(ctx context.Context, st *store.Store, p Payload, b store.Bindi
 	if !ok {
 		return false, watermark(ctx, st, cursor, b.Drive)
 	}
-	open, err := owed(ctx, st, b.Drive, b.Lane)
+	open, err := Owed(ctx, st, b.Drive, b.Lane)
 	if err != nil {
 		return false, err
 	}
