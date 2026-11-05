@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci me` and `cci who` now print `gone, never seen` for a peer with no sighting
+  and no status. Before, they printed `gone, last seen Dec 31 4:00 PM`, the zero
+  time in Pacific, so a lane that had never announced read as one that had left
+  at year's end.
 - An ask now reads closed once the lane that asked it has ended, by a stand-down
   or by its own newest record being `done`, `stopped` or `handoff`, and no lane
   hears its mail: no live successor down its stand-downs and no live lane under

@@ -178,3 +178,14 @@ func TestAgentViewsLeaveTheRootItsWindow(t *testing.T) {
 		}
 	}
 }
+
+func TestALineWithNoSightingNeverNamesATime(t *testing.T) {
+	now := time.Date(2026, 10, 4, 22, 0, 0, 0, time.UTC)
+	var view peers.View
+	view.Name, view.Role, view.Lane = "red-tunnel-fix", "session", "red-tunnel-fix"
+	got := view.Line(now)
+	want := "red-tunnel-fix session lane=red-tunnel-fix gone, never seen"
+	if got != want {
+		t.Errorf("Line() = %q, want %q", got, want)
+	}
+}
