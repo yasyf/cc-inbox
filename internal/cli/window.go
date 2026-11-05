@@ -30,7 +30,7 @@ import (
 const (
 	captureFile = "traffic.capture"
 	matrixSpan  = 500
-	matrixLanes = 60
+	matrixLanes = 16
 )
 
 var (
@@ -268,6 +268,7 @@ func newWindowParityCmd() *cobra.Command {
 	cmd.Flags().Int64Var(&limit, "cap", store.HotWindowBytes, "bytes the window may hold")
 	cmd.Flags().BoolVar(&opts.model, "model", false, "compare the read model rather than the window")
 	cmd.Flags().BoolVar(&opts.replayOnly, "replay-only", false, "stop after the captured traffic, without the reader matrix")
+	cmd.Flags().BoolVar(&opts.matrixOnly, "matrix-only", false, "run the reader matrix without replaying the captured traffic")
 	cmd.Flags().StringVar(&opts.profile, "profile", "", "file for a CPU profile, labeled side=served on the read through the window or model")
 	for _, name := range []string{"plain", "windowed", "traffic", "report"} {
 		_ = cmd.MarkFlagRequired(name)
@@ -276,8 +277,8 @@ func newWindowParityCmd() *cobra.Command {
 }
 
 type parityOptions struct {
-	model, replayOnly bool
-	profile           string
+	model, replayOnly, matrixOnly bool
+	profile                       string
 }
 
 func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, traffic, report string, limit int64, opts parityOptions) error {
@@ -379,7 +380,7 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 		if err := json.Unmarshal(lines.Bytes(), &entry); err != nil {
 			return fmt.Errorf("read a captured request: %w", err)
 		}
-		if entry.Hook == "" && (wire.Stream(entry.Argv) || len(entry.Argv) > 1 && entry.Argv[1] == "window") {
+		if opts.matrixOnly || entry.Hook == "" && (wire.Stream(entry.Argv) || len(entry.Argv) > 1 && entry.Argv[1] == "window") {
 			skipped++
 			continue
 		}
@@ -437,6 +438,20 @@ func runWindowParity(ctx context.Context, w io.Writer, plainHome, windowedHome, 
 		count := int64(t.same + t.different)
 		say("%-30s same=%-5d different=%-3d cpu/req store=%6.1fms window=%6.1fms faults/req store=%6d window=%6d\n", name, t.same, t.different,
 			float64(t.storeNanos)/float64(count)/1e6, float64(t.windowNanos)/float64(count)/1e6, t.storeFaults/count, t.windowFaults/count)
+	}
+	var heapAfter runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&heapAfter)
+	say("heap after replay %.0f MB\n", (float64(heapAfter.HeapAlloc)-float64(heap0.HeapAlloc))/1e6)
+	if opts.profile != "" {
+		heapProfile, err := os.Create(opts.profile + ".heap")
+		if err != nil {
+			return err
+		}
+		defer func() { _ = heapProfile.Close() }()
+		if err := pprof.Lookup("heap").WriteTo(heapProfile, 0); err != nil {
+			return err
+		}
 	}
 	if opts.replayOnly {
 		say("streams skipped=%d\nserved %s\n", skipped, describe())

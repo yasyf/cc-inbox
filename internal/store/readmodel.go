@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,10 +28,12 @@ const (
 	ReadModelBytes     = 256 << 20
 	readModelSpan      = 36 * time.Hour
 	readModelBatch     = 1000
-	readModelRowBytes  = 200
+	readModelRowBytes  = 300
 	readModelTextBytes = 400
 	readModelTrimRows  = 1000
 	readModelTrimAge   = 10 * time.Minute
+	readModelMetaHeld  = 1 << 10
+	modelNoExpiry      = math.MinInt64
 	readModelColumns   = "seq, origin, origin_seq, COALESCE(id, ''), drive, lane, kind, at, text, topic, recipients, re, resolves, refs, fields, expires_at, source, COALESCE(body, ''), COALESCE(also_resolves, ''), re_origin_seq, resolves_origin_seq"
 )
 
@@ -253,13 +256,13 @@ func (m *ReadModel) catchUp(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if err := m.trim(); err != nil {
+			m.stale.Store(true)
+			return err
+		}
 		if !more {
 			break
 		}
-	}
-	if err := m.trim(); err != nil {
-		m.stale.Store(true)
-		return err
 	}
 	m.version = version
 	return nil
@@ -325,15 +328,16 @@ func (m *ReadModel) ingest(rows *sql.Rows, cold int64) error {
 	if err := rows.Scan(&seq, &origin, &originSeq, &text.id, &drive, &lane, &kind, &at, &text.text, &topic, &recipient, &re, &resolves, &text.refs, &text.fields, &expires, &source, &text.body, &text.also, &text.reOriginSeq, &text.resolvesOriginSeq); err != nil {
 		return fmt.Errorf("scan a record for the read model: %w", err)
 	}
-	row := modelRow{seq: seq, at: at, re: re, resolves: resolves, originSeq: originSeq, drive: m.intern(drive), lane: m.intern(lane), kind: m.intern(kind), topic: m.intern(topic), source: m.intern(source), from: m.intern(origin)}
+	row := modelRow{expires: modelNoExpiry, seq: seq, at: at, re: re, resolves: resolves, originSeq: originSeq, drive: m.intern(drive), lane: m.intern(lane), kind: m.intern(kind), topic: m.intern(topic), source: m.intern(source), from: m.intern(origin)}
 	if expires.Valid {
 		row.expires = expires.Int64
 	}
 	row.addressees = m.parsedAddressees(recipient)
 	row.refs = parsedModelRefs(text.refs)
-	wrong := row.addressees.wrong || row.refs != nil && row.refs.wrong || text.fields != "{}" && !json.Valid([]byte(text.fields))
+	wrong := row.addressees.wrong || row.refs != nil && row.refs.wrong || !text.decodes()
 	if text.also != "" {
 		wrong = json.Unmarshal([]byte(text.also), &row.also) != nil || wrong
+		row.also = slices.Clip(row.also)
 		m.bytes += int64(len(row.also)) * 8
 	}
 	index := int32(len(m.rows)) //nolint:gosec // G115: a store never holds 2^31 records.
@@ -446,6 +450,7 @@ func (m *ReadModel) parsedAddressees(raw string) *modelAddressees {
 		parsed.to = append(parsed.to, address)
 		parsed.all = parsed.all || address == "all"
 	}
+	parsed.to = slices.Clip(parsed.to)
 	m.addressees[parsed.raw] = parsed
 	m.bytes += int64(len(raw)) + int64(len(parsed.to))*16 + 64
 	return parsed
@@ -458,6 +463,11 @@ func parsedModelRefs(raw string) *modelRefs {
 	var keys map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &keys); err != nil || strings.Contains(strings.ToLower(raw), `\ud`) {
 		return &modelRefs{wrong: true}
+	}
+	for _, name := range [...]string{`"prs"`, `"stacks"`, `"targets"`} {
+		if strings.Count(raw, name) > 1 {
+			return &modelRefs{wrong: true}
+		}
 	}
 	refs := &modelRefs{}
 	held := false
@@ -641,6 +651,9 @@ func (m *ReadModel) firstSince(at int64) sql.NullInt64 {
 }
 
 func (f Filter) modelable() bool {
+	if f.Trigrams != "" {
+		return false
+	}
 	for _, word := range f.Contains {
 		if strings.ContainsAny(word, "%_") {
 			return false
@@ -854,7 +867,7 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 	if !f.Since.IsZero() && r.at < sel.since || !f.Until.IsZero() && r.at >= sel.until {
 		return false, true
 	}
-	if !f.IncludeExpired && r.expires != 0 && r.expires <= sel.now {
+	if !f.IncludeExpired && r.expires != modelNoExpiry && r.expires <= sel.now {
 		return false, true
 	}
 	if len(sel.wordsLower) == 0 {
@@ -1039,6 +1052,9 @@ func lowerASCII(s string) []byte {
 }
 
 func containsFoldASCII(hay string, lowerWord []byte) bool {
+	if end := strings.IndexByte(hay, 0); end >= 0 {
+		hay = hay[:end]
+	}
 	if len(lowerWord) == 0 {
 		return true
 	}
@@ -1089,7 +1105,7 @@ func (m *ReadModel) hydrated(ctx context.Context, s *Store, chosen []*modelRow, 
 		}
 		return out, nil
 	}
-	cold, err := s.recordsBySeq(ctx, coldSeqs, projection)
+	cold, err := m.recordsBySeq(ctx, s, coldSeqs, projection)
 	if err != nil {
 		return nil, err
 	}
@@ -1106,12 +1122,24 @@ func (m *ReadModel) hydrated(ctx context.Context, s *Store, chosen []*modelRow, 
 	return out, nil
 }
 
-func (s *Store) recordsBySeq(ctx context.Context, seqs []int64, projection string) (map[int64]Record, error) {
+func (m *ReadModel) recordsBySeq(ctx context.Context, s *Store, seqs []int64, projection string) (map[int64]Record, error) {
 	wanted, err := json.Marshal(seqs)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx, "SELECT "+projection+" FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(wanted))
+	snapshot, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin a read of older text: %w", err)
+	}
+	defer func() { _ = snapshot.Rollback() }()
+	var mutations int64
+	if err := snapshot.QueryRowContext(ctx, "SELECT COALESCE((SELECT value FROM meta WHERE key = ?), 0)", recordMutationsKey).Scan(&mutations); err != nil {
+		return nil, fmt.Errorf("read record mutations: %w", err)
+	}
+	if mutations != m.mutations {
+		return nil, errReadModelStale
+	}
+	rows, err := snapshot.QueryContext(ctx, "SELECT "+projection+" FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(wanted))
 	if err != nil {
 		return nil, fmt.Errorf("read records by seq: %w", err)
 	}
@@ -1143,17 +1171,19 @@ func (s *Store) modelRecord(row *modelRow, projection string) (Record, error) {
 	if projection != textColumns && row.text.body != "" {
 		r.Body = json.RawMessage(row.text.body)
 	}
-	if row.expires != 0 {
+	if row.expires != modelNoExpiry {
 		expires := time.UnixMilli(row.expires).UTC()
 		r.ExpiresAt = &expires
 	}
 	return r, nil
 }
 
-func (t *modelText) decodedMeta(seq int64) (*modelMeta, error) {
-	if meta := t.meta.Load(); meta != nil {
-		return meta, nil
-	}
+func (t *modelText) decodes() bool {
+	_, err := t.decode(0)
+	return err == nil
+}
+
+func (t *modelText) decode(seq int64) (*modelMeta, error) {
 	meta := &modelMeta{}
 	if t.refs != "{}" {
 		if err := json.Unmarshal([]byte(t.refs), &meta.refs); err != nil {
@@ -1165,7 +1195,26 @@ func (t *modelText) decodedMeta(seq int64) (*modelMeta, error) {
 			return nil, fmt.Errorf("decode fields of #%d: %w", seq, err)
 		}
 	}
-	t.meta.Store(meta)
+	clipRefs(&meta.refs)
+	meta.fields.Envs = slices.Clip(meta.fields.Envs)
+	return meta, nil
+}
+
+func clipRefs(refs *Refs) {
+	refs.PRs, refs.Builds, refs.Stacks, refs.Targets, refs.Lanes = slices.Clip(refs.PRs), slices.Clip(refs.Builds), slices.Clip(refs.Stacks), slices.Clip(refs.Targets), slices.Clip(refs.Lanes)
+}
+
+func (t *modelText) decodedMeta(seq int64) (*modelMeta, error) {
+	if meta := t.meta.Load(); meta != nil {
+		return meta, nil
+	}
+	meta, err := t.decode(seq)
+	if err != nil {
+		return nil, err
+	}
+	if len(t.refs)+len(t.fields) <= readModelMetaHeld {
+		t.meta.Store(meta)
+	}
 	return meta, nil
 }
 
@@ -1323,7 +1372,11 @@ func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelRow, bool
 
 // namesOf is names answered from memory, false when a target is past what the
 // model holds.
-func (m *ReadModel) namesOf(s *Store, seqs []int64) (map[string]bool, map[int64]string, bool) {
+func (m *ReadModel) namesOf(ctx context.Context, s *Store, seqs []int64) (map[string]bool, map[int64]string, bool) {
+	if err := m.catchUp(ctx); err != nil {
+		m.failures.Add(1)
+		return nil, nil, false
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.stale.Load() || m.owners == nil {

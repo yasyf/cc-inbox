@@ -114,3 +114,19 @@ func TestRecentSessionsKeepsAReadForItsSpan(t *testing.T) {
 		t.Errorf("read with no span = %v, %v; want both files", fresh, err)
 	}
 }
+
+func TestRecentSessionsGivesEachCallerItsOwnMap(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "one.json", `{"sessionId":"one"}`)
+	harness.KeepSessions(time.Hour)
+	t.Cleanup(func() { harness.KeepSessions(0) })
+	first, err := harness.RecentSessions(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	delete(first, "one")
+	second, err := harness.RecentSessions(dir)
+	if err != nil || len(second) != 1 {
+		t.Errorf("after a caller deleted from its map = %v, %v; want the session", second, err)
+	}
+}
