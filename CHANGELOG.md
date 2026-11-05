@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci watch` now follows across a daemon restart. When the daemon stopped for a
+  newer install, it told each watch it had been cut short and sent exit 1, so a
+  Monitor on the watch ended and the lane stopped hearing its mail. Now the
+  daemon drops a cancelled watch's connection without a word and the client
+  resumes from the watch's cursor on the next daemon, as it already did when the
+  connection broke by itself.
+- A read whose caller cancelled it now fails with the cancellation, not `cci
+  store is busy`. A busy store waits for the caller's deadline, or 30 seconds
+  when it set none, and only then reports busy; `read schema version: context
+  canceled` after "busy" was the caller's own cancel, so it read as a store
+  fault that was not one.
 - `cci post` now says what to use when a lane reaches for `--subject`,
   `--title`, `--message` or `--summary`: a record has no line of its own beside
   its text, which is the one quoted argument or `--text`, with a longer body in

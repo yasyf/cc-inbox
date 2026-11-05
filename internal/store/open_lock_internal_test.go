@@ -147,6 +147,24 @@ func TestConnectReturnsBusyWithinItsDeadlineWhileInitLockIsHeld(t *testing.T) {
 	}
 }
 
+func TestConnectCancelledByItsCallerIsNotBusy(t *testing.T) {
+	home := t.TempDir()
+	st, err := Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	other, err := Connect(ctx, home)
+	if err == nil {
+		_ = other.Close()
+	}
+	if !errors.Is(err, context.Canceled) || Busy(err) {
+		t.Fatalf("connect with a cancelled context = %v, want the cancellation and not ErrBusy", err)
+	}
+}
+
 func TestConnectNeverMigrates(t *testing.T) {
 	for _, tt := range []struct {
 		name  string

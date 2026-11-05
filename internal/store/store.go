@@ -481,7 +481,7 @@ func (s *Store) connect(ctx context.Context) error {
 	defer func() { _ = lock.Close() }()
 	schema, current, err := s.current(ctx)
 	switch {
-	case Busy(err) || err != nil && ctx.Err() != nil:
+	case Busy(err) || err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
 		return fmt.Errorf("%w: %w", ErrBusy, err)
 	case err != nil:
 		return err

@@ -171,6 +171,9 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	err = root.ExecuteContext(channel.Hosted(context.WithValue(harness.WithConfigDir(ctx, env["CLAUDE_CONFIG_DIR"]), invocationKey{}, &invocation{
 		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, st: &view,
 	})))
+	if parent.Err() != nil && wire.Stream(request.Argv) && request.Argv[1] != "channel" {
+		return parent.Err()
+	}
 	if flushed := replies.Flush(ctx); flushed != nil {
 		return flushed
 	}
