@@ -76,7 +76,7 @@ func (s *Store) Announce(ctx context.Context, p Peer) (Peer, error) {
 	p.AnnouncedAt = p.AnnouncedAt.UTC()
 	tags, _ := json.Marshal(nonNil(p.Tags))
 	env, _ := json.Marshal(p.Env)
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Peer{}, fmt.Errorf("announce %s: %w", p.Session, err)
 	}

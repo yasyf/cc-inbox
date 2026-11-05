@@ -740,7 +740,7 @@ type Binding struct {
 }
 
 func (s *Store) Bind(ctx context.Context, k PeerKey, drive string, root bool) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("bind session: %w", err)
 	}
@@ -1023,7 +1023,7 @@ func (s *Store) Binding(ctx context.Context, k PeerKey) (Binding, bool, error) {
 
 // SetParent records the agent that spawned k, "" for the session's root thread.
 func (s *Store) SetParent(ctx context.Context, k PeerKey, parent string) error {
-	if _, err := s.db.ExecContext(ctx, "UPDATE sessions SET parent = ? WHERE session = ? AND agent = ? AND origin = ?", parent, k.Session, k.Agent, s.Self()); err != nil {
+	if _, err := s.rw.ExecContext(ctx, "UPDATE sessions SET parent = ? WHERE session = ? AND agent = ? AND origin = ?", parent, k.Session, k.Agent, s.Self()); err != nil {
 		return fmt.Errorf("record parent of %s: %w", k, err)
 	}
 	return nil
@@ -1092,7 +1092,7 @@ func (s *Store) Source(ctx context.Context, path string) (Source, bool, error) {
 }
 
 func (s *Store) SaveSource(ctx context.Context, src Source) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO imports (path, drive, lane, offset, inode, parser) VALUES (?, ?, ?, ?, ?, ?)
+	_, err := s.rw.ExecContext(ctx, `INSERT INTO imports (path, drive, lane, offset, inode, parser) VALUES (?, ?, ?, ?, ?, ?)
 ON CONFLICT (path) DO UPDATE SET drive = excluded.drive, lane = excluded.lane, offset = excluded.offset, inode = excluded.inode, parser = excluded.parser`, src.Path, src.Drive, src.Lane, src.Offset, src.Inode, src.Parser)
 	if err != nil {
 		return fmt.Errorf("save import source: %w", err)

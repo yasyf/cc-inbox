@@ -132,7 +132,7 @@ ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 		t.Fatal(err)
 	}
 	counted := *production
-	counted.db = db
+	counted.db, counted.rw = db, db
 	counted.owner = false
 	return &counted
 }

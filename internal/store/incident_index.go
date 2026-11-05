@@ -174,7 +174,7 @@ func (index *IncidentIndex) publishBody(ctx context.Context, path string) error 
 	if bodyErr == nil {
 		identity, id = body.Identity, incidentBodyID(body.Identity)
 	}
-	tx, err := index.store.db.BeginTx(ctx, nil)
+	tx, err := index.store.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -211,7 +211,7 @@ func (index *IncidentIndex) linkBody(ctx context.Context, path, id string) error
 	if previous == id {
 		return nil
 	}
-	tx, err := index.store.db.BeginTx(ctx, nil)
+	tx, err := index.store.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -297,7 +297,7 @@ func (index *IncidentIndex) reconcile(ctx context.Context) error {
 		if err := index.publishBody(ctx, path); err != nil {
 			return err
 		}
-		if _, err := index.store.db.ExecContext(ctx, "DELETE FROM incident_body_changes WHERE path=?", path); err != nil {
+		if _, err := index.store.rw.ExecContext(ctx, "DELETE FROM incident_body_changes WHERE path=?", path); err != nil {
 			return err
 		}
 		delete(index.pending, path)

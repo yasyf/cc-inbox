@@ -656,7 +656,7 @@ func collectedSeqs(rows []collectRow) []int64 {
 }
 
 func (s *Store) forget(ctx context.Context, rows []collectRow, head int64, k *retention) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin forget: %w", err)
 	}
@@ -711,7 +711,7 @@ ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)`, through); e
 }
 
 func (s *Store) forgetSessions(ctx context.Context, cutoff int64) (sessions, claims int, err error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin session retention: %w", err)
 	}
@@ -786,7 +786,7 @@ func (s *Store) returnSpace(ctx context.Context, pause func(context.Context) err
 		return true, free, s.vacuumIncremental(ctx)
 	}
 	for free > 0 {
-		if _, err := s.db.ExecContext(ctx, fmt.Sprintf("PRAGMA incremental_vacuum(%d)", min(free, vacuumPages))); err != nil {
+		if _, err := s.rw.ExecContext(ctx, fmt.Sprintf("PRAGMA incremental_vacuum(%d)", min(free, vacuumPages))); err != nil {
 			return false, freed, fmt.Errorf("return free pages: %w", err)
 		}
 		freed += min(free, vacuumPages)
@@ -799,7 +799,7 @@ func (s *Store) returnSpace(ctx context.Context, pause func(context.Context) err
 }
 
 func (s *Store) vacuumIncremental(ctx context.Context) error {
-	conn, err := s.db.Conn(ctx)
+	conn, err := s.rw.Conn(ctx)
 	if err != nil {
 		return fmt.Errorf("open vacuum connection: %w", err)
 	}
@@ -814,7 +814,7 @@ func (s *Store) vacuumIncremental(ctx context.Context) error {
 
 func (s *Store) checkpoint(ctx context.Context) (bool, error) {
 	var busy, log, moved int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &moved); err != nil {
+	if err := s.rw.QueryRowContext(ctx, "PRAGMA wal_checkpoint(TRUNCATE)").Scan(&busy, &log, &moved); err != nil {
 		return false, fmt.Errorf("checkpoint: %w", err)
 	}
 	return busy == 0, nil

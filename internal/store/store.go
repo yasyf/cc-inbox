@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -331,6 +332,7 @@ type Store struct {
 	beforeCursorMove func(context.Context) error
 
 	db     *sql.DB
+	rw     *sql.DB
 	home   string
 	node   node.Node
 	owner  bool
@@ -394,7 +396,7 @@ func Open(ctx context.Context, home string) (*Store, error) {
 		}
 	}
 	if err != nil {
-		_ = s.db.Close()
+		_ = s.Close()
 		return nil, err
 	}
 	return s, nil
@@ -403,20 +405,30 @@ func Open(ctx context.Context, home string) (*Store, error) {
 // Connect opens home as a client: it waits for an in-flight schema upgrade
 // and for SQLite's writer only until ctx's deadline, or ClientBudget when ctx
 // has none, then fails with ErrBusy, and returns ErrNeedsInit for a store an
-// initializer has not brought current.
+// initializer has not brought current. Its reads run on a read-only handle,
+// so a client that only reads never checkpoints the log or takes the
+// database's exclusive lock when it closes.
 func Connect(ctx context.Context, home string) (*Store, error) {
+	if _, err := os.Stat(filepath.Join(home, DBFile)); errors.Is(err, fs.ErrNotExist) {
+		return nil, ErrNeedsInit
+	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, ClientBudget)
 		defer cancel()
 	}
 	deadline, _ := ctx.Deadline()
-	s, err := openDB(home, min(time.Until(deadline), busyTimeout))
+	busy := min(time.Until(deadline), busyTimeout)
+	s, err := openDB(home, busy)
 	if err != nil {
 		return nil, err
 	}
+	if s.db, err = sql.Open("sqlite", storeDSN(home, int(busy.Milliseconds()))+"&mode=ro"); err != nil {
+		_ = s.rw.Close()
+		return nil, fmt.Errorf("open store reader: %w", err)
+	}
 	if err := s.connect(ctx); err != nil {
-		_ = s.db.Close()
+		_ = s.Close()
 		return nil, err
 	}
 	return s, nil
@@ -434,7 +446,7 @@ func openDB(home string, busy time.Duration) (*Store, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open store: %w", err)
 	}
-	return &Store{db: db, home: home, node: n, owner: true, Now: time.Now, floors: &sinceFloors{}, window: &hotWindowSlot{}}, nil
+	return &Store{db: db, rw: db, home: home, node: n, owner: true, Now: time.Now, floors: &sinceFloors{}, window: &hotWindowSlot{}}, nil
 }
 
 func sleep(ctx context.Context, d time.Duration) error {
@@ -498,7 +510,7 @@ func (s *Store) initialize(ctx context.Context) error {
 	if err != nil || current {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
+	if _, err := s.rw.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
 		return fmt.Errorf("set journal mode: %w", err)
 	}
 	if err := s.migrate(ctx); err != nil {
@@ -571,10 +583,14 @@ func newerSchema(schema int) error {
 }
 
 func (s *Store) Close() error {
+	var errs []error
 	if w, ok := s.writer.(io.Closer); ok {
-		return errors.Join(w.Close(), s.db.Close())
+		errs = append(errs, w.Close())
 	}
-	return s.db.Close()
+	if s.rw != s.db {
+		errs = append(errs, s.rw.Close())
+	}
+	return errors.Join(append(errs, s.db.Close())...)
 }
 
 func (s *Store) HomeDir() string {
@@ -617,7 +633,7 @@ func (s *Store) origin(local string) string {
 }
 
 func (s *Store) migrate(ctx context.Context) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin migration: %w", err)
 	}
@@ -904,7 +920,7 @@ type Ingestion struct {
 }
 
 func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin ingest: %w", err)
 	}
@@ -937,7 +953,7 @@ func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
 }
 
 func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (updated, inserted int, err error) {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, 0, fmt.Errorf("begin reparse: %w", err)
 	}

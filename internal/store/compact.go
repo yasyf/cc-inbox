@@ -390,7 +390,7 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 		day := r.At.In(time.Local).Format(time.DateOnly)
 		days[day] = append(days[day], r)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return CompactResult{}, fmt.Errorf("begin compact: %w", err)
 	}

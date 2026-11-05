@@ -43,7 +43,7 @@ func (s *Store) ProvisionIncidentScope(ctx context.Context, drive string) (Incid
 	}
 	defer func() { _ = index.Close() }()
 	transactionStarted := time.Now()
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return report, err
 	}
@@ -92,7 +92,7 @@ func (s *Store) ProvisionIncidentScope(ctx context.Context, drive string) (Incid
 	if err := index.checkBodyErrors(ctx, s, drive, s.Now().UnixMilli()); err != nil {
 		return report, err
 	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE incident_scopes SET ready=1 WHERE drive=?", drive); err != nil {
+	if _, err := s.rw.ExecContext(ctx, "UPDATE incident_scopes SET ready=1 WHERE drive=?", drive); err != nil {
 		return report, err
 	}
 	if err := s.db.QueryRowContext(ctx, "SELECT count(*) FROM incident_records WHERE drive=?", drive).Scan(&report.Records); err != nil {

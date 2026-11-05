@@ -46,7 +46,7 @@ func (s *Store) Claim(ctx context.Context, c Claim) (Claim, error) {
 		return Claim{}, errors.New("claim needs a session, rel, kind and key")
 	}
 	c.At, c.Source = s.Now().UTC(), "claim"
-	if _, err := s.db.ExecContext(ctx, `INSERT INTO claims (session, agent, rel, kind, key, at, origin) VALUES (?, ?, ?, ?, ?, ?, ?)
+	if _, err := s.rw.ExecContext(ctx, `INSERT INTO claims (session, agent, rel, kind, key, at, origin) VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (session, agent, rel, kind, key) DO UPDATE SET at = excluded.at, origin = excluded.origin`, c.Session, c.Agent, c.Rel, c.Kind, c.Key, c.At.UnixMilli(), s.Self()); err != nil {
 		return Claim{}, fmt.Errorf("claim %s %s: %w", c.Rel, c.Ref(), err)
 	}
@@ -55,7 +55,7 @@ ON CONFLICT (session, agent, rel, kind, key) DO UPDATE SET at = excluded.at, ori
 
 // Unclaim removes an explicit association and reports whether one existed.
 func (s *Store) Unclaim(ctx context.Context, c Claim) (bool, error) {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM claims WHERE session = ? AND agent = ? AND rel = ? AND kind = ? AND key = ? AND origin = ?", c.Session, c.Agent, c.Rel, c.Kind, c.Key, s.Self())
+	res, err := s.rw.ExecContext(ctx, "DELETE FROM claims WHERE session = ? AND agent = ? AND rel = ? AND kind = ? AND key = ? AND origin = ?", c.Session, c.Agent, c.Rel, c.Kind, c.Key, s.Self())
 	if err != nil {
 		return false, fmt.Errorf("unclaim %s %s: %w", c.Rel, c.Ref(), err)
 	}

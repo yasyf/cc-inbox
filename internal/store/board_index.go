@@ -223,7 +223,7 @@ func (index *BoardIndex) reconcile(ctx context.Context, scope *boardScope, encod
 	for path := range scope.pending {
 		dirty[path] = true
 	}
-	tx, err := index.store.db.BeginTx(ctx, nil)
+	tx, err := index.store.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
