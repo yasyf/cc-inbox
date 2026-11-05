@@ -294,3 +294,88 @@ func corrupt(t *testing.T, st *store.Store, statement string, seq int64) {
 		t.Fatal(err)
 	}
 }
+
+func TestReadModelLeavesWhatItCannotProveToTheStore(t *testing.T) {
+	tests := []struct {
+		name, set string
+	}{
+		{"fields that do not decode", `fields='{"attrs":123}'`},
+		{"refs with a repeated key", `refs='{"stacks":["a"],"stacks":["b"]}'`},
+		{"refs with a key in another case", `refs='{"STACKS":["a"]}'`},
+		{"a surrogate escape in refs", `refs='{"path":"😀"}'`},
+		{"recipients that are not strings", `recipients='[1]'`},
+		{"also_resolves that is not numbers", `also_resolves='["x"]'`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			readModelFixture(t, st)
+			bad := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "bad"})
+			corrupt(t, st, "UPDATE records SET "+tt.set+" WHERE seq=?", bad.Seq)
+			model, err := st.BuildReadModel(t.Context(), noPace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = model.Close() })
+			if _, answered, err := model.Answer(t.Context(), st, store.Filter{Drive: "d"}); err != nil || answered {
+				t.Errorf("answered = %t, err = %v; want the store to judge the row", answered, err)
+			}
+		})
+	}
+}
+
+func TestReadModelKeepsAnExpiryOfZero(t *testing.T) {
+	st, _ := testutil.Store(t)
+	expired := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "expired"})
+	corrupt(t, st, "UPDATE records SET expires_at=0 WHERE seq=?", expired.Seq)
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	for _, f := range []store.Filter{{Drive: "d"}, {Drive: "d", IncludeExpired: true}} {
+		got, answered, err := model.Answer(t.Context(), st, f)
+		if err != nil || !answered {
+			t.Fatalf("answered = %t, err = %v", answered, err)
+		}
+		want, err := st.Query(t.Context(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sameRecords(t, got, want)
+	}
+}
+
+func TestReadModelSearchStopsAtANul(t *testing.T) {
+	st, _ := testutil.Store(t)
+	held := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "placeholder"})
+	corrupt(t, st, "UPDATE records SET text='a'||char(0)||'needle' WHERE seq=?", held.Seq)
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	f := store.Filter{Drive: "d", Contains: []string{"needle"}}
+	got, answered, err := model.Answer(t.Context(), st, f)
+	if err != nil || !answered {
+		t.Fatalf("answered = %t, err = %v", answered, err)
+	}
+	want, err := st.Query(t.Context(), f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRecords(t, got, want)
+}
+
+func TestReadModelReadsUnderATrigramNarrowingStayOnTheStore(t *testing.T) {
+	st, _ := testutil.Store(t)
+	readModelFixture(t, st)
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	if _, answered, err := model.Answer(t.Context(), st, store.Filter{Drive: "d", Trigrams: `"xyz"`}); err != nil || answered {
+		t.Errorf("answered = %t, err = %v; want the store", answered, err)
+	}
+}

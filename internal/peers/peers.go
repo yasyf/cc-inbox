@@ -246,7 +246,11 @@ func resolve(ctx context.Context, st *store.Store, f Filter, lanes []string) ([]
 	if err != nil {
 		return nil, err
 	}
-	windows, err := harness.RecentSessions(dir)
+	readSessions := harness.CurrentSessions
+	if lanes != nil {
+		readSessions = harness.RecentSessions
+	}
+	windows, err := readSessions(dir)
 	if err != nil {
 		return nil, err
 	}

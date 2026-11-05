@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -141,17 +142,28 @@ func KeepSessions(span time.Duration) {
 }
 
 // RecentSessions is Sessions at most KeepSessions' span old, for a caller that
-// asks often. It decodes only the files whose size or time changed. The map is
-// shared, so a caller reads it and never writes to it.
+// asks often.
 func RecentSessions(dir string) (map[string]Session, error) {
 	sessionsKept.Lock()
 	defer sessionsKept.Unlock()
+	if sessionsKept.span != 0 && sessionsKept.dir == dir && time.Since(sessionsKept.at) < sessionsKept.span {
+		return maps.Clone(sessionsKept.read), nil
+	}
+	return currentSessions(dir)
+}
+
+// CurrentSessions is Sessions now, though with KeepSessions on it decodes only
+// the files whose size or time changed.
+func CurrentSessions(dir string) (map[string]Session, error) {
+	sessionsKept.Lock()
+	defer sessionsKept.Unlock()
+	return currentSessions(dir)
+}
+
+func currentSessions(dir string) (map[string]Session, error) {
 	kept := &sessionsKept
 	if kept.span == 0 {
 		return Sessions(dir)
-	}
-	if kept.dir == dir && time.Since(kept.at) < kept.span {
-		return kept.read, nil
 	}
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -192,7 +204,7 @@ func RecentSessions(dir string) (map[string]Session, error) {
 		read[file.session.SessionID] = file.session
 	}
 	kept.dir, kept.at, kept.files, kept.read = dir, time.Now(), files, read
-	return read, nil
+	return maps.Clone(read), nil
 }
 
 // Procs reads each process's create time once, however many registry rows
