@@ -404,6 +404,8 @@ func (v View) Line(now time.Time) string {
 		fmt.Fprintf(&b, " cwd=%s", v.Cwd)
 	}
 	switch {
+	case !v.Live && v.LastSeen().IsZero():
+		b.WriteString(" gone, never seen")
 	case !v.Live:
 		fmt.Fprintf(&b, " gone, last seen %s", render.Stamp(v.LastSeen(), now))
 	case v.Status != "":

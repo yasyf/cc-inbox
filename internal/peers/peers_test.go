@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,5 +177,16 @@ func TestAgentViewsLeaveTheRootItsWindow(t *testing.T) {
 		if err != nil || v.Agent != tt.want {
 			t.Fatalf("One(%+v) = %+v, %v; want agent %q", tt.f, v, err, tt.want)
 		}
+	}
+}
+
+func TestALineWithNoSightingNeverNamesATime(t *testing.T) {
+	now := time.Date(2026, 10, 4, 22, 0, 0, 0, time.UTC)
+	var view peers.View
+	view.Name, view.Role, view.Lane = "red-tunnel-fix", "session", "red-tunnel-fix"
+	got := view.Line(now)
+	want := "red-tunnel-fix session lane=red-tunnel-fix gone, never seen"
+	if !strings.HasPrefix(got, want) || strings.Contains(got, "last seen") {
+		t.Errorf("Line() = %q, want it to start %q and name no time", got, want)
 	}
 }
