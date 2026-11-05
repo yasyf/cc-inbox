@@ -41,8 +41,8 @@ func TestPostValidation(t *testing.T) {
 		{"opened needs pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Opened, Text: "x"}, "requires --pr"},
 		{"answer needs re", store.Record{Drive: "d", Lane: "l", Kind: kinds.Answer, Text: "x"}, "requires --re, --resolves or --topic"},
 		{"digest is internal", store.Record{Drive: "d", Lane: "l", Kind: kinds.Digest, Text: "x"}, "written only by cci"},
-		{"hold names a pr in text", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "HOLD #39489 until the canary clears"}, "hold names #39489 without --pr: add --pr 39489"},
-		{"hold names a pr in topic", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold"}, "add --pr 39489"},
+		{"hold names a pr in text", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "HOLD #39489 until the canary clears"}, "hold names #39489 without --pr, and a hold holds only its --pr targets: add --pr for each pull request this hold stops, such as --pr 39489"},
+		{"hold names a pr in topic", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Topic: "#39489", Text: "hold"}, "such as --pr 39489"},
 		{"hold names an owner/repo pr", store.Record{Drive: "d", Lane: "l", Kind: kinds.Hold, Text: "hold yasyf/cc-inbox#93"}, "hold names #93"},
 		{"blocked until is not a span", store.Record{Drive: "d", Lane: "l", Kind: kinds.Blocked, Text: "lr wait on the canary", Fields: store.Fields{Attrs: map[string]string{"until": "45"}}}, `until="45" is not a span`},
 	}

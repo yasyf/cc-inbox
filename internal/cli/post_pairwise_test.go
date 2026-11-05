@@ -111,9 +111,9 @@ func TestPostHoldDistinguishesExplicitRecordReferences(t *testing.T) {
 		want string
 	}{
 		{"wait for record #123", ""},
-		{"wait for #123", "add --pr 123"},
-		{"record #123 and #123", "add --pr 123"},
-		{"record #123 and #456", "add --pr 456"},
+		{"wait for #123", "such as --pr 123"},
+		{"record #123 and #123", "such as --pr 123"},
+		{"record #123 and #456", "such as --pr 456"},
 	} {
 		t.Run(tt.text, func(t *testing.T) {
 			t.Setenv("CCI_HOME", t.TempDir())

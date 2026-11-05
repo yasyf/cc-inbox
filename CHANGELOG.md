@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and no status. Before, they printed `gone, last seen Dec 31 4:00 PM`, the zero
   time in Pacific, so a lane that had never announced read as one that had left
   at year's end.
+- A hold whose text names a pull request without `--pr` is still refused, but the
+  refusal now says a hold holds only its `--pr` targets and asks for `--pr` on
+  each pull request the hold stops. Before, it told the poster to add `--pr` for
+  every number the text named, so a hold on a writer that named its readers as
+  context held the readers too. A hold with `--pr` whose text names other pull
+  requests now posts with a line listing them as not held.
 - An ask now reads closed once the lane that asked it has ended, by a stand-down
   or by its own newest record being `done`, `stopped` or `handoff`, and no lane
   hears its mail: no live successor down its stand-downs and no live lane under

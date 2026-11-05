@@ -114,7 +114,7 @@ func TestPostTailDigest(t *testing.T) {
 	if _, err = run(t, "post", "--lane", "l", "--kind", "nope", "--text", "x"); err == nil || !strings.Contains(err.Error(), "unknown kind") {
 		t.Fatalf("unknown kind: %v", err)
 	}
-	if _, err = run(t, "post", "--lane", "root", "--kind", "hold", "--text", "HOLD #39489 until the canary clears"); err == nil || !strings.Contains(err.Error(), "add --pr 39489") {
+	if _, err = run(t, "post", "--lane", "root", "--kind", "hold", "--text", "HOLD #39489 until the canary clears"); err == nil || !strings.Contains(err.Error(), "such as --pr 39489") {
 		t.Fatalf("hold naming an unbound pr: %v", err)
 	}
 	if out, err = run(t, "grep", "WALKER"); err != nil || !strings.Contains(out, "2 hold root") {
@@ -122,6 +122,9 @@ func TestPostTailDigest(t *testing.T) {
 	}
 	if out, err = run(t, "post", "--lane", "evidence-lane", "--kind", "evidence", "--text", "5xx began at "+time.Now().Add(-30*time.Minute).Format("3:04 PM")); err != nil || out != "#3\n" {
 		t.Fatalf("post evidence = %q, %v", out, err)
+	}
+	if out, err = run(t, "post", "--lane", "root", "--kind", "hold", "--pr", "48747", "--text", "#48747 holds until a release carrying #48611 and #48212 is live"); err != nil || !strings.Contains(out, "cci: this hold holds #48747 only; its text also names #48611, #48212, which it does not hold") {
+		t.Fatalf("hold naming context prs = %q, %v", out, err)
 	}
 }
 

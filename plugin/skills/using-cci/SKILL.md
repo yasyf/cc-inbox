@@ -159,9 +159,11 @@ Every `defect`, `matrix`, `hold`, `go`, or `opened` record about a stack carries
 too, so a stack or target query finds both the problem and the work addressing it.
 `--stack` names a deploy stack, such as `api/plat-usw2-prod`. Use repeated `--pr`
 flags for pull requests; `opened` and `landed` require at least one. A `hold`
-record that names `#<number>` in its text or topic needs `--pr <number>` for
-each one, because merge-queue guards read the hold's pull requests, never its
-prose. Post refuses the hold otherwise. Write a record sequence number in a hold
+holds exactly the pull requests its `--pr` flags name, because merge-queue
+guards read the hold's pull requests, never its prose. Give `--pr` only for each
+pull request the hold stops; one the text names as context stays unheld, and
+post prints a line listing it. Post refuses a hold whose text or topic names
+`#<number>` with no `--pr` at all. Write a record sequence number in a hold
 without its `#`.
 
 Use `blocked` when a stack or target cannot deploy. Close it with `unblock`
