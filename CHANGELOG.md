@@ -33,6 +33,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every number the text named, so a hold on a writer that named its readers as
   context held the readers too. A hold with `--pr` whose text names other pull
   requests now posts with a line listing them as not held.
+- `cci watch` now exits nonzero, saying it stopped, when it is cut short before
+  its `--for` ends, as a signal or a stopped daemon does. Before, it exited 0
+  with no output, so a Monitor on it read the silence as nothing happening.
 - An ask now reads closed once the lane that asked it has ended, by a stand-down
   or by its own newest record being `done`, `stopped` or `handoff`, and no lane
   hears its mail: no live successor down its stand-downs and no live lane under
