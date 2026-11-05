@@ -382,6 +382,7 @@ func newRelaySeedCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "seed",
 		Short: "Load a drive's records from cci relay export on stdin, printing progress, so relay sync reads only what arrived since",
+		Long:  "Load a drive's records from cci relay export on stdin, printing progress, so relay sync reads only what arrived since.\n\nTo seed another machine, copy the export there as a file and run cci relay seed < FILE on it. Piping the export into a remote session's stdin, as with sprite exec, can drop the session partway through a large drive.",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			nodes, _, err := relayNodes(st, mesh)
