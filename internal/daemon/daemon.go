@@ -243,7 +243,7 @@ func (r *Runtime) serveCommands(ctx context.Context, st *store.Store) error {
 const (
 	readModelRetry    = 5 * time.Minute
 	readModelSessions = time.Second
-	readModelProcs    = 2
+	readModelProcs    = 1
 )
 
 func keepReadModel(ctx context.Context, st *store.Store, home string) {
