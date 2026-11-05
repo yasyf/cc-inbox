@@ -188,6 +188,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	loops.Go(func() { collect(syncCtx, st) })
 	loops.Go(func() { indexTrigrams(syncCtx, st) })
 	loops.Go(func() { keepHotWindow(syncCtx, st, r.home) })
+	loops.Go(func() { keepReadModel(syncCtx, st, r.home) })
 	if r.commands != nil {
 		loops.Go(func() {
 			if err := r.serveCommands(syncCtx, st); err != nil && syncCtx.Err() == nil {
@@ -280,6 +281,61 @@ func keepHotWindow(ctx context.Context, st *store.Store, home string) {
 		case window != nil:
 			if err := window.CatchUp(ctx); err != nil && !window.Stale() && ctx.Err() == nil {
 				slog.Warn("cci daemon cannot catch the hot window up", "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+		}
+	}
+}
+
+const readModelRetry = 5 * time.Minute
+
+func keepReadModel(ctx context.Context, st *store.Store, home string) {
+	var model *store.ReadModel
+	drop := func() {
+		if model == nil {
+			return
+		}
+		st.ServeReadModel(nil)
+		if err := model.Close(); err != nil && ctx.Err() == nil {
+			slog.Warn("cci daemon cannot close the read model", "err", err)
+		}
+		model = nil
+	}
+	defer drop()
+	tick := time.NewTicker(hotWindowFollow)
+	defer tick.Stop()
+	var buildAfter time.Time
+	for {
+		on := store.ReadModelOn(home)
+		if model != nil && (!on || model.Stale()) {
+			drop()
+		}
+		switch {
+		case on && model == nil && time.Now().After(buildAfter):
+			built, err := st.BuildReadModel(ctx, func(ctx context.Context) error {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(hotWindowPace):
+					return nil
+				}
+			})
+			if err != nil {
+				if ctx.Err() == nil {
+					slog.Warn("cci daemon cannot build the read model; reads stay on the store", "err", err)
+				}
+				buildAfter = time.Now().Add(readModelRetry)
+				break
+			}
+			model = built
+			st.ServeReadModel(model)
+		case model != nil:
+			if err := model.CatchUp(ctx); err != nil && !model.Stale() && ctx.Err() == nil {
+				slog.Warn("cci daemon cannot catch the read model up", "err", err)
 			}
 		}
 		select {

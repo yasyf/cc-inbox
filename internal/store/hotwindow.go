@@ -57,6 +57,7 @@ func SetHotWindow(home string, on bool) error {
 
 type hotWindowSlot struct {
 	current atomic.Pointer[MemWindow]
+	model   atomic.Pointer[ReadModel]
 }
 
 // MemWindow holds every record from a floor seq up in an in-memory database with
@@ -468,6 +469,9 @@ func (w *MemWindow) answer(ctx context.Context, s *Store, f Filter, projection s
 // Covers reports whether the window holds every record f can select, so f needs
 // no narrowing that exists to spare the store a scan.
 func (s *Store) Covers(f Filter) bool {
+	if m := s.window.model.Load(); m != nil && !m.stale.Load() && (f.After >= m.hotFloor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > m.hotAt.Load()) {
+		return true
+	}
 	w := s.window.current.Load()
 	return w != nil && !w.stale.Load() && (f.After >= w.floor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > w.belowAt.Load())
 }
@@ -486,6 +490,12 @@ func (w *MemWindow) firstSince(ctx context.Context, at int64) sql.NullInt64 {
 		return sql.NullInt64{}
 	}
 	return found
+}
+
+// Bounds is the window's floor and its newest seq.
+func (w *MemWindow) Bounds() (floor, head int64) {
+	stats := w.Stats()
+	return stats.Floor, stats.Head
 }
 
 // Answer is what the window returns for f, with whether it could answer: the
