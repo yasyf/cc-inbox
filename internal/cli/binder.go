@@ -58,36 +58,26 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, wi
 		if !ok {
 			continue
 		}
-		if held == lane {
-			return refuseHolder(ctx, st, self, drive, lane, holder, at)
+		seen := st.Now().Sub(holder.SeenAt).Round(time.Minute)
+		name := holder.Name + " " + holder.Key().String()
+		if holder.Origin != "" {
+			name += " on node " + holder.Origin
 		}
-		text := fmt.Sprintf("%s stood down for %s, which registered under %s while %s, thread %s, was live, seen %s ago: %s posts its handoff for %s and stops", held, lane, store.Stem(lane), held, holderName(holder), seenAgo(st, holder), held, lane)
-		if _, _, err := st.PostAt(ctx, store.Record{ID: "replaced:" + held + ":" + lane, Drive: drive, Lane: peers.RegistryLane, Kind: kinds.StandDown, To: []string{held, lane}, Text: text, Fields: store.Fields{Attrs: map[string]string{"successor": lane}}, Source: "post"}, 0, at); err != nil {
+		if held != lane {
+			text := fmt.Sprintf("%s stood down for %s, which registered under %s while %s, thread %s, was live, seen %s ago: %s posts its handoff for %s and stops", held, lane, store.Stem(lane), held, name, seen, held, lane)
+			if _, _, err := st.PostAt(ctx, store.Record{ID: "replaced:" + held + ":" + lane, Drive: drive, Lane: peers.RegistryLane, Kind: kinds.StandDown, To: []string{held, lane}, Text: text, Fields: store.Fields{Attrs: map[string]string{"successor": lane}}, Source: "post"}, 0, at); err != nil {
+				return err
+			}
+			continue
+		}
+		text := fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, name, seen, lane)
+		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
+		if err != nil {
 			return err
 		}
+		return &HeldLane{fmt.Sprintf("lane %s is held by live thread %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d. The name passes to another thread only after a stand-down: cci post --drive %s --lane root --kind stand-down --to %s --successor <lane> --text '<why>'", lane, name, seen, defect.Seq, drive, lane)}
 	}
 	return nil
-}
-
-func refuseHolder(ctx context.Context, st *store.Store, self store.PeerKey, drive, lane string, holder peers.View, at time.Time) error {
-	name, seen := holderName(holder), seenAgo(st, holder)
-	text := fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, name, seen, lane)
-	defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + lane + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
-	if err != nil {
-		return err
-	}
-	return &HeldLane{fmt.Sprintf("lane %s is held by live thread %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d. The name passes to another thread only after a stand-down: cci post --drive %s --lane root --kind stand-down --to %s --successor <lane> --text '<why>'", lane, name, seen, defect.Seq, drive, lane)}
-}
-
-func holderName(holder peers.View) string {
-	if holder.Origin == "" {
-		return holder.Name + " " + holder.Key().String()
-	}
-	return fmt.Sprintf("%s %s on node %s", holder.Name, holder.Key(), holder.Origin)
-}
-
-func seenAgo(st *store.Store, holder peers.View) time.Duration {
-	return st.Now().Sub(holder.SeenAt).Round(time.Minute)
 }
 
 func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey, window store.Window, drive, lane string) (peers.View, bool, error) {
