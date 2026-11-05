@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A post kept while the bus was down now replays each `--attr` whole. The kept
+  copy joined every attr into one `--attr` argument, so on replay the first
+  attr's value swallowed the rest after its first `=`. A post carrying two
+  attrs, one of them a refusal reason with `=` and `,`, was stored with one
+  attr.
 - `cci watch` now follows across a daemon restart. When the daemon stopped for a
   newer install, it told each watch it had been cut short and sent exit 1, so a
   Monitor on the watch ended and the lane stopped hearing its mail. Now the
