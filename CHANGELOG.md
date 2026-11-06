@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci relay delegate --pub <key> --drive <drive>` lets an owner sign a worker
+  key a delegation of at most 24 hours, wrap it every group key, and register
+  both with the relay, then prints the delegation. `cci relay join --delegation -`
+  joins the worker with it, holding no key but its own, and drops a
+  `service.pem` an earlier `--instance` join kept. The owner renews by running
+  `cci relay delegate` again; the worker adopts the renewal when its next push
+  meets the relay's `stale_delegation` refusal, and pushes again with nothing
+  lost. A rotation or share wraps the new group key to every live
+  owner-delegated worker whose delegation verifies against a pinned owner.
+  Needs a relay that serves `POST /v1/delegate`.
+
 - `cci tail --open` prints every open ask, blocker and question-ending decide
   the lane this thread is bound as owes, newest first at any age, in one call;
   `--to <lane>` reads another lane's and `--kind ask` narrows it. A lane read

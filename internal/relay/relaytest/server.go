@@ -25,14 +25,15 @@ import (
 )
 
 type Member struct {
-	ID       string `json:"id"`
-	Pub      []byte `json:"pub"`
-	Name     string `json:"name"`
-	Tier     string `json:"tier"`
-	Allow    *Allow `json:"allow,omitempty"`
-	By       string `json:"by"`
-	At       string `json:"at"`
-	keysFrom string
+	ID         string `json:"id"`
+	Pub        []byte `json:"pub"`
+	Name       string `json:"name"`
+	Tier       string `json:"tier"`
+	Allow      *Allow `json:"allow,omitempty"`
+	By         string `json:"by"`
+	At         string `json:"at"`
+	keysFrom   string
+	delegation *e2e.Delegation
 }
 
 type Allow struct {
@@ -89,6 +90,7 @@ func NewServer(t testing.TB) *Server {
 		reply(w, map[string]any{"pub": s.Pub(), "fingerprint": ""})
 	})
 	s.Mux.HandleFunc("POST /v1/join", s.signed(s.join))
+	s.Mux.HandleFunc("POST /v1/delegate", s.signed(s.delegate))
 	s.Mux.HandleFunc("POST /v1/push", s.signed(s.push))
 	s.Mux.HandleFunc("GET /v1/pull", s.signed(s.pull))
 	s.Mux.HandleFunc("POST /v1/ack", s.signed(s.ack))
@@ -184,7 +186,7 @@ func (s *Server) signed(h handler) http.HandlerFunc {
 		}
 		s.mu.Lock()
 		m, ok := s.members[node]
-		if !ok && r.URL.Path == "/v1/join" {
+		if r.URL.Path == "/v1/join" && (!ok || m.delegation != nil) {
 			m, ok = s.delegatedLocked(body)
 		}
 		s.mu.Unlock()
@@ -209,12 +211,48 @@ func (s *Server) delegatedLocked(body []byte) (Member, bool) {
 	}
 	d := req.Delegation
 	svc, ok := s.members[d.Service]
-	if !ok || svc.Tier != e2e.TierService || !e2e.VerifyDelegation(svc.Pub, *d) || d.Instance != e2e.NodeID(d.InstancePub) {
+	if !ok || svc.Tier != e2e.TierService && svc.Tier != e2e.TierOwner || !e2e.VerifyDelegation(svc.Pub, *d) || d.Instance != e2e.NodeID(d.InstancePub) {
 		return Member{}, false
 	}
-	m := Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: d.Service, keysFrom: d.Service}
+	m := Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: d.Service, delegation: d}
+	if svc.Tier == e2e.TierService {
+		m.keysFrom = d.Service
+	}
 	s.members[m.ID] = m
 	return m, true
+}
+
+func (s *Server) delegate(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
+	var req struct {
+		Delegation e2e.Delegation `json:"delegation"`
+		Wraps      []e2e.Wrap     `json:"wraps"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		fail(w, 400, "bad_request", err.Error())
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	d := req.Delegation
+	if caller.Tier != e2e.TierOwner || d.Service != caller.ID || !e2e.VerifyDelegation(caller.Pub, d) || d.Instance != e2e.NodeID(d.InstancePub) {
+		fail(w, 403, "forbidden", "an owner registers only a delegation it signed")
+		return
+	}
+	if have, ok := s.members[d.Instance]; ok && have.delegation == nil {
+		fail(w, 409, "conflict", d.Instance+" is a member, not an instance")
+		return
+	}
+	for _, wr := range req.Wraps {
+		if wr.To != d.Instance || wr.From != caller.ID || wr.Epoch == 0 || wr.Epoch > s.epoch {
+			fail(w, 400, "bad_request", "wrap does not match")
+			return
+		}
+	}
+	s.members[d.Instance] = Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: caller.ID, At: time.Now().UTC().Format(time.RFC3339Nano), delegation: &d}
+	for _, wr := range req.Wraps {
+		s.wraps[wr.Epoch] = append(slices.DeleteFunc(s.wraps[wr.Epoch], func(have e2e.Wrap) bool { return have.To == wr.To }), wr)
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
@@ -247,6 +285,10 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 			fail(w, 409, "stale_epoch", fmt.Sprintf("epoch %d, current %d", e.Epoch, s.epoch))
 			return
 		}
+		if registered := s.members[caller.ID].delegation; registered != nil && e.Delegation != nil && !bytes.Equal(registered.Sig, e.Delegation.Sig) {
+			fail(w, 409, "stale_delegation", "the envelope carries a delegation other than the registered one")
+			return
+		}
 	}
 	type result struct {
 		OriginSeq int64  `json:"origin_seq"`
@@ -255,7 +297,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 	}
 	var accepted, rejected []result
 	for _, e := range req.Envelopes {
-		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) || caller.keysFrom != "" && e.Delegation == nil || e.Tier == e2e.TierOwner && strings.Contains(e.KindClass, ".") {
+		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) || caller.delegation != nil && e.Delegation == nil || e.Tier == e2e.TierOwner && strings.Contains(e.KindClass, ".") {
 			rejected = append(rejected, result{OriginSeq: e.OriginSeq, Reason: "forbidden"})
 			continue
 		}
@@ -391,6 +433,10 @@ func (s *Server) getKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 	if caller.keysFrom != "" {
 		to = caller.keysFrom
 	}
+	var registered *e2e.Delegation
+	if m := s.members[caller.ID]; m.delegation != nil && m.keysFrom == "" {
+		registered = m.delegation
+	}
 	out := []e2e.Wrap{}
 	for e, ws := range s.wraps {
 		if e < since {
@@ -402,19 +448,23 @@ func (s *Server) getKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 			}
 		}
 	}
-	reply(w, map[string]any{"epoch": s.epoch, "wraps": out})
+	reply(w, map[string]any{"epoch": s.epoch, "wraps": out, "delegation": registered})
 }
 
 func (s *Server) listMembers(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []Member{}
+	instances := []e2e.Delegation{}
 	for _, m := range s.members {
-		if m.keysFrom == "" {
+		switch {
+		case m.delegation == nil:
 			out = append(out, m)
+		case m.keysFrom == "" && caller.Tier == e2e.TierOwner:
+			instances = append(instances, *m.delegation)
 		}
 	}
-	reply(w, map[string]any{"epoch": s.epoch, "members": out})
+	reply(w, map[string]any{"epoch": s.epoch, "members": out, "instances": instances})
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {

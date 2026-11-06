@@ -63,8 +63,15 @@ type keysRequest struct {
 }
 
 type keysResponse struct {
-	Epoch uint64     `json:"epoch"`
-	Wraps []e2e.Wrap `json:"wraps"`
+	Epoch      uint64          `json:"epoch"`
+	Wraps      []e2e.Wrap      `json:"wraps"`
+	Delegation *e2e.Delegation `json:"delegation,omitempty"`
+}
+
+type delegateRequest struct {
+	Mesh       string         `json:"mesh"`
+	Delegation e2e.Delegation `json:"delegation"`
+	Wraps      []e2e.Wrap     `json:"wraps"`
 }
 
 type RemoteMember struct {
@@ -83,8 +90,9 @@ type Allow struct {
 }
 
 type membersResponse struct {
-	Epoch   uint64         `json:"epoch"`
-	Members []RemoteMember `json:"members"`
+	Epoch     uint64           `json:"epoch"`
+	Members   []RemoteMember   `json:"members"`
+	Instances []e2e.Delegation `json:"instances,omitempty"`
 }
 
 type RemoteStatus struct {

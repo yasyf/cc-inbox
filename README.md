@@ -333,6 +333,15 @@ cci relay enroll --tier service --pub <base64 key> --allow 'page:*|oncall.say' -
 
 The new member then runs `cci relay join --url https://<relay URL> --tier <tier> --owner <the enrolling owner's public key>`, so it trusts that owner's group-key wraps. Every other owner pins the new member from the relay's `peer.joined`, which carries the enrolling owner's signed grant; against a relay older than relay-api v3.5, pin a new service by hand with `cci relay join --service <its public key>`.
 
+A short-lived machine, such as a cloud worker, joins as an instance its owner delegates, and holds no key but its own. The owner signs it a delegation of at most 24 hours, wraps it every group key, and registers both with the relay; the worker joins with the printed delegation on stdin:
+
+```bash
+cci relay delegate --pub <the worker's public key> --drive <drive> \
+  | ssh worker cci relay join --url https://<relay URL> --owner <this owner's public key> --delegation -
+```
+
+Run `cci relay delegate` for the same key again before the delegation expires to renew it. The relay takes the renewal at once, the worker adopts it the next time it refreshes keys, and a worker its owner stops renewing drops off the relay when the delegation expires.
+
 ### Hear Trunk merge-queue changes as records
 
 A webhook receiver can write records with no local store. Enroll its service

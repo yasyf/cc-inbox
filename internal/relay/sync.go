@@ -33,6 +33,7 @@ const (
 	logPage      = 100
 	logReaders   = 16
 	instanceLife = 24 * time.Hour
+	instanceSkew = 5 * time.Minute
 	renewWithin  = 2 * time.Hour
 )
 
@@ -59,23 +60,25 @@ func Open(home string, st *store.Store, id e2e.Identity, cfg Config) (*Node, err
 		return nil, err
 	}
 	n := &Node{Home: home, Store: st, Identity: id, Config: cfg, Keyring: ring}
-	if cfg.Delegation != nil {
-		if n.Service, err = ServiceKey(home, cfg.Mesh); err != nil {
-			return nil, err
-		}
-		if n.Service.ID() != cfg.Delegation.Service {
-			return nil, fmt.Errorf("relay: the service key is node %s, the delegation names %s", n.Service.ID(), cfg.Delegation.Service)
-		}
+	if cfg.Delegation == nil {
+		return n, nil
+	}
+	if n.Service, err = ServiceKey(home, cfg.Mesh); err != nil || n.Service == nil {
+		return n, err
+	}
+	if n.Service.ID() != cfg.Delegation.Service {
+		return nil, fmt.Errorf("relay: the service key is node %s, the delegation names %s", n.Service.ID(), cfg.Delegation.Service)
 	}
 	return n, nil
 }
 
 const ServiceKeyEnv = "CCI_SERVICE_KEY"
 
-// ServiceKey reads the service key a delegated instance holds from
+// ServiceKey reads the service key a service-delegated instance holds from
 // $CCI_SERVICE_KEY, or else from the mesh's service.pem, which Delegate
 // writes so that later processes, the daemon among them, need no secret in
-// their environment.
+// their environment. It is nil for an instance an owner delegated, which
+// holds no key but its own.
 func ServiceKey(home, mesh string) (e2e.Identity, error) {
 	if raw := os.Getenv(ServiceKeyEnv); raw != "" {
 		return parseServiceKey([]byte(raw), "$"+ServiceKeyEnv)
@@ -83,7 +86,7 @@ func ServiceKey(home, mesh string) (e2e.Identity, error) {
 	path := serviceKeyPath(home, mesh)
 	raw, err := os.ReadFile(path) //nolint:gosec // G304: path is the mesh's service key under the cci home.
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("relay: a delegated instance needs the service key in $%s or %s", ServiceKeyEnv, path)
+		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read service key: %w", err)
@@ -126,12 +129,103 @@ func (n *Node) Delegate(drives, kinds []string, ttl time.Duration) error {
 	return nil
 }
 
+// Issue signs the instance key pub a delegation over drives and kinds for
+// ttl, wraps it every group key this owner holds, and registers both with the
+// relay, which takes a renewal of a live instance the same way. The instance
+// joins with the delegation through Adopt and holds no key but its own.
+func (n *Node) Issue(ctx context.Context, pub []byte, drives, kinds []string, ttl time.Duration) (e2e.Delegation, error) {
+	if n.Config.Tier != e2e.TierOwner {
+		return e2e.Delegation{}, fmt.Errorf("relay: only an owner node issues delegations (this node is %s)", n.Config.Tier)
+	}
+	if ttl <= 0 || ttl > instanceLife {
+		return e2e.Delegation{}, fmt.Errorf("relay: a delegation lasts at most %s, not %s", instanceLife, ttl)
+	}
+	d, err := e2e.Delegate(n.Identity, n.Config.Mesh, pub, drives, kinds, time.Now().Add(ttl))
+	if err != nil {
+		return e2e.Delegation{}, err
+	}
+	if d.Instance == n.Identity.ID() {
+		return e2e.Delegation{}, errors.New("relay: an owner never delegates its own key")
+	}
+	members, err := n.Members(ctx)
+	if err != nil {
+		return e2e.Delegation{}, err
+	}
+	if _, err := n.Keyring.Current(n.Identity, n.Config.Mesh, members); err != nil {
+		return e2e.Delegation{}, err
+	}
+	keys, _ := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
+	to := e2e.Member{Node: d.Instance, PublicKey: pub, Tier: e2e.TierService}
+	wraps := make([]e2e.Wrap, 0, len(keys))
+	for _, k := range keys {
+		w, err := e2e.WrapKey(k, n.Config.Mesh, n.Identity, to)
+		if err != nil {
+			return e2e.Delegation{}, err
+		}
+		wraps = append(wraps, w)
+	}
+	req := delegateRequest{Mesh: n.Config.Mesh, Delegation: d, Wraps: wraps}
+	if err := n.client().Call(ctx, http.MethodPost, "/v1/delegate", req, nil); err != nil {
+		return e2e.Delegation{}, err
+	}
+	return d, nil
+}
+
+// Adopt makes this node the instance d delegates, holding no key but its own.
+// It refuses a delegation that names another key or mesh or that no pinned
+// owner signed; the Join that follows drops a service key an earlier join kept.
+func (n *Node) Adopt(ctx context.Context, d e2e.Delegation) error {
+	members, err := n.Members(ctx)
+	if err != nil {
+		return err
+	}
+	if err := n.ownDelegation(d, members); err != nil {
+		return err
+	}
+	n.Service, n.servicePEM, n.Config.Delegation, n.Config.Tier = nil, nil, &d, e2e.TierService
+	return nil
+}
+
+func (n *Node) ownDelegation(d e2e.Delegation, members map[string]e2e.Member) error {
+	if !slices.Equal(d.InstancePub, n.Identity.PublicKey()) || d.Service == n.Identity.ID() {
+		return fmt.Errorf("relay: the delegation is for %s, not this node %s", d.Instance, n.Identity.ID())
+	}
+	return ownerSigned(d, n.Config.Mesh, members)
+}
+
+func ownerSigned(d e2e.Delegation, mesh string, members map[string]e2e.Member) error {
+	owner, ok := members[d.Service]
+	switch {
+	case d.Mesh != mesh || d.Instance != e2e.NodeID(d.InstancePub):
+		return fmt.Errorf("relay: the delegation of %s in mesh %s is not one of mesh %s", d.Instance, d.Mesh, mesh)
+	case !ok || owner.Tier != e2e.TierOwner:
+		return fmt.Errorf("relay: the delegation of %s is by %s, no pinned owner", d.Instance, d.Service)
+	case !e2e.VerifyDelegation(owner.PublicKey, d):
+		return fmt.Errorf("relay: the delegation of %s by %s: %w", d.Instance, d.Service, e2e.ErrBadSignature)
+	}
+	return nil
+}
+
+func (n *Node) adoptRegistered(d *e2e.Delegation, members map[string]e2e.Member) error {
+	held := n.Config.Delegation
+	if d == nil || held == nil || n.Service != nil || slices.Equal(d.Sig, held.Sig) {
+		return nil
+	}
+	if err := n.ownDelegation(*d, members); err != nil {
+		return err
+	}
+	n.Config.Delegation = d
+	return SaveConfig(n.Home, n.Config)
+}
+
 // Renew signs this instance a fresh delegation with the service key it kept
 // and joins with it, once the one it holds is within renewWithin of expiring
-// or past it, so a long-lived instance never loses the relay at its expiry.
+// or past it, so a long-lived instance never loses the relay at its expiry. An
+// instance an owner delegated holds no key to renew with: its owner renews it
+// on the relay, and the instance adopts that delegation when it refreshes keys.
 func (n *Node) Renew(ctx context.Context) error {
 	held := n.Config.Delegation
-	if held == nil {
+	if held == nil || n.Service == nil {
 		return nil
 	}
 	expires, err := time.Parse(time.RFC3339Nano, held.Expires)
@@ -179,9 +273,14 @@ func (n *Node) Join(ctx context.Context) error {
 	if err := SaveConfig(n.Home, n.Config); err != nil {
 		return err
 	}
-	if n.servicePEM != nil {
+	switch {
+	case n.servicePEM != nil:
 		if err := writeFile(serviceKeyPath(n.Home, n.Config.Mesh), n.servicePEM); err != nil {
 			return fmt.Errorf("keep service key: %w", err)
+		}
+	case n.Config.Delegation != nil && n.Service == nil:
+		if err := os.Remove(serviceKeyPath(n.Home, n.Config.Mesh)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("drop the kept service key: %w", err)
 		}
 	}
 	if err := n.RefreshKeys(ctx); err != nil {
@@ -220,6 +319,9 @@ func (n *Node) RefreshKeys(ctx context.Context) error {
 	members, err := n.Members(ctx)
 	if err != nil {
 		return err
+	}
+	if err := n.adoptRegistered(kr.Delegation, members); err != nil {
+		slog.Warn("relay delegation refused", "mesh", n.Config.Mesh, "err", err)
 	}
 	added := false
 	for _, w := range kr.Wraps {
@@ -306,11 +408,22 @@ func (n *Node) wrapAll(ctx context.Context, k e2e.GroupKey) ([]e2e.Wrap, error) 
 		return nil, err
 	}
 	wraps := []e2e.Wrap{self}
+	to := make([]e2e.Member, 0, len(mr.Members)+len(mr.Instances))
 	for _, rm := range mr.Members {
 		m, ok := local[rm.ID]
-		if !ok || rm.ID == n.Identity.ID() || !slices.Equal(m.PublicKey, rm.Pub) {
+		if ok && rm.ID != n.Identity.ID() && slices.Equal(m.PublicKey, rm.Pub) {
+			to = append(to, m)
+		}
+	}
+	live := time.Now().Add(instanceSkew)
+	for _, d := range mr.Instances {
+		expires, err := time.Parse(time.RFC3339Nano, d.Expires)
+		if err != nil || !live.Before(expires) || ownerSigned(d, n.Config.Mesh, local) != nil {
 			continue
 		}
+		to = append(to, e2e.Member{Node: d.Instance, PublicKey: d.InstancePub, Tier: e2e.TierService})
+	}
+	for _, m := range to {
 		w, err := e2e.WrapKey(k, n.Config.Mesh, n.Identity, m)
 		if err != nil {
 			return nil, err
@@ -371,7 +484,7 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 	}
 	for batch := range slices.Chunk(rows, pushBatch) {
 		pr, sent, err := n.pushBatch(ctx, configs, batch)
-		if errors.Is(err, errStaleEpoch) {
+		if errors.Is(err, errStaleEpoch) || errors.Is(err, errStaleDelegation) {
 			if err := n.RefreshKeys(ctx); err != nil {
 				return res, err
 			}
@@ -393,7 +506,10 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 	return res, nil
 }
 
-var errStaleEpoch = errors.New("relay: sealed under a superseded group key")
+var (
+	errStaleEpoch      = errors.New("relay: sealed under a superseded group key")
+	errStaleDelegation = errors.New("relay: sealed under a delegation its owner has renewed")
+)
 
 const ownerKeepsLocal = "every dotted kind, such as lr.note, lr.item, lr.escalation and board.card"
 
@@ -436,8 +552,11 @@ func (n *Node) pushBatch(ctx context.Context, configs []Config, batch []store.Ro
 	}
 	if err := n.client().Call(ctx, http.MethodPost, "/v1/push", pushRequest{Mesh: n.Config.Mesh, Envelopes: envs}, &pr); err != nil {
 		var se *StatusError
-		if errors.As(err, &se) && se.Kind == "stale_epoch" {
+		switch {
+		case errors.As(err, &se) && se.Kind == "stale_epoch":
 			return pr, sent, fmt.Errorf("%w: %w", errStaleEpoch, err)
+		case errors.As(err, &se) && se.Kind == "stale_delegation":
+			return pr, sent, fmt.Errorf("%w: %w", errStaleDelegation, err)
 		}
 		return pr, sent, err
 	}
@@ -936,6 +1055,10 @@ func (n *Node) Scope(ctx context.Context) (ScopeReport, error) {
 	if d != nil {
 		enrolled, rep.Drives, rep.Kinds, rep.Expires = d.Service, d.Drives, d.Kinds, d.Expires
 		if len(d.Kinds) > 0 {
+			return rep, nil
+		}
+		if n.Service == nil {
+			rep.Kinds = []string{"*"}
 			return rep, nil
 		}
 	}
