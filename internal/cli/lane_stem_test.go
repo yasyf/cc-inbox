@@ -246,6 +246,87 @@ func TestAStemOrderTheHookShowedDoesNotWakeTheLanesStemWait(t *testing.T) {
 	}
 }
 
+const handedSuccessor = "dev-red-d12370de07-fix-case2"
+
+var handedReaders = []struct{ lane, hears, misses string }{
+	{"red-sweep-7", "the order for the stem", "the note for the stood-down lane"},
+	{handedSuccessor, "the note for the stood-down lane", "the order for the stem"},
+}
+
+func handedToAnotherStem(t *testing.T) (*store.Store, map[string]store.PeerKey) {
+	t.Helper()
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	post := func(args ...string) string {
+		t.Helper()
+		out, err := run(t, append([]string{"post", "--drive", "d"}, args...)...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	threads := map[string]store.PeerKey{"red-sweep-7": {Session: "session-7"}, handedSuccessor: {Session: "session-successor"}}
+	bind := func(lane string) {
+		t.Helper()
+		if err := st.BindLane(ctx, threads[lane], "d", lane, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetCursor(ctx, store.LaneCursor(threads[lane]), "d", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	post("--lane", "red-sweep-5", "--kind", "state", "--text", "red-sweep-5 up")
+	post("--lane", "red-sweep-7", "--kind", "state", "--text", "red-sweep-7 up")
+	bind("red-sweep-7")
+	post("--lane", "root", "--kind", "stand-down", "--to", "red-sweep-5", "--successor", handedSuccessor, "--text", "stand-down red-sweep-5 for "+handedSuccessor)
+	bind(handedSuccessor)
+	if out := post("--lane", "root", "--kind", "go", "--to", "red-sweep", "--text", "the order for the stem"); strings.HasPrefix(out, "cci:") {
+		t.Fatalf("post --to red-sweep = %q; want no notice, red-sweep-7 alone holding red-sweep", out)
+	}
+	if out := post("--lane", "root", "--kind", "note", "--to", "red-sweep-5", "--text", "the note for the stood-down lane"); !strings.HasPrefix(out, "cci: --to red-sweep-5: red-sweep-5 stood down, so this reaches "+handedSuccessor+"; --to red-sweep reaches whichever lane holds it\n") {
+		t.Fatalf("post --to red-sweep-5 = %q; want the notice naming %s", out, handedSuccessor)
+	}
+	post("--lane", handedSuccessor, "--kind", "state", "--text", "the successor works")
+	post("--lane", "red-sweep-7", "--kind", "state", "--text", "red-sweep-7 works")
+	return st, threads
+}
+
+func TestTheHookDeliversAStemOrderToTheStemsLiveLaneNotAnotherStemsSuccessor(t *testing.T) {
+	st, threads := handedToAnotherStem(t)
+	window := func() (store.Window, error) { return store.Window{PID: 1}, nil }
+	for _, reader := range handedReaders {
+		var out bytes.Buffer
+		if err := hook.PostToolUse(context.Background(), st, hook.Payload{SessionID: threads[reader.lane].Session, Event: "PostToolUse"}, window, &out); err != nil {
+			t.Fatal(err)
+		}
+		if got := out.String(); !strings.Contains(got, reader.hears) || strings.Contains(got, reader.misses) {
+			t.Errorf("%s's hook = %q; want %q and not %q", reader.lane, got, reader.hears, reader.misses)
+		}
+	}
+}
+
+func TestTailMailReadsAStemOrderForTheStemsLiveLaneNotAnotherStemsSuccessor(t *testing.T) {
+	_, threads := handedToAnotherStem(t)
+	for _, reader := range handedReaders {
+		t.Setenv("CLAUDE_CODE_SESSION_ID", threads[reader.lane].Session)
+		out, err := run(t, "tail", "--drive", "d", "--cursor", reader.lane+"-wake", "--seed", reader.lane, "--to", reader.lane, "--mail")
+		if err != nil || !strings.Contains(out, reader.hears) || strings.Contains(out, reader.misses) {
+			t.Errorf("%s's tail --mail = %q, %v; want %q and not %q", reader.lane, out, err, reader.hears, reader.misses)
+		}
+	}
+}
+
 func TestALaneFilterReadsEveryLaneThatHeldTheAlias(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
