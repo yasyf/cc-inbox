@@ -6,6 +6,21 @@ import (
 	"syscall"
 )
 
+type boardBody struct {
+	bytes   []byte
+	regular bool
+	message string
+}
+
+func boardBodyAt(path string) boardBody {
+	info, statErr := os.Stat(path)
+	body, regular, err := readBoardBody(path, statErr == nil && info.Mode().IsRegular())
+	if err != nil {
+		return boardBody{regular: regular, message: err.Error()}
+	}
+	return boardBody{bytes: body, regular: regular}
+}
+
 func readBoardBody(path string, regular bool) ([]byte, bool, error) {
 	file, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0) //nolint:gosec // G304: record body references intentionally support arbitrary paths; nonblocking open prevents a replacement FIFO from blocking reconciliation.
 	if err != nil {
