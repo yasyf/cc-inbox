@@ -24,7 +24,7 @@ func IssueArgv(issuerPub []byte, expires string) []string {
 	return []string{"cci", "relay", "grant", node.FingerprintOf(issuerPub), expires}
 }
 
-func GrantIssuer(ctx context.Context, self node.Node, cfg relay.Config, consent Consent, life time.Duration, out io.Writer) error {
+func GrantIssuer(ctx context.Context, home string, self node.Node, cfg relay.Config, consent Consent, life time.Duration, out io.Writer) error {
 	if cfg.Tier != e2e.TierOwner {
 		return fmt.Errorf("pairing: only an owner node issues delegations; this node joined mesh %s as %s", cfg.Mesh, cfg.Tier)
 	}
@@ -33,7 +33,8 @@ func GrantIssuer(ctx context.Context, self node.Node, cfg relay.Config, consent 
 	if err := c.Call(ctx, http.MethodPost, "/v1/nonce", map[string]string{"mesh": cfg.Mesh}, &nr); err != nil {
 		return fmt.Errorf("issuer grant nonce: %w", err)
 	}
-	req := issuerRequest{Mesh: cfg.Mesh, Expires: time.Now().Add(life).UTC().Format(time.RFC3339Nano), Nonce: nr.Nonce}
+	expires := time.Now().Add(life).UTC()
+	req := issuerRequest{Mesh: cfg.Mesh, Expires: expires.Format(time.RFC3339Nano), Nonce: nr.Nonce}
 	var err error
 	ask := Ask{Reason: "let this node issue relay delegations until " + req.Expires, Subject: "cci-issuer:" + self.Fingerprint(), Nonce: base64.StdEncoding.EncodeToString(nr.Nonce), Argv: IssueArgv(self.PublicKey(), req.Expires)}
 	if req.Attestation, err = consent.Approve(ctx, ask); err != nil {
@@ -41,6 +42,9 @@ func GrantIssuer(ctx context.Context, self node.Node, cfg relay.Config, consent 
 	}
 	if err := c.Call(ctx, http.MethodPost, "/v1/issuer", req, nil); err != nil {
 		return fmt.Errorf("issuer grant: %w", err)
+	}
+	if err := relay.WriteIssuerGrant(home, cfg.Mesh, expires); err != nil {
+		return err
 	}
 	_, err = fmt.Fprintf(out, "%s issues relay delegations in mesh %s until %s\n", self.ID(), cfg.Mesh, req.Expires)
 	return err

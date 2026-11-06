@@ -54,6 +54,22 @@ func serviceKeyPath(home, mesh string) string { return filepath.Join(dir(home, m
 
 func issuedPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "issued.json") }
 
+func issuerPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "issuer.json") }
+
+type issuerGrant struct {
+	Expires time.Time `json:"expires"`
+}
+
+func WriteIssuerGrant(home, mesh string, expires time.Time) error {
+	return writeJSON(issuerPath(home, mesh), issuerGrant{Expires: expires})
+}
+
+func issuerExpiry(home, mesh string) (time.Time, error) {
+	var g issuerGrant
+	_, err := readJSON(issuerPath(home, mesh), &g)
+	return g.Expires, err
+}
+
 type issuedGrant struct {
 	e2e.Delegation
 	Revoked bool `json:"revoked,omitempty"`

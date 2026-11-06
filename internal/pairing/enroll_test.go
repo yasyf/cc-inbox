@@ -152,3 +152,20 @@ func TestAnEnrolledServiceIsAdmittedByEveryOtherOwner(t *testing.T) {
 		t.Fatalf("owner b pins %+v (%v), want the service granted by %s", m, ok, a.id.ID())
 	}
 }
+
+func TestAnOwnerGrantsItselfADayOfDelegationsWithOneTouchID(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	founder, consent := endorsedFounder(t)
+	found(t, srv, founder)
+	if err := pairing.GrantIssuer(context.Background(), founder.home(), founder.id, cfg(t, founder), consent, 24*time.Hour, &bytes.Buffer{}); err != nil {
+		t.Fatalf("GrantIssuer: %v", err)
+	}
+	expires := srv.Issuer(founder.id.ID())
+	if len(consent.asks) != 1 || !slices.Equal(consent.asks[0].Argv, pairing.IssueArgv(founder.id.PublicKey(), expires)) {
+		t.Fatalf("Touch ID asks = %+v, want one for the grant expiring %q", consent.asks, expires)
+	}
+	at, err := time.Parse(time.RFC3339Nano, expires)
+	if err != nil || time.Until(at) > 24*time.Hour || time.Until(at) < 23*time.Hour {
+		t.Fatalf("the grant expires %q, want a day from now", expires)
+	}
+}

@@ -68,6 +68,11 @@ func join(t *testing.T, srv *relaytest.Server, p *peer, routes ...string) {
 	if err := n.Join(context.Background()); err != nil {
 		t.Fatalf("join %s: %v", p.tier, err)
 	}
+	if p.tier == node.TierOwner {
+		if err := relay.WriteIssuerGrant(p.st.HomeDir(), relay.DefaultMesh, time.Now().Add(24*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
 	p.node = n
 }
 
@@ -1177,5 +1182,33 @@ func TestAnInstanceRefusesADelegationNoPinnedOwnerSigned(t *testing.T) {
 	other, err := a.node.Issue(context.Background(), a.id.PublicKey(), []string{"page:*"}, nil, time.Hour)
 	if err == nil {
 		t.Fatalf("an owner delegated its own key: %+v", other)
+	}
+}
+
+func TestAnOwnerIssuesNothingWithoutALiveGrantAndNothingThatOutlivesIt(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	join(t, srv, a)
+	st, _ := testutil.Store(t)
+	id, err := node.Load(st.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	granted := time.Now().Add(time.Hour).UTC()
+	if err := relay.WriteIssuerGrant(a.st.HomeDir(), relay.DefaultMesh, granted); err != nil {
+		t.Fatal(err)
+	}
+	d, err := a.node.Issue(context.Background(), id.PublicKey(), []string{"page:*"}, nil, 24*time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expires, err := time.Parse(time.RFC3339Nano, d.Expires); err != nil || expires.After(granted) {
+		t.Fatalf("a delegation expires %s, after its grant at %s", d.Expires, granted)
+	}
+	if err := relay.WriteIssuerGrant(a.st.HomeDir(), relay.DefaultMesh, time.Now().Add(-time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.node.Issue(context.Background(), newPeer(t, srv, node.TierService).id.PublicKey(), []string{"page:*"}, nil, time.Hour); err == nil || !strings.Contains(err.Error(), "no live issuer grant") {
+		t.Fatalf("an expired grant issued: %v", err)
 	}
 }

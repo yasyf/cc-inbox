@@ -22,7 +22,7 @@ import (
 
 func newRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relay", Short: "Replicate records end-to-end encrypted through the wide-area relay"}
-	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayDelegateCmd(), newRelayRevokeCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd(), newRelayScopeCmd())
+	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayGrantCmd(), newRelayJoinCmd(), newRelayDelegateCmd(), newRelayRevokeCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd(), newRelayScopeCmd())
 	return cmd
 }
 
@@ -237,6 +237,30 @@ func readProof(cmd *cobra.Command, path string) ([]byte, error) {
 		return io.ReadAll(cmd.InOrStdin())
 	}
 	return os.ReadFile(path) //nolint:gosec // G304: the operator names the proof file.
+}
+
+func newRelayGrantCmd() *cobra.Command {
+	var (
+		mesh, synckitd string
+		life           time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "grant",
+		Short: "Owner: approve with Touch ID that this node issues relay delegations for the next day; the relay refuses its delegations without a live grant",
+		Args:  cobra.NoArgs,
+		RunE: withNode(func(cmd *cobra.Command, home string, _ *store.Store, self node.Node, _ []string) error {
+			cfg, err := joinedConfig(home, mesh)
+			if err != nil {
+				return err
+			}
+			return pairing.GrantIssuer(cmd.Context(), home, self, cfg, pairing.Synckitd{Path: synckitd}, life, cmd.OutOrStdout())
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", relay.DefaultMesh, "the mesh the grant covers")
+	cmd.Flags().DurationVar(&life, "ttl", 24*time.Hour, "how long the grant lives, at most 24h")
+	cmd.Flags().StringVar(&synckitd, "synckitd", "synckitd", "the synckitd binary that routes the Touch ID prompt")
+	_ = cmd.Flags().MarkHidden("synckitd")
+	return cmd
 }
 
 func newRelayEnrollCmd() *cobra.Command {

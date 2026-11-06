@@ -162,7 +162,18 @@ func expiry(d e2e.Delegation) time.Time {
 }
 
 func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, ttl time.Duration, issued map[string]issuedGrant) (e2e.Delegation, error) {
-	d, err := e2e.Delegate(n.Identity, n.Config.Mesh, pub, drives, kinds, time.Now().Add(ttl))
+	granted, err := issuerExpiry(n.Home, n.Config.Mesh)
+	if err != nil {
+		return e2e.Delegation{}, err
+	}
+	if !time.Now().Before(granted) {
+		return e2e.Delegation{}, errors.New("relay: this owner holds no live issuer grant; tap Touch ID at the Mac with cci relay grant")
+	}
+	expires := time.Now().Add(ttl)
+	if granted.Before(expires) {
+		expires = granted
+	}
+	d, err := e2e.Delegate(n.Identity, n.Config.Mesh, pub, drives, kinds, expires)
 	if err != nil {
 		return e2e.Delegation{}, err
 	}
