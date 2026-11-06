@@ -2301,6 +2301,33 @@ func TestABoundWaitSkipsWhatTheLaneReadThroughItsOwnCursorWhateverItsWakeCursorS
 	}
 }
 
+func TestAWaitSkipsWhatTheLaneReadThroughTheInboxToolSinceItsLastWait(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "sprite-session")
+	post := func(text string) {
+		t.Helper()
+		if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "go", "--to", "api", "--text", text); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wait := []string{"tail", "--drive", "d", "--to", "api", "--cursor", "api-wake", "--seed", "api", "--mail"}
+	post("before the first wait")
+	if _, err := run(t, wait...); err != nil {
+		t.Fatal(err)
+	}
+	post("the lane read this through its inbox")
+	if got := mustTool(t, "inbox", map[string]any{"lane": "api", "drive": "d"}); !strings.Contains(got, "the lane read this through its inbox") {
+		t.Fatalf("inbox = %q", got)
+	}
+	if out, err := run(t, wait...); err != nil || out != "" {
+		t.Fatalf("the next wait replayed what the inbox read: %q, %v", out, err)
+	}
+	post("the owner's pick")
+	if out, err := run(t, wait...); err != nil || !strings.Contains(out, "the owner's pick") || strings.Contains(out, "through its inbox") {
+		t.Fatalf("the wait after a new record = %q, %v", out, err)
+	}
+}
+
 func TestCursorShowPrintsWhereACursorStandsWithoutMovingIt(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	if _, err := run(t, "cursor", "show", "api-wake", "--drive", "d"); err == nil || !strings.Contains(err.Error(), "has not been set") {

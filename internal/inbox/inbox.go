@@ -454,8 +454,12 @@ func (t *tailRun) mark(r store.Record, folded bool) {
 
 func seedOf(ctx context.Context, st *store.Store, seed, drive string, own int64, exists bool) (int64, error) {
 	floor, ok, err := st.Cursor(ctx, seed, drive)
-	if err != nil || ok || exists {
-		return max(own, floor), err
+	if err != nil {
+		return 0, err
+	}
+	inboxed, read, err := st.Cursor(ctx, store.InboxCursor(seed), drive)
+	if err != nil || ok || read || exists {
+		return max(own, floor, inboxed), err
 	}
 	return st.MaxSeq(ctx)
 }
