@@ -986,46 +986,55 @@ type reparsing struct {
 }
 
 // Reparse rewrites each item's record from its line, or stores it when the
-// line is new, a page of items per transaction, carrying the record a split
-// line inherits its time from across pages.
+// line is new, a page of items per transaction. A page ends only where no split
+// line still takes its time from a record the page rewrote, so a parent and its
+// split lines commit together.
 func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (updated, inserted int, err error) {
 	var done reparsing
-	for page := range slices.Chunk(items, writePage) {
-		if err := s.reparse(ctx, page, fresh, &done); err != nil {
+	for len(items) > 0 {
+		n, err := s.reparse(ctx, items, fresh, &done)
+		if err != nil {
 			return done.updated, done.inserted, err
 		}
+		items = items[n:]
 	}
 	return done.updated, done.inserted, nil
 }
 
-func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done *reparsing) error {
+func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done *reparsing) (int, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin reparse: %w", err)
+		return 0, fmt.Errorf("begin reparse: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	progress := *done
+	n := 0
 	for _, it := range items {
-		r := it.Record
-		unseen, err := consume(ctx, tx, it.LineHash)
-		if err != nil {
-			return err
-		}
 		var (
 			at  int64
 			old string
 		)
-		err = tx.QueryRowContext(ctx, "SELECT at, text FROM records WHERE line_hash = ?", it.LineHash).Scan(&at, &old)
-		switch {
-		case err == nil:
+		err := tx.QueryRowContext(ctx, "SELECT at, text FROM records WHERE line_hash = ?", it.LineHash).Scan(&at, &old)
+		found := err == nil
+		if !found && !errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("reparse record: %w", err)
+		}
+		if n >= writePage && (fresh || found || progress.parentText == "") {
+			break
+		}
+		n++
+		r := it.Record
+		unseen, err := consume(ctx, tx, it.LineHash)
+		if err != nil {
+			return 0, err
+		}
+		if found {
 			if _, err := tx.ExecContext(ctx, reparseSQL, reparseArgs(r, it.LineHash)...); err != nil {
-				return fmt.Errorf("reparse record: %w", err)
+				return 0, fmt.Errorf("reparse record: %w", err)
 			}
 			progress.parentAt, progress.parentText = time.UnixMilli(at).UTC(), old
 			progress.updated++
 			continue
-		case !errors.Is(err, sql.ErrNoRows):
-			return fmt.Errorf("reparse record: %w", err)
 		}
 		switch {
 		case unseen && fresh:
@@ -1038,19 +1047,19 @@ func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done
 		r.ExpiresAt = expiry(r, 0)
 		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", s.args(r, Hash(r), &it.LineHash)...)
 		if err != nil {
-			return fmt.Errorf("reparse record: %w", err)
+			return 0, fmt.Errorf("reparse record: %w", err)
 		}
-		n, err := res.RowsAffected()
+		inserted, err := res.RowsAffected()
 		if err != nil {
-			return fmt.Errorf("reparse record: %w", err)
+			return 0, fmt.Errorf("reparse record: %w", err)
 		}
-		progress.inserted += int(n)
+		progress.inserted += int(inserted)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit reparse: %w", err)
+		return 0, fmt.Errorf("commit reparse: %w", err)
 	}
 	*done = progress
-	return nil
+	return n, nil
 }
 
 func consume(ctx context.Context, tx *sql.Tx, lineHash string) (bool, error) {

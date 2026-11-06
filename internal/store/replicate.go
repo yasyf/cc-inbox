@@ -240,40 +240,78 @@ ON CONFLICT (channel, origin) DO UPDATE SET change_id = excluded.change_id, revi
 // will send. A pointer to an absent record that this store neither holds nor
 // holds in pending is stored unresolved: the row keeps the pointer's origin
 // and origin_seq, and its re or resolves stays 0. A row waiting on an absent
-// record still in pending is stored once that record is. It commits a page of
-// absent records at a time, and a Settle that stops partway keeps the pages it
-// committed.
+// record still in pending is stored once that record is. Each transaction
+// stores a page of held rows, and a row it stores releases the rows waiting on
+// it in a later page; a Settle that stops partway keeps the pages it committed.
 func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
 	gone := make(map[Pointer]bool, len(absent))
 	for _, p := range absent {
 		gone[p] = true
 	}
 	var a Applied
-	for page := range slices.Chunk(absent, writePage) {
-		if err := s.settle(ctx, page, gone, &a); err != nil {
+	for waiting := slices.Clone(absent); len(waiting) > 0; {
+		var err error
+		if waiting, err = s.settle(ctx, waiting, gone, &a); err != nil {
 			return a, err
 		}
 	}
 	return a, nil
 }
 
-func (s *Store) settle(ctx context.Context, page []Pointer, gone map[Pointer]bool, a *Applied) error {
+func (s *Store) settle(ctx context.Context, waiting []Pointer, gone map[Pointer]bool, a *Applied) ([]Pointer, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin settle: %w", err)
+		return nil, fmt.Errorf("begin settle: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	settled := *a
-	for _, p := range page {
-		if err := s.release(ctx, tx, p, &settled, gone); err != nil {
-			return err
+	for budget := writePage; budget > 0 && len(waiting) > 0; {
+		held, err := s.releasePage(ctx, tx, waiting[0], budget)
+		if err != nil {
+			return nil, err
 		}
+		if len(held) < budget {
+			waiting = waiting[1:]
+		}
+		budget -= max(1, len(held))
+		var arrivals []Pointer
+		for _, row := range held {
+			if err := s.apply(ctx, tx, row, &settled, true, gone, &arrivals); err != nil {
+				return nil, err
+			}
+		}
+		waiting = append(waiting, arrivals...)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit settle: %w", err)
+		return nil, fmt.Errorf("commit settle: %w", err)
 	}
 	*a = settled
-	return nil
+	return waiting, nil
+}
+
+func (s *Store) releasePage(ctx context.Context, tx *sql.Tx, arrived Pointer, limit int) ([]Row, error) {
+	rows, err := tx.QueryContext(ctx, "DELETE FROM pending WHERE rowid IN (SELECT rowid FROM pending WHERE wait_origin = ? AND wait_seq = ? LIMIT ?) RETURNING row", arrived.Origin, arrived.Seq, limit)
+	if err != nil {
+		return nil, fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
+	}
+	var held []Row
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
+		}
+		var row Row
+		if err := json.Unmarshal([]byte(raw), &row); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("decode held reply: %w", err)
+		}
+		held = append(held, row)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
+	}
+	return held, nil
 }
 
 // Backfill ingests rows as Apply does and makes moves, in one transaction. The

@@ -474,30 +474,36 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 	}
 	var res CompactResult
 	for _, day := range slices.Sorted(maps.Keys(days)) {
+		digested := false
 		for page := range slices.Chunk(days[day], writePage) {
-			if err := s.foldPage(ctx, drive, day, page); err != nil {
+			folded, err := s.foldPage(ctx, drive, day, page)
+			res.Folded += folded
+			if folded > 0 && !digested {
+				res.Digests++
+				digested = true
+			}
+			if err != nil {
 				return res, err
 			}
-			res.Folded += len(page)
 		}
-		res.Digests++
 	}
 	return res, nil
 }
 
-func (s *Store) foldPage(ctx context.Context, drive, day string, records []Record) error {
+func (s *Store) foldPage(ctx context.Context, drive, day string, records []Record) (int, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin compact: %w", err)
+		return 0, fmt.Errorf("begin compact: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := s.fold(ctx, tx, drive, day, records); err != nil {
-		return err
+	folded, err := s.fold(ctx, tx, drive, day, records)
+	if err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit compact: %w", err)
+		return 0, fmt.Errorf("commit compact: %w", err)
 	}
-	return nil
+	return folded, nil
 }
 
 func (s *Store) foreignResolvers(ctx context.Context, drive string) (map[int64]bool, error) {
@@ -518,7 +524,33 @@ UNION SELECT r.seq FROM records r, json_each(r.also_resolves) j JOIN records t O
 	return out, rows.Err()
 }
 
-func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records []Record) error {
+func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, candidates []Record) (int, error) {
+	deleted := map[int64]bool{}
+	for chunk := range slices.Chunk(candidates, 500) {
+		seqs := make([]any, len(chunk))
+		for i, r := range chunk {
+			seqs[i] = r.Seq
+		}
+		rows, err := tx.QueryContext(ctx, "DELETE FROM records WHERE seq IN ("+placeholders(len(seqs))+") RETURNING seq", seqs...)
+		if err != nil {
+			return 0, fmt.Errorf("delete folded records: %w", err)
+		}
+		for rows.Next() {
+			var seq int64
+			if err := rows.Scan(&seq); err != nil {
+				_ = rows.Close()
+				return 0, fmt.Errorf("delete folded records: %w", err)
+			}
+			deleted[seq] = true
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return 0, fmt.Errorf("delete folded records: %w", err)
+		}
+	}
+	records := slices.DeleteFunc(slices.Clone(candidates), func(r Record) bool { return !deleted[r.Seq] })
+	if len(records) == 0 {
+		return 0, nil
+	}
 	topic := "digest:" + day
 	counts := map[string]int{}
 	var existing int64
@@ -528,11 +560,11 @@ func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records
 	case err == nil:
 		var f Fields
 		if err := json.Unmarshal([]byte(raw), &f); err != nil {
-			return fmt.Errorf("decode digest %s: %w", topic, err)
+			return 0, fmt.Errorf("decode digest %s: %w", topic, err)
 		}
 		maps.Copy(counts, f.Counts)
 	case !errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("read digest %s: %w", topic, err)
+		return 0, fmt.Errorf("read digest %s: %w", topic, err)
 	}
 	last := records[len(records)-1].At
 	for _, r := range records {
@@ -553,35 +585,28 @@ func (s *Store) fold(ctx context.Context, tx *sql.Tx, drive, day string, records
 	if existing != 0 {
 		fields, _ := json.Marshal(d.Fields)
 		if _, err := tx.ExecContext(ctx, "UPDATE records SET text = ?, fields = ?, at = MAX(at, ?) WHERE seq = ?", d.Text, string(fields), last.UnixMilli(), existing); err != nil {
-			return fmt.Errorf("update digest %s: %w", topic, err)
+			return 0, fmt.Errorf("update digest %s: %w", topic, err)
 		}
 	} else if _, err := s.insert(ctx, tx, d, Hash(d), nil); err != nil {
-		return err
+		return 0, err
 	}
-	seqs := make([]any, len(records))
 	var through int64
-	for i, r := range records {
-		seqs[i] = r.Seq
+	for _, r := range records {
 		if r.Origin == "" {
 			through = max(through, r.Seq)
 			continue
 		}
 		if _, err := tx.ExecContext(ctx, "INSERT INTO folded (origin, origin_seq) VALUES (?, ?) ON CONFLICT DO NOTHING", r.Origin, r.OriginSeq); err != nil {
-			return fmt.Errorf("record folded %s/%d: %w", r.Origin, r.OriginSeq, err)
+			return 0, fmt.Errorf("record folded %s/%d: %w", r.Origin, r.OriginSeq, err)
 		}
 	}
 	if through > 0 {
 		if _, err := tx.ExecContext(ctx, `INSERT INTO meta (key, value) VALUES ('compacted_through', ?)
 ON CONFLICT (key) DO UPDATE SET value = MAX(value, excluded.value)`, through); err != nil {
-			return fmt.Errorf("record compacted-through: %w", err)
+			return 0, fmt.Errorf("record compacted-through: %w", err)
 		}
 	}
-	for chunk := range slices.Chunk(seqs, 500) {
-		if _, err := tx.ExecContext(ctx, "DELETE FROM records WHERE seq IN ("+placeholders(len(chunk))+")", chunk...); err != nil {
-			return fmt.Errorf("delete folded records: %w", err)
-		}
-	}
-	return countRecordsDeleted(ctx, tx)
+	return len(records), countRecordsDeleted(ctx, tx)
 }
 
 func digestText(day string, counts map[string]int) string {
