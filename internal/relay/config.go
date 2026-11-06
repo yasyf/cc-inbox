@@ -56,6 +56,22 @@ func issuedPath(home, mesh string) string { return filepath.Join(dir(home, mesh)
 
 func issuerPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "issuer.json") }
 
+func ringPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "ring.json") }
+
+type ringMark struct {
+	Gen uint64 `json:"gen"`
+}
+
+func ringWritten(home, mesh string) (uint64, error) {
+	var m ringMark
+	_, err := readJSON(ringPath(home, mesh), &m)
+	return m.Gen, err
+}
+
+func writeRingWritten(home, mesh string, gen uint64) error {
+	return writeJSON(ringPath(home, mesh), ringMark{Gen: gen})
+}
+
 type issuerGrant struct {
 	Expires time.Time `json:"expires"`
 }

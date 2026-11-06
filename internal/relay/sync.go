@@ -227,30 +227,24 @@ func (n *Node) currentRing(ctx context.Context, members map[string]e2e.Member, i
 	if err != nil {
 		return e2e.GroupKey{}, err
 	}
-	if rr.Wrap == nil {
-		return n.writeRing(ctx, rr.Gen+1, members, issued)
-	}
-	ring, err := e2e.UnwrapKey(*rr.Wrap, e2e.RingMesh(n.Config.Mesh), n.Identity, members)
+	written, err := ringWritten(n.Home, n.Config.Mesh)
 	if err != nil {
 		return e2e.GroupKey{}, err
+	}
+	if rr.Gen < written {
+		return e2e.GroupKey{}, fmt.Errorf("relay: the relay answers ring %d, older than ring %d this owner wrote", rr.Gen, written)
 	}
 	keys, err := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
 	if err != nil {
 		return e2e.GroupKey{}, err
 	}
-	for epoch, k := range keys {
-		if slices.ContainsFunc(rr.Epochs, func(s e2e.SealedEpoch) bool { return s.Epoch == epoch }) {
-			continue
-		}
-		s, err := e2e.SealEpoch(ring, n.Config.Mesh, k, n.Identity)
-		if err != nil {
-			return e2e.GroupKey{}, err
-		}
-		if err := n.client().Call(ctx, http.MethodPost, "/v1/ring/epoch", ringEpochRequest{Mesh: n.Config.Mesh, Sealed: s}, nil); err != nil {
-			return e2e.GroupKey{}, err
-		}
+	sealed := func(epoch uint64) bool {
+		return slices.ContainsFunc(rr.Epochs, func(s e2e.SealedEpoch) bool { return s.Epoch == epoch })
 	}
-	return ring, nil
+	if rr.Wrap == nil || slices.ContainsFunc(slices.Collect(maps.Keys(keys)), func(epoch uint64) bool { return !sealed(epoch) }) {
+		return n.writeRing(ctx, rr.Gen+1, members, issued)
+	}
+	return e2e.UnwrapKey(*rr.Wrap, e2e.RingMesh(n.Config.Mesh), n.Identity, members)
 }
 
 func (n *Node) writeRing(ctx context.Context, gen uint64, members map[string]e2e.Member, issued map[string]issuedGrant) (e2e.GroupKey, error) {
@@ -291,7 +285,7 @@ func (n *Node) writeRing(ctx context.Context, gen uint64, members map[string]e2e
 	if err := n.client().Call(ctx, http.MethodPut, "/v1/ring", req, nil); err != nil {
 		return e2e.GroupKey{}, fmt.Errorf("write ring %d: %w", gen, err)
 	}
-	return ring, nil
+	return ring, writeRingWritten(n.Home, n.Config.Mesh, gen)
 }
 
 func (n *Node) rekeyRing(ctx context.Context) error {
@@ -509,9 +503,20 @@ func (n *Node) RefreshKeys(ctx context.Context) error {
 		}
 	}
 	if kr.Ring != nil && kr.Ring.Wrap != nil {
-		if _, err := e2e.UnwrapKey(*kr.Ring.Wrap, e2e.RingMesh(n.Config.Mesh), n.Identity, members); err != nil {
+		ring, err := e2e.UnwrapKey(*kr.Ring.Wrap, e2e.RingMesh(n.Config.Mesh), n.Identity, members)
+		if err != nil {
 			slog.Warn("relay ring wrap refused", "mesh", n.Config.Mesh, "ring", kr.Ring.Wrap.Epoch, "from", kr.Ring.Wrap.From, "err", err)
-		} else if n.Keyring.AddRing(*kr.Ring.Wrap, kr.Ring.Epochs) {
+		}
+		opened := slices.DeleteFunc(slices.Clone(kr.Ring.Epochs), func(s e2e.SealedEpoch) bool {
+			if err == nil {
+				if _, err := e2e.OpenEpoch(ring, n.Config.Mesh, s, members); err == nil {
+					return false
+				}
+			}
+			slog.Warn("relay sealed epoch refused", "mesh", n.Config.Mesh, "ring", s.Ring, "epoch", s.Epoch, "from", s.From)
+			return true
+		})
+		if err == nil && n.Keyring.AddRing(*kr.Ring.Wrap, opened) {
 			added = true
 		}
 	}
@@ -1233,7 +1238,8 @@ func (n *Node) control(ctx context.Context, c e2e.Control, handle ControlHandler
 			return false, err
 		}
 		if err := n.rekeyRing(ctx); err != nil {
-			slog.Warn("relay ring rekey after a rotation failed", "mesh", n.Config.Mesh, "err", err)
+			slog.Warn("relay ring rekey after a rotation failed; left for redelivery", "mesh", n.Config.Mesh, "err", err)
+			return false, nil
 		}
 	case e2e.ControlJoined:
 		if err := n.Share(ctx); err != nil {

@@ -88,11 +88,6 @@ type ringRequest struct {
 	Wraps  []ringMemberWrap  `json:"wraps"`
 }
 
-type ringEpochRequest struct {
-	Mesh   string          `json:"mesh"`
-	Sealed e2e.SealedEpoch `json:"sealed"`
-}
-
 type delegateRequest struct {
 	Mesh       string         `json:"mesh"`
 	Delegation e2e.Delegation `json:"delegation"`
