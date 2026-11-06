@@ -1005,7 +1005,7 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
 	out, err := run(t, "tail", "--since", "0", "--reader", "root")
-	if err != nil || !strings.Contains(out, "ask root>peer:bbbb2222 take #34363?") || !strings.Contains(out, "go root>root@drive-b GO") || len(recordLines(out)) != 2 {
+	if err != nil || !strings.Contains(out, "ask root>peer:bbbb2222 take #34363?") || !strings.Contains(out, "go root@drive-a>root@drive-b GO") || len(recordLines(out)) != 2 {
 		t.Fatalf("b tail = %q, %v", out, err)
 	}
 	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "1", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#3\n" {
@@ -1015,7 +1015,7 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	if out, err = run(t, "tail", "--since", "0"); err != nil || !strings.Contains(out, "answer root>peer:aaaa1111 x1 yes") || !strings.Contains(out, "take #34363? [RESOLVED #3]") {
 		t.Fatalf("a tail = %q, %v", out, err)
 	}
-	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || len(recordLines(out)) != 1 || !strings.Contains(out, "go root>root@drive-b") {
+	if out, err = run(t, "tail", "--since", "0", "--to", "root@drive-b"); err != nil || len(recordLines(out)) != 1 || !strings.Contains(out, "go root@drive-a>root@drive-b") {
 		t.Fatalf("tail --to root@drive-b = %q, %v", out, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-root-b")
@@ -1078,7 +1078,7 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 		t.Fatalf("post to a lane live in two other drives: %v", err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-owner")
-	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "release-owner-4"); err != nil || !strings.Contains(out, "go root>release-owner-4@drive-b,desk,root,nobody GO promote") || len(recordLines(out)) != 1 {
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "release-owner-4"); err != nil || !strings.Contains(out, "go root@drive-a>release-owner-4@drive-b,desk,root,nobody GO promote") || len(recordLines(out)) != 1 {
 		t.Fatalf("drive-b reader release-owner-4 = %q, %v", out, err)
 	}
 	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "desk"); err != nil || out != "" {

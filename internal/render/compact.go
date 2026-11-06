@@ -1,7 +1,6 @@
 package render
 
 import (
-	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -20,7 +19,7 @@ func Compact(r store.Record, width int) string {
 	if r.Status == "closed" {
 		b.WriteString(" closed")
 	}
-	b.WriteString(" " + cmp.Or(r.Stem, r.Lane))
+	b.WriteString(" " + sender(r))
 	if to := recipients(r.To); len(to) > 0 {
 		for i, t := range to {
 			to[i] = strings.TrimSuffix(t, "@"+r.Drive)
