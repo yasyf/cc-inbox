@@ -20,6 +20,12 @@ func (s *Store) SetOwner(owner bool) {
 	s.owner = owner
 }
 
+// OwnerNode reports whether this node holds the owner tier. A node that does
+// not reads a drive's lane registry as far as its relay copy has reached.
+func (s *Store) OwnerNode() bool {
+	return s.owner
+}
+
 func (s *Store) owners(ctx context.Context) (map[string]bool, error) {
 	return readOwners(ctx, s.db, s)
 }

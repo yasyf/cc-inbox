@@ -736,7 +736,7 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 				}
 				out[i], err = routeLane(t, drive, readers, notices)
 			}
-			if err == nil && registry && out[i] == t && kind != kinds.StandDown {
+			if err == nil && registry && out[i] == t && kind != kinds.StandDown && (st.OwnerNode() || reach.Lane != "") {
 				err = noticeReach(notices, t, reach)
 			}
 		}
