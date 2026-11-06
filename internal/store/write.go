@@ -46,10 +46,14 @@ type SettlePage struct {
 	Absent  []Pointer `json:"absent"`
 }
 
-// ReparsePage rewrites a page of Items, carrying From across pages.
+// ReparsePage rewrites a page of Items, carrying From across pages. More says
+// Items stops short of the input: a page that would end there while a split
+// line may still follow applies nothing and consumes no item, so the caller
+// sends a longer page.
 type ReparsePage struct {
 	Items []Ingestion `json:"items"`
 	Fresh bool        `json:"fresh,omitempty"`
+	More  bool        `json:"more,omitempty"`
 	From  Reparsing   `json:"from"`
 }
 
@@ -281,10 +285,22 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, w Write) (Written, error)
 		done.Ingested = ingested
 	}
 	if p := w.Reparse; p != nil {
+		if _, err := tx.ExecContext(ctx, "SAVEPOINT reparse"); err != nil {
+			return Written{}, fmt.Errorf("begin reparse page: %w", err)
+		}
 		reparsed := p.From
 		items, err := s.reparsePage(ctx, tx, p.Items, p.Fresh, &reparsed)
 		if err != nil {
 			return Written{}, err
+		}
+		if p.More && items == len(p.Items) && !p.Fresh && reparsed.ParentText != "" {
+			if _, err := tx.ExecContext(ctx, "ROLLBACK TO reparse"); err != nil {
+				return Written{}, fmt.Errorf("roll back reparse page: %w", err)
+			}
+			items, reparsed = 0, p.From
+		}
+		if _, err := tx.ExecContext(ctx, "RELEASE reparse"); err != nil {
+			return Written{}, fmt.Errorf("end reparse page: %w", err)
 		}
 		done.Reparsed, done.Items = &reparsed, items
 	}
