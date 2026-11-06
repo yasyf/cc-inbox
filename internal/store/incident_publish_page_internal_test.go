@@ -27,3 +27,40 @@ SELECT 'd','seed','incident',x,'incident #'||x,'post','paged-'||x FROM n`, pages
 	}
 	t.Logf("records=%d..%d largest_transaction=%+v", writePage, 100*writePage, byPages[100])
 }
+
+func TestAnIncidentChangeQueuedBehindAPublishedPageIsCapturedNext(t *testing.T) {
+	ctx := t.Context()
+	st, _ := pagedStore(t)
+	if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?)
+INSERT INTO records(drive,lane,kind,at,text,source,hash)
+SELECT 'd','seed','incident',x,'incident #'||x,'post','queued-'||x FROM n`, writePage+1); err != nil {
+		t.Fatal(err)
+	}
+	if report, err := st.ProvisionIncidentScope(ctx, "d"); err != nil || !report.Ready {
+		t.Fatalf("provision = %+v, %v", report, err)
+	}
+	if _, err := st.db.ExecContext(ctx, "UPDATE records SET text = text || ' moved' WHERE kind = 'incident'"); err != nil {
+		t.Fatal(err)
+	}
+	first, err := st.captureIncidentChanges(ctx)
+	if err != nil || len(first) != writePage || first[0].Seq != 1 {
+		t.Fatalf("first capture = %d changes from seq %v, %v; want a page from seq 1", len(first), first, err)
+	}
+	if err := st.publishIncidentChanges(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, "UPDATE records SET text = 'incident #1 moved back' WHERE seq = 1"); err != nil {
+		t.Fatal(err)
+	}
+	next, err := st.captureIncidentChanges(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := map[int64]bool{}
+	for _, change := range next {
+		captured[change.Seq] = true
+	}
+	if !captured[1] || !captured[int64(writePage+1)] {
+		t.Fatalf("the capture after a published page holds seqs %v; want seq 1, queued again behind the page, and seq %d", captured, writePage+1)
+	}
+}

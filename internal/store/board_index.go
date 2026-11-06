@@ -261,10 +261,15 @@ func (index *BoardIndex) reconcile(ctx context.Context, scope *boardScope, encod
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
 	}
-	if len(changed) == 0 && len(dirty) == 0 && !clockChanged {
+	if !cold && len(changed) == 0 && len(dirty) == 0 && !clockChanged {
 		return nil
 	}
 	affected := map[[2]int64]bool{}
+	if cold {
+		if err := boardErroredRows(ctx, tx, scope, affected); err != nil {
+			return err
+		}
+	}
 	for _, seq := range changed {
 		if err := boardChangedEffects(ctx, tx, scope, seq, affected); err != nil {
 			return err
@@ -427,6 +432,22 @@ func (index *BoardIndex) rebuild(ctx context.Context, scope *boardScope, encoded
 	}
 	_, err := index.store.rw.ExecContext(ctx, "UPDATE board_query_scopes SET applied=?,clock_ms=? WHERE id=?", revision, now.UnixMilli(), scope.id)
 	return err
+}
+
+func boardErroredRows(ctx context.Context, tx *sql.Tx, scope *boardScope, affected map[[2]int64]bool) error {
+	rows, err := tx.QueryContext(ctx, "SELECT category,seq FROM board_query_rows WHERE scope=? AND annotation_error!=''", scope.id)
+	if err != nil {
+		return err
+	}
+	for rows.Next() {
+		var key [2]int64
+		if err := rows.Scan(&key[0], &key[1]); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		affected[key] = true
+	}
+	return errors.Join(rows.Err(), rows.Close())
 }
 
 func (index *BoardIndex) clear(ctx context.Context, table, column, scoped string, args ...any) error {

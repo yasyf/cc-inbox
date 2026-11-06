@@ -263,8 +263,8 @@ func (index *IncidentIndex) reconcile(ctx context.Context) error {
 		index.authorityError = err
 		return &IncidentError{Code: "watch_authority_lost", Cause: err}
 	}
-	for after := int64(0); ; {
-		changes, err := index.store.captureIncidentChanges(ctx, after)
+	for {
+		changes, err := index.store.captureIncidentChanges(ctx)
 		if err != nil {
 			return err
 		}
@@ -277,7 +277,6 @@ func (index *IncidentIndex) reconcile(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		after = changes[len(changes)-1].Seq
 	}
 	rows, err := index.store.db.QueryContext(ctx, "SELECT path FROM incident_body_changes")
 	if err != nil {

@@ -21,7 +21,7 @@ type incidentChange struct {
 	Unsupported bool
 }
 
-func (s *Store) captureIncidentChanges(ctx context.Context, after int64) ([]incidentChange, error) {
+func (s *Store) captureIncidentChanges(ctx context.Context) ([]incidentChange, error) {
 	connection, err := s.db.Conn(ctx)
 	if err != nil {
 		return nil, err
@@ -31,7 +31,7 @@ func (s *Store) captureIncidentChanges(ctx context.Context, after int64) ([]inci
 		return nil, err
 	}
 	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
-	rows, err := connection.QueryContext(ctx, "SELECT source_seq,revision FROM incident_changes WHERE source_seq>? ORDER BY source_seq LIMIT ?", after, writePage)
+	rows, err := connection.QueryContext(ctx, "SELECT source_seq,revision FROM incident_changes ORDER BY source_seq LIMIT ?", writePage)
 	if err != nil {
 		return nil, err
 	}

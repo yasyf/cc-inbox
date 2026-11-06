@@ -38,7 +38,7 @@ func TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication(t *testi
 		if _, err := st.db.ExecContext(ctx, "UPDATE records SET text='summary #43' WHERE seq=?", record.Seq); err != nil {
 			t.Fatal(err)
 		}
-		stale, err := st.captureIncidentChanges(ctx, 0)
+		stale, err := st.captureIncidentChanges(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
