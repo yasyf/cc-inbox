@@ -363,16 +363,24 @@ func newRelaySyncCmd() *cobra.Command {
 }
 
 func newRelayExportCmd() *cobra.Command {
-	var drive string
+	var drive, since string
 	cmd := &cobra.Command{
 		Use:   "export",
 		Short: "Write a drive's records to stdout as gzipped JSON lines, for cci relay seed on a new node",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			return relay.ExportDrive(cmd.Context(), st, drive, cmd.OutOrStdout())
+			seq, from, err := parseSince(cmd.Context(), st, since)
+			if err != nil {
+				return err
+			}
+			if seq != 0 {
+				return fmt.Errorf("--since %q names a record; export reads a time", since)
+			}
+			return relay.ExportDrive(cmd.Context(), st, drive, from, cmd.OutOrStdout())
 		}),
 	}
 	cmd.Flags().StringVar(&drive, "drive", "", "drive to export")
+	cmd.Flags().StringVar(&since, "since", "", "write only what this store took from the first record written at or after this time: a duration (30m), a Pacific clock time (9:00 AM), a date (2026-10-26) or an RFC3339 time")
 	_ = cmd.MarkFlagRequired("drive")
 	return cmd
 }

@@ -531,7 +531,7 @@ func TestASeedCutOffPartwayKeepsWhatItReadAndSyncReadsOnlyTheRest(t *testing.T) 
 		t.Fatal(err)
 	}
 	var copied bytes.Buffer
-	if err := relay.ExportDrive(context.Background(), a.st, "d", &copied); err != nil {
+	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, &copied); err != nil {
 		t.Fatal(err)
 	}
 	late := newPeer(t, srv, node.TierOwner)
@@ -563,7 +563,7 @@ func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
 		t.Fatal(err)
 	}
 	var copied bytes.Buffer
-	if err := relay.ExportDrive(context.Background(), a.st, "d", &copied); err != nil {
+	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, &copied); err != nil {
 		t.Fatal(err)
 	}
 	late := newPeer(t, srv, node.TierOwner)
@@ -589,6 +589,39 @@ func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
 	}
 	if got := texts(t, late.st); len(got) != 6 || got[0] != "note 0" || got[5] != "after the copy" {
 		t.Fatalf("store holds %q", got)
+	}
+}
+
+func TestAnExportSinceALaunchSeedsOnlyWhatTheStoreTookFromThen(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	launch := a.st.Now().Add(time.Minute)
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: "before the launch"})
+	a.st.Now = func() time.Time { return launch }
+	for _, text := range []string{"at the launch", "before the join"} {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: text})
+	}
+	testutil.Post(t, a.st, store.Record{Drive: "other", Kind: kinds.Note, Text: "another drive"})
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, late, a, b)
+	join(t, srv, late)
+
+	for _, step := range []struct {
+		since time.Time
+		want  []string
+	}{
+		{launch.Add(time.Hour), []string{}},
+		{launch, []string{"at the launch", "before the join"}},
+	} {
+		var copied bytes.Buffer
+		if err := relay.ExportDrive(context.Background(), a.st, "d", step.since, &copied); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := late.node.Seed(context.Background(), "d", &copied); err != nil {
+			t.Fatal(err)
+		}
+		if got := texts(t, late.st); !slices.Equal(got, step.want) {
+			t.Fatalf("a seed from an export since %s left the store holding %q, want %q", step.since, got, step.want)
+		}
 	}
 }
 
