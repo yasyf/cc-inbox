@@ -22,7 +22,7 @@ func TestSelectedClosureProvisioningSerializesOldCloserWriter(t *testing.T) {
 	}
 }
 
-func selectedClosureOldCloserWriter(t *testing.T, population int) time.Duration {
+func selectedClosureOldCloserWriter(t *testing.T, population int) {
 	t.Helper()
 	binary := os.Getenv("CCI_OLD_STORE_PROBE")
 	if binary == "" {
@@ -138,5 +138,4 @@ SELECT 'concurrent','seed','answer',n,'seed','["peer:before"]',1000000+n,'other-
 	assertMembership(ctx, t, st, "record_recipients", "'peer:concurrent-old'", result.Seq, 1)
 	assertMembershipsDerived(ctx, t, st)
 	t.Logf("old_writer_preopened=true rows=%d waited_across_atomic_backfill=true posted_seq=%d held_for=%s fingerprint=%s", population, result.Seq, elapsed, result.Fingerprint)
-	return elapsed
 }
