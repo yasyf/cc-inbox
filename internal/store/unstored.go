@@ -48,12 +48,12 @@ func (s *Store) Unstored(ctx context.Context, rows []Row) ([]Record, error) {
 	return out, nil
 }
 
-// Oldest returns the lowest origin_seq among origin's records this store holds
-// on drive, or 0 when it holds none.
-func (s *Store) Oldest(ctx context.Context, drive, origin string) (int64, error) {
+// NextHeld returns the lowest origin_seq above originSeq among origin's
+// records this store holds on drive, or 0 when it holds none.
+func (s *Store) NextHeld(ctx context.Context, drive, origin string, originSeq int64) (int64, error) {
 	var seq int64
-	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MIN(origin_seq), 0) FROM records WHERE origin = ? AND drive = ?", origin, drive).Scan(&seq); err != nil {
-		return 0, fmt.Errorf("oldest record of %s on %s: %w", origin, drive, err)
+	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MIN(origin_seq), 0) FROM records WHERE origin = ? AND drive = ? AND origin_seq > ?", origin, drive, originSeq).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("next record of %s on %s after %d: %w", origin, drive, originSeq, err)
 	}
 	return seq, nil
 }

@@ -316,3 +316,31 @@ func TestGrepOnAReplicaSinceARecordOnlyTheHubHoldsReadsWhatCameAfterIt(t *testin
 		}
 	}
 }
+
+func TestTailOnAReplicaHoldingOlderHistoryStartsAfterTheSinceRecord(t *testing.T) {
+	ctx := context.Background()
+	r := newReplica(t,
+		[]store.Record{
+			{Lane: "root", Kind: kinds.Decision, Text: "seeded history"},
+			{Lane: "root", Kind: kinds.Decision, Text: "since here"},
+			{Lane: "root", Kind: kinds.Decision, Text: "hub only"},
+		},
+		[]store.Record{{Lane: "root", Kind: kinds.Decision, Text: "after the join"}})
+	seeded, ok, err := r.spriteNode.Find(ctx, "d", store.Number{Seq: 1})
+	if err != nil || !ok {
+		t.Fatalf("find #1 on the hub = %v, %v", ok, err)
+	}
+	seeded.At = seeded.At.Add(-48 * time.Hour)
+	if _, err := r.sprite.Backfill(ctx, []store.Row{seeded}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := run(t, "tail", "--drive", "d", "--since", "#2", "--oldest", "--budget", "100000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hub, joined := strings.Index(out, "hub only"), strings.Index(out, "after the join")
+	if strings.Contains(out, "seeded history") || strings.Contains(out, "since here") || hub < 0 || joined < hub {
+		t.Fatalf("tail --since #2 on a replica holding #1 = %q; want hub only, then after the join, and nothing from before #2", out)
+	}
+}

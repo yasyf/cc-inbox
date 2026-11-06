@@ -580,10 +580,11 @@ func (f *readFlags) sinceFromHub(ctx context.Context, st *store.Store, peer stor
 	if err != nil {
 		return store.Filter{}, nil, err
 	}
-	before, err := st.Oldest(ctx, filter.Drive, row.Origin)
+	before, err := st.NextHeld(ctx, filter.Drive, row.Origin, row.OriginSeq)
 	if err != nil {
 		return store.Filter{}, nil, err
 	}
+	filter.Since = row.At
 	rows, err := hub.Range(ctx, filter.Drive, row.Origin, row.OriginSeq, before)
 	if err != nil {
 		return store.Filter{}, nil, err
