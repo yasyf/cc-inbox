@@ -24,6 +24,11 @@ import (
 	"github.com/yasyf/cc-inbox/e2e"
 )
 
+const (
+	maxBody = 1 << 20
+	maxPush = 25
+)
+
 type Member struct {
 	ID         string `json:"id"`
 	Pub        []byte `json:"pub"`
@@ -189,6 +194,10 @@ func (s *Server) signed(h handler) http.HandlerFunc {
 			fail(w, 400, "bad_request", err.Error())
 			return
 		}
+		if len(body) > maxBody {
+			fail(w, 400, "bad_request", fmt.Sprintf("the body exceeds %d bytes", maxBody))
+			return
+		}
 		node := r.Header.Get("X-CCI-Node")
 		sig, err := base64.StdEncoding.DecodeString(r.Header.Get("X-CCI-Sig"))
 		if err != nil {
@@ -284,6 +293,10 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		fail(w, 400, "bad_request", err.Error())
+		return
+	}
+	if len(req.Envelopes) == 0 || len(req.Envelopes) > maxPush {
+		fail(w, 400, "bad_request", fmt.Sprintf("push carries 1 to %d envelopes, not %d", maxPush, len(req.Envelopes)))
 		return
 	}
 	s.mu.Lock()

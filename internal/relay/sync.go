@@ -28,6 +28,7 @@ import (
 
 const (
 	pushBatch    = 25
+	pushBody     = 1 << 20
 	seedProgress = 2000
 	pullMax      = 10
 	logPage      = 100
@@ -559,26 +560,23 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 	if err != nil || len(rows) == 0 {
 		return res, err
 	}
-	for batch := range slices.Chunk(rows, pushBatch) {
-		pr, sent, err := n.pushBatch(ctx, configs, batch)
+	for len(rows) > 0 {
+		page, taken, err := n.pushPage(ctx, configs, rows)
 		if errors.Is(err, errStaleEpoch) {
 			if err := n.RefreshKeys(ctx); err != nil {
 				return res, err
 			}
-			pr, sent, err = n.pushBatch(ctx, configs, batch)
+			page, taken, err = n.pushPage(ctx, configs, rows)
 		}
 		if err != nil {
 			return res, err
 		}
-		for _, rj := range pr.Rejected {
-			r := sent[rj.OriginSeq]
-			slog.Warn("relay refused record", "mesh", n.Config.Mesh, "origin_seq", rj.OriginSeq, "reason", rj.Reason)
-			res.Rejected = append(res.Rejected, Rejection{ID: r.ID, Drive: r.Drive, OriginSeq: rj.OriginSeq, Reason: rj.Reason})
-		}
-		res.Pushed += len(pr.Accepted)
-		if err := n.Store.Ack(ctx, Peer(n.Config.Mesh), batch[len(batch)-1].OriginSeq); err != nil {
+		res.Pushed += page.Pushed
+		res.Rejected = append(res.Rejected, page.Rejected...)
+		if err := n.Store.Ack(ctx, Peer(n.Config.Mesh), rows[taken-1].OriginSeq); err != nil {
 			return res, err
 		}
+		rows = rows[taken:]
 	}
 	return res, nil
 }
@@ -593,45 +591,82 @@ func (n *Node) relayRefuses(kind kinds.Kind) bool {
 	return n.Config.Tier == e2e.TierOwner && strings.Contains(string(kind), ".")
 }
 
-func (n *Node) pushBatch(ctx context.Context, configs []Config, batch []store.Row) (pushResponse, map[int64]store.Row, error) {
+func (n *Node) pushPage(ctx context.Context, configs []Config, rows []store.Row) (PushResult, int, error) {
+	res := PushResult{Rejected: []Rejection{}}
 	ring, err := LoadKeyring(n.Home, n.Config.Mesh)
 	if err != nil {
-		return pushResponse{}, nil, err
+		return res, 0, err
 	}
 	n.Keyring = ring
 	members, err := n.Members(ctx)
 	if err != nil {
-		return pushResponse{}, nil, err
+		return res, 0, err
 	}
 	k, err := n.Keyring.Current(n.keyHolder(), n.Config.Mesh, members)
 	if err != nil {
-		return pushResponse{}, nil, err
+		return res, 0, err
 	}
-	var envs []e2e.Envelope
+	req := pushRequest{Mesh: n.Config.Mesh, Envelopes: []e2e.Envelope{}}
+	empty, err := json.Marshal(req)
+	if err != nil {
+		return res, 0, err
+	}
+	size, taken := len(empty), 0
 	sent := map[int64]store.Row{}
-	for _, r := range batch {
+	var tooLarge []pushResult
+page:
+	for _, r := range rows {
+		if len(req.Envelopes) == pushBatch {
+			break
+		}
 		if Route(configs, r.Drive) != n.Config.Mesh || n.relayRefuses(r.Kind) {
+			taken++
 			continue
 		}
 		e, err := SealRow(k, n.Identity, n.Config, r)
 		if err != nil {
-			return pushResponse{}, nil, err
+			return res, 0, err
 		}
-		envs = append(envs, e)
+		sealed, err := json.Marshal(e)
+		if err != nil {
+			return res, 0, err
+		}
+		cost := len(sealed)
+		if len(req.Envelopes) > 0 {
+			cost++
+		}
+		switch {
+		case len(empty)+len(sealed) > pushBody:
+			tooLarge = append(tooLarge, pushResult{OriginSeq: r.OriginSeq, Reason: fmt.Sprintf("too_large: its sealed envelope is %d bytes, over the %d a push to the relay carries", len(sealed), pushBody)})
+		case size+cost > pushBody:
+			break page
+		default:
+			size += cost
+			req.Envelopes = append(req.Envelopes, e)
+		}
 		sent[r.OriginSeq] = r
+		taken++
 	}
 	var pr pushResponse
-	if len(envs) == 0 {
-		return pr, sent, nil
-	}
-	if err := n.client().Call(ctx, http.MethodPost, "/v1/push", pushRequest{Mesh: n.Config.Mesh, Envelopes: envs}, &pr); err != nil {
-		var se *StatusError
-		if errors.As(err, &se) && se.Kind == "stale_epoch" {
-			return pr, sent, fmt.Errorf("%w: %w", errStaleEpoch, err)
+	if len(req.Envelopes) > 0 {
+		if err := n.client().Call(ctx, http.MethodPost, "/v1/push", req, &pr); err != nil {
+			var se *StatusError
+			if errors.As(err, &se) && se.Kind == "stale_epoch" {
+				return res, 0, fmt.Errorf("%w: %w", errStaleEpoch, err)
+			}
+			return res, 0, err
 		}
-		return pr, sent, err
+		if err := accounted(req.Envelopes, pr); err != nil {
+			return res, 0, err
+		}
 	}
-	return pr, sent, accounted(envs, pr)
+	for _, rj := range slices.Concat(pr.Rejected, tooLarge) {
+		r := sent[rj.OriginSeq]
+		slog.Warn("relay refused record", "mesh", n.Config.Mesh, "origin_seq", rj.OriginSeq, "reason", rj.Reason)
+		res.Rejected = append(res.Rejected, Rejection{ID: r.ID, Drive: r.Drive, OriginSeq: rj.OriginSeq, Reason: rj.Reason})
+	}
+	res.Pushed = len(pr.Accepted)
+	return res, taken, nil
 }
 
 func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
