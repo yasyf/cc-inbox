@@ -1797,6 +1797,36 @@ func TestARecordToAnOwnedScriptLaneReachesItsOwner(t *testing.T) {
 	}
 }
 
+func TestAnOwnerWhoseChainEndedGetsNoCopyAndALiveOwnerStillDoes(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root")
+	t.Setenv("CCI_AGENT_ID", "")
+	if _, err := run(t, "drive", "use", "d", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"--lane", "mq-health-9", "--kind", "decide", "--owned-by", "mq-health-9", "--to", "supervisor", "--text", "supervisor is owned by mq-health-9"},
+		{"--lane", "alerts-desk-3", "--kind", "decide", "--owned-by", "alerts-desk-3", "--to", "monitor-watch", "--text", "monitor-watch is owned by alerts-desk-3"},
+		{"--lane", "root", "--kind", "stand-down", "--to", "mq-health-9", "--text", "stand down"},
+	} {
+		if _, err := run(t, append([]string{"post"}, args...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "decide", "--to", "supervisor", "--text", "registry request: owner pr-unblock-18", "--json")
+	if err != nil || !strings.Contains(out, `"to":["supervisor"]`) {
+		t.Fatalf("decide to a lane whose owner stood down with no successor = %q, %v; want the lane alone", out, err)
+	}
+	out, err = run(t, "post", "--lane", "root", "--kind", "defect", "--to", "monitor-watch", "--text", "stale page", "--json")
+	if err != nil || !strings.Contains(out, `"to":["monitor-watch","alerts-desk`) {
+		t.Fatalf("defect to a lane whose owner is live = %q, %v; want the owner's copy", out, err)
+	}
+}
+
 func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())

@@ -581,11 +581,17 @@ func forwarded(ctx context.Context, st *store.Store, drive string, to []string, 
 			}
 		}
 		if owner != "" {
-			owners, _, err := st.Successors(ctx, laneDrive, owner)
-			if err != nil {
+			reach, err := st.Reach(ctx, laneDrive, owner)
+			if err != nil && !errors.Is(err, store.ErrNoLaneRegistry) {
 				return nil, err
 			}
-			chain = append(append(chain, owner), owners...)
+			if !reach.Started || reach.Lane != "" {
+				owners, _, err := st.Successors(ctx, laneDrive, owner)
+				if err != nil {
+					return nil, err
+				}
+				chain = append(append(chain, owner), owners...)
+			}
 		}
 		for _, successor := range chain {
 			if cross {

@@ -45,6 +45,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- An ask, decide or defect sent to an owned lane no longer copies the owner when
+  the owner stood down and no live lane carries its chain. The record still
+  reaches every lane in its `--to`. A live owner, or a live successor of the
+  owner, still gets its copy.
 - `cci tail --seed <lane>` also starts no earlier than where the MCP `inbox`
   tool has read for that lane, so `lr wait` never wakes on records a lane
   already read through the tool. On Nov 6 a Sprite lane read its mail through
