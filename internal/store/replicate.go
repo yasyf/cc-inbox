@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -200,12 +201,17 @@ func pointer(p Pointer) *Pointer {
 	return &p
 }
 
-// Apply ingests rows from other nodes in one transaction. A row whose
-// (origin, origin_seq) is already stored, or whose origin is this node, is a
-// duplicate. A row whose re or resolves target has not arrived waits in
-// pending until it does. The caller has already verified each row's
-// provenance; Apply stores what it is given, keeping its time and source.
+// Apply ingests rows from other nodes in one transaction, after writing their
+// bodies to this node's blobs. A row whose (origin, origin_seq) is already
+// stored, or whose origin is this node, is a duplicate. A row whose re or
+// resolves target has not arrived waits in pending until it does. The caller
+// has already verified each row's provenance; Apply stores what it is given,
+// keeping its time and source.
 func (s *Store) Apply(ctx context.Context, rows []Row, receipt *Receipt) (Applied, error) {
+	rows, err := s.blobbed(rows)
+	if err != nil {
+		return Applied{}, err
+	}
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
@@ -234,27 +240,78 @@ ON CONFLICT (channel, origin) DO UPDATE SET change_id = excluded.change_id, revi
 // will send. A pointer to an absent record that this store neither holds nor
 // holds in pending is stored unresolved: the row keeps the pointer's origin
 // and origin_seq, and its re or resolves stays 0. A row waiting on an absent
-// record still in pending is stored once that record is.
+// record still in pending is stored once that record is. Each transaction
+// stores a page of held rows, and a row it stores releases the rows waiting on
+// it in a later page; a Settle that stops partway keeps the pages it committed.
 func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return Applied{}, fmt.Errorf("begin settle: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	gone := make(map[Pointer]bool, len(absent))
 	for _, p := range absent {
 		gone[p] = true
 	}
 	var a Applied
-	for _, p := range absent {
-		if err := s.release(ctx, tx, p, &a, gone); err != nil {
-			return Applied{}, err
+	for waiting := slices.Clone(absent); len(waiting) > 0; {
+		var err error
+		if waiting, err = s.settle(ctx, waiting, gone, &a); err != nil {
+			return a, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return Applied{}, fmt.Errorf("commit settle: %w", err)
-	}
 	return a, nil
+}
+
+func (s *Store) settle(ctx context.Context, waiting []Pointer, gone map[Pointer]bool, a *Applied) ([]Pointer, error) {
+	tx, err := s.rw.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin settle: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	settled := *a
+	for budget := writePage; budget > 0 && len(waiting) > 0; {
+		held, err := s.releasePage(ctx, tx, waiting[0], budget)
+		if err != nil {
+			return nil, err
+		}
+		if len(held) < budget {
+			waiting = waiting[1:]
+		}
+		budget -= max(1, len(held))
+		var arrivals []Pointer
+		for _, row := range held {
+			if err := s.apply(ctx, tx, row, &settled, true, gone, &arrivals); err != nil {
+				return nil, err
+			}
+		}
+		waiting = append(waiting, arrivals...)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit settle: %w", err)
+	}
+	*a = settled
+	return waiting, nil
+}
+
+func (s *Store) releasePage(ctx context.Context, tx *sql.Tx, arrived Pointer, limit int) ([]Row, error) {
+	rows, err := tx.QueryContext(ctx, "DELETE FROM pending WHERE rowid IN (SELECT rowid FROM pending WHERE wait_origin = ? AND wait_seq = ? LIMIT ?) RETURNING row", arrived.Origin, arrived.Seq, limit)
+	if err != nil {
+		return nil, fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
+	}
+	var held []Row
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
+		}
+		var row Row
+		if err := json.Unmarshal([]byte(raw), &row); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("decode held reply: %w", err)
+		}
+		held = append(held, row)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
+	}
+	return held, nil
 }
 
 // Backfill ingests rows as Apply does and makes moves, in one transaction. The
@@ -263,6 +320,10 @@ func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
 // them, so it reaches the lane as a row Apply stores does. A Backfill that
 // starts where the last one ended extends that one's span.
 func (s *Store) Backfill(ctx context.Context, rows []Row, moves []CursorMove) (Applied, error) {
+	rows, err := s.blobbed(rows)
+	if err != nil {
+		return Applied{}, err
+	}
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
@@ -310,6 +371,24 @@ func (s *Store) Backfill(ctx context.Context, rows []Row, moves []CursorMove) (A
 		return Applied{}, fmt.Errorf("commit apply: %w", err)
 	}
 	return a, nil
+}
+
+func (s *Store) blobbed(rows []Row) ([]Row, error) {
+	if !slices.ContainsFunc(rows, func(row Row) bool { return row.PathBody != "" }) {
+		return rows, nil
+	}
+	out := slices.Clone(rows)
+	for i, row := range out {
+		if row.PathBody == "" {
+			continue
+		}
+		path, err := s.Blob(row.PathBody)
+		if err != nil {
+			return nil, fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
+		}
+		out[i].Refs.Path, out[i].PathBody = path, ""
+	}
+	return out, nil
 }
 
 func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, released bool, absent map[Pointer]bool, arrivals *[]Pointer) error {

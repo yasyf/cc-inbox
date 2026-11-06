@@ -931,7 +931,22 @@ type Ingestion struct {
 	Line     string
 }
 
+// IngestAll stores each item's record once, keyed by its line hash, a page of
+// items per transaction; an IngestAll that stops partway keeps the pages it
+// committed, and running it again stores only the rest.
 func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
+	inserted := 0
+	for page := range slices.Chunk(items, writePage) {
+		n, err := s.ingest(ctx, page)
+		if err != nil {
+			return inserted, err
+		}
+		inserted += n
+	}
+	return inserted, nil
+}
+
+func (s *Store) ingest(ctx context.Context, items []Ingestion) (int, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin ingest: %w", err)
@@ -964,61 +979,87 @@ func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
 	return inserted, nil
 }
 
+type reparsing struct {
+	updated, inserted int
+	parentAt          time.Time
+	parentText        string
+}
+
+// Reparse rewrites each item's record from its line, or stores it when the
+// line is new, a page of items per transaction. A page ends only where no split
+// line still takes its time from a record the page rewrote, so a parent and its
+// split lines commit together.
 func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (updated, inserted int, err error) {
+	var done reparsing
+	for len(items) > 0 {
+		n, err := s.reparse(ctx, items, fresh, &done)
+		if err != nil {
+			return done.updated, done.inserted, err
+		}
+		items = items[n:]
+	}
+	return done.updated, done.inserted, nil
+}
+
+func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done *reparsing) (int, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("begin reparse: %w", err)
+		return 0, fmt.Errorf("begin reparse: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	var (
-		parentAt   time.Time
-		parentText string
-	)
+	progress := *done
+	n := 0
 	for _, it := range items {
-		r := it.Record
-		unseen, err := consume(ctx, tx, it.LineHash)
-		if err != nil {
-			return 0, 0, err
-		}
 		var (
 			at  int64
 			old string
 		)
-		err = tx.QueryRowContext(ctx, "SELECT at, text FROM records WHERE line_hash = ?", it.LineHash).Scan(&at, &old)
-		switch {
-		case err == nil:
+		err := tx.QueryRowContext(ctx, "SELECT at, text FROM records WHERE line_hash = ?", it.LineHash).Scan(&at, &old)
+		found := err == nil
+		if !found && !errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("reparse record: %w", err)
+		}
+		if n >= writePage && (fresh || found || progress.parentText == "") {
+			break
+		}
+		n++
+		r := it.Record
+		unseen, err := consume(ctx, tx, it.LineHash)
+		if err != nil {
+			return 0, err
+		}
+		if found {
 			if _, err := tx.ExecContext(ctx, reparseSQL, reparseArgs(r, it.LineHash)...); err != nil {
-				return 0, 0, fmt.Errorf("reparse record: %w", err)
+				return 0, fmt.Errorf("reparse record: %w", err)
 			}
-			parentAt, parentText = time.UnixMilli(at).UTC(), old
-			updated++
+			progress.parentAt, progress.parentText = time.UnixMilli(at).UTC(), old
+			progress.updated++
 			continue
-		case !errors.Is(err, sql.ErrNoRows):
-			return 0, 0, fmt.Errorf("reparse record: %w", err)
 		}
 		switch {
 		case unseen && fresh:
-		case unseen && parentText != "" && strings.Contains(parentText, strings.Join(strings.Fields(it.Line), " ")):
-			r.At = parentAt
+		case unseen && progress.parentText != "" && strings.Contains(progress.parentText, strings.Join(strings.Fields(it.Line), " ")):
+			r.At = progress.parentAt
 		default:
-			parentText = ""
+			progress.parentText = ""
 			continue
 		}
 		r.ExpiresAt = expiry(r, 0)
 		res, err := tx.ExecContext(ctx, insertSQL+" ON CONFLICT DO NOTHING", s.args(r, Hash(r), &it.LineHash)...)
 		if err != nil {
-			return 0, 0, fmt.Errorf("reparse record: %w", err)
+			return 0, fmt.Errorf("reparse record: %w", err)
 		}
-		n, err := res.RowsAffected()
+		inserted, err := res.RowsAffected()
 		if err != nil {
-			return 0, 0, fmt.Errorf("reparse record: %w", err)
+			return 0, fmt.Errorf("reparse record: %w", err)
 		}
-		inserted += int(n)
+		progress.inserted += int(inserted)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, 0, fmt.Errorf("commit reparse: %w", err)
+		return 0, fmt.Errorf("commit reparse: %w", err)
 	}
-	return updated, inserted, nil
+	*done = progress
+	return n, nil
 }
 
 func consume(ctx context.Context, tx *sql.Tx, lineHash string) (bool, error) {
