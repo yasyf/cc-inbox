@@ -659,6 +659,9 @@ func resolveAll(ctx context.Context, st *store.Store, drive string, refs []strin
 	for i, ref := range refs {
 		if !store.IsNamedRef(ref) {
 			seq, err := st.Resolve(ctx, ref)
+			if errors.Is(err, store.ErrNoNumber) {
+				seq, err = storeFromHub(ctx, st, drive, ref, err)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -675,6 +678,21 @@ func resolveAll(ctx context.Context, st *store.Store, drive string, refs []strin
 		named[seqs[i]] = ref
 	}
 	return seqs, nil
+}
+
+func storeFromHub(ctx context.Context, st *store.Store, drive, ref string, missing error) (int64, error) {
+	hub, row, err := findOnHub(ctx, st, drive, ref, missing)
+	if err != nil {
+		return 0, err
+	}
+	applied, err := st.Backfill(ctx, []store.Row{row}, nil)
+	if err == nil && applied.Buffered > 0 {
+		_, err = hub.Pull(ctx, 0, nil)
+	}
+	if err != nil {
+		return 0, err
+	}
+	return st.Resolve(ctx, ref)
 }
 
 func namedRefPRs(ctx context.Context, st *store.Store, drive, ref string) ([]store.PR, error) {
