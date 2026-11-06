@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/yasyf/cc-inbox/e2e"
 	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/pairing"
 	"github.com/yasyf/cc-inbox/internal/relay"
@@ -21,7 +22,7 @@ import (
 
 func newRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relay", Short: "Replicate records end-to-end encrypted through the wide-area relay"}
-	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd(), newRelayScopeCmd())
+	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayDelegateCmd(), newRelayRevokeCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd(), newRelayScopeCmd())
 	return cmd
 }
 
@@ -53,13 +54,14 @@ func relayNodes(st *store.Store, mesh string) ([]*relay.Node, []relay.Config, er
 
 func newRelayJoinCmd() *cobra.Command {
 	var (
-		cfg      relay.Config
-		instance bool
-		drives   []string
-		kinds    []string
-		ttl      time.Duration
-		owners   []string
-		services []string
+		cfg        relay.Config
+		instance   bool
+		delegation string
+		drives     []string
+		kinds      []string
+		ttl        time.Duration
+		owners     []string
+		services   []string
 	)
 	cmd := &cobra.Command{
 		Use:   "join",
@@ -90,11 +92,26 @@ func newRelayJoinCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if instance {
+			switch {
+			case instance && delegation != "":
+				return errors.New("pass --instance or --delegation, not both")
+			case instance:
 				if err := n.Delegate(drives, kinds, ttl); err != nil {
 					return err
 				}
 				n.Config.Tier = string(node.TierService)
+			case delegation != "":
+				raw, err := readProof(cmd, delegation)
+				if err != nil {
+					return err
+				}
+				var d e2e.Delegation
+				if err := json.Unmarshal(raw, &d); err != nil {
+					return fmt.Errorf("--delegation %s: %w", delegation, err)
+				}
+				if err := n.Adopt(cmd.Context(), d); err != nil {
+					return err
+				}
 			}
 			if n.Config.Tier == "" {
 				return errors.New("pass --tier owner|service|paired: the tier this node was enrolled at, which the relay must confirm")
@@ -113,12 +130,73 @@ func newRelayJoinCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.Tier, "tier", "", "the tier this node was enrolled at (owner|service|paired); kept from an earlier join")
 	cmd.Flags().StringVar(&cfg.Tap, "tap", "", "pull from the per-drive tap NAME instead of this node's queue (service members)")
 	cmd.Flags().BoolVar(&instance, "instance", false, "join as an instance delegated by the service key in $CCI_SERVICE_KEY, which the join keeps in the mesh's service.pem so later calls and the daemon need no key in their environment (CI jobs sharing one service identity)")
+	cmd.Flags().StringVar(&delegation, "delegation", "", "join as the instance an owner delegated with `cci relay delegate`: a file holding the delegation it printed, or - for stdin; the node holds no key but its own, and its owner renews it on the relay")
 	cmd.Flags().StringSliceVar(&drives, "drive", nil, "drives the instance may write (exact or trailing *); required with --instance")
 	cmd.Flags().StringSliceVar(&kinds, "kind", nil, "kinds the instance may write (default: the service's scope)")
 	cmd.Flags().DurationVar(&ttl, "ttl", 6*time.Hour, "how long the first instance delegation lasts; a running daemon renews it near its expiry with the kept key")
 	cmd.Flags().StringSliceVar(&services, "service", nil, "pin a service node by its base64 X9.63 public key before joining, so its records and delegated instances verify")
 	cmd.Flags().StringSliceVar(&owners, "owner", nil, "pin an owner node by its base64 X9.63 public key before joining (a fresh node has no other way to trust group-key wraps)")
 	_ = cmd.MarkFlagRequired("url")
+	return cmd
+}
+
+func newRelayDelegateCmd() *cobra.Command {
+	var (
+		mesh, pub string
+		drives    []string
+		kinds     []string
+		ttl       time.Duration
+	)
+	cmd := &cobra.Command{
+		Use:   "delegate",
+		Short: "Owner: sign an instance key a delegation, wrap it every group key, register both with the relay, and print the delegation for `cci relay join --delegation -`",
+		Long:  "Owner: sign an instance key a delegation, wrap it every group key, register both with the relay, and print the delegation for `cci relay join --delegation -`.\n\nRun it again before the delegation expires to renew it: the relay takes the new one at once, and the instance adopts it the next time it refreshes keys. The instance never holds a service key.",
+		Args:  cobra.NoArgs,
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
+			key, err := base64.StdEncoding.DecodeString(pub)
+			if err != nil {
+				return fmt.Errorf("--pub %q is not base64: %w", pub, err)
+			}
+			nodes, _, err := relayNodes(st, mesh)
+			if err != nil {
+				return err
+			}
+			d, err := nodes[0].Issue(cmd.Context(), key, drives, kinds, ttl)
+			if err != nil {
+				return err
+			}
+			return json.NewEncoder(cmd.OutOrStdout()).Encode(d)
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", relay.DefaultMesh, "mesh the instance joins")
+	cmd.Flags().StringVar(&pub, "pub", "", "the instance's base64 X9.63 public key, as `cci node --json` prints it there")
+	cmd.Flags().StringSliceVar(&drives, "drive", nil, "drives the instance may write (exact or trailing *)")
+	cmd.Flags().StringSliceVar(&kinds, "kind", nil, "kinds the instance may write (default: every kind)")
+	cmd.Flags().DurationVar(&ttl, "ttl", 24*time.Hour, "how long the delegation lasts, at most 24h")
+	_ = cmd.MarkFlagRequired("pub")
+	_ = cmd.MarkFlagRequired("drive")
+	return cmd
+}
+
+func newRelayRevokeCmd() *cobra.Command {
+	var mesh string
+	cmd := &cobra.Command{
+		Use:   "revoke INSTANCE",
+		Short: "Owner: end an instance this node delegated, so the relay drops it and no later rotation wraps it a group key",
+		Args:  cobra.ExactArgs(1),
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			nodes, _, err := relayNodes(st, mesh)
+			if err != nil {
+				return err
+			}
+			if err := nodes[0].Revoke(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "revoked instance %s on mesh %s\n", args[0], nodes[0].Config.Mesh)
+			return err
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", relay.DefaultMesh, "mesh the instance joined")
 	return cmd
 }
 

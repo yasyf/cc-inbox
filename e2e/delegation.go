@@ -83,7 +83,7 @@ func (d Delegation) check(members map[string]Member, e Envelope) error {
 	switch {
 	case !ok:
 		return fmt.Errorf("%w: delegating service %s", ErrUnknownMember, d.Service)
-	case svc.Tier != TierService || e.Tier != TierService:
+	case svc.Tier != TierService && svc.Tier != TierOwner || e.Tier != TierService:
 		return fmt.Errorf("%w: delegation from %s tier %s carried tier %s", ErrTierMismatch, d.Service, svc.Tier, e.Tier)
 	case !VerifyDelegation(svc.PublicKey, d):
 		return fmt.Errorf("delegation of %s by %s: %w", d.Instance, d.Service, ErrBadSignature)

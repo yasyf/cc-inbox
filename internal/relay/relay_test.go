@@ -915,3 +915,224 @@ func TestDelegatedInstanceReopensWithoutTheServiceKeyInItsEnvironment(t *testing
 		t.Fatalf("push on the renewed delegation = %+v, %v; want 1", res, err)
 	}
 }
+
+func ownerDelegated(t *testing.T, srv *relaytest.Server, owner *peer, ttl time.Duration) *peer {
+	t.Helper()
+	st, _ := testutil.Store(t)
+	id, err := node.Load(st.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &peer{st: st, id: id, tier: node.TierService}
+	pin(t, job, owner)
+	d, err := owner.node.Issue(context.Background(), id.PublicKey(), []string{"page:*"}, nil, ttl)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	n, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Adopt(context.Background(), d); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if err := n.Join(context.Background()); err != nil {
+		t.Fatalf("instance join: %v", err)
+	}
+	job.node = n
+	return job
+}
+
+func TestAnOwnerDelegatedInstanceWritesAndReadsWithOnlyItsOwnKey(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	join(t, srv, a)
+	job := ownerDelegated(t, srv, a, time.Hour)
+	if _, err := os.Stat(filepath.Join(job.st.HomeDir(), "relay", relay.DefaultMesh, "service.pem")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("service.pem on an owner-delegated instance: %v; want none", err)
+	}
+	if d := mustConfig(t, job).Delegation; d == nil || d.Service != a.id.ID() {
+		t.Fatalf("instance delegation = %+v; want one by the owner %s", d, a.id.ID())
+	}
+	testutil.Post(t, job.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "from the instance"})
+	if res, err := job.node.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 {
+		t.Fatalf("instance push = %+v, %v; want 1", res, err)
+	}
+	if got := pull(t, a); got.Inserted != 1 {
+		t.Fatalf("owner inserted %d instance records, want 1", got.Inserted)
+	}
+	testutil.Post(t, a.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: secret})
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	if got := pull(t, job); got.Inserted != 1 {
+		t.Fatalf("instance inserted %d owner records, want 1 opened with its own key", got.Inserted)
+	}
+}
+
+func TestAnInstanceAdoptsItsOwnersRenewalWithoutLosingARecord(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	join(t, srv, a)
+	job := ownerDelegated(t, srv, a, time.Hour)
+	first := mustConfig(t, job).Delegation
+	renewed, err := a.node.Issue(context.Background(), job.id.PublicKey(), []string{"page:*"}, nil, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("renew: %v", err)
+	}
+	testutil.Post(t, job.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "written across the renewal"})
+	if res, err := job.node.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("push after the owner renewed = %+v, %v; want 1 pushed, none refused", res, err)
+	}
+	pull(t, job)
+	held := mustConfig(t, job).Delegation
+	if bytes.Equal(held.Sig, first.Sig) || !bytes.Equal(held.Sig, renewed.Sig) {
+		t.Fatalf("instance holds %s after a pull, want the renewal expiring %s", held.Expires, renewed.Expires)
+	}
+	if _, err := a.node.Issue(context.Background(), job.id.PublicKey(), []string{"page:*"}, nil, 3*time.Hour); err != nil {
+		t.Fatalf("second renewal: %v", err)
+	}
+	reopened, err := relay.Open(job.st.HomeDir(), job.st, job.id, mustConfig(t, job))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, job.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "under the adopted renewal"})
+	if res, err := reopened.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("push on the adopted renewal after a second one = %+v, %v; want 1 pushed", res, err)
+	}
+	if got := pull(t, a); got.Inserted != 2 {
+		t.Fatalf("owner inserted %d records, want both written across the renewals", got.Inserted)
+	}
+}
+
+func TestAnOwnerRevokesAnInstanceAndItsNextRotationLeavesItOut(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	join(t, srv, a)
+	job := ownerDelegated(t, srv, a, time.Hour)
+	if err := a.node.Revoke(context.Background(), job.id.ID()); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := a.node.Rotate(context.Background()); err != nil {
+		t.Fatalf("rotate after the revoke: %v", err)
+	}
+	if _, err := job.node.Pull(context.Background(), 0, nil); err == nil {
+		t.Fatal("a revoked instance still pulls")
+	}
+}
+
+func TestARotationWrapsTheNewKeyToOwnerDelegatedInstances(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	join(t, srv, a)
+	job := ownerDelegated(t, srv, a, time.Hour)
+	if epoch, err := a.node.Rotate(context.Background()); err != nil || epoch != 2 {
+		t.Fatalf("rotate = %d, %v; want 2", epoch, err)
+	}
+	pull(t, job)
+	testutil.Post(t, a.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: secret})
+	if _, err := a.node.Push(context.Background(), configs(t, a)); err != nil {
+		t.Fatal(err)
+	}
+	if got := pull(t, job); got.Inserted != 1 {
+		t.Fatalf("instance inserted %d records sealed after the rotation, want 1", got.Inserted)
+	}
+	testutil.Post(t, job.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "sealed under epoch 2"})
+	if res, err := job.node.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 {
+		t.Fatalf("instance push after the rotation = %+v, %v; want 1", res, err)
+	}
+}
+
+func TestAServiceDelegatedInstanceMovesToItsOwnersDelegationAndDropsTheServiceKey(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	svc := newPeer(t, srv, node.TierService)
+	pin(t, a, svc)
+	join(t, srv, a)
+	pemKey, err := os.ReadFile(filepath.Join(node.Dir(svc.st.HomeDir()), "key.pem"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, string(pemKey))
+	st, _ := testutil.Store(t)
+	id, err := node.Load(st.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &peer{st: st, id: id, tier: node.TierService}
+	pin(t, job, a)
+	legacy, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, Tier: string(node.TierService)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Delegate([]string{"page:*"}, nil, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if err := legacy.Join(context.Background()); err != nil {
+		t.Fatalf("service-delegated join: %v", err)
+	}
+	t.Setenv(relay.ServiceKeyEnv, "")
+	kept := filepath.Join(st.HomeDir(), "relay", relay.DefaultMesh, "service.pem")
+	if _, err := os.Stat(kept); err != nil {
+		t.Fatalf("service-delegated join kept no service key: %v", err)
+	}
+	d, err := a.node.Issue(context.Background(), id.PublicKey(), []string{"page:*"}, nil, time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	moved, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh, RelayPub: mustConfig(t, job).RelayPub})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := moved.Adopt(context.Background(), d); err != nil {
+		t.Fatalf("adopt: %v", err)
+	}
+	if err := moved.Join(context.Background()); err != nil {
+		t.Fatalf("owner-delegated join: %v", err)
+	}
+	if _, err := os.Stat(kept); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("service key after the owner-delegated join: %v; want it gone", err)
+	}
+	reopened, err := relay.Open(st.HomeDir(), st, id, mustConfig(t, job))
+	if err != nil {
+		t.Fatalf("reopen with no service key: %v", err)
+	}
+	if reopened.Service != nil {
+		t.Fatal("the reopened instance holds a service key")
+	}
+	testutil.Post(t, st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "after the move"})
+	if res, err := reopened.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 {
+		t.Fatalf("push after the move = %+v, %v; want 1", res, err)
+	}
+}
+
+func TestAnInstanceRefusesADelegationNoPinnedOwnerSigned(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	b := newPeer(t, srv, node.TierOwner)
+	pin(t, a, b)
+	pin(t, b, a)
+	join(t, srv, a)
+	join(t, srv, b)
+	st, _ := testutil.Store(t)
+	id, err := node.Load(st.HomeDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin(t, &peer{st: st}, a)
+	d, err := b.node.Issue(context.Background(), id.PublicKey(), []string{"page:*"}, nil, time.Hour)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	n, err := relay.Open(st.HomeDir(), st, id, relay.Config{URL: srv.URL, Mesh: relay.DefaultMesh})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := n.Adopt(context.Background(), d); err == nil {
+		t.Fatal("adopted a delegation by an owner this node never pinned")
+	}
+	other, err := a.node.Issue(context.Background(), a.id.PublicKey(), []string{"page:*"}, nil, time.Hour)
+	if err == nil {
+		t.Fatalf("an owner delegated its own key: %+v", other)
+	}
+}

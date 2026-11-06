@@ -171,3 +171,36 @@ func TestDelegationScope(t *testing.T) {
 		})
 	}
 }
+
+func TestAnOwnerDelegatesAndAPairedNodeCannot(t *testing.T) {
+	owner, paired, inst := e2etest.NewIdentity(t), e2etest.NewIdentity(t), e2etest.NewIdentity(t)
+	k, _ := e2e.NewGroupKey(1)
+	keys := map[uint64]e2e.GroupKey{1: k}
+	pinned := members(member(owner, e2e.TierOwner), member(paired, e2e.TierPaired))
+	ts := time.Date(2026, 11, 5, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name string
+		by   e2e.Identity
+		want error
+	}{
+		{"owner", owner, nil},
+		{"paired", paired, e2e.ErrTierMismatch},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d, err := e2e.Delegate(c.by, "default", inst.PublicKey(), []string{"page:*"}, nil, ts.Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			e, err := e2e.Seal(k, inst, e2e.Envelope{
+				Mesh: "default", Drive: "page:9", OriginSeq: 1, Tier: e2e.TierService, KindClass: "decision",
+				TS: ts.Format(time.RFC3339Nano), Delegation: &d,
+			}, []byte("x"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e2e.Open(e, keys, pinned); !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+		})
+	}
+}
