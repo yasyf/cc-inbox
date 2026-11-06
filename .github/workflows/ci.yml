@@ -282,13 +282,19 @@ jobs:
       - name: Text Tail retained private fixture native query plans
         if: env.FULL_CI == 'true'
         run: go test -count=1 -run '^TestTailProjectionPrivateFixturePlan$' -v ./internal/store
+      - uses: actions/checkout@v7
+        if: env.FULL_CI == 'true'
+        with:
+          ref: 70ea38a2108e20eadf526838d9d97797c63cdcec
+          path: .ci-tail-body-baseline
+          persist-credentials: false
       - name: Text Tail Body immutable output error and cursor contract
         if: env.FULL_CI == 'true'
         run: |
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = fbc0e5bd6479118800bf57b118ae6dfeaf6bbee3
-          cp internal/cli/tail_body_contract_test.go .ci-compact-line-baseline/internal/cli/
+          test "$(git -C .ci-tail-body-baseline rev-parse HEAD)" = 70ea38a2108e20eadf526838d9d97797c63cdcec
+          cp internal/cli/tail_body_contract_test.go .ci-tail-body-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
-          (cd .ci-compact-line-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli)
+          (cd .ci-tail-body-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli)
           CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli
       - uses: actions/checkout@v7
         if: env.FULL_CI == 'true'
