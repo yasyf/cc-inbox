@@ -103,6 +103,9 @@ func TestBriefCountsTheRecipientsOfABroadcast(t *testing.T) {
 }
 
 func TestStampPrintsPacificTimeOnAnyHost(t *testing.T) {
+	host := time.Local
+	time.Local = time.FixedZone("UTC+9", 9*60*60)
+	t.Cleanup(func() { time.Local = host })
 	at := time.Date(2026, 11, 6, 0, 40, 20, 0, time.UTC)
 	if got := render.Stamp(at, at); got != "4:40 PM" {
 		t.Fatalf("Stamp(%v) = %q, want the Pacific 4:40 PM", at, got)
