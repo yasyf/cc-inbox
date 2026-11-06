@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 )
@@ -173,6 +174,13 @@ func tailBodyCheckSnapshot(t *testing.T, dir string, got tailBodyContractResult)
 
 func runTailBodyContract(t *testing.T, args []string, node string) (result tailBodyContractResult) {
 	t.Helper()
+	host := time.Local
+	zone, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Local = zone
+	defer func() { time.Local = host }()
 	var out, stderr bytes.Buffer
 	code := 0
 	defer func() {

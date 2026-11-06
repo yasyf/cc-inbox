@@ -67,6 +67,7 @@ SELECT 'd','reviewer','review',x,'REVIEW selected '||x,'post','selected-'||x FRO
 					args := []string{"grep", "REVIEW", "--drive", "d", "--kind", "review", "--budget", fmt.Sprint(budget)}
 					if old := os.Getenv("CCI_GREP_CURRENT_BASELINE"); old != "" {
 						command := exec.CommandContext(ctx, old, args...)
+						command.Env = append(os.Environ(), "TZ=America/Los_Angeles")
 						want, err := command.Output()
 						if err != nil {
 							t.Fatalf("old CLI: %v: %s", err, want)
