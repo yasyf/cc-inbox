@@ -9,6 +9,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/pacific"
 )
 
 func TestParseShapes(t *testing.T) {
@@ -93,7 +94,7 @@ func clockString(c *importer.Clock) string {
 }
 
 func TestDateWalksBackAcrossMidnight(t *testing.T) {
-	loc := time.Local
+	loc := pacific.Zone
 	end := time.Date(2026, 10, 4, 0, 30, 0, 0, loc)
 	entries := []importer.Entry{
 		{Clock: &importer.Clock{Hour: 23, Minute: 50}},
@@ -159,7 +160,7 @@ func parseOne(t *testing.T, line string) importer.Entry {
 }
 
 func TestDateKeepsOutOfOrderStampsOnTheirDay(t *testing.T) {
-	loc := time.Local
+	loc := pacific.Zone
 	end := time.Date(2026, 10, 5, 1, 50, 0, 0, loc)
 	entries := []importer.Entry{
 		{Clock: &importer.Clock{Hour: 1, Minute: 0}},
@@ -218,7 +219,7 @@ func TestParseMapsEveryWatchedLeadTokenToAKind(t *testing.T) {
 }
 
 func TestDateNeverPlacesAStampAfterTheFileWasWritten(t *testing.T) {
-	loc := time.Local
+	loc := pacific.Zone
 	end := time.Date(2026, 10, 5, 10, 10, 0, 0, loc)
 	entries := []importer.Entry{
 		{Clock: &importer.Clock{Hour: 22, Minute: 7}},
@@ -236,18 +237,18 @@ func TestDateNeverPlacesAStampAfterTheFileWasWritten(t *testing.T) {
 }
 
 func TestParseClockResolvesToTheLatestPastInstant(t *testing.T) {
-	now := time.Date(2026, 10, 5, 12, 40, 0, 0, time.Local)
+	now := time.Date(2026, 10, 5, 12, 40, 0, 0, pacific.Zone)
 	tests := []struct {
 		in   string
 		want time.Time
 	}{
-		{"09:00", time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)},
-		{"9:00 AM", time.Date(2026, 10, 5, 9, 0, 0, 0, time.Local)},
-		{"12:0x PM", time.Date(2026, 10, 5, 12, 0, 0, 0, time.Local)},
-		{"11:30pm", time.Date(2026, 10, 4, 23, 30, 0, 0, time.Local)},
-		{"13:15", time.Date(2026, 10, 4, 13, 15, 0, 0, time.Local)},
+		{"09:00", time.Date(2026, 10, 5, 9, 0, 0, 0, pacific.Zone)},
+		{"9:00 AM", time.Date(2026, 10, 5, 9, 0, 0, 0, pacific.Zone)},
+		{"12:0x PM", time.Date(2026, 10, 5, 12, 0, 0, 0, pacific.Zone)},
+		{"11:30pm", time.Date(2026, 10, 4, 23, 30, 0, 0, pacific.Zone)},
+		{"13:15", time.Date(2026, 10, 4, 13, 15, 0, 0, pacific.Zone)},
 		{"12:40 PT", now},
-		{"12:26:07 AM", time.Date(2026, 10, 5, 0, 26, 0, 0, time.Local)},
+		{"12:26:07 AM", time.Date(2026, 10, 5, 0, 26, 0, 0, pacific.Zone)},
 	}
 	for _, tt := range tests {
 		c := importer.ParseClock(tt.in)

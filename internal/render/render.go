@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -23,12 +24,11 @@ const (
 )
 
 func Stamp(t, now time.Time) string {
-	local := t.In(time.Local)
-	n := now.In(time.Local)
-	if local.Year() == n.Year() && local.YearDay() == n.YearDay() {
-		return local.Format("3:04 PM")
+	at, n := t.In(pacific.Zone), now.In(pacific.Zone)
+	if at.Year() == n.Year() && at.YearDay() == n.YearDay() {
+		return at.Format("3:04 PM")
 	}
-	return local.Format("Jan 2 3:04 PM")
+	return at.Format("Jan 2 3:04 PM")
 }
 
 func Line(r store.Record, now time.Time) string {

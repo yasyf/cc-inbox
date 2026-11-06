@@ -335,7 +335,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
-	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label, one that opens the text or follows at most four words and ends in a colon or follows the lane's own name, is replaced with it too, with a hint on stderr; any other time is stored as typed; over 400 characters it spills to a file under $CCI_HOME/blobs, followed by the --path file when one is named, and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
+	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own Pacific time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label is replaced with it too, with a hint on stderr: one that opens the text followed by a colon or the lane's own name, one that follows the lane's own name, or one that follows at most four words and ends in a colon; any other time, such as a deadline that opens the text, is stored as typed; over 400 characters it spills to a file under $CCI_HOME/blobs, followed by the --path file when one is named, and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
 	f.StringVar(&ownedBy, "owned-by", "", "with --kind decide, the lane that owns the one --to lane, such as the lane that maintains a script posting as that lane: stored as fields.attrs.owned-by: later asks, decides and defects addressed to the owned lane reach its owner, and the owner's successors, too; the newest such decide wins")
 	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
@@ -727,7 +727,7 @@ func stamped(w io.Writer, text, lane string, at time.Time) (string, error) {
 	stamp := render.Stamp(at, at)
 	if m := typedStamp.FindStringSubmatchIndex(text); m != nil && importer.ParseClock(text[m[2]:m[3]]) != nil {
 		text = text[:m[2]] + stamp + text[m[3]:]
-	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil && labels(text[m[2]:m[3]], text[m[6]:m[7]], lane) {
+	} else if m := leadingLabel.FindStringSubmatchIndex(text); m != nil && labels(text[m[2]:m[3]], text[m[6]:m[7]], text[m[7]:], lane) {
 		if _, err := fmt.Fprintf(w, "cci: label %s became the post time %s; cci stamps every record, so leave the time out\n", text[m[4]:m[5]], stamp); err != nil {
 			return "", err
 		}
@@ -736,9 +736,13 @@ func stamped(w io.Writer, text, lane string, at time.Time) (string, error) {
 	return strings.ReplaceAll(text, "{at}", stamp), nil
 }
 
-func labels(prefix, colon, lane string) bool {
+func labels(prefix, colon, rest, lane string) bool {
 	prefix = strings.TrimSpace(prefix)
-	if prefix == "" || prefix == lane {
+	if prefix == "" {
+		next, _, _ := strings.Cut(strings.TrimSpace(rest), " ")
+		return colon != "" || strings.TrimSuffix(next, ":") == lane
+	}
+	if prefix == lane {
 		return true
 	}
 	words := strings.Fields(prefix)

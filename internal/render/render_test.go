@@ -101,3 +101,13 @@ func TestBriefCountsTheRecipientsOfABroadcast(t *testing.T) {
 		t.Fatalf("Line() = %q, want every recipient", got)
 	}
 }
+
+func TestStampPrintsPacificTimeOnAnyHost(t *testing.T) {
+	at := time.Date(2026, 11, 6, 0, 40, 20, 0, time.UTC)
+	if got := render.Stamp(at, at); got != "4:40 PM" {
+		t.Fatalf("Stamp(%v) = %q, want the Pacific 4:40 PM", at, got)
+	}
+	if got := render.Stamp(at, at.Add(24*time.Hour)); got != "Nov 5 4:40 PM" {
+		t.Fatalf("Stamp(%v) a day later = %q, want the Pacific date Nov 5 4:40 PM", at, got)
+	}
+}

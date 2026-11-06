@@ -18,6 +18,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
@@ -290,7 +291,7 @@ func parseSince(ctx context.Context, st *store.Store, s string) (int64, time.Tim
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return 0, t, nil
 	}
-	if t, err := time.ParseInLocation(time.DateOnly, s, time.Local); err == nil {
+	if t, err := time.ParseInLocation(time.DateOnly, s, pacific.Zone); err == nil {
 		return 0, t, nil
 	}
 	return 0, time.Time{}, fmt.Errorf("--since %q is not a seq, a duration, a clock time (9:00 AM, 21:30), a date (2026-10-26), or an RFC3339 time", s)

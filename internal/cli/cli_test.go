@@ -19,6 +19,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/hook"
+	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -415,7 +416,7 @@ type posted struct {
 }
 
 func (p posted) stamp() string {
-	return p.At.In(time.Local).Format("3:04 PM")
+	return p.At.In(pacific.Zone).Format("3:04 PM")
 }
 
 func postJSON(t *testing.T, args ...string) posted {
@@ -486,6 +487,7 @@ func TestPostNeverRefusesAClockInItsText(t *testing.T) {
 	}{
 		{name: "leading label off the clock", lane: "fidelity-desk-19", kind: "state", text: label + round, want: "{at}" + round, stderr: hint(label)},
 		{name: "label after the lane's name", lane: "root", kind: "note", text: "root " + before + " count: 0 ungraded", want: "root {at} count: 0 ungraded", stderr: hint(before)},
+		{name: "deadline that opens the text", lane: "dev-red-d12370de07-fix", kind: "state", text: label + " backup gate: #51584 is still queued", want: label + " backup gate: #51584 is still queued"},
 		{name: "past claim 299 minutes ahead", lane: "go-sweep-9", kind: "note", text: "the sweep landed at " + clock(299*time.Minute) + " with no new reds", want: "the sweep landed at " + clock(299*time.Minute) + " with no new reds"},
 		{name: "past claim 464 minutes ahead", lane: "supervisor", kind: "note", text: "the relaunch failed at " + clock(464*time.Minute) + ", so go-sweep-9 is still down", want: "the relaunch failed at " + clock(464*time.Minute) + ", so go-sweep-9 is still down"},
 		{name: "future deadline as an attr", lane: "root", kind: "note", text: "next state", attrs: []string{"--attr", "due=" + clock(90*time.Minute)}, want: "next state"},
