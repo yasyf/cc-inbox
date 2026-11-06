@@ -68,7 +68,7 @@ func Definition() (daemonkit.Daemon, error) {
 		Args:    []string{"daemon", "run"},
 		Schemas: []daemonkit.Schema{Schema},
 
-		Restart:     daemonkit.RestartOnFailure,
+		Restart:     daemonkit.RestartAlways,
 		Shutdown:    daemonkit.Grace(10 * time.Second),
 		Idle:        daemonkit.Grace(SessionIdle),
 		Concurrency: Sessions,

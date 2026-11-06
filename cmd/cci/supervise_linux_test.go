@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yasyf/daemonkit"
+
+	"github.com/yasyf/cc-inbox/internal/daemon"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/relay"
@@ -47,6 +51,64 @@ func TestASecondSuperviseWaitsForTheLabelAndTakesOver(t *testing.T) {
 	post(t, st, "posted after the first supervisor stopped")
 	waitPushed(t, n, second)
 	second.stop(t)
+}
+
+func TestADrainedDaemonGetsASuccessorThatAnswersTheHeldListener(t *testing.T) {
+	home := t.TempDir()
+	sv := startSupervise(t, home)
+	d, err := daemon.Definition()
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := daemonkit.Open(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = client.Close(ctx)
+	})
+	old := waitReady(t, client, sv, 0)
+	held, err := daemon.Hold(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = held.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	if _, err := client.Drain(ctx, daemonkit.Expect{Build: old.Build, Generation: old.Generation}); err != nil {
+		t.Fatalf("drain the daemon as an upgrade's Ensure does: %v\n%s", err, logged(t, sv.log))
+	}
+	resp, err := (&http.Client{Timeout: time.Minute}).Get("http://" + daemon.Addr + "/v1/drives")
+	if err != nil {
+		t.Fatalf("a dial after the drain got %v, want a successor to answer it with no Ensure left to start one\n%s", err, logged(t, sv.log))
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("the successor answered %s, want 200", resp.Status)
+	}
+	if next := waitReady(t, client, sv, old.Generation); next.PID == old.PID {
+		t.Fatalf("the daemon serving after the drain is pid %d, the drained one", next.PID)
+	}
+	sv.stop(t)
+}
+
+func waitReady(t *testing.T, client *daemonkit.Client, sv *supervisor, past uint64) daemonkit.Health {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		h, err := client.Health(ctx)
+		cancel()
+		if err == nil && h.Phase == daemonkit.PhaseReady && h.Generation != past {
+			return h
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no daemon past generation %d became ready: %+v, %v\n%s", past, h, err, logged(t, sv.log))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 type supervisor struct {

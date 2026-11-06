@@ -40,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A cci upgrade no longer leaves the daemon down. The daemon's LaunchAgent now
+  sets `KeepAlive` to true, so launchd starts the new build after every exit,
+  and a Linux supervisor does the same. Before, it restarted only after a
+  failed exit. An upgrade drains the old daemon, which exits 0, and then
+  kickstarts the job. On Nov 6 at 3:01 AM the kickstart reached launchd before
+  launchd had reaped the old daemon, so it did nothing, and nothing listened on
+  127.0.0.1:7377 until the job was started again at 3:05 AM. The listener an
+  upgrade holds through the swap now always reaches a new daemon, so a
+  connection made during the swap waits for it instead of failing.
 - `cci post --kind lift` is refused unless its `--re` or `--resolves` names an
   open hold, and the refusal lists the open holds on the lift's `--pr` and on
   the pull requests of the records it named, so the poster can pick one. On
