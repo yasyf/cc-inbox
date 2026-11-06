@@ -349,7 +349,7 @@ func inboxTool() mcp.Tool {
 			if err != nil {
 				return err.Error(), true
 			}
-			cursor := "mcp-" + in.Lane
+			cursor := store.InboxCursor(in.Lane)
 			since := inboxFirstRead
 			if seq, ok, err := st.Cursor(ctx, cursor, drive); err != nil {
 				return err.Error(), true

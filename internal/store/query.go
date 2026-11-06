@@ -802,6 +802,10 @@ func LaneCursor(k PeerKey) string {
 	return "lane-" + k.String()
 }
 
+func InboxCursor(lane string) string {
+	return "mcp-" + lane
+}
+
 func BroadcastCursor(k PeerKey) string {
 	return LaneCursor(k) + "#all"
 }

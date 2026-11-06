@@ -45,6 +45,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci tail --seed <lane>` also starts no earlier than where the MCP `inbox`
+  tool has read for that lane, so `lr wait` never wakes on records a lane
+  already read through the tool. On Nov 6 a Sprite lane read its mail through
+  `inbox`, which moves only the `mcp-<lane>` cursor; its next wait started at
+  the `<lane>-wake` cursor its previous wait left, found no `<lane>` cursor to
+  start past, and woke at once on 16 minutes of records the lane had already
+  read instead of on the owner's pick it was waiting for.
 - A cci upgrade no longer leaves the daemon down. The daemon's LaunchAgent now
   sets `KeepAlive` to true, so launchd starts the new build after every exit,
   and a Linux supervisor does the same. Before, it restarted only after a
