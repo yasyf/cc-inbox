@@ -5,12 +5,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 func TestCompactDropsWhatTheLineAlreadyCarries(t *testing.T) {
-	at := time.Date(2026, 11, 2, 21, 5, 0, 0, time.Local)
+	at := time.Date(2026, 11, 2, 21, 5, 0, 0, pacific.Zone)
 	r := store.Record{
 		Seq: 308532, Drive: "d", Lane: "progress-desk-2", Kind: "evidence", At: at, Re: 308500, Resolves: 308400, AlsoResolves: []int64{308401},
 		To:   []string{"root", "drive-watchdog@d"},

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/pacific"
 )
 
 func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
@@ -444,7 +445,7 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 		if r.Kind == kinds.Digest || keepSeq[r.Seq] || elsewhere[r.Seq] || keepSeq[r.Re] || slices.ContainsFunc(r.Closes(), func(seq int64) bool { return keepSeq[seq] }) {
 			continue
 		}
-		day := r.At.In(time.Local).Format(time.DateOnly)
+		day := r.At.In(pacific.Zone).Format(time.DateOnly)
 		days[day] = append(days[day], r)
 	}
 	tx, err := s.rw.BeginTx(ctx, nil)

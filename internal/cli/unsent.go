@@ -16,6 +16,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 
+	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
@@ -242,7 +243,7 @@ drain:
 			if err := dropKept(path); err != nil {
 				return err
 			}
-			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: the bus refused a post kept since %s: %s; it is at %s\n", post.At.Local().Format(time.Kitchen), strings.TrimSpace(string(out)), path+refusedExt); err != nil {
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: the bus refused a post kept since %s: %s; it is at %s\n", post.At.In(pacific.Zone).Format(time.Kitchen), strings.TrimSpace(string(out)), path+refusedExt); err != nil {
 				return err
 			}
 		}

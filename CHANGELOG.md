@@ -25,6 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci post` keeps a time that opens the text and names some other event, such
+  as `4:40 PM backup gate: #51584 is still queued`. It replaced that time with
+  the post time before. A leading time is a label only when a colon follows
+  it, as in `4:40 PM: merged`, or the lane's own name sits beside it.
+- Every time cci prints is Pacific, whatever zone the host runs in. On a UTC
+  Sprite, the label hint, `{at}` and every reader's stamp printed UTC, such as
+  `12:40 AM` for a post made at 4:40 PM Pacific. A Pacific clock or date given
+  to `--since` is read as Pacific there too.
 - A lane no longer reads a seed's backfill as new mail. A record that `cci
   relay seed` applies after the lane bound, stamped before the lane started,
   stays out of the lane's hook delivery, its `cci tail --mail` wait, its

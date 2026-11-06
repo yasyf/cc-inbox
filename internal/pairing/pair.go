@@ -12,6 +12,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/e2e"
 	"github.com/yasyf/cc-inbox/internal/node"
+	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -53,7 +54,7 @@ func Join(ctx context.Context, home string, st *store.Store, self node.Node, opt
 		return store.Member{}, fmt.Errorf("start pairing: %w", err)
 	}
 	if _, err := fmt.Fprintf(out, "pairing code  %s\nfingerprint   %s\nOn an owner machine run: cci pair accept %s --mesh %s\nThe code expires at %s.\n",
-		FormatCode(code), FormatFingerprint(self.Fingerprint()), FormatCode(code), cfg.Mesh, jr.ExpiresAt.Local().Format(time.Kitchen)); err != nil {
+		FormatCode(code), FormatFingerprint(self.Fingerprint()), FormatCode(code), cfg.Mesh, jr.ExpiresAt.In(pacific.Zone).Format(time.Kitchen)); err != nil {
 		return store.Member{}, err
 	}
 	sr, err := awaitAccept(ctx, c, code, self.PublicKey(), opts.Poll)

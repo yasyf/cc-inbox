@@ -14,6 +14,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/importer"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
@@ -331,7 +332,7 @@ func TestRotationNeverReappendsACompactedLine(t *testing.T) {
 	inbox := filepath.Join(t.TempDir(), "deploy-go.md")
 	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
 	write(t, inbox, body)
-	written := time.Date(2026, 10, 1, 23, 0, 0, 0, time.Local)
+	written := time.Date(2026, 10, 1, 23, 0, 0, 0, pacific.Zone)
 	if err := os.Chtimes(inbox, written, written); err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +356,7 @@ func TestRereadRecordsLinesAnOlderBinaryInserted(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	body := "DONE (9:40 PM PT) lane-a: first\nDONE (9:41 PM PT) lane-b: second\n"
-	written := time.Date(2026, 10, 1, 23, 0, 0, 0, time.Local)
+	written := time.Date(2026, 10, 1, 23, 0, 0, 0, pacific.Zone)
 	for _, name := range []string{"deploy-go.md", "copy-1.md", "copy-2.md"} {
 		write(t, filepath.Join(dir, name), body)
 		if err := os.Chtimes(filepath.Join(dir, name), written, written); err != nil {
@@ -387,7 +388,7 @@ func TestImportedDeploymentBlocksStayOpenUntilClosedByRef(t *testing.T) {
 		"DEFECT slack-release-sweep-8 (10:09 PM PT) target:api preview red on every plan",
 		"HOLD root (10:10 PM PT) names no deployment",
 	}, "\n")+"\n")
-	written := time.Date(2026, 10, 4, 23, 0, 0, 0, time.Local)
+	written := time.Date(2026, 10, 4, 23, 0, 0, 0, pacific.Zone)
 	open := func() string {
 		t.Helper()
 		if err := os.Chtimes(path, written, written); err != nil {
@@ -425,7 +426,7 @@ func TestDigestNamesImportedHoldsNoRefCanClose(t *testing.T) {
 		"HOLD reco-box-accounts (10:08 PM PT) tunnel/T apply waits on the box bake",
 		"HOLD reco-target (10:09 PM PT) reco-box-1 replace pending",
 	}, "\n")+"\n")
-	written := time.Date(2026, 10, 4, 23, 0, 0, 0, time.Local)
+	written := time.Date(2026, 10, 4, 23, 0, 0, 0, pacific.Zone)
 	if err := os.Chtimes(path, written, written); err != nil {
 		t.Fatal(err)
 	}
@@ -456,7 +457,7 @@ func TestDigestDropsUntrackedHoldsAResolverCloses(t *testing.T) {
 		"HOLD slack-release-sweep-7 (10:08 PM PT) 7-box re-roll waits on the owner",
 		"HOLD slack-release-sweep-8 (10:09 PM PT) reco-e2e rerun re-rolls all 7 boxes",
 	}, "\n")+"\n")
-	written := time.Date(2026, 10, 4, 23, 0, 0, 0, time.Local)
+	written := time.Date(2026, 10, 4, 23, 0, 0, 0, pacific.Zone)
 	if err := os.Chtimes(path, written, written); err != nil {
 		t.Fatal(err)
 	}

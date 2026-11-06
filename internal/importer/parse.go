@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/pacific"
 )
 
 type Clock struct {
@@ -308,7 +309,7 @@ func (c Clock) location() *time.Location {
 	if c.UTC {
 		return time.UTC
 	}
-	return time.Local
+	return pacific.Zone
 }
 
 func (c Clock) Latest(now time.Time) time.Time {

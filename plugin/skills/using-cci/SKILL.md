@@ -112,11 +112,14 @@ register under the stem reads it.
 
 Never type a clock time into a record. Every reader prints the record's own
 stored time, and a time typed from memory can run minutes off it. Where prose
-needs the time, write `{at}`, which `cci post` replaces with the record's time
-in the form readers print, such as `10:52 AM`. A clock typed in a leading
-`R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same way, and
-so is a leading `H:MM AM/PM` label, with a hint on stderr. Any other clock is
-stored as typed; no clock refuses a post. Name an earlier record by its seq,
+needs the time, write `{at}`, which `cci post` replaces with the record's
+Pacific time in the form readers print, such as `10:52 AM`. A clock typed in a
+leading `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced the same
+way, and so is a leading `H:MM AM/PM` label that labels the post: a time
+followed by a colon, as in `10:59 AM: done`, or one beside the lane's own name.
+cci prints a hint on stderr when it replaces one. Any other clock is stored as
+typed, such as the deadline in `4:40 PM backup gate: queued`; no clock refuses
+a post. Name an earlier record by its seq,
 never its time, and put a deadline in an attribute, such as
 `--attr due=9:30 AM`. A post that takes its
 text from a `--path` file stores the file's first line exactly as written, so
