@@ -382,3 +382,43 @@ func TestPagedWritesReachTheStoresWriterAPageAtATime(t *testing.T) {
 		t.Fatalf("the writer took the relayed row %+v; want its body already in this node's blobs", relayed)
 	}
 }
+
+func TestAReparseCommitsAParentWithEverySplitLineHoweverManyFollowIt(t *testing.T) {
+	ctx := t.Context()
+	st, _ := pagedStore(t)
+	parentAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	children := 8 * WritePage
+	words := make([]string, children)
+	for i := range words {
+		words[i] = fmt.Sprintf("w%d", i)
+	}
+	parent := Ingestion{Record: Record{Drive: "d", Lane: "importer", Kind: kinds.Note, At: parentAt, Text: strings.Join(words, " "), Source: "import:/inbox.md"}, LineHash: "parent", Line: "the parent"}
+	if inserted, err := st.IngestAll(ctx, []Ingestion{parent}); err != nil || inserted != 1 {
+		t.Fatalf("ingest of the parent = %d, %v", inserted, err)
+	}
+	parent.Record.Text = "the parent"
+	items := []Ingestion{parent}
+	for _, word := range words {
+		items = append(items, Ingestion{Record: Record{Drive: "d", Lane: "importer", Kind: kinds.Note, At: time.Now(), Text: word, Source: "import:/inbox.md"}, LineHash: "split-" + word, Line: word})
+	}
+	last := words[len(words)-1]
+	if _, err := st.db.ExecContext(ctx, "CREATE TRIGGER interrupt BEFORE INSERT ON records WHEN NEW.text = '"+last+"' BEGIN SELECT RAISE(ABORT, 'interrupted'); END"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.Reparse(ctx, items, false); err == nil {
+		t.Fatal("the interrupted reparse succeeded")
+	}
+	if _, err := st.db.ExecContext(ctx, "DROP TRIGGER interrupt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, inserted, err := st.Reparse(ctx, items, false); err != nil || inserted != children {
+		t.Fatalf("the retried reparse = %d inserted, %v; want all %d split lines", inserted, err, children)
+	}
+	var stamped int
+	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE at = ?", parentAt.UnixMilli()).Scan(&stamped); err != nil {
+		t.Fatal(err)
+	}
+	if stamped != children+1 {
+		t.Fatalf("%d records carry the parent's time after the retry, want the parent and its %d split lines", stamped, children)
+	}
+}

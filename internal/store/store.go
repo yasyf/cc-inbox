@@ -986,17 +986,20 @@ type Reparsing struct {
 // split lines commit together.
 func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (updated, inserted int, err error) {
 	var from Reparsing
-	for len(items) > 0 {
-		done, err := s.Commit(ctx, Write{Reparse: &ReparsePage{Items: items[:min(len(items), reparseWindow)], Fresh: fresh, From: from}})
+	for window := 2 * WritePage; len(items) > 0; {
+		page := items[:min(len(items), window)]
+		done, err := s.Commit(ctx, Write{Reparse: &ReparsePage{Items: page, Fresh: fresh, More: len(page) < len(items), From: from}})
 		if err != nil {
 			return from.Updated, from.Inserted, fmt.Errorf("reparse: %w", err)
 		}
-		from, items = *done.Reparsed, items[done.Items:]
+		if done.Items == 0 {
+			window *= 2
+			continue
+		}
+		from, items, window = *done.Reparsed, items[done.Items:], 2*WritePage
 	}
 	return from.Updated, from.Inserted, nil
 }
-
-const reparseWindow = WritePage + MaxText
 
 func (s *Store) reparsePage(ctx context.Context, tx *sql.Tx, items []Ingestion, fresh bool, progress *Reparsing) (int, error) {
 	n := 0
