@@ -465,6 +465,39 @@ func TestWatchWithoutForRunsUntilCancelled(t *testing.T) {
 	}
 }
 
+func TestAWatchSinceNeverReplaysOlderAddressedMailOnAResumeOrAReArm(t *testing.T) {
+	st, c := testutil.Store(t)
+	ctx := context.Background()
+	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "handled hours ago", To: []string{"api"}})
+	c.Advance(time.Hour)
+	since := st.Now()
+	watch := func(cursor string) []string {
+		t.Helper()
+		var got []string
+		if err := inbox.Watch(ctx, st, inbox.WatchOptions{Filter: store.Filter{Drive: "d", For: "api", Since: since}, Cursor: cursor, Interval: time.Millisecond, For: 50 * time.Millisecond}, func(r store.Record, _ string) error {
+			got = append(got, r.Text)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	resumed := "watch-1-1"
+	if got := watch(resumed); len(got) != 0 {
+		t.Fatalf("watch --since = %q; want no record older than --since", got)
+	}
+	if got := watch(resumed); len(got) != 0 {
+		t.Fatalf("a watch resumed after a daemon restart = %q; want no record older than --since", got)
+	}
+	testutil.Post(t, st, store.Record{Kind: kinds.Note, Text: "after since", To: []string{"api"}})
+	if got := watch("api-watch"); len(got) != 1 || got[0] != "after since" {
+		t.Fatalf("watch --cursor api-watch --since = %q; want the one record inside --since", got)
+	}
+	if got := watch("api-watch"); len(got) != 0 {
+		t.Fatalf("a re-armed watch on --cursor api-watch = %q; want nothing it already printed", got)
+	}
+}
+
 func TestDigestListsLatestNewestSeqFirst(t *testing.T) {
 	st, c := testutil.Store(t)
 	ctx := context.Background()

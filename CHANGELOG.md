@@ -46,6 +46,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that node's own seq. lr's landing pass on a landing host named root's holds on
   #48034 and #50750 as `#197289` and `#330048`, which on the Mac are a register
   note and a HEAD line, so root lifted the wrong records.
+- `cci watch --since` no longer replays older mail when it resumes. A watch the
+  daemon resumed after a restart dropped `--since` and started from the
+  cursor it saved at arm time, seq 0 when nothing had printed yet, so it
+  printed every record addressed to its reader since the drive began. A watch
+  re-armed with `--cursor <name> --since <time>` ignored the cursor and printed
+  everything since `--since` again. Now `--since` bounds every read of the
+  watch, and a named cursor that exists resumes it.
 - A lane no longer reads a seed's backfill as new mail. A record that `cci
   relay seed` applies after the lane bound, stamped before the lane started,
   stays out of the lane's hook delivery, its `cci tail --mail` wait, its
