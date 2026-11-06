@@ -31,3 +31,18 @@ func TestCompactDropsWhatTheLineAlreadyCarries(t *testing.T) {
 		t.Errorf("Wire lines = %q, %q; want one minute header before the first", first, second)
 	}
 }
+
+func TestASenderFromAnotherDriveCarriesItsDrive(t *testing.T) {
+	at := time.Date(2026, 11, 6, 0, 26, 0, 0, pacific.Zone)
+	r := store.Record{Seq: 530065, Drive: "other", Lane: "root", Kind: "note", At: at, To: []string{"root@durable-agents-rebuild"}, Text: "Please refresh the port."}
+	if got, want := render.Compact(r, 0), "530065 note root@other>root@durable-agents-rebuild Please refresh the port."; got != want {
+		t.Errorf("Compact = %q\nwant      %q", got, want)
+	}
+	if got := render.Line(r, at); !strings.Contains(got, " NOTE root@other -> root@durable-agents-rebuild ") {
+		t.Errorf("Line = %q, want the sender named root@other", got)
+	}
+	local := store.Record{Seq: 530066, Drive: "durable-agents-rebuild", Lane: "root", Kind: "note", At: at, To: []string{"meta-desk", "root@durable-agents-rebuild"}, Text: "Ours."}
+	if got, want := render.Compact(local, 0), "530066 note root>meta-desk,root Ours."; got != want {
+		t.Errorf("Compact of a record in its own drive = %q\nwant      %q", got, want)
+	}
+}

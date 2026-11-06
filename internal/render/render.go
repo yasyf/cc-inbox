@@ -51,7 +51,17 @@ func fit(head string, r store.Record, width int) string {
 }
 
 func header(r store.Record, now time.Time) string {
-	return fmt.Sprintf("%s %s %s %s", r.Name(), Stamp(r.At, now), strings.ToUpper(string(r.Kind)), cmp.Or(r.Stem, r.Lane))
+	return fmt.Sprintf("%s %s %s %s", r.Name(), Stamp(r.At, now), strings.ToUpper(string(r.Kind)), sender(r))
+}
+
+func sender(r store.Record) string {
+	lane := cmp.Or(r.Stem, r.Lane)
+	for _, to := range r.To {
+		if _, drive, cross := strings.Cut(to, "@"); cross && drive != r.Drive {
+			return lane + "@" + r.Drive
+		}
+	}
+	return lane
 }
 
 func rest(r store.Record, brief, elide bool) string {
