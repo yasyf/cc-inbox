@@ -1,6 +1,7 @@
 package store
 
 import (
+	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -48,7 +49,14 @@ func TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication(t *testi
 		if got, err := second.Holds(ctx, other, "d", []string{"44"}); err != nil || got["44"].Seq != record.Seq {
 			t.Fatalf("newer projector did not publish: %v/%v", got, err)
 		}
-		if err := st.publishIncidentChanges(ctx, stale); err != nil {
+		// CI also compiles this file against b7da336, whose publishIncidentChanges returns the touched paths too.
+		switch publish := any(st.publishIncidentChanges).(type) {
+		case func(context.Context, []incidentChange) error:
+			err = publish(ctx, stale)
+		case func(context.Context, []incidentChange) (map[string]bool, error):
+			_, err = publish(ctx, stale)
+		}
+		if err != nil {
 			t.Fatal(err)
 		}
 		got, err := second.Holds(ctx, other, "d", []string{"43", "44"})
