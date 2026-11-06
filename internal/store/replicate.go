@@ -217,6 +217,17 @@ func (s *Store) Apply(ctx context.Context, rows []Row, receipt *Receipt) (Applie
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	a, err := s.applyRows(ctx, tx, rows, receipt)
+	if err != nil {
+		return Applied{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Applied{}, fmt.Errorf("commit apply: %w", err)
+	}
+	return a, nil
+}
+
+func (s *Store) applyRows(ctx context.Context, tx *sql.Tx, rows []Row, receipt *Receipt) (Applied, error) {
 	var a Applied
 	for _, row := range rows {
 		if err := s.apply(ctx, tx, row, &a, false, nil, nil); err != nil {
@@ -229,9 +240,6 @@ ON CONFLICT (channel, origin) DO UPDATE SET change_id = excluded.change_id, revi
 			receipt.Channel, receipt.Origin, receipt.ChangeID, receipt.Revision, receipt.Digest); err != nil {
 			return Applied{}, fmt.Errorf("store receipt: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return Applied{}, fmt.Errorf("commit apply: %w", err)
 	}
 	return a, nil
 }
@@ -265,7 +273,19 @@ func (s *Store) settle(ctx context.Context, waiting []Pointer, gone map[Pointer]
 	}
 	defer func() { _ = tx.Rollback() }()
 	settled := *a
-	for budget := writePage; budget > 0 && len(waiting) > 0; {
+	waiting, err = s.settlePage(ctx, tx, waiting, gone, &settled)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit settle: %w", err)
+	}
+	*a = settled
+	return waiting, nil
+}
+
+func (s *Store) settlePage(ctx context.Context, tx *sql.Tx, waiting []Pointer, gone map[Pointer]bool, a *Applied) ([]Pointer, error) {
+	for budget := WritePage; budget > 0 && len(waiting) > 0; {
 		held, err := s.releasePage(ctx, tx, waiting[0], budget)
 		if err != nil {
 			return nil, err
@@ -276,16 +296,12 @@ func (s *Store) settle(ctx context.Context, waiting []Pointer, gone map[Pointer]
 		budget -= max(1, len(held))
 		var arrivals []Pointer
 		for _, row := range held {
-			if err := s.apply(ctx, tx, row, &settled, true, gone, &arrivals); err != nil {
+			if err := s.apply(ctx, tx, row, a, true, gone, &arrivals); err != nil {
 				return nil, err
 			}
 		}
 		waiting = append(waiting, arrivals...)
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit settle: %w", err)
-	}
-	*a = settled
 	return waiting, nil
 }
 
@@ -329,48 +345,57 @@ func (s *Store) Backfill(ctx context.Context, rows []Row, moves []CursorMove) (A
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	var before int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&before); err != nil {
-		return Applied{}, fmt.Errorf("read the head before a backfill: %w", err)
+	a, span, err := s.backfillRows(ctx, tx, rows)
+	if err != nil {
+		return Applied{}, err
 	}
-	var (
-		a        Applied
-		arrivals []Pointer
-	)
-	for _, row := range rows {
-		if err := s.apply(ctx, tx, row, &a, false, nil, &arrivals); err != nil {
-			return Applied{}, err
-		}
-	}
-	var after int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&after); err != nil {
-		return Applied{}, fmt.Errorf("read the head after a backfill: %w", err)
-	}
-	if after > before {
-		extended, err := tx.ExecContext(ctx, "UPDATE cursors SET seq = ? WHERE name GLOB '"+backfillPrefix+"*' AND drive = '' AND seq = ?", after, before)
-		if err != nil {
-			return Applied{}, fmt.Errorf("extend a backfill: %w", err)
-		}
-		n, err := extended.RowsAffected()
-		if err != nil {
-			return Applied{}, fmt.Errorf("extend a backfill: %w", err)
-		}
-		if n == 0 {
-			moves = append(moves, CursorMove{Name: backfillCursor(before), Seq: after, Exact: true})
-		}
-	}
-	for _, p := range arrivals {
-		if err := s.release(ctx, tx, p, &a, nil); err != nil {
-			return Applied{}, err
-		}
-	}
-	if _, err := s.write(ctx, tx, Write{Cursors: moves}); err != nil {
+	if _, err := s.write(ctx, tx, Write{Cursors: append(moves, span...)}); err != nil {
 		return Applied{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return Applied{}, fmt.Errorf("commit apply: %w", err)
 	}
 	return a, nil
+}
+
+func (s *Store) backfillRows(ctx context.Context, tx *sql.Tx, rows []Row) (Applied, []CursorMove, error) {
+	var before int64
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&before); err != nil {
+		return Applied{}, nil, fmt.Errorf("read the head before a backfill: %w", err)
+	}
+	var (
+		a        Applied
+		arrivals []Pointer
+		span     []CursorMove
+	)
+	for _, row := range rows {
+		if err := s.apply(ctx, tx, row, &a, false, nil, &arrivals); err != nil {
+			return Applied{}, nil, err
+		}
+	}
+	var after int64
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&after); err != nil {
+		return Applied{}, nil, fmt.Errorf("read the head after a backfill: %w", err)
+	}
+	if after > before {
+		extended, err := tx.ExecContext(ctx, "UPDATE cursors SET seq = ? WHERE name GLOB '"+backfillPrefix+"*' AND drive = '' AND seq = ?", after, before)
+		if err != nil {
+			return Applied{}, nil, fmt.Errorf("extend a backfill: %w", err)
+		}
+		n, err := extended.RowsAffected()
+		if err != nil {
+			return Applied{}, nil, fmt.Errorf("extend a backfill: %w", err)
+		}
+		if n == 0 {
+			span = append(span, CursorMove{Name: backfillCursor(before), Seq: after, Exact: true})
+		}
+	}
+	for _, p := range arrivals {
+		if err := s.release(ctx, tx, p, &a, nil); err != nil {
+			return Applied{}, nil, err
+		}
+	}
+	return a, span, nil
 }
 
 func (s *Store) blobbed(rows []Row) ([]Row, error) {
