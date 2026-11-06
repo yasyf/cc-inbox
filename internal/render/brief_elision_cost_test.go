@@ -22,6 +22,13 @@ func TestBriefElisionImmutableOutput(t *testing.T) {
 	if dir == "" {
 		t.Skip("CI supplies immutable Brief output snapshots")
 	}
+	host := time.Local
+	zone, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Local = zone
+	t.Cleanup(func() { time.Local = host })
 	at := time.Date(2026, 11, 1, 6, 22, 0, 0, time.UTC)
 	outputs := map[string][]byte{}
 	for textIndex, text := range []string{"", "selected-10000", "ready rollout #42", "READY (rollout), #o/r#42!", "#420 rollout-extra", " α\u00a0β\u3000γ\r\n", " \xffa\t\xc0b \x80 ", "a\x00b c", strings.Repeat("filler ", 32) + "rollout #42", strings.Repeat("x", 32*1024)} {

@@ -232,6 +232,13 @@ func TestNativeTailCLIReference(t *testing.T) {
 	if os.Getenv("CCI_NATIVE_TAIL_SNAPSHOTS") == "" {
 		t.Skip("CI supplies immutable native Tail reference snapshots")
 	}
+	host := time.Local
+	zone, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Local = zone
+	t.Cleanup(func() { time.Local = host })
 	for _, variant := range nativeTailVariants {
 		for _, call := range nativeTailCalls() {
 			t.Run(variant.name+"/"+call.name, func(t *testing.T) {
