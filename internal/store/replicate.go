@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"iter"
 	"os"
 	"time"
 	"unicode/utf8"
@@ -214,7 +213,7 @@ func (s *Store) Apply(ctx context.Context, rows []Row, receipt *Receipt) (Applie
 	defer func() { _ = tx.Rollback() }()
 	var a Applied
 	for _, row := range rows {
-		if err := s.apply(ctx, tx, row, &a, false, nil); err != nil {
+		if err := s.apply(ctx, tx, row, &a, false, nil, nil); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -258,12 +257,12 @@ func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
 	return a, nil
 }
 
-// ApplyAll ingests every row rows yields as Apply does, then makes the cursor
-// moves moves returns once rows ends, all in one transaction: a copy of a
-// whole drive commits once, and a row Apply refuses keeps none of it. The rows
-// it stores are backfill: a lane bound before them reads none stamped before
-// it started as mail, while a row Apply stores always reaches the lane.
-func (s *Store) ApplyAll(ctx context.Context, rows iter.Seq[Row], moves func() []CursorMove) (Applied, error) {
+// Backfill ingests rows as Apply does and makes moves, in one transaction. The
+// records it stores are backfill: a lane bound before them reads none stamped
+// before it started as mail. A row it releases from pending is stored after
+// them, so it reaches the lane as a row Apply stores does. A Backfill that
+// starts where the last one ended extends that one's span.
+func (s *Store) Backfill(ctx context.Context, rows []Row, moves []CursorMove) (Applied, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
@@ -273,9 +272,12 @@ func (s *Store) ApplyAll(ctx context.Context, rows iter.Seq[Row], moves func() [
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&before); err != nil {
 		return Applied{}, fmt.Errorf("read the head before a backfill: %w", err)
 	}
-	var a Applied
-	for row := range rows {
-		if err := s.apply(ctx, tx, row, &a, false, nil); err != nil {
+	var (
+		a        Applied
+		arrivals []Pointer
+	)
+	for _, row := range rows {
+		if err := s.apply(ctx, tx, row, &a, false, nil, &arrivals); err != nil {
 			return Applied{}, err
 		}
 	}
@@ -283,11 +285,25 @@ func (s *Store) ApplyAll(ctx context.Context, rows iter.Seq[Row], moves func() [
 	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&after); err != nil {
 		return Applied{}, fmt.Errorf("read the head after a backfill: %w", err)
 	}
-	cursors := moves()
 	if after > before {
-		cursors = append(cursors, CursorMove{Name: backfillCursor(before), Seq: after, Exact: true})
+		extended, err := tx.ExecContext(ctx, "UPDATE cursors SET seq = ? WHERE name GLOB '"+backfillPrefix+"*' AND drive = '' AND seq = ?", after, before)
+		if err != nil {
+			return Applied{}, fmt.Errorf("extend a backfill: %w", err)
+		}
+		n, err := extended.RowsAffected()
+		if err != nil {
+			return Applied{}, fmt.Errorf("extend a backfill: %w", err)
+		}
+		if n == 0 {
+			moves = append(moves, CursorMove{Name: backfillCursor(before), Seq: after, Exact: true})
+		}
 	}
-	if _, err := s.write(ctx, tx, Write{Cursors: cursors}); err != nil {
+	for _, p := range arrivals {
+		if err := s.release(ctx, tx, p, &a, nil); err != nil {
+			return Applied{}, err
+		}
+	}
+	if _, err := s.write(ctx, tx, Write{Cursors: moves}); err != nil {
 		return Applied{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -296,7 +312,7 @@ func (s *Store) ApplyAll(ctx context.Context, rows iter.Seq[Row], moves func() [
 	return a, nil
 }
 
-func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, released bool, absent map[Pointer]bool) error {
+func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, released bool, absent map[Pointer]bool, arrivals *[]Pointer) error {
 	if row.Origin == "" || row.OriginSeq <= 0 {
 		return fmt.Errorf("apply: row has no origin identity (%q, %d)", row.Origin, row.OriginSeq)
 	}
@@ -322,7 +338,7 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 				return fmt.Errorf("alias %s/%d: %w", row.Origin, row.OriginSeq, err)
 			}
 			a.Duplicate++
-			return s.release(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a, absent)
+			return s.arrive(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a, absent, arrivals)
 		case !errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
 		}
@@ -385,7 +401,15 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 	} else {
 		a.Inserted++
 	}
-	return s.release(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a, absent)
+	return s.arrive(ctx, tx, Pointer{Origin: row.Origin, Seq: row.OriginSeq}, a, absent, arrivals)
+}
+
+func (s *Store) arrive(ctx context.Context, tx *sql.Tx, arrived Pointer, a *Applied, absent map[Pointer]bool, arrivals *[]Pointer) error {
+	if arrivals != nil {
+		*arrivals = append(*arrivals, arrived)
+		return nil
+	}
+	return s.release(ctx, tx, arrived, a, absent)
 }
 
 func (s *Store) release(ctx context.Context, tx *sql.Tx, arrived Pointer, a *Applied, absent map[Pointer]bool) error {
@@ -411,7 +435,7 @@ func (s *Store) release(ctx context.Context, tx *sql.Tx, arrived Pointer, a *App
 		return fmt.Errorf("release replies to %s/%d: %w", arrived.Origin, arrived.Seq, err)
 	}
 	for _, row := range held {
-		if err := s.apply(ctx, tx, row, a, true, absent); err != nil {
+		if err := s.apply(ctx, tx, row, a, true, absent, nil); err != nil {
 			return err
 		}
 	}

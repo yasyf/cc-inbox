@@ -126,7 +126,7 @@ func TestReadModelSkipsWhatASeedBackfilledAfterALaneBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	old := clock.Now().Add(-time.Hour)
-	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: old, Text: "backfilled", To: []string{"worker"}, Source: "post"}}), func() []store.CursorMove { return nil }); err != nil {
+	if _, err := st.Backfill(ctx, []store.Row{{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: old, Text: "backfilled", To: []string{"worker"}, Source: "post"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Apply(ctx, []store.Row{{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: kinds.Note, At: old, Text: "delivered live", To: []string{"worker"}, Source: "post"}}, nil); err != nil {
@@ -151,6 +151,41 @@ func TestReadModelSkipsWhatASeedBackfilledAfterALaneBound(t *testing.T) {
 	sameRecords(t, got, want)
 	if len(want) != 3 || want[0].Text != "posted before the bind" || want[1].Text != "delivered live" || want[2].Text != "posted since the bind" {
 		t.Fatalf("lane mail = %+v; want both posts and the live delivery, not the seeded record", want)
+	}
+}
+
+func TestALiveReplyASeedReleasesFromPendingStillReachesTheLane(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := t.Context()
+	k := store.PeerKey{Session: "s1"}
+	if err := st.BindLane(ctx, k, "d", "worker", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	old := clock.Now().Add(-time.Hour)
+	parent := store.Pointer{Origin: "0123456789abcdef", Seq: 1}
+	if _, err := st.Apply(ctx, []store.Row{{Origin: parent.Origin, OriginSeq: 2, Drive: "d", Lane: "root", Kind: kinds.Note, At: old, Text: "delivered live", To: []string{"worker"}, Re: &parent, Source: "post"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Backfill(ctx, []store.Row{{Origin: parent.Origin, OriginSeq: parent.Seq, Drive: "d", Lane: "root", Kind: kinds.Note, At: old, Text: "backfilled", To: []string{"worker"}, Source: "post"}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	model, err := st.BuildReadModel(ctx, noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	f := store.LaneMail(k, store.Binding{Drive: "d", Lane: "worker"})
+	got, answered, err := model.Answer(ctx, st, f)
+	if err != nil || !answered {
+		t.Fatalf("model answered %v, %v", answered, err)
+	}
+	want, err := st.Query(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameRecords(t, got, want)
+	if len(want) != 1 || want[0].Text != "delivered live" {
+		t.Fatalf("lane mail = %+v; want the live reply the seed released, not the seeded parent", want)
 	}
 }
 

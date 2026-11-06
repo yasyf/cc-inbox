@@ -47,6 +47,7 @@ type Filter struct {
 	laneStart      int64
 	laneHead       int64
 	backfills      [][2]int64
+	backfillsAsOf  int64
 	AliasFloor     bool
 	aliasSince     int64
 	aliasOrders    int64
@@ -821,27 +822,36 @@ func backfillCursor(after int64) string {
 
 var backfillSpans = "SELECT CAST(substr(name, " + strconv.Itoa(len(backfillPrefix)+1) + ") AS INTEGER) AS low, seq AS high FROM cursors WHERE name GLOB '" + backfillPrefix + "*' AND drive = ''"
 
-func (s *Store) backfills(ctx context.Context, after int64) ([][2]int64, error) {
-	rows, err := s.db.QueryContext(ctx, backfillSpans+" AND seq > ?", after)
+func (s *Store) backfills(ctx context.Context, after int64) ([][2]int64, int64, error) {
+	snapshot, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, fmt.Errorf("read backfills: %w", err)
+		return nil, 0, fmt.Errorf("read backfills: %w", err)
+	}
+	defer func() { _ = snapshot.Rollback() }()
+	var head int64
+	if err := snapshot.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&head); err != nil {
+		return nil, 0, fmt.Errorf("read backfills: %w", err)
+	}
+	rows, err := snapshot.QueryContext(ctx, backfillSpans+" AND seq > ?", after)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read backfills: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out [][2]int64
 	for rows.Next() {
 		var span [2]int64
 		if err := rows.Scan(&span[0], &span[1]); err != nil {
-			return nil, fmt.Errorf("scan a backfill: %w", err)
+			return nil, 0, fmt.Errorf("scan a backfill: %w", err)
 		}
 		out = append(out, span)
 	}
-	return out, rows.Err()
+	return out, head, rows.Err()
 }
 
 const ownPR = `EXISTS (SELECT 1 FROM json_each(records.refs, '$.prs') graded JOIN records own ON own.drive = records.drive AND own.kind = 'opened' JOIN json_each(own.refs, '$.prs') opened ON CASE opened.type WHEN 'integer' THEN CAST(opened.value AS TEXT) ELSE substr(opened.value, instr(opened.value, '#') + 1) END = CASE graded.type WHEN 'integer' THEN CAST(graded.value AS TEXT) ELSE substr(graded.value, instr(graded.value, '#') + 1) END WHERE own.lane`
 
 // LaneMail is what the thread k bound as b reads as mail. A bound lane hears
-// no broadcast from before it started, and no record ApplyAll backfilled after
+// no broadcast from before it started, and no record Backfill stored after
 // it bound that is stamped before it started.
 func LaneMail(k PeerKey, b Binding) Filter {
 	f := Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
