@@ -9,11 +9,11 @@ import (
 )
 
 const boardColdEffectsSQL = `INSERT INTO board_query_effects(scope,source_seq,drive,axis,key)
-SELECT ?,source_seq,drive,axis,key FROM record_closer_keys
-UNION SELECT ?,seq,'','self',CAST(seq AS TEXT) FROM records
-UNION SELECT ?,seq,'','incident',CAST(seq AS TEXT) FROM records
-UNION SELECT ?,seq,'','resolve',CAST(resolves AS TEXT) FROM records WHERE resolves!=0
-UNION SELECT ?,source_seq,'','resolve',CAST(target AS TEXT) FROM record_also_resolves`
+SELECT ?1,source_seq,drive,axis,key FROM record_closer_keys WHERE source_seq>?2 AND source_seq<=?3
+UNION SELECT ?1,seq,'','self',CAST(seq AS TEXT) FROM records WHERE seq>?2 AND seq<=?3
+UNION SELECT ?1,seq,'','incident',CAST(seq AS TEXT) FROM records WHERE seq>?2 AND seq<=?3
+UNION SELECT ?1,seq,'','resolve',CAST(resolves AS TEXT) FROM records WHERE seq>?2 AND seq<=?3 AND resolves!=0
+UNION SELECT ?1,source_seq,'','resolve',CAST(target AS TEXT) FROM record_also_resolves WHERE source_seq>?2 AND source_seq<=?3`
 
 func boardOpenerKeys(ctx context.Context, tx *sql.Tx, scope *boardScope, category int, record Record) error {
 	if !record.Kind.Opens() || !record.Tracked() {
@@ -123,10 +123,10 @@ func boardAnnotateErrors(ctx context.Context, tx *sql.Tx, st *Store, scope *boar
 
 // boardColdMatches returns nil when a malformed row fails the scan, so the
 // per-record probes pin that failure to its own row.
-func boardColdMatches(ctx context.Context, tx *sql.Tx, st *Store, filter Filter) map[int64]bool {
+func boardColdMatches(ctx context.Context, tx *sql.Tx, st *Store, filter Filter, after, last int64) map[int64]bool {
 	filter.IncludeExpired = true
 	where, params := filter.where(st.Self(), st.Now())
-	rows, err := tx.QueryContext(ctx, "SELECT seq FROM records WHERE ("+where+")", params...)
+	rows, err := tx.QueryContext(ctx, "SELECT seq FROM records WHERE seq>? AND seq<=? AND ("+where+")", append([]any{after, last}, params...)...)
 	if err != nil {
 		return nil
 	}

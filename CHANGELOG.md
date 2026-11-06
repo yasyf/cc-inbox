@@ -75,6 +75,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page at most. A run that stops partway keeps the pages it committed, and
   running it again does the rest. A synced record's body file is written
   before its transaction starts, not while it holds the lock.
+- The daemon's first board read after it starts, and `cci maintain-indexes`
+  provisioning a drive's incident scope, build their index 64 records per
+  transaction. Before, each built it in one transaction over the whole store,
+  and the board build also read every body file while it held the lock, so
+  posts and hooks failed with `SQLITE_BUSY` after each daemon start on a large
+  store.
 - The `--lane` help on `cci tail`, `cci grep` and the other readers says it
   keeps the records those lanes wrote, never the ones addressed to them, which
   `--to` reads. A Sprite lane read its parent's evidence with

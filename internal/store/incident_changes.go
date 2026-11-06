@@ -31,7 +31,7 @@ func (s *Store) captureIncidentChanges(ctx context.Context) ([]incidentChange, e
 		return nil, err
 	}
 	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
-	rows, err := connection.QueryContext(ctx, "SELECT source_seq,revision FROM incident_changes ORDER BY source_seq")
+	rows, err := connection.QueryContext(ctx, "SELECT source_seq,revision FROM incident_changes ORDER BY source_seq LIMIT ?", writePage)
 	if err != nil {
 		return nil, err
 	}
@@ -79,34 +79,29 @@ func (s *Store) captureIncidentChanges(ctx context.Context) ([]incidentChange, e
 	return changes, nil
 }
 
-func (s *Store) publishIncidentChanges(ctx context.Context, changes []incidentChange) (map[string]bool, error) {
-	paths := map[string]bool{}
-	if len(changes) == 0 {
-		return paths, nil
-	}
+func (s *Store) publishIncidentChanges(ctx context.Context, changes []incidentChange) error {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer func() { _ = tx.Rollback() }()
 	for _, change := range changes {
 		var oldPath string
 		err := tx.QueryRowContext(ctx, "SELECT body_path FROM incident_records WHERE seq=?", change.Seq).Scan(&oldPath)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return nil, err
+			return err
 		}
 		if oldPath != "" {
-			paths[oldPath] = true
 			if _, err := tx.ExecContext(ctx, "INSERT INTO incident_body_changes(path) VALUES(?) ON CONFLICT(path) DO NOTHING", oldPath); err != nil {
-				return nil, err
+				return err
 			}
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM incident_record_prs WHERE source_seq=?", change.Seq); err != nil {
-			return nil, err
+			return err
 		}
 		if len(change.Values) == 0 {
 			if _, err := tx.ExecContext(ctx, "DELETE FROM incident_records WHERE seq=?", change.Seq); err != nil {
-				return nil, err
+				return err
 			}
 		} else {
 			path := change.Record.Refs.Path
@@ -114,28 +109,24 @@ func (s *Store) publishIncidentChanges(ctx context.Context, changes []incidentCh
 				path = ""
 			}
 			if err := writeIncidentRecord(ctx, tx, change.Values, change.Revision, change.DecodeError, path, change.Unsupported); err != nil {
-				return nil, err
+				return err
 			}
 			if path != "" {
-				paths[path] = true
 				if _, err := tx.ExecContext(ctx, "INSERT INTO incident_body_changes(path) VALUES(?) ON CONFLICT(path) DO NOTHING", path); err != nil {
-					return nil, err
+					return err
 				}
 			}
 			for axis, words := range map[string]map[string]bool{"summary": change.Words, "refs": change.References} {
 				for pr := range words {
 					if _, err := tx.ExecContext(ctx, "INSERT INTO incident_record_prs(source_seq,axis,pr) VALUES(?,?,?)", change.Seq, axis, pr); err != nil {
-						return nil, err
+						return err
 					}
 				}
 			}
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM incident_changes WHERE source_seq=? AND revision=?", change.Seq, change.Revision); err != nil {
-			return nil, fmt.Errorf("acknowledge incident revision: %w", err)
+			return fmt.Errorf("acknowledge incident revision: %w", err)
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return nil, err
-	}
-	return paths, nil
+	return tx.Commit()
 }

@@ -60,17 +60,23 @@ func (s *Store) ProvisionIncidentScope(ctx context.Context, drive string) (Incid
 		if _, err := tx.ExecContext(ctx, "INSERT INTO incident_scopes(drive) VALUES(?)", drive); err != nil {
 			return report, err
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO incident_versions(source_seq,revision) SELECT seq,1 FROM records WHERE drive=? AND kind='incident' ON CONFLICT(source_seq) DO UPDATE SET revision=revision+1", drive); err != nil {
-			return report, err
-		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO incident_changes(source_seq,revision) SELECT r.seq,v.revision FROM records r JOIN incident_versions v ON v.source_seq=r.seq WHERE r.drive=? AND r.kind='incident' ON CONFLICT(source_seq) DO UPDATE SET revision=excluded.revision", drive); err != nil {
-			return report, err
-		}
 	}
 	if err := tx.Commit(); err != nil {
 		return report, err
 	}
 	report.AdmissionTransaction = time.Since(transactionStarted)
+	for after := int64(0); ; {
+		started := time.Now()
+		last, err := s.admitIncidentPage(ctx, drive, after)
+		report.AdmissionTransaction = max(report.AdmissionTransaction, time.Since(started))
+		if err != nil {
+			return report, err
+		}
+		if last == 0 {
+			break
+		}
+		after = last
+	}
 	if err := index.reconcile(ctx); err != nil {
 		return report, err
 	}
@@ -105,4 +111,26 @@ func (s *Store) ProvisionIncidentScope(ctx context.Context, drive string) (Incid
 	report.Statistics = index.Stats()
 	report.MaxWritePhase = max(report.AdmissionTransaction, report.Statistics.MaxWritePhase)
 	return report, nil
+}
+
+func (s *Store) admitIncidentPage(ctx context.Context, drive string, after int64) (int64, error) {
+	tx, err := s.rw.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var last sql.NullInt64
+	if err := tx.QueryRowContext(ctx, "SELECT max(seq) FROM (SELECT seq FROM records WHERE drive=? AND kind='incident' AND seq>? ORDER BY seq LIMIT ?)", drive, after, writePage).Scan(&last); err != nil {
+		return 0, err
+	}
+	if !last.Valid {
+		return 0, nil
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO incident_versions(source_seq,revision) SELECT seq,1 FROM records WHERE drive=? AND kind='incident' AND seq>? AND seq<=? ON CONFLICT(source_seq) DO UPDATE SET revision=revision+1", drive, after, last.Int64); err != nil {
+		return 0, err
+	}
+	if _, err := tx.ExecContext(ctx, "INSERT INTO incident_changes(source_seq,revision) SELECT r.seq,v.revision FROM records r JOIN incident_versions v ON v.source_seq=r.seq WHERE r.drive=? AND r.kind='incident' AND r.seq>? AND r.seq<=? ON CONFLICT(source_seq) DO UPDATE SET revision=excluded.revision", drive, after, last.Int64); err != nil {
+		return 0, err
+	}
+	return last.Int64, tx.Commit()
 }
