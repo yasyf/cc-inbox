@@ -397,7 +397,7 @@ func TestAReparseCommitsAParentWithEverySplitLineHoweverManyFollowIt(t *testing.
 		t.Fatalf("ingest of the parent = %d, %v", inserted, err)
 	}
 	parent.Record.Text = "the parent"
-	items := []Ingestion{parent}
+	items := append(make([]Ingestion, 0, 1+len(words)), parent)
 	for _, word := range words {
 		items = append(items, Ingestion{Record: Record{Drive: "d", Lane: "importer", Kind: kinds.Note, At: time.Now(), Text: word, Source: "import:/inbox.md"}, LineHash: "split-" + word, Line: word})
 	}
