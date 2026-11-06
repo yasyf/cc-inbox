@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"context"
-	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,10 +90,10 @@ func TestALanesWaitAndOpenAsksSkipWhatASeedBackfilledAfterItBound(t *testing.T) 
 		t.Fatal(err)
 	}
 	backfilled := time.Now().Add(-time.Hour)
-	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{
+	if _, err := st.Backfill(ctx, []store.Row{
 		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: "ask", At: backfilled, Text: "a backfilled ask", To: []string{"api"}, Source: "post"},
 		{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: "go", At: backfilled, Text: "a backfilled go", To: []string{"api"}, Source: "post"},
-	}), func() []store.CursorMove { return nil }); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Apply(ctx, []store.Row{

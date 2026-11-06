@@ -44,6 +44,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the hold kept a pull request from its grade for two hours. The MCP `close`
   tool posts through the same check. A lift naming an open hold posts as
   before.
+- `cci relay seed` no longer locks every other writer out of the store while
+  it runs. Since v0.52.2 it applied a whole drive in one write transaction and
+  read its copy inside it, so on a Sprite every `cci post` went unconfirmed
+  and `cci tail --mail` failed with `database is locked (SQLITE_BUSY)` until
+  the seed finished; on Nov 5 a lane's posts stayed unconfirmed from 10:32 PM
+  until it was relaunched. The seed now reads 100 rows, then stores them and
+  moves its sync cursors in one transaction, so another writer waits for one
+  page at most and never while the seed reads its copy. A seed that stops
+  partway, a canceled one included, keeps the pages it stored, and
+  `cci relay sync` resumes from them. A lane bound while the seed runs still
+  reads none of its backfill as mail, and a live reply that waited in the store
+  for a parent the seed brings still reaches the lane.
 - The `--lane` help on `cci tail`, `cci grep` and the other readers says it
   keeps the records those lanes wrote, never the ones addressed to them, which
   `--to` reads. A Sprite lane read its parent's evidence with

@@ -693,51 +693,65 @@ func (n *Node) Sync(ctx context.Context, drive string) (store.Applied, error) {
 	return total, nil
 }
 
-// Seed applies a drive's rows from the gzipped JSON lines ExportDrive wrote, and
-// starts Sync where the copy stops, in one transaction. A copy cut off partway
-// keeps every row it read, and Sync resumes from those; a cancelled seed keeps
-// none. The caller trusts the node the copy came from: rows are applied unverified.
+// Seed applies a drive's rows from the gzipped JSON lines ExportDrive wrote, one
+// Sync page at a time: it reads a page before it takes the write lock, then
+// stores the page and moves Sync's cursors past it in one transaction, so
+// another writer waits for one page at most. A seed that stops partway keeps
+// the pages it stored, and Sync resumes from them. The caller trusts the node
+// the copy came from: rows are applied unverified.
 func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Applied, error) {
 	unzipped, err := gzip.NewReader(from)
 	if err != nil {
 		return store.Applied{}, fmt.Errorf("seed: %w", err)
 	}
-	through := map[string]int64{}
 	decoder := json.NewDecoder(unzipped)
-	var broken error
-	rows := func(yield func(store.Row) bool) {
-		for read := 1; ; read++ {
-			var row store.Row
-			if err := decoder.Decode(&row); err != nil {
-				if !errors.Is(err, io.EOF) {
-					broken = fmt.Errorf("seed: %w", err)
-				}
-				return
+	var total store.Applied
+	for read := 0; ; {
+		page, more, broken := seedPage(decoder, drive)
+		if len(page) > 0 {
+			through := map[string]int64{}
+			for _, row := range page {
+				through[row.Origin] = max(through[row.Origin], row.OriginSeq)
 			}
-			if row.Drive != drive {
-				broken = fmt.Errorf("seed: %s/%d is on drive %s, not %s", row.Origin, row.OriginSeq, row.Drive, drive)
-				return
+			moves := make([]store.CursorMove, 0, len(through))
+			for origin, seq := range through {
+				moves = append(moves, store.CursorMove{Name: syncCursor + n.Config.Mesh + ":" + origin, Drive: drive, Seq: seq})
 			}
-			through[row.Origin] = max(through[row.Origin], row.OriginSeq)
-			if n.Progress != nil && read%seedProgress == 0 {
+			a, err := n.Store.Backfill(ctx, page, moves)
+			if err != nil {
+				return total, errors.Join(err, broken)
+			}
+			total.Inserted += a.Inserted
+			total.Duplicate += a.Duplicate
+			total.Buffered += a.Buffered
+			total.Released += a.Released
+			if read += len(page); n.Progress != nil && read%seedProgress == 0 {
 				_, _ = fmt.Fprintf(n.Progress, "read %d rows\n", read)
 			}
-			if !yield(row) {
-				return
-			}
+		}
+		if broken != nil || !more {
+			return total, broken
 		}
 	}
-	a, err := n.Store.ApplyAll(ctx, rows, func() []store.CursorMove {
-		moves := make([]store.CursorMove, 0, len(through))
-		for origin, seq := range through {
-			moves = append(moves, store.CursorMove{Name: syncCursor + n.Config.Mesh + ":" + origin, Drive: drive, Seq: seq})
+}
+
+func seedPage(decoder *json.Decoder, drive string) ([]store.Row, bool, error) {
+	page := make([]store.Row, 0, logPage)
+	for len(page) < logPage {
+		var row store.Row
+		err := decoder.Decode(&row)
+		if errors.Is(err, io.EOF) {
+			return page, false, nil
 		}
-		return moves
-	})
-	if err != nil {
-		return store.Applied{}, errors.Join(err, broken)
+		if err != nil {
+			return page, false, fmt.Errorf("seed: %w", err)
+		}
+		if row.Drive != drive {
+			return page, false, fmt.Errorf("seed: %s/%d is on drive %s, not %s", row.Origin, row.OriginSeq, row.Drive, drive)
+		}
+		page = append(page, row)
 	}
-	return a, broken
+	return page, true, nil
 }
 
 // ExportDrive writes a drive's rows as gzipped JSON lines for Seed on another

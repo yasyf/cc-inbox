@@ -319,8 +319,6 @@ func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.
 	}
 }
 
-func noMoves() []store.CursorMove { return nil }
-
 func TestALaneOwesNothingASeedBackfilledAfterItBound(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
@@ -331,10 +329,10 @@ func TestALaneOwesNothingASeedBackfilledAfterItBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	backfilled := clock.Now().Add(-time.Hour)
-	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{
+	if _, err := st.Backfill(ctx, []store.Row{
 		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Ask, At: backfilled, Text: "a backfilled ask", To: []string{"lane-x"}, Source: "post"},
 		{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: kinds.Note, At: backfilled, Text: "a backfilled note", To: []string{"lane-x"}, Source: "post"},
-	}), noMoves); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(time.Minute)
@@ -366,9 +364,9 @@ func TestARecordPostedWhileALaneSpawnedReachesItLiveAfterItBound(t *testing.T) {
 	if err := st.BindLane(ctx, k, "d", "lane-x", clock.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{
+	if _, err := st.Backfill(ctx, []store.Row{
 		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: posted.Add(-time.Hour), Text: "a seeded note", To: []string{"lane-x"}, Source: "post"},
-	}), noMoves); err != nil {
+	}, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := st.Apply(ctx, []store.Row{

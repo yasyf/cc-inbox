@@ -8,12 +8,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,6 +25,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 const secret = "the launch code is swordfish"
@@ -626,55 +627,97 @@ func TestAnExportSinceALaunchSeedsOnlyWhatTheStoreTookFromThen(t *testing.T) {
 }
 
 var (
-	countCommits sync.Once
-	commits      sync.Map
+	measureTransactions sync.Once
+	transactions        = struct {
+		sync.Mutex
+		largest map[string]int
+	}{largest: map[string]int{}}
 )
 
-func commitsUnder(home string) int64 {
-	var n int64
-	commits.Range(func(dsn, count any) bool {
-		if strings.Contains(dsn.(string), home+string(filepath.Separator)) {
-			n += count.(*atomic.Int64).Load()
+func largestTransactionUnder(home string) int {
+	transactions.Lock()
+	defer transactions.Unlock()
+	most := 0
+	for dsn, largest := range transactions.largest {
+		if strings.Contains(dsn, home+string(filepath.Separator)) {
+			most = max(most, largest)
 		}
-		return true
-	})
-	return n
+	}
+	return most
 }
 
-func TestASeedCommitsOnceHoweverManyRowsItCopies(t *testing.T) {
-	countCommits.Do(func() {
+type lockProbe struct {
+	copy   io.Reader
+	writer *sql.DB
+	held   []error
+}
+
+func (p *lockProbe) Read(b []byte) (int, error) {
+	tx, err := p.writer.BeginTx(context.Background(), nil)
+	if err == nil {
+		err = tx.Rollback()
+	}
+	if err != nil {
+		p.held = append(p.held, err)
+	}
+	return p.copy.Read(b)
+}
+
+func TestASeedHoldsTheWriteLockAPageAtATimeAndNeverWhileItReadsItsCopy(t *testing.T) {
+	measureTransactions.Do(func() {
 		sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
-			count, _ := commits.LoadOrStore(dsn, new(atomic.Int64))
-			conn.(sqlite.HookRegisterer).RegisterCommitHook(func() int32 {
-				count.(*atomic.Int64).Add(1)
+			inserted := 0
+			hooks := conn.(sqlite.HookRegisterer)
+			hooks.RegisterPreUpdateHook(func(change sqlite.SQLitePreUpdateData) {
+				if change.TableName == "records" && change.Op == sqlite3.SQLITE_INSERT {
+					inserted++
+				}
+			})
+			hooks.RegisterCommitHook(func() int32 {
+				transactions.Lock()
+				transactions.largest[dsn] = max(transactions.largest[dsn], inserted)
+				transactions.Unlock()
+				inserted = 0
 				return 0
 			})
+			hooks.RegisterRollbackHook(func() { inserted = 0 })
 			return nil
 		})
 	})
-	for _, rows := range []int{1, 2500} {
-		t.Run(fmt.Sprintf("rows=%d", rows), func(t *testing.T) {
-			srv := relaytest.NewServer(t)
-			late := newPeer(t, srv, node.TierOwner)
-			join(t, srv, late)
-			var copied bytes.Buffer
-			zipped := gzip.NewWriter(&copied)
-			encoder := json.NewEncoder(zipped)
-			at := time.Now().Add(-time.Hour)
-			for i := range rows {
-				if err := encoder.Encode(store.Row{Origin: "0123456789abcdef", OriginSeq: int64(i + 1), Drive: "d", Lane: "root", Kind: kinds.Note, At: at, Text: fmt.Sprintf("note %d", i), Source: "post"}); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if err := zipped.Close(); err != nil {
+	largest := map[int]int{}
+	for _, rows := range []int{250, 2500} {
+		srv := relaytest.NewServer(t)
+		late := newPeer(t, srv, node.TierOwner)
+		join(t, srv, late)
+		var copied bytes.Buffer
+		zipped := gzip.NewWriter(&copied)
+		encoder := json.NewEncoder(zipped)
+		at := time.Now().Add(-time.Hour)
+		for i := range rows {
+			if err := encoder.Encode(store.Row{Origin: "0123456789abcdef", OriginSeq: int64(i + 1), Drive: "d", Lane: "root", Kind: kinds.Note, At: at, Text: fmt.Sprintf("note %d", i), Source: "post"}); err != nil {
 				t.Fatal(err)
 			}
-			before := commitsUnder(late.st.HomeDir())
-			seeded, err := late.node.Seed(context.Background(), "d", &copied)
-			if got := commitsUnder(late.st.HomeDir()) - before; err != nil || seeded.Inserted != rows || got != 1 {
-				t.Fatalf("seed of %d rows = %+v, %v in %d commits; want every row and the sync cursor in one commit", rows, seeded, err, got)
-			}
-		})
+		}
+		if err := zipped.Close(); err != nil {
+			t.Fatal(err)
+		}
+		writer, err := sql.Open("sqlite", "file:"+filepath.Join(late.st.HomeDir(), store.DBFile)+"?_pragma=busy_timeout(0)&_txlock=immediate")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = writer.Close() })
+		probe := &lockProbe{copy: &copied, writer: writer}
+		seeded, err := late.node.Seed(context.Background(), "d", probe)
+		if err != nil || seeded.Inserted != rows {
+			t.Fatalf("seed of %d rows = %+v, %v; want every row", rows, seeded, err)
+		}
+		if len(probe.held) > 0 {
+			t.Fatalf("another writer found the store locked at %d reads of a %d-row copy: %v", len(probe.held), rows, probe.held)
+		}
+		largest[rows] = largestTransactionUnder(late.st.HomeDir())
+	}
+	if largest[250] != largest[2500] {
+		t.Fatalf("the largest seed transaction stored %d records from a 250-row copy and %d from a 2,500-row copy; want the same page either way", largest[250], largest[2500])
 	}
 }
 
