@@ -984,12 +984,40 @@ func TestAnInstanceAdoptsItsOwnersRenewalWithoutLosingARecord(t *testing.T) {
 	if res, err := job.node.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 || len(res.Rejected) != 0 {
 		t.Fatalf("push after the owner renewed = %+v, %v; want 1 pushed, none refused", res, err)
 	}
+	pull(t, job)
 	held := mustConfig(t, job).Delegation
 	if bytes.Equal(held.Sig, first.Sig) || !bytes.Equal(held.Sig, renewed.Sig) {
-		t.Fatalf("instance holds %s, want the renewal expiring %s", held.Expires, renewed.Expires)
+		t.Fatalf("instance holds %s after a pull, want the renewal expiring %s", held.Expires, renewed.Expires)
 	}
-	if got := pull(t, a); got.Inserted != 1 {
-		t.Fatalf("owner inserted %d records, want the one written across the renewal", got.Inserted)
+	if _, err := a.node.Issue(context.Background(), job.id.PublicKey(), []string{"page:*"}, nil, 3*time.Hour); err != nil {
+		t.Fatalf("second renewal: %v", err)
+	}
+	reopened, err := relay.Open(job.st.HomeDir(), job.st, job.id, mustConfig(t, job))
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, job.st, store.Record{Drive: "page:1", Kind: kinds.Note, Text: "under the adopted renewal"})
+	if res, err := reopened.Push(context.Background(), configs(t, job)); err != nil || res.Pushed != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("push on the adopted renewal after a second one = %+v, %v; want 1 pushed", res, err)
+	}
+	if got := pull(t, a); got.Inserted != 2 {
+		t.Fatalf("owner inserted %d records, want both written across the renewals", got.Inserted)
+	}
+}
+
+func TestAnOwnerRevokesAnInstanceAndItsNextRotationLeavesItOut(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	join(t, srv, a)
+	job := ownerDelegated(t, srv, a, time.Hour)
+	if err := a.node.Revoke(context.Background(), job.id.ID()); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	if _, err := a.node.Rotate(context.Background()); err != nil {
+		t.Fatalf("rotate after the revoke: %v", err)
+	}
+	if _, err := job.node.Pull(context.Background(), 0, nil); err == nil {
+		t.Fatal("a revoked instance still pulls")
 	}
 }
 

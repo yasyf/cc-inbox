@@ -22,7 +22,7 @@ import (
 
 func newRelayCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "relay", Short: "Replicate records end-to-end encrypted through the wide-area relay"}
-	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayDelegateCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd(), newRelayScopeCmd())
+	cmd.AddCommand(newRelayFoundCmd(), newRelayEnrollCmd(), newRelayJoinCmd(), newRelayDelegateCmd(), newRelayRevokeCmd(), newRelayPushCmd(), newRelayExportCmd(), newRelaySeedCmd(), newRelayPullCmd(), newRelaySyncCmd(), newRelayRotateCmd(), newRelayStatusCmd(), newRelayScopeCmd())
 	return cmd
 }
 
@@ -175,6 +175,28 @@ func newRelayDelegateCmd() *cobra.Command {
 	cmd.Flags().DurationVar(&ttl, "ttl", 24*time.Hour, "how long the delegation lasts, at most 24h")
 	_ = cmd.MarkFlagRequired("pub")
 	_ = cmd.MarkFlagRequired("drive")
+	return cmd
+}
+
+func newRelayRevokeCmd() *cobra.Command {
+	var mesh string
+	cmd := &cobra.Command{
+		Use:   "revoke INSTANCE",
+		Short: "Owner: end an instance this node delegated, so the relay drops it and no later rotation wraps it a group key",
+		Args:  cobra.ExactArgs(1),
+		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			nodes, _, err := relayNodes(st, mesh)
+			if err != nil {
+				return err
+			}
+			if err := nodes[0].Revoke(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "revoked instance %s on mesh %s\n", args[0], nodes[0].Config.Mesh)
+			return err
+		}),
+	}
+	cmd.Flags().StringVar(&mesh, "mesh", relay.DefaultMesh, "mesh the instance joined")
 	return cmd
 }
 

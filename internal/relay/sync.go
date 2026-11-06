@@ -140,12 +140,40 @@ func (n *Node) Issue(ctx context.Context, pub []byte, drives, kinds []string, tt
 	if ttl <= 0 || ttl > instanceLife {
 		return e2e.Delegation{}, fmt.Errorf("relay: a delegation lasts at most %s, not %s", instanceLife, ttl)
 	}
+	var d e2e.Delegation
+	err := withIssued(n.Home, n.Config.Mesh, func(issued map[string]e2e.Delegation) error {
+		var err error
+		if d, err = n.issue(ctx, pub, drives, kinds, ttl, issued); errors.Is(err, errRotatedMeanwhile) {
+			if err := n.RefreshKeys(ctx); err != nil {
+				return err
+			}
+			d, err = n.issue(ctx, pub, drives, kinds, ttl, issued)
+		}
+		if err == nil {
+			issued[d.Instance] = d
+		}
+		return err
+	})
+	return d, err
+}
+
+var errRotatedMeanwhile = errors.New("relay: the mesh rotated during the delegation")
+
+func expiry(d e2e.Delegation) time.Time {
+	at, _ := time.Parse(time.RFC3339Nano, d.Expires)
+	return at
+}
+
+func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, ttl time.Duration, issued map[string]e2e.Delegation) (e2e.Delegation, error) {
 	d, err := e2e.Delegate(n.Identity, n.Config.Mesh, pub, drives, kinds, time.Now().Add(ttl))
 	if err != nil {
 		return e2e.Delegation{}, err
 	}
 	if d.Instance == n.Identity.ID() {
 		return e2e.Delegation{}, errors.New("relay: an owner never delegates its own key")
+	}
+	if held, ok := issued[d.Instance]; ok && !expiry(d).After(expiry(held)) {
+		return e2e.Delegation{}, fmt.Errorf("relay: %s already holds a delegation expiring %s; a renewal must outlast it", d.Instance, held.Expires)
 	}
 	members, err := n.Members(ctx)
 	if err != nil {
@@ -166,9 +194,30 @@ func (n *Node) Issue(ctx context.Context, pub []byte, drives, kinds []string, tt
 	}
 	req := delegateRequest{Mesh: n.Config.Mesh, Delegation: d, Wraps: wraps}
 	if err := n.client().Call(ctx, http.MethodPost, "/v1/delegate", req, nil); err != nil {
+		var se *StatusError
+		if errors.As(err, &se) && se.Code == http.StatusConflict && strings.Contains(se.Message, "rotated") {
+			return e2e.Delegation{}, fmt.Errorf("%w: %w", errRotatedMeanwhile, err)
+		}
 		return e2e.Delegation{}, err
 	}
 	return d, nil
+}
+
+// Revoke ends an instance this owner delegated: the relay drops its queue and
+// wraps, and the group key rotates so the instance reads nothing written after.
+func (n *Node) Revoke(ctx context.Context, instance string) error {
+	err := withIssued(n.Home, n.Config.Mesh, func(issued map[string]e2e.Delegation) error {
+		if err := n.client().Call(ctx, http.MethodPost, "/v1/unpair", unpairRequest{Mesh: n.Config.Mesh, Node: instance}, nil); err != nil {
+			return err
+		}
+		delete(issued, instance)
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	_, err = n.Rotate(ctx)
+	return err
 }
 
 // Adopt makes this node the instance d delegates, holding no key but its own.
@@ -206,10 +255,21 @@ func ownerSigned(d e2e.Delegation, mesh string, members map[string]e2e.Member) e
 	return nil
 }
 
-func (n *Node) adoptRegistered(d *e2e.Delegation, members map[string]e2e.Member) error {
+func (n *Node) adoptRegistered(ctx context.Context, d *e2e.Delegation) error {
 	held := n.Config.Delegation
 	if d == nil || held == nil || n.Service != nil || slices.Equal(d.Sig, held.Sig) {
 		return nil
+	}
+	expires, err := time.Parse(time.RFC3339Nano, d.Expires)
+	if err != nil {
+		return fmt.Errorf("relay: delegation expiry %q: %w", d.Expires, err)
+	}
+	if was, err := time.Parse(time.RFC3339Nano, held.Expires); err == nil && !expires.After(was) || !time.Now().Before(expires) {
+		return fmt.Errorf("relay: the relay offers a delegation expiring %s, not a renewal of the one expiring %s", d.Expires, held.Expires)
+	}
+	members, err := n.Members(ctx)
+	if err != nil {
+		return err
 	}
 	if err := n.ownDelegation(*d, members); err != nil {
 		return err
@@ -320,7 +380,7 @@ func (n *Node) RefreshKeys(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := n.adoptRegistered(kr.Delegation, members); err != nil {
+	if err := n.adoptRegistered(ctx, kr.Delegation); err != nil {
 		slog.Warn("relay delegation refused", "mesh", n.Config.Mesh, "err", err)
 	}
 	added := false
@@ -375,6 +435,17 @@ func (n *Node) RotateAfter(ctx context.Context, base uint64) (uint64, error) {
 	return k.Epoch, n.Keyring.Save(n.Home, n.Config.Mesh)
 }
 
+func (n *Node) shareWithIssued(ctx context.Context) error {
+	if n.Config.Tier != e2e.TierOwner {
+		return nil
+	}
+	issued, err := loadIssued(n.Home, n.Config.Mesh)
+	if err != nil || len(issued) == 0 {
+		return err
+	}
+	return n.Share(ctx)
+}
+
 func (n *Node) Share(ctx context.Context) error {
 	if n.Config.Tier != e2e.TierOwner {
 		return nil
@@ -408,20 +479,22 @@ func (n *Node) wrapAll(ctx context.Context, k e2e.GroupKey) ([]e2e.Wrap, error) 
 		return nil, err
 	}
 	wraps := []e2e.Wrap{self}
-	to := make([]e2e.Member, 0, len(mr.Members)+len(mr.Instances))
+	to := make([]e2e.Member, 0, len(mr.Members))
 	for _, rm := range mr.Members {
 		m, ok := local[rm.ID]
 		if ok && rm.ID != n.Identity.ID() && slices.Equal(m.PublicKey, rm.Pub) {
 			to = append(to, m)
 		}
 	}
+	issued, err := loadIssued(n.Home, n.Config.Mesh)
+	if err != nil {
+		return nil, err
+	}
 	live := time.Now().Add(instanceSkew)
-	for _, d := range mr.Instances {
-		expires, err := time.Parse(time.RFC3339Nano, d.Expires)
-		if err != nil || !live.Before(expires) || ownerSigned(d, n.Config.Mesh, local) != nil {
-			continue
+	for _, d := range issued {
+		if expires, err := time.Parse(time.RFC3339Nano, d.Expires); err == nil && live.Before(expires) {
+			to = append(to, e2e.Member{Node: d.Instance, PublicKey: d.InstancePub, Tier: e2e.TierService})
 		}
-		to = append(to, e2e.Member{Node: d.Instance, PublicKey: d.InstancePub, Tier: e2e.TierService})
 	}
 	for _, m := range to {
 		w, err := e2e.WrapKey(k, n.Config.Mesh, n.Identity, m)
@@ -484,7 +557,7 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 	}
 	for batch := range slices.Chunk(rows, pushBatch) {
 		pr, sent, err := n.pushBatch(ctx, configs, batch)
-		if errors.Is(err, errStaleEpoch) || errors.Is(err, errStaleDelegation) {
+		if errors.Is(err, errStaleEpoch) {
 			if err := n.RefreshKeys(ctx); err != nil {
 				return res, err
 			}
@@ -506,10 +579,7 @@ func (n *Node) Push(ctx context.Context, configs []Config) (PushResult, error) {
 	return res, nil
 }
 
-var (
-	errStaleEpoch      = errors.New("relay: sealed under a superseded group key")
-	errStaleDelegation = errors.New("relay: sealed under a delegation its owner has renewed")
-)
+var errStaleEpoch = errors.New("relay: sealed under a superseded group key")
 
 const ownerKeepsLocal = "every dotted kind, such as lr.note, lr.item, lr.escalation and board.card"
 
@@ -552,11 +622,8 @@ func (n *Node) pushBatch(ctx context.Context, configs []Config, batch []store.Ro
 	}
 	if err := n.client().Call(ctx, http.MethodPost, "/v1/push", pushRequest{Mesh: n.Config.Mesh, Envelopes: envs}, &pr); err != nil {
 		var se *StatusError
-		switch {
-		case errors.As(err, &se) && se.Kind == "stale_epoch":
+		if errors.As(err, &se) && se.Kind == "stale_epoch" {
 			return pr, sent, fmt.Errorf("%w: %w", errStaleEpoch, err)
-		case errors.As(err, &se) && se.Kind == "stale_delegation":
-			return pr, sent, fmt.Errorf("%w: %w", errStaleDelegation, err)
 		}
 		return pr, sent, err
 	}
@@ -874,6 +941,9 @@ func (n *Node) Pull(ctx context.Context, wait time.Duration, handle ControlHandl
 	if err := n.client().Call(ctx, http.MethodGet, "/v1/pull?"+q.Encode(), nil, &pr); err != nil {
 		return store.Applied{}, err
 	}
+	if err := n.adoptRegistered(ctx, pr.Delegation); err != nil {
+		slog.Warn("relay delegation refused", "mesh", n.Config.Mesh, "err", err)
+	}
 	if len(pr.Messages) == 0 {
 		return store.Applied{}, n.fillAwaited(ctx)
 	}
@@ -1009,6 +1079,9 @@ func (n *Node) control(ctx context.Context, c e2e.Control, handle ControlHandler
 	case e2e.ControlRekey:
 		if err := n.RefreshKeys(ctx); err != nil {
 			return false, err
+		}
+		if err := n.shareWithIssued(ctx); err != nil {
+			slog.Warn("relay share with issued instances after a rekey failed", "mesh", n.Config.Mesh, "err", err)
 		}
 	case e2e.ControlJoined:
 		if err := n.Share(ctx); err != nil {

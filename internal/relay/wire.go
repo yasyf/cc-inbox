@@ -47,7 +47,8 @@ type message struct {
 }
 
 type pullResponse struct {
-	Messages []message `json:"messages"`
+	Messages   []message       `json:"messages"`
+	Delegation *e2e.Delegation `json:"delegation,omitempty"`
 }
 
 type ackRequest struct {
@@ -90,9 +91,13 @@ type Allow struct {
 }
 
 type membersResponse struct {
-	Epoch     uint64           `json:"epoch"`
-	Members   []RemoteMember   `json:"members"`
-	Instances []e2e.Delegation `json:"instances,omitempty"`
+	Epoch   uint64         `json:"epoch"`
+	Members []RemoteMember `json:"members"`
+}
+
+type unpairRequest struct {
+	Mesh string `json:"mesh"`
+	Node string `json:"node"`
 }
 
 type RemoteStatus struct {

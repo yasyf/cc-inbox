@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,6 +51,41 @@ func configPath(home, mesh string) string { return filepath.Join(dir(home, mesh)
 func keyringPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "keyring.json") }
 
 func serviceKeyPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "service.pem") }
+
+func issuedPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "issued.json") }
+
+func loadIssued(home, mesh string) (map[string]e2e.Delegation, error) {
+	issued := map[string]e2e.Delegation{}
+	_, err := readJSON(issuedPath(home, mesh), &issued)
+	return issued, err
+}
+
+func withIssued(home, mesh string, change func(map[string]e2e.Delegation) error) error {
+	if err := os.MkdirAll(dir(home, mesh), 0o700); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filepath.Join(dir(home, mesh), "issued.lock"), os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return fmt.Errorf("lock issued delegations: %w", err)
+	}
+	issued, err := loadIssued(home, mesh)
+	if err != nil {
+		return err
+	}
+	if err := change(issued); err != nil {
+		return err
+	}
+	now := time.Now()
+	maps.DeleteFunc(issued, func(_ string, d e2e.Delegation) bool {
+		expires, err := time.Parse(time.RFC3339Nano, d.Expires)
+		return err != nil || !now.Before(expires)
+	})
+	return writeJSON(issuedPath(home, mesh), issued)
+}
 
 func LoadConfig(home, mesh string) (Config, bool, error) {
 	var c Config

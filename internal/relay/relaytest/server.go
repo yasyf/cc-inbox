@@ -34,6 +34,17 @@ type Member struct {
 	At         string `json:"at"`
 	keysFrom   string
 	delegation *e2e.Delegation
+	previous   *e2e.Delegation
+}
+
+func (m Member) carries(d *e2e.Delegation) bool {
+	switch {
+	case m.delegation == nil || d == nil:
+		return m.delegation == nil && d == nil
+	case bytes.Equal(m.delegation.Sig, d.Sig):
+		return true
+	}
+	return m.previous != nil && bytes.Equal(m.previous.Sig, d.Sig)
 }
 
 type Allow struct {
@@ -214,10 +225,11 @@ func (s *Server) delegatedLocked(body []byte) (Member, bool) {
 	if !ok || svc.Tier != e2e.TierService && svc.Tier != e2e.TierOwner || !e2e.VerifyDelegation(svc.Pub, *d) || d.Instance != e2e.NodeID(d.InstancePub) {
 		return Member{}, false
 	}
-	m := Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: d.Service, delegation: d}
-	if svc.Tier == e2e.TierService {
-		m.keysFrom = d.Service
+	if svc.Tier == e2e.TierOwner {
+		m, ok := s.members[d.Instance]
+		return m, ok && m.delegation != nil && bytes.Equal(m.delegation.Sig, d.Sig)
 	}
+	m := Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: d.Service, delegation: d, keysFrom: d.Service}
 	s.members[m.ID] = m
 	return m, true
 }
@@ -248,7 +260,11 @@ func (s *Server) delegate(w http.ResponseWriter, r *http.Request, caller Member,
 			return
 		}
 	}
-	s.members[d.Instance] = Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: caller.ID, At: time.Now().UTC().Format(time.RFC3339Nano), delegation: &d}
+	renewed := Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: caller.ID, At: time.Now().UTC().Format(time.RFC3339Nano), delegation: &d}
+	if have, ok := s.members[d.Instance]; ok && !bytes.Equal(have.delegation.Sig, d.Sig) {
+		renewed.previous = have.delegation
+	}
+	s.members[d.Instance] = renewed
 	for _, wr := range req.Wraps {
 		s.wraps[wr.Epoch] = append(slices.DeleteFunc(s.wraps[wr.Epoch], func(have e2e.Wrap) bool { return have.To == wr.To }), wr)
 	}
@@ -285,10 +301,6 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 			fail(w, 409, "stale_epoch", fmt.Sprintf("epoch %d, current %d", e.Epoch, s.epoch))
 			return
 		}
-		if registered := s.members[caller.ID].delegation; registered != nil && e.Delegation != nil && !bytes.Equal(registered.Sig, e.Delegation.Sig) {
-			fail(w, 409, "stale_delegation", "the envelope carries a delegation other than the registered one")
-			return
-		}
 	}
 	type result struct {
 		OriginSeq int64  `json:"origin_seq"`
@@ -297,7 +309,7 @@ func (s *Server) push(w http.ResponseWriter, r *http.Request, caller Member, bod
 	}
 	var accepted, rejected []result
 	for _, e := range req.Envelopes {
-		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) || caller.delegation != nil && e.Delegation == nil || e.Tier == e2e.TierOwner && strings.Contains(e.KindClass, ".") {
+		if e.Origin != caller.ID || e.Tier != caller.Tier || !e2e.VerifyEnvelope(caller.Pub, e) || !s.members[caller.ID].carries(e.Delegation) || e.Tier == e2e.TierOwner && strings.Contains(e.KindClass, ".") {
 			rejected = append(rejected, result{OriginSeq: e.OriginSeq, Reason: "forbidden"})
 			continue
 		}
@@ -342,7 +354,11 @@ func (s *Server) pull(w http.ResponseWriter, r *http.Request, caller Member, bod
 		msgs = append(msgs, msg)
 	}
 	s.queues[caller.ID] = q[n:]
-	reply(w, map[string]any{"messages": msgs})
+	answer := map[string]any{"messages": msgs}
+	if m := s.members[caller.ID]; m.delegation != nil && m.keysFrom == "" {
+		answer["delegation"] = m.delegation
+	}
+	reply(w, answer)
 }
 
 func (s *Server) ack(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
@@ -455,16 +471,12 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request, caller Memb
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	out := []Member{}
-	instances := []e2e.Delegation{}
 	for _, m := range s.members {
-		switch {
-		case m.delegation == nil:
+		if m.delegation == nil {
 			out = append(out, m)
-		case m.keysFrom == "" && caller.Tier == e2e.TierOwner:
-			instances = append(instances, *m.delegation)
 		}
 	}
-	reply(w, map[string]any{"epoch": s.epoch, "members": out, "instances": instances})
+	reply(w, map[string]any{"epoch": s.epoch, "members": out})
 }
 
 func (s *Server) status(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {

@@ -340,7 +340,7 @@ cci relay delegate --pub <the worker's public key> --drive <drive> \
   | ssh worker cci relay join --url https://<relay URL> --owner <this owner's public key> --delegation -
 ```
 
-Run `cci relay delegate` for the same key again before the delegation expires to renew it. The relay takes the renewal at once, the worker adopts it the next time it refreshes keys, and a worker its owner stops renewing drops off the relay when the delegation expires.
+Run `cci relay delegate` for the same key again before the delegation expires to renew it. The relay takes the renewal at once and still accepts the delegation it replaced, the worker adopts the renewal from its next pull, and a worker its owner stops renewing drops off the relay when the delegation expires. `cci relay revoke <instance>` ends one sooner.
 
 ### Hear Trunk merge-queue changes as records
 
