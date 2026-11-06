@@ -243,8 +243,64 @@ func TestALaneThatStoodDownBeforeItWasNamedASuccessorLeavesTheStemToTheRunningLa
 	}
 
 	g.up("bugs-2-opus")
-	if r := g.reach("bugs"); r.Lane != "bugs-2-opus" {
-		t.Fatalf("Reach(bugs) = %+v after bugs-2-opus posted again; want it holding the stem it was handed", r)
+	if r := g.reach("bugs"); r.Lane != "bugs-2" || !slices.Equal(r.Holders, []string{"bugs-2"}) {
+		t.Fatalf("Reach(bugs) = %+v after bugs-2-opus posted again; want bugs-2, since a successor from another stem never holds bugs", r)
+	}
+	if r := g.reach("bugs-1"); r.Lane != "bugs-2-opus" {
+		t.Fatalf("Reach(bugs-1) = %+v after bugs-2-opus posted again; want its successor", r)
+	}
+}
+
+func TestAStemReachesItsOwnLiveLaneNotTheSuccessorAnotherStemsLaneNamed(t *testing.T) {
+	const successor = "dev-red-d12370de07-fix-case2"
+	g := newRegistry(t)
+	bind := func(lane string) int64 {
+		t.Helper()
+		g.clock.Advance(time.Minute)
+		k := store.PeerKey{Session: lane + "-thread"}
+		if err := g.st.BindLane(context.Background(), k, "d", lane, g.clock.Now()); err != nil {
+			t.Fatal(err)
+		}
+		cursor, _, err := g.st.Cursor(context.Background(), store.LaneCursor(k), "d")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return cursor
+	}
+	g.up("red-sweep-5")
+	g.up("red-sweep-7")
+	g.standDown("red-sweep-5", successor)
+	stem := g.note("red-sweep")
+	handed := g.note("red-sweep-5")
+	if r := g.reach("red-sweep"); r.Lane != "red-sweep-7" || !slices.Equal(r.Holders, []string{"red-sweep-7"}) {
+		t.Fatalf("Reach(red-sweep) = %+v before %s registered; want red-sweep-7 alone", r, successor)
+	}
+	if cursor := bind(successor); cursor != handed-1 {
+		t.Fatalf("%s's lane cursor = %d; want it before red-sweep-5's #%d and past the stem's #%d", successor, cursor, handed, stem)
+	}
+	if r := g.reach("red-sweep"); r.Lane != "red-sweep-7" || !slices.Equal(r.Holders, []string{"red-sweep-7"}) {
+		t.Fatalf("Reach(red-sweep) = %+v; want red-sweep-7 alone", r)
+	}
+	if r := g.reach("red-sweep-5"); r.Lane != successor || !r.Down {
+		t.Fatalf("Reach(red-sweep-5) = %+v; want its mail on %s", r, successor)
+	}
+	if got := g.reads("red-sweep-7"); !slices.Equal(got, []int64{stem}) {
+		t.Fatalf("red-sweep-7 reads %v; want the stem's #%d alone", got, stem)
+	}
+	if got := g.reads(successor); !slices.Equal(got, []int64{handed}) {
+		t.Fatalf("%s reads %v; want red-sweep-5's #%d alone", successor, got, handed)
+	}
+	if holding, err := g.st.Holding(context.Background(), "d", []string{"red-sweep-7", successor}); err != nil || !slices.Equal(holding, []string{"red-sweep-7"}) {
+		t.Fatalf("Holding = %v, %v; want red-sweep-7", holding, err)
+	}
+
+	g.standDown("red-sweep-7", "")
+	if r := g.reach("red-sweep"); r.Lane != "" {
+		t.Fatalf("Reach(red-sweep) = %+v after red-sweep-7 stood down; want no lane, not %s", r, successor)
+	}
+	waiting := g.note("red-sweep")
+	if cursor := bind("red-sweep-8"); cursor != waiting-1 {
+		t.Fatalf("red-sweep-8's lane cursor = %d; want it before #%d, the stem's mail no lane held", cursor, waiting)
 	}
 }
 

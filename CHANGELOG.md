@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `--to <stem>` reaches the stem's own live lane, never a successor from another
+  stem. When red-sweep-5 stood down naming dev-red-d12370de07-fix-case2 as its
+  successor, `--to red-sweep` reached that successor instead of the live
+  red-sweep-7, in routing, `cci post` notices, hook delivery, `cci tail --mail`
+  and the writer label. Mail addressed to red-sweep-5 itself still reaches its
+  successor. A red-sweep lane that binds later also hears the `--to red-sweep`
+  mail that waited for it, which the successor's registration used to hide.
 - `cci post` keeps a time that opens the text and names some other event, such
   as `4:40 PM backup gate: #51584 is still queued`. It replaced that time with
   the post time before. A leading time is a label only when a colon follows

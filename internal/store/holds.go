@@ -34,6 +34,10 @@ func stemSQL(lane string) string {
 	return "CASE WHEN " + trimmed + " != " + lane + " AND " + trimmed + " GLOB '?*-' THEN substr(" + trimmed + ", 1, length(" + trimmed + ") - 1) ELSE " + lane + " END"
 }
 
+func ownStem(table string) string {
+	return table + ".stem = " + stemSQL(table+".lane")
+}
+
 func holdableSQL(lane string) string {
 	return lane + " IS NOT NULL AND " + lane + " NOT IN ('', 'root', 'main', 'owner', 'all') AND " + lane + " NOT GLOB 'peer:*' AND instr(" + lane + ", '@') = 0"
 }
@@ -196,7 +200,8 @@ type Reach struct {
 	Down bool
 	// Lane is the lane the mail reaches now, "" when no lane does.
 	Lane string
-	// Holders are the stem's live lanes, newest registration first; the first holds the stem.
+	// Holders are the stem's live lanes, the stem itself and its <stem>-<n>
+	// lanes, newest registration first; the first holds the stem.
 	Holders []string
 }
 
@@ -207,10 +212,9 @@ type hold struct {
 
 // Reach resolves name on drive through the lane registry: a live numbered lane
 // reads its own mail; a stood-down one passes it to the successor it named, else
-// to its stem's holder; a stem reaches its holder, the newest live registration,
-// as Aliases and Holding count it, even when a lane named the stem itself is older
-// and live. An unregistered numbered name keeps its mail until it registers. Each
-// hop is one indexed lookup.
+// to its stem's holder; a stem reaches the newest live of itself and its
+// <stem>-<n> lanes, never a successor from another stem. An unregistered
+// numbered name keeps its mail until it registers. Each hop is one indexed lookup.
 func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 	if err := s.laneRegistry(ctx); err != nil {
 		return Reach{}, err
@@ -263,7 +267,7 @@ func (s *Store) Reach(ctx context.Context, drive, name string) (Reach, error) {
 func (s *Store) holds(ctx context.Context, drive, lane, stem string) ([]hold, error) {
 	columns := `lane, stem, CASE WHEN ` + unstamped("lane_holds") + ` THEN (SELECT MAX(named.successor) FROM lane_holds named WHERE named.drive = lane_holds.drive AND named.lane = lane_holds.lane) ELSE successor END, ` + liveOf("lane_holds") + `, ` + writtenOrder("lane_holds.held")
 	rows, err := s.db.QueryContext(ctx, `SELECT `+columns+` FROM lane_holds WHERE drive = ? AND lane = ?
-UNION SELECT `+columns+` FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? AND `+liveOf("lane_holds")+`
+UNION SELECT `+columns+` FROM lane_holds INDEXED BY lane_holds_stem WHERE drive = ? AND stem = ? AND `+ownStem("lane_holds")+` AND `+liveOf("lane_holds")+`
 ORDER BY 5 DESC, lane`, drive, lane, drive, stem)
 	if err != nil {
 		return nil, fmt.Errorf("read the lane registry for %s on %s: %w", lane, drive, err)
@@ -285,8 +289,8 @@ type rowsQuerier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// Aliases lists the other names whose mail reaches lane on drive: each stem it
-// holds as the stem's newest live registration, the stem's lanes that stood
+// Aliases lists the other names whose mail reaches lane on drive: its own stem
+// when it is the stem's newest live registration, the stem's lanes that stood
 // down naming no successor, and every stood-down lane whose successor chain
 // ends at one of those. The query walks indexes from lane, so its cost does not
 // grow with the drive's other lanes.
@@ -390,8 +394,8 @@ func aliases(ctx context.Context, q rowsQuerier, drive, lane string) ([]string, 
 		return nil, nil
 	}
 	rows, err := q.QueryContext(ctx, `WITH RECURSIVE
-held(stem) AS (SELECT h.stem FROM lane_holds h WHERE h.drive = ?1 AND h.lane = ?2 AND `+liveOf("h")+`
-	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = ?1 AND o.stem = h.stem AND o.lane != h.lane AND `+liveOf("o")+` AND (`+writtenLater("o.held", "h.held")+` OR o.held = h.held AND o.lane < h.lane))),
+held(stem) AS (SELECT h.stem FROM lane_holds h WHERE h.drive = ?1 AND h.lane = ?2 AND `+ownStem("h")+` AND `+liveOf("h")+`
+	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = ?1 AND o.stem = h.stem AND o.lane != h.lane AND `+ownStem("o")+` AND `+liveOf("o")+` AND (`+writtenLater("o.held", "h.held")+` OR o.held = h.held AND o.lane < h.lane))),
 reach(name) AS (
 	SELECT ?2
 	UNION SELECT stem FROM held
@@ -551,8 +555,8 @@ func (s *Store) Holding(ctx context.Context, drive string, lanes []string) ([]st
 }
 
 func (s *Store) holdingOf(ctx context.Context, drive string, lanes []string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT h.lane FROM lane_holds h WHERE h.drive = ? AND h.lane IN (`+strings.Repeat("?,", len(lanes)-1)+`?) AND h.stem != h.lane AND `+liveOf("h")+`
-	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = h.drive AND o.stem = h.stem AND o.lane != h.lane AND `+liveOf("o")+` AND (`+writtenLater("o.held", "h.held")+` OR o.held = h.held AND o.lane < h.lane))
+	rows, err := s.db.QueryContext(ctx, `SELECT h.lane FROM lane_holds h WHERE h.drive = ? AND h.lane IN (`+strings.Repeat("?,", len(lanes)-1)+`?) AND h.stem != h.lane AND `+ownStem("h")+` AND `+liveOf("h")+`
+	AND NOT EXISTS (SELECT 1 FROM lane_holds o INDEXED BY lane_holds_stem WHERE o.drive = h.drive AND o.stem = h.stem AND o.lane != h.lane AND `+ownStem("o")+` AND `+liveOf("o")+` AND (`+writtenLater("o.held", "h.held")+` OR o.held = h.held AND o.lane < h.lane))
 	ORDER BY h.lane`, append([]any{drive}, toAny(lanes)...)...)
 	if err != nil {
 		return nil, fmt.Errorf("read which lanes hold their stem on %s: %w", drive, err)
@@ -602,7 +606,7 @@ func (s *Store) waitingAliases(ctx context.Context, tx *sql.Tx, drive, lane stri
 	if err != nil || len(names) == 0 {
 		return "", nil, err
 	}
-	rows, err := tx.QueryContext(ctx, `SELECT o.lane, o.held, o.down, `+liveOf("o")+` FROM lane_holds h CROSS JOIN lane_holds o INDEXED BY lane_holds_stem ON o.drive = h.drive AND o.stem = h.stem WHERE h.drive = ? AND h.lane = ?
+	rows, err := tx.QueryContext(ctx, `SELECT o.lane, o.held, o.down, `+liveOf("o")+` FROM lane_holds h CROSS JOIN lane_holds o INDEXED BY lane_holds_stem ON o.drive = h.drive AND o.stem = h.stem WHERE h.drive = ? AND h.lane = ? AND `+ownStem("h")+` AND `+ownStem("o")+`
 UNION SELECT lane, held, down, `+liveOf("lane_holds")+` FROM lane_holds WHERE drive = ? AND lane IN (`+placeholders(len(names))+`)`,
 		append([]any{drive, lane, drive}, toAny(names)...)...)
 	if err != nil {
