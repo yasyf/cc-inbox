@@ -194,6 +194,9 @@ func newPostCmd() *cobra.Command {
 			if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
 				return err
 			}
+			if lane, err = aliasedLane(cmd.Context(), st, r.Drive, lane); err != nil {
+				return err
+			}
 			r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
 			if census != "" {
 				r.Fields.Census = &store.Census{}
@@ -290,7 +293,7 @@ func newPostCmd() *cobra.Command {
 				bind   *store.LaneBinding
 				binder string
 			)
-			if self, window, err := peerIdentity(cmd.Context()); getenv(cmd.Context(), unsentEnv) == "" && err == nil && window.PID != 0 {
+			if self, window, err := peerIdentity(cmd.Context()); getenv(cmd.Context(), unsentEnv) == "" && err == nil && window.PID != 0 && bindsCaller(cmd.Context(), lane) {
 				if err := refuseUnregistered(cmd.Context(), st, r.Drive, lane); err != nil {
 					return err
 				}
