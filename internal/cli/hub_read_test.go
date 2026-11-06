@@ -276,3 +276,27 @@ func TestTheNextPullStoresRepliesAnEarlierVersionHeldForARecordTheOwnerKeepsLoca
 		t.Fatalf("replica holds %v after a pull that brought nothing new; want the decide, and the review answering #2", got)
 	}
 }
+
+func TestPostOnAReplicaAnswersARecordOnlyTheHubHoldsByEitherNumber(t *testing.T) {
+	r := newReplica(t,
+		[]store.Record{{Lane: "root", Kind: kinds.Ask, Text: "first?"}, {Lane: "root", Kind: kinds.Ask, Text: "second?", Re: 1}, {Lane: "root", Kind: kinds.Ask, Text: "third?"}},
+		[]store.Record{{Lane: "root", Kind: kinds.Decision, Text: "after the join"}})
+
+	if _, err := run(t, "post", "--lane", "desk", "--kind", "answer", "--re", "#2", "--to", "root", "--text", "by the Mac's number"); err != nil {
+		t.Fatalf("post --re #2 on the replica: %v", err)
+	}
+	if _, err := run(t, "post", "--lane", "desk", "--kind", "answer", "--resolves", "3@"+r.mac.Self()[:8], "--to", "root", "--text", "by its origin"); err != nil {
+		t.Fatalf("post --resolves 3@origin on the replica: %v", err)
+	}
+	records, err := r.sprite.Query(context.Background(), store.Filter{Drive: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	re, closes := map[string]string{}, map[string]string{}
+	for _, rec := range records {
+		re[rec.Text], closes[rec.Text] = rec.ReNum, strings.Join(rec.CloseNums, ",")
+	}
+	if re["by the Mac's number"] != "#2" || closes["by its origin"] != "#3" || re["second?"] != "#1" {
+		t.Fatalf("replica holds replies %v and closes %v; want an answer to #2, one resolving #3, and #2 answering #1, each fetched from the hub", re, closes)
+	}
+}
