@@ -311,6 +311,13 @@ func (n *Node) rekeyRing(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		written, err := ringWritten(n.Home, n.Config.Mesh)
+		if err != nil {
+			return err
+		}
+		if rr.Gen < written {
+			return fmt.Errorf("relay: the relay answers ring %d, older than ring %d this owner wrote", rr.Gen, written)
+		}
 		latest := n.Keyring.Latest(n.Config.Mesh)
 		if rr.Wrap != nil && slices.ContainsFunc(rr.Epochs, func(s e2e.SealedEpoch) bool { return s.Epoch == latest }) {
 			return nil
