@@ -239,7 +239,19 @@ func (f *readFlags) registerLimit(cmd *cobra.Command, usage string) {
 }
 
 func (f *readFlags) filter(ctx context.Context, st *store.Store) (store.Filter, error) {
-	return f.filterPeer(ctx, st, SelfPeer(ctx))
+	out, err := f.filterPeer(ctx, st, SelfPeer(ctx))
+	if !errors.Is(err, store.ErrNoNumber) {
+		return out, err
+	}
+	_, row, err := findOnHub(ctx, st, f.drive, f.since, err)
+	if err != nil {
+		return store.Filter{}, err
+	}
+	rest := *f
+	rest.since = ""
+	out, err = rest.filterPeer(ctx, st, SelfPeer(ctx))
+	out.Since = row.At
+	return out, err
 }
 
 func (f *readFlags) filterPeer(ctx context.Context, st *store.Store, peer store.PeerKey) (store.Filter, error) {

@@ -176,7 +176,7 @@ func TestTailOnAReplicaFromAnOlderSeqReadsTheWholeRangeInOrder(t *testing.T) {
 func TestShowAndTailOnAReplicaKeepTheErrorForANumberNoHubHolds(t *testing.T) {
 	newReplica(t, []store.Record{{Lane: "root", Kind: kinds.Decision, Text: "older"}}, []store.Record{{Lane: "root", Kind: kinds.Decision, Text: "newer"}})
 
-	for _, args := range [][]string{{"show", "#99"}, {"tail", "--drive", "d", "--since", "#99"}} {
+	for _, args := range [][]string{{"show", "#99"}, {"tail", "--drive", "d", "--since", "#99"}, {"grep", ".", "--drive", "d", "--since", "#99"}} {
 		if _, err := run(t, args...); err == nil || !strings.Contains(err.Error(), "#99: no record has this number") {
 			t.Errorf("%v on the replica = %v; want #99: no record has this number", args, err)
 		}
@@ -298,5 +298,21 @@ func TestPostOnAReplicaAnswersARecordOnlyTheHubHoldsByEitherNumber(t *testing.T)
 	}
 	if re["by the Mac's number"] != "#2" || closes["by its origin"] != "#3" || re["second?"] != "#1" {
 		t.Fatalf("replica holds replies %v and closes %v; want an answer to #2, one resolving #3, and #2 answering #1, each fetched from the hub", re, closes)
+	}
+}
+
+func TestGrepOnAReplicaSinceARecordOnlyTheHubHoldsReadsWhatCameAfterIt(t *testing.T) {
+	newReplica(t,
+		[]store.Record{{Lane: "root", Kind: kinds.Decision, Text: "older than the sprite"}},
+		[]store.Record{{Lane: "root", Kind: kinds.Decision, Text: "after the join"}})
+
+	for _, since := range []string{"#1", "1"} {
+		out, err := run(t, "grep", ".", "--drive", "d", "--since", since)
+		if err != nil {
+			t.Fatalf("grep --since %s on the replica: %v", since, err)
+		}
+		if !strings.Contains(out, "after the join") {
+			t.Fatalf("grep --since %s on the replica = %q; want the record the replica holds after the hub's #1", since, out)
+		}
 	}
 }
