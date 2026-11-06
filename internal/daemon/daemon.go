@@ -88,7 +88,7 @@ type Product struct {
 
 type Runtime struct {
 	home     string
-	ln       net.Listener
+	ln       *net.TCPListener
 	mu       sync.Mutex
 	failed   error
 	reads    func(context.Context, *store.Store) (ReadAPI, error)
@@ -105,7 +105,7 @@ type ReadAPI interface {
 	Close() error
 }
 
-func New(home string, ln net.Listener, reads func(context.Context, *store.Store) (ReadAPI, error)) *Runtime {
+func New(home string, ln *net.TCPListener, reads func(context.Context, *store.Store) (ReadAPI, error)) *Runtime {
 	return &Runtime{home: home, ln: ln, reads: reads}
 }
 
@@ -124,6 +124,7 @@ func (r *Runtime) fail(c daemonkit.Ctx, err error) {
 
 func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	runtime.GOMAXPROCS(min(schedulerProcs, runtime.GOMAXPROCS(0)))
+	offerUntil(c.Context, r.home, r.ln)
 	roots, err := version.DefaultRoots()
 	if err != nil {
 		return nil, err

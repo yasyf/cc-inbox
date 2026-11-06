@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -94,7 +93,7 @@ func newUpgradeCmd() *cobra.Command {
 			if newest.Path == "" {
 				return errors.New("no cci install found to serve from")
 			}
-			return runShown(cmd, exec.CommandContext(cmd.Context(), newest.Path, "serve")) //nolint:gosec // G204: an install path cci found.
+			return runShown(cmd, exec.Command(newest.Path, "serve")) //nolint:gosec // G204: an install path cci found.
 		},
 	}
 }
@@ -102,9 +101,7 @@ func newUpgradeCmd() *cobra.Command {
 const releaseStartBound = time.Minute
 
 func runUpgradeStep(cmd *cobra.Command, line string) error {
-	c := exec.Command("/bin/sh", "-c", line) //nolint:gosec // G204: an upgrade command cci composed.
-	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-	return runShown(cmd, c)
+	return runShown(cmd, exec.Command("/bin/sh", "-c", line)) //nolint:gosec // G204: an upgrade command cci composed.
 }
 
 func runShown(cmd *cobra.Command, c *exec.Cmd) error {
@@ -114,10 +111,26 @@ func runShown(cmd *cobra.Command, c *exec.Cmd) error {
 	}
 	c.Stdout = cmd.OutOrStdout()
 	c.Stderr = cmd.ErrOrStderr()
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	if err := c.Run(); err != nil {
 		return fmt.Errorf("%s: %w", line, err)
 	}
 	return nil
+}
+
+func runDetached(ctx context.Context, c *exec.Cmd) error {
+	c.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := c.Start(); err != nil {
+		return err
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- c.Wait() }()
+	select {
+	case err := <-exited:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func ensureDaemon(ctx context.Context, timeout time.Duration) (daemonkit.Ensured, error) {
@@ -129,6 +142,15 @@ func ensureDaemon(ctx context.Context, timeout time.Duration) (daemonkit.Ensured
 	if err != nil {
 		return daemonkit.Ensured{}, fmt.Errorf("open cci daemon: %w", err)
 	}
+	home, err := store.Home()
+	if err != nil {
+		return daemonkit.Ensured{}, err
+	}
+	held, err := daemon.Hold(home)
+	if err != nil {
+		return daemonkit.Ensured{}, fmt.Errorf("hold the cci daemon's listener: %w", err)
+	}
+	defer func() { _ = held.Close() }()
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	ensured, err := client.Ensure(ctx)
@@ -150,7 +172,7 @@ func ensureNewestDaemon(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	if version.IsRelease(version.String()) && version.Newer(newest.Version, version.String()) {
-		return exec.CommandContext(ctx, newest.Path, "serve").Run() //nolint:gosec // G204: a cci install under the plugin cache or Caskroom.
+		return runDetached(ctx, exec.Command(newest.Path, "serve")) //nolint:gosec // G204: a cci install under the plugin cache or Caskroom.
 	}
 	_, err = ensureDaemon(ctx, 10*time.Second)
 	return err
@@ -170,9 +192,9 @@ func newDaemonCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			ln, err := net.Listen("tcp", daemon.Addr)
+			ln, err := daemon.Listen(home, daemon.Addr)
 			if err != nil {
-				return fmt.Errorf("listen %s: %w", daemon.Addr, err)
+				return err
 			}
 			rt := daemon.New(home, ln, func(ctx context.Context, st *store.Store) (daemon.ReadAPI, error) {
 				return NativeReadHandler(ctx, st, home)
