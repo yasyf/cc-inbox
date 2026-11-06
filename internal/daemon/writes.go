@@ -98,8 +98,8 @@ func (q *queue) run() {
 	defer close(q.stopped)
 	var carried []job
 	for {
-		first, ok := job{}, true
-		if len(carried) > 0 {
+		var first job
+		if ok := len(carried) > 0; ok {
 			first, carried = carried[0], nil
 		} else if first, ok = <-q.jobs; !ok {
 			return
