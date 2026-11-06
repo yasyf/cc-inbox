@@ -32,27 +32,33 @@ type WatchOptions struct {
 // while the feed is away, it looks for commits itself every opts.Interval.
 func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(store.Record, string) error) error {
 	f := opts.Filter
-	if f.After == 0 && f.Since.IsZero() {
-		start, err := watchStart(ctx, st, opts)
+	var resumed int64
+	found := false
+	if opts.Cursor != "" {
+		var err error
+		resumed, found, err = st.Cursor(ctx, opts.Cursor, f.Drive)
 		if ctx.Err() != nil {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		f.After = start
 	}
-	if strings.HasPrefix(opts.Cursor, wire.WatchCursorPrefix) {
-		resumed, found, err := st.Cursor(ctx, opts.Cursor, f.Drive)
+	switch {
+	case found:
+		f.After = max(f.After, resumed)
+	case f.After == 0 && f.Since.IsZero():
+		head, err := st.MaxSeq(ctx)
 		if ctx.Err() != nil {
 			return nil
 		}
 		if err != nil {
 			return err
 		}
-		if found {
-			f.After, f.Since = max(f.After, resumed), time.Time{}
-		} else if err := st.SetCursor(ctx, opts.Cursor, f.Drive, f.After); err != nil {
+		f.After = head
+	}
+	if !found && strings.HasPrefix(opts.Cursor, wire.WatchCursorPrefix) {
+		if err := st.SetCursor(ctx, opts.Cursor, f.Drive, f.After); err != nil {
 			return err
 		}
 	}
@@ -206,17 +212,4 @@ func WriteLines(w io.Writer, asJSON bool) func(store.Record, string) error {
 		}
 		return nil
 	}
-}
-
-func watchStart(ctx context.Context, st *store.Store, opts WatchOptions) (int64, error) {
-	if opts.Cursor != "" {
-		seq, ok, err := st.Cursor(ctx, opts.Cursor, opts.Filter.Drive)
-		if err != nil {
-			return 0, err
-		}
-		if ok {
-			return seq, nil
-		}
-	}
-	return st.MaxSeq(ctx)
 }
