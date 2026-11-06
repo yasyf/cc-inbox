@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -81,6 +82,8 @@ type Server struct {
 	consent  map[string][]byte
 	nonces   map[string]string
 	issuers  map[string]string
+	rings    map[string]*fakeRing
+	ringDown bool
 	Pushes   [][]byte
 	Proofs   []json.RawMessage
 }
@@ -98,6 +101,7 @@ func NewServer(t testing.TB) *Server {
 		queues:   map[string][]queued{},
 		inflight: map[string]map[string]queued{},
 		wraps:    map[uint64][]e2e.Wrap{},
+		rings:    map[string]*fakeRing{},
 		log:      map[string]e2e.Envelope{},
 		pairs:    map[string]*pairCode{},
 		consent:  map[string][]byte{},
@@ -109,6 +113,8 @@ func NewServer(t testing.TB) *Server {
 	})
 	s.Mux.HandleFunc("POST /v1/join", s.signed(s.join))
 	s.Mux.HandleFunc("POST /v1/delegate", s.signed(s.delegate))
+	s.Mux.HandleFunc("GET /v1/ring", s.signed(s.getRing))
+	s.Mux.HandleFunc("PUT /v1/ring", s.signed(s.putRing))
 	s.Mux.HandleFunc("POST /v1/push", s.signed(s.push))
 	s.Mux.HandleFunc("GET /v1/pull", s.signed(s.pull))
 	s.Mux.HandleFunc("POST /v1/ack", s.signed(s.ack))
@@ -149,6 +155,19 @@ func (s *Server) Epoch() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.epoch
+}
+
+func (s *Server) Ring(owner string) (uint64, []uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := s.ringOfLocked(owner)
+	return held.gen, slices.Sorted(maps.Keys(held.epochs))
+}
+
+func (s *Server) FailRingWrites(down bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ringDown = down
 }
 
 func (s *Server) InjectWrap(w e2e.Wrap) {
@@ -248,7 +267,7 @@ func (s *Server) delegatedLocked(body []byte) (Member, bool) {
 func (s *Server) delegate(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
 	var req struct {
 		Delegation e2e.Delegation `json:"delegation"`
-		Wraps      []e2e.Wrap     `json:"wraps"`
+		RingWrap   e2e.Wrap       `json:"ring_wrap"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		fail(w, 400, "bad_request", err.Error())
@@ -265,21 +284,111 @@ func (s *Server) delegate(w http.ResponseWriter, r *http.Request, caller Member,
 		fail(w, 409, "conflict", d.Instance+" is a member, not an instance")
 		return
 	}
-	for _, wr := range req.Wraps {
-		if wr.To != d.Instance || wr.From != caller.ID || wr.Epoch == 0 || wr.Epoch > s.epoch {
-			fail(w, 400, "bad_request", "wrap does not match")
-			return
-		}
+	if wr := req.RingWrap; wr.To != d.Instance || wr.From != caller.ID || !strings.HasSuffix(wr.Mesh, "#ring") {
+		fail(w, 400, "bad_request", "ring wrap does not match")
+		return
+	}
+	held := s.ringOfLocked(caller.ID)
+	if held.gen == 0 || req.RingWrap.Epoch != held.gen {
+		fail(w, 409, "conflict", fmt.Sprintf("ring %d, current %d", req.RingWrap.Epoch, held.gen))
+		return
 	}
 	renewed := Member{ID: d.Instance, Pub: d.InstancePub, Tier: e2e.TierService, By: caller.ID, At: time.Now().UTC().Format(time.RFC3339Nano), delegation: &d}
 	if have, ok := s.members[d.Instance]; ok && !bytes.Equal(have.delegation.Sig, d.Sig) {
 		renewed.previous = have.delegation
 	}
 	s.members[d.Instance] = renewed
-	for _, wr := range req.Wraps {
-		s.wraps[wr.Epoch] = append(slices.DeleteFunc(s.wraps[wr.Epoch], func(have e2e.Wrap) bool { return have.To == wr.To }), wr)
-	}
+	held.to[d.Instance] = req.RingWrap
 	w.WriteHeader(http.StatusNoContent)
+}
+
+type fakeRing struct {
+	gen    uint64
+	epochs map[uint64]e2e.SealedEpoch
+	to     map[string]e2e.Wrap
+}
+
+func (s *Server) ringOfLocked(issuer string) *fakeRing {
+	if s.rings[issuer] == nil {
+		s.rings[issuer] = &fakeRing{epochs: map[uint64]e2e.SealedEpoch{}, to: map[string]e2e.Wrap{}}
+	}
+	return s.rings[issuer]
+}
+
+func (s *Server) ringLocked(issuer, id string, since uint64) map[string]any {
+	held := s.ringOfLocked(issuer)
+	epochs := []e2e.SealedEpoch{}
+	for _, e := range slices.Sorted(maps.Keys(held.epochs)) {
+		if e >= since {
+			epochs = append(epochs, held.epochs[e])
+		}
+	}
+	out := map[string]any{"gen": held.gen, "epochs": epochs}
+	if wr, ok := held.to[id]; ok && wr.Epoch == held.gen {
+		out["wrap"] = wr
+	}
+	return out
+}
+
+func (s *Server) getRing(w http.ResponseWriter, r *http.Request, caller Member, _ []byte) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if caller.Tier != e2e.TierOwner {
+		fail(w, 403, "forbidden", "owner only")
+		return
+	}
+	reply(w, s.ringLocked(caller.ID, caller.ID, 0))
+}
+
+type ringRequest struct {
+	Gen    uint64            `json:"gen"`
+	Epochs []e2e.SealedEpoch `json:"epochs"`
+	Wraps  []struct {
+		Wrap e2e.Wrap `json:"wrap"`
+	} `json:"wraps"`
+}
+
+func (s *Server) putRing(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
+	var req ringRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		fail(w, 400, "bad_request", err.Error())
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case caller.Tier != e2e.TierOwner:
+		fail(w, 403, "forbidden", "owner only")
+		return
+	case s.ringDown:
+		fail(w, 503, "unavailable", "ring writes are down")
+		return
+	}
+	next, ok := s.nextRingLocked(w, caller.ID, s.epoch, req)
+	if !ok {
+		return
+	}
+	s.rings[caller.ID] = next
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) nextRingLocked(w http.ResponseWriter, owner string, epoch uint64, req ringRequest) (*fakeRing, bool) {
+	switch {
+	case req.Gen != s.ringOfLocked(owner).gen+1:
+		fail(w, 409, "conflict", fmt.Sprintf("ring %d, current %d", req.Gen, s.ringOfLocked(owner).gen))
+		return nil, false
+	case !slices.ContainsFunc(req.Epochs, func(e e2e.SealedEpoch) bool { return e.Epoch == epoch }):
+		fail(w, 400, "bad_request", "the ring misses the current epoch")
+		return nil, false
+	}
+	next := &fakeRing{gen: req.Gen, epochs: map[uint64]e2e.SealedEpoch{}, to: map[string]e2e.Wrap{}}
+	for _, e := range req.Epochs {
+		next.epochs[e.Epoch] = e
+	}
+	for _, m := range req.Wraps {
+		next.to[m.Wrap.To] = m.Wrap
+	}
+	return next, true
 }
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
@@ -422,9 +531,10 @@ func (s *Server) putKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 		return
 	}
 	var req struct {
-		Mesh   string     `json:"mesh"`
-		Wraps  []e2e.Wrap `json:"wraps"`
-		Rotate bool       `json:"rotate"`
+		Mesh   string       `json:"mesh"`
+		Wraps  []e2e.Wrap   `json:"wraps"`
+		Rotate bool         `json:"rotate"`
+		Ring   *ringRequest `json:"ring"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		fail(w, 400, "bad_request", err.Error())
@@ -442,10 +552,20 @@ func (s *Server) putKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 			return
 		}
 	}
+	var ring *fakeRing
+	if req.Ring != nil {
+		var ok bool
+		if ring, ok = s.nextRingLocked(w, caller.ID, epoch, *req.Ring); !ok {
+			return
+		}
+	}
 	switch {
 	case req.Rotate && epoch == s.epoch+1:
 		s.epoch = epoch
 		s.wraps[epoch] = req.Wraps
+		if ring != nil {
+			s.rings[caller.ID] = ring
+		}
 		s.controlLocked(e2e.Control{Type: e2e.ControlRekey, Mesh: req.Mesh, By: caller.ID, Epoch: epoch})
 	case !req.Rotate && epoch == s.epoch:
 		s.wraps[epoch] = append(s.wraps[epoch], req.Wraps...)
@@ -479,7 +599,11 @@ func (s *Server) getKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 			}
 		}
 	}
-	reply(w, map[string]any{"epoch": s.epoch, "wraps": out, "delegation": registered})
+	resp := map[string]any{"epoch": s.epoch, "wraps": out, "delegation": registered}
+	if registered != nil && s.members[registered.Service].Tier == e2e.TierOwner {
+		resp["ring"] = s.ringLocked(registered.Service, caller.ID, since)
+	}
+	reply(w, resp)
 }
 
 func (s *Server) listMembers(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {

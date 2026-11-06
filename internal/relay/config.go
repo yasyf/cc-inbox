@@ -56,6 +56,22 @@ func issuedPath(home, mesh string) string { return filepath.Join(dir(home, mesh)
 
 func issuerPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "issuer.json") }
 
+func ringPath(home, mesh string) string { return filepath.Join(dir(home, mesh), "ring.json") }
+
+type ringMark struct {
+	Gen uint64 `json:"gen"`
+}
+
+func ringWritten(home, mesh string) (uint64, error) {
+	var m ringMark
+	_, err := readJSON(ringPath(home, mesh), &m)
+	return m.Gen, err
+}
+
+func writeRingWritten(home, mesh string, gen uint64) error {
+	return writeJSON(ringPath(home, mesh), ringMark{Gen: gen})
+}
+
 type issuerGrant struct {
 	Expires time.Time `json:"expires"`
 }
@@ -185,7 +201,9 @@ func Forget(home, mesh string) error {
 }
 
 type Keyring struct {
-	Wraps []e2e.Wrap `json:"wraps"`
+	Wraps  []e2e.Wrap        `json:"wraps"`
+	Rings  []e2e.Wrap        `json:"rings,omitempty"`
+	Sealed []e2e.SealedEpoch `json:"sealed,omitempty"`
 
 	mu      sync.Mutex
 	open    map[uint64]e2e.GroupKey
@@ -223,7 +241,44 @@ func (k *Keyring) Save(home, mesh string) error {
 			k.Wraps = append(k.Wraps, w)
 		}
 	}
+	for _, w := range disk.Rings {
+		if !k.dropped[w.From] && !k.hasRing(w) {
+			k.Rings = append(k.Rings, w)
+		}
+	}
+	for _, s := range disk.Sealed {
+		if !k.dropped[s.From] && !k.hasSealed(s) {
+			k.Sealed = append(k.Sealed, s)
+		}
+	}
 	return writeJSON(keyringPath(home, mesh), k)
+}
+
+func (k *Keyring) hasRing(w e2e.Wrap) bool {
+	return slices.ContainsFunc(k.Rings, func(have e2e.Wrap) bool {
+		return have.Mesh == w.Mesh && have.Epoch == w.Epoch && have.To == w.To
+	})
+}
+
+func (k *Keyring) hasSealed(s e2e.SealedEpoch) bool {
+	return slices.ContainsFunc(k.Sealed, func(have e2e.SealedEpoch) bool {
+		return have.Mesh == s.Mesh && have.Ring == s.Ring && have.Epoch == s.Epoch
+	})
+}
+
+func (k *Keyring) AddRing(w e2e.Wrap, sealed []e2e.SealedEpoch) bool {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	added := false
+	if !k.hasRing(w) {
+		k.Rings, added = append(k.Rings, w), true
+	}
+	for _, s := range sealed {
+		if !k.hasSealed(s) {
+			k.Sealed, added = append(k.Sealed, s), true
+		}
+	}
+	return added
 }
 
 func (k *Keyring) has(w e2e.Wrap) bool {
@@ -246,6 +301,8 @@ func (k *Keyring) DropFrom(node string) {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 	k.Wraps = slices.DeleteFunc(k.Wraps, func(w e2e.Wrap) bool { return w.From == node })
+	k.Rings = slices.DeleteFunc(k.Rings, func(w e2e.Wrap) bool { return w.From == node })
+	k.Sealed = slices.DeleteFunc(k.Sealed, func(s e2e.SealedEpoch) bool { return s.From == node })
 	if k.dropped == nil {
 		k.dropped = map[string]bool{}
 	}
@@ -260,6 +317,11 @@ func (k *Keyring) Latest(mesh string) uint64 {
 	for _, w := range k.Wraps {
 		if w.Mesh == mesh {
 			e = max(e, w.Epoch)
+		}
+	}
+	for _, s := range k.Sealed {
+		if s.Mesh == mesh {
+			e = max(e, s.Epoch)
 		}
 	}
 	return e
@@ -285,6 +347,33 @@ func (k *Keyring) Keys(mesh string, id e2e.Identity, members map[string]e2e.Memb
 			continue
 		}
 		k.open[w.Epoch] = g
+	}
+	rings := map[uint64]e2e.GroupKey{}
+	for _, s := range k.Sealed {
+		if _, open := k.open[s.Epoch]; open || s.Mesh != mesh {
+			continue
+		}
+		ring, ok := rings[s.Ring]
+		if !ok {
+			at := slices.IndexFunc(k.Rings, func(w e2e.Wrap) bool {
+				return w.Mesh == e2e.RingMesh(mesh) && w.Epoch == s.Ring && w.To == id.ID()
+			})
+			if at < 0 {
+				continue
+			}
+			g, err := e2e.UnwrapKey(k.Rings[at], e2e.RingMesh(mesh), id, members)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			ring, rings[s.Ring] = g, g
+		}
+		g, err := e2e.OpenEpoch(ring, mesh, s, members)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		k.open[s.Epoch] = g
 	}
 	out := make(map[uint64]e2e.GroupKey, len(k.open))
 	for e, g := range k.open {

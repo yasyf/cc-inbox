@@ -58,21 +58,41 @@ type ackRequest struct {
 }
 
 type keysRequest struct {
-	Mesh   string     `json:"mesh"`
-	Wraps  []e2e.Wrap `json:"wraps"`
-	Rotate bool       `json:"rotate,omitempty"`
+	Mesh   string       `json:"mesh"`
+	Wraps  []e2e.Wrap   `json:"wraps"`
+	Rotate bool         `json:"rotate,omitempty"`
+	Ring   *ringRequest `json:"ring,omitempty"`
 }
 
 type keysResponse struct {
 	Epoch      uint64          `json:"epoch"`
 	Wraps      []e2e.Wrap      `json:"wraps"`
+	Ring       *ringResponse   `json:"ring,omitempty"`
 	Delegation *e2e.Delegation `json:"delegation,omitempty"`
+}
+
+type ringResponse struct {
+	Gen    uint64            `json:"gen"`
+	Wrap   *e2e.Wrap         `json:"wrap,omitempty"`
+	Epochs []e2e.SealedEpoch `json:"epochs"`
+}
+
+type ringMemberWrap struct {
+	Wrap    e2e.Wrap `json:"wrap"`
+	Expires string   `json:"expires,omitempty"`
+}
+
+type ringRequest struct {
+	Mesh   string            `json:"mesh"`
+	Gen    uint64            `json:"gen"`
+	Epochs []e2e.SealedEpoch `json:"epochs"`
+	Wraps  []ringMemberWrap  `json:"wraps"`
 }
 
 type delegateRequest struct {
 	Mesh       string         `json:"mesh"`
 	Delegation e2e.Delegation `json:"delegation"`
-	Wraps      []e2e.Wrap     `json:"wraps"`
+	RingWrap   e2e.Wrap       `json:"ring_wrap"`
 }
 
 type RemoteMember struct {

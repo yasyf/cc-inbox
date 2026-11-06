@@ -1127,6 +1127,26 @@ func TestAnOwnerRevokesAnInstanceAndItsNextRotationLeavesItOut(t *testing.T) {
 	}
 }
 
+func TestARotationSealsItsEpochInTheRingBeforeItsRekeyGoesOut(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	a := newPeer(t, srv, node.TierOwner)
+	join(t, srv, a)
+	ownerDelegated(t, srv, a, time.Hour)
+	before, _ := srv.Ring(a.id.ID())
+	srv.FailRingWrites(true)
+	if epoch, err := a.node.Rotate(context.Background()); err != nil || epoch != 2 {
+		t.Fatalf("rotate with PUT /v1/ring refused = %d, %v; want epoch 2 with the ring carried by the rotation", epoch, err)
+	}
+	if gen, epochs := srv.Ring(a.id.ID()); gen != before+1 || !slices.Equal(epochs, []uint64{1, 2}) {
+		t.Fatalf("after the rotation the ring is %d sealing %v; want %d sealing [1 2]", gen, epochs, before+1)
+	}
+	srv.FailRingWrites(false)
+	pull(t, a)
+	if gen, _ := srv.Ring(a.id.ID()); gen != before+1 {
+		t.Fatalf("the owner's own Rekey wrote ring %d; want it left at %d", gen, before+1)
+	}
+}
+
 func TestARotationWrapsTheNewKeyToOwnerDelegatedInstances(t *testing.T) {
 	srv := relaytest.NewServer(t)
 	a := newPeer(t, srv, node.TierOwner)

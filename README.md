@@ -340,6 +340,8 @@ cci relay delegate --pub <the worker's public key> --drive <drive> \
   | ssh worker cci relay join --url https://<relay URL> --owner <this owner's public key> --delegation -
 ```
 
+Workers get the group keys through the owner's ring: each epoch key sealed under a ring key that the owner wraps once for each worker it delegates, so a worker reads every epoch in two relay reads and a rotation writes one new ring without the workers it revoked.
+
 An owner issues delegations only under a live issuer grant: `cci relay grant` asks for Touch ID once at the Mac and covers the next 24 hours, and with no live grant the relay refuses `cci relay delegate`.
 
 Run `cci relay delegate` for the same key again before the delegation expires to renew it. The relay takes the renewal at once and still accepts the delegation it replaced, the worker adopts the renewal from its next pull, and a worker its owner stops renewing drops off the relay when the delegation expires. `cci relay revoke <instance>` ends one sooner.
