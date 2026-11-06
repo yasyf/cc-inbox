@@ -83,6 +83,7 @@ type Server struct {
 	nonces   map[string]string
 	issuers  map[string]string
 	rings    map[string]*fakeRing
+	ringDown bool
 	Pushes   [][]byte
 	Proofs   []json.RawMessage
 }
@@ -154,6 +155,19 @@ func (s *Server) Epoch() uint64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.epoch
+}
+
+func (s *Server) Ring(owner string) (uint64, []uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held := s.ringOfLocked(owner)
+	return held.gen, slices.Sorted(maps.Keys(held.epochs))
+}
+
+func (s *Server) FailRingWrites(down bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ringDown = down
 }
 
 func (s *Server) InjectWrap(w e2e.Wrap) {
@@ -326,14 +340,16 @@ func (s *Server) getRing(w http.ResponseWriter, r *http.Request, caller Member, 
 	reply(w, s.ringLocked(caller.ID, caller.ID, 0))
 }
 
+type ringRequest struct {
+	Gen    uint64            `json:"gen"`
+	Epochs []e2e.SealedEpoch `json:"epochs"`
+	Wraps  []struct {
+		Wrap e2e.Wrap `json:"wrap"`
+	} `json:"wraps"`
+}
+
 func (s *Server) putRing(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
-	var req struct {
-		Gen    uint64            `json:"gen"`
-		Epochs []e2e.SealedEpoch `json:"epochs"`
-		Wraps  []struct {
-			Wrap e2e.Wrap `json:"wrap"`
-		} `json:"wraps"`
-	}
+	var req ringRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		fail(w, 400, "bad_request", err.Error())
 		return
@@ -344,12 +360,26 @@ func (s *Server) putRing(w http.ResponseWriter, r *http.Request, caller Member, 
 	case caller.Tier != e2e.TierOwner:
 		fail(w, 403, "forbidden", "owner only")
 		return
-	case req.Gen != s.ringOfLocked(caller.ID).gen+1:
-		fail(w, 409, "conflict", fmt.Sprintf("ring %d, current %d", req.Gen, s.ringOfLocked(caller.ID).gen))
+	case s.ringDown:
+		fail(w, 503, "unavailable", "ring writes are down")
 		return
-	case !slices.ContainsFunc(req.Epochs, func(e e2e.SealedEpoch) bool { return e.Epoch == s.epoch }):
+	}
+	next, ok := s.nextRingLocked(w, caller.ID, s.epoch, req)
+	if !ok {
+		return
+	}
+	s.rings[caller.ID] = next
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) nextRingLocked(w http.ResponseWriter, owner string, epoch uint64, req ringRequest) (*fakeRing, bool) {
+	switch {
+	case req.Gen != s.ringOfLocked(owner).gen+1:
+		fail(w, 409, "conflict", fmt.Sprintf("ring %d, current %d", req.Gen, s.ringOfLocked(owner).gen))
+		return nil, false
+	case !slices.ContainsFunc(req.Epochs, func(e e2e.SealedEpoch) bool { return e.Epoch == epoch }):
 		fail(w, 400, "bad_request", "the ring misses the current epoch")
-		return
+		return nil, false
 	}
 	next := &fakeRing{gen: req.Gen, epochs: map[uint64]e2e.SealedEpoch{}, to: map[string]e2e.Wrap{}}
 	for _, e := range req.Epochs {
@@ -358,8 +388,7 @@ func (s *Server) putRing(w http.ResponseWriter, r *http.Request, caller Member, 
 	for _, m := range req.Wraps {
 		next.to[m.Wrap.To] = m.Wrap
 	}
-	s.rings[caller.ID] = next
-	w.WriteHeader(http.StatusNoContent)
+	return next, true
 }
 
 func (s *Server) join(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
@@ -502,9 +531,10 @@ func (s *Server) putKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 		return
 	}
 	var req struct {
-		Mesh   string     `json:"mesh"`
-		Wraps  []e2e.Wrap `json:"wraps"`
-		Rotate bool       `json:"rotate"`
+		Mesh   string       `json:"mesh"`
+		Wraps  []e2e.Wrap   `json:"wraps"`
+		Rotate bool         `json:"rotate"`
+		Ring   *ringRequest `json:"ring"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		fail(w, 400, "bad_request", err.Error())
@@ -522,10 +552,20 @@ func (s *Server) putKeys(w http.ResponseWriter, r *http.Request, caller Member, 
 			return
 		}
 	}
+	var ring *fakeRing
+	if req.Ring != nil {
+		var ok bool
+		if ring, ok = s.nextRingLocked(w, caller.ID, epoch, *req.Ring); !ok {
+			return
+		}
+	}
 	switch {
 	case req.Rotate && epoch == s.epoch+1:
 		s.epoch = epoch
 		s.wraps[epoch] = req.Wraps
+		if ring != nil {
+			s.rings[caller.ID] = ring
+		}
 		s.controlLocked(e2e.Control{Type: e2e.ControlRekey, Mesh: req.Mesh, By: caller.ID, Epoch: epoch})
 	case !req.Rotate && epoch == s.epoch:
 		s.wraps[epoch] = append(s.wraps[epoch], req.Wraps...)

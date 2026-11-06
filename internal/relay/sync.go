@@ -248,26 +248,36 @@ func (n *Node) currentRing(ctx context.Context, members map[string]e2e.Member, i
 }
 
 func (n *Node) writeRing(ctx context.Context, gen uint64, members map[string]e2e.Member, issued map[string]issuedGrant) (e2e.GroupKey, error) {
-	ring, err := e2e.NewGroupKey(gen)
-	if err != nil {
-		return e2e.GroupKey{}, err
-	}
 	keys, err := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
 	if err != nil {
 		return e2e.GroupKey{}, err
+	}
+	ring, req, err := n.sealRing(gen, keys, issued)
+	if err != nil {
+		return e2e.GroupKey{}, err
+	}
+	if err := n.client().Call(ctx, http.MethodPut, "/v1/ring", req, nil); err != nil {
+		return e2e.GroupKey{}, fmt.Errorf("write ring %d: %w", gen, err)
+	}
+	return ring, writeRingWritten(n.Home, n.Config.Mesh, gen)
+}
+
+func (n *Node) sealRing(gen uint64, keys map[uint64]e2e.GroupKey, issued map[string]issuedGrant) (e2e.GroupKey, ringRequest, error) {
+	ring, err := e2e.NewGroupKey(gen)
+	if err != nil {
+		return e2e.GroupKey{}, ringRequest{}, err
 	}
 	req := ringRequest{Mesh: n.Config.Mesh, Gen: gen}
 	for _, k := range keys {
 		s, err := e2e.SealEpoch(ring, n.Config.Mesh, k, n.Identity)
 		if err != nil {
-			return e2e.GroupKey{}, err
+			return e2e.GroupKey{}, ringRequest{}, err
 		}
 		req.Epochs = append(req.Epochs, s)
 	}
 	to := []ringMemberWrap{{Wrap: e2e.Wrap{To: n.Identity.ID()}}}
-	live := time.Now().Add(instanceSkew)
 	for _, g := range issued {
-		if !g.Revoked && live.Before(expiry(g.Delegation)) {
+		if liveGrant(g) {
 			to = append(to, ringMemberWrap{Wrap: e2e.Wrap{To: g.Instance}, Expires: g.Expires})
 		}
 	}
@@ -278,14 +288,15 @@ func (n *Node) writeRing(ctx context.Context, gen uint64, members map[string]e2e
 		}
 		w, err := e2e.WrapKey(ring, e2e.RingMesh(n.Config.Mesh), n.Identity, e2e.Member{Node: m.Wrap.To, PublicKey: pub})
 		if err != nil {
-			return e2e.GroupKey{}, err
+			return e2e.GroupKey{}, ringRequest{}, err
 		}
 		req.Wraps = append(req.Wraps, ringMemberWrap{Wrap: w, Expires: m.Expires})
 	}
-	if err := n.client().Call(ctx, http.MethodPut, "/v1/ring", req, nil); err != nil {
-		return e2e.GroupKey{}, fmt.Errorf("write ring %d: %w", gen, err)
-	}
-	return ring, writeRingWritten(n.Home, n.Config.Mesh, gen)
+	return ring, req, nil
+}
+
+func liveGrant(g issuedGrant) bool {
+	return !g.Revoked && time.Now().Add(instanceSkew).Before(expiry(g.Delegation))
 }
 
 func (n *Node) rekeyRing(ctx context.Context) error {
@@ -293,15 +304,18 @@ func (n *Node) rekeyRing(ctx context.Context) error {
 		return nil
 	}
 	return withIssued(n.Home, n.Config.Mesh, func(issued map[string]issuedGrant) error {
-		live := time.Now().Add(instanceSkew)
-		if !slices.ContainsFunc(slices.Collect(maps.Values(issued)), func(g issuedGrant) bool { return !g.Revoked && live.Before(expiry(g.Delegation)) }) {
+		if !slices.ContainsFunc(slices.Collect(maps.Values(issued)), liveGrant) {
 			return nil
 		}
-		members, err := n.Members(ctx)
+		rr, err := n.ring(ctx)
 		if err != nil {
 			return err
 		}
-		rr, err := n.ring(ctx)
+		latest := n.Keyring.Latest(n.Config.Mesh)
+		if rr.Wrap != nil && slices.ContainsFunc(rr.Epochs, func(s e2e.SealedEpoch) bool { return s.Epoch == latest }) {
+			return nil
+		}
+		members, err := n.Members(ctx)
 		if err != nil {
 			return err
 		}
@@ -550,19 +564,45 @@ func (n *Node) RotateAfter(ctx context.Context, base uint64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	req := keysRequest{Mesh: n.Config.Mesh, Wraps: wraps, Rotate: true}
-	if err := n.client().Call(ctx, http.MethodPut, "/v1/keys/"+strconv.FormatUint(k.Epoch, 10), req, nil); err != nil {
-		var se *StatusError
-		if errors.As(err, &se) && se.Code == http.StatusConflict {
-			return 0, fmt.Errorf("%w: %d", ErrEpochTaken, k.Epoch)
+	err = withIssued(n.Home, n.Config.Mesh, func(issued map[string]issuedGrant) error {
+		req := keysRequest{Mesh: n.Config.Mesh, Wraps: wraps, Rotate: true}
+		if slices.ContainsFunc(slices.Collect(maps.Values(issued)), liveGrant) {
+			members, err := n.Members(ctx)
+			if err != nil {
+				return err
+			}
+			rr, err := n.ring(ctx)
+			if err != nil {
+				return err
+			}
+			keys, err := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
+			if err != nil {
+				return err
+			}
+			keys[k.Epoch] = k
+			_, ring, err := n.sealRing(rr.Gen+1, keys, issued)
+			if err != nil {
+				return err
+			}
+			req.Ring = &ring
 		}
+		if err := n.client().Call(ctx, http.MethodPut, "/v1/keys/"+strconv.FormatUint(k.Epoch, 10), req, nil); err != nil {
+			var se *StatusError
+			if errors.As(err, &se) && se.Code == http.StatusConflict {
+				return fmt.Errorf("%w: %d", ErrEpochTaken, k.Epoch)
+			}
+			return err
+		}
+		if req.Ring == nil {
+			return nil
+		}
+		return writeRingWritten(n.Home, n.Config.Mesh, req.Ring.Gen)
+	})
+	if err != nil {
 		return 0, err
 	}
 	n.Keyring.Add(wraps[0])
-	if err := n.Keyring.Save(n.Home, n.Config.Mesh); err != nil {
-		return k.Epoch, err
-	}
-	return k.Epoch, n.rekeyRing(ctx)
+	return k.Epoch, n.Keyring.Save(n.Home, n.Config.Mesh)
 }
 
 func (n *Node) Share(ctx context.Context) error {

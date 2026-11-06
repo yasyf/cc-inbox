@@ -58,9 +58,10 @@ type ackRequest struct {
 }
 
 type keysRequest struct {
-	Mesh   string     `json:"mesh"`
-	Wraps  []e2e.Wrap `json:"wraps"`
-	Rotate bool       `json:"rotate,omitempty"`
+	Mesh   string       `json:"mesh"`
+	Wraps  []e2e.Wrap   `json:"wraps"`
+	Rotate bool         `json:"rotate,omitempty"`
+	Ring   *ringRequest `json:"ring,omitempty"`
 }
 
 type keysResponse struct {

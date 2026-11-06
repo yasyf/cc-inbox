@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An owner gives the workers it delegates the group keys through one ring: each
   epoch's key sealed under a ring key, and the ring key wrapped once for each
   worker. A worker reads every epoch it may hold in two relay reads, a delegation
-  writes one wrap, and each rotation writes a new ring that leaves revoked workers out.
+  writes one wrap, and each rotation carries its new ring, which leaves revoked
+  workers out, so a worker that hears the rotation already finds its new key.
 - `cci relay grant` asks the owner's Touch ID once and lets this node issue
   `cci relay delegate` delegations for the next 24 hours; the relay refuses a
   delegation from an owner with no live grant.
