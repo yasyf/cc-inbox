@@ -286,15 +286,15 @@ jobs:
         if: env.FULL_CI == 'true'
         with:
           ref: 70ea38a2108e20eadf526838d9d97797c63cdcec
-          path: .ci-tail-body-baseline
+          path: .ci-cli-output-baseline
           persist-credentials: false
       - name: Text Tail Body immutable output error and cursor contract
         if: env.FULL_CI == 'true'
         run: |
-          test "$(git -C .ci-tail-body-baseline rev-parse HEAD)" = 70ea38a2108e20eadf526838d9d97797c63cdcec
-          cp internal/cli/tail_body_contract_test.go .ci-tail-body-baseline/internal/cli/
+          test "$(git -C .ci-cli-output-baseline rev-parse HEAD)" = 70ea38a2108e20eadf526838d9d97797c63cdcec
+          cp internal/cli/tail_body_contract_test.go .ci-cli-output-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-body-contract"
-          (cd .ci-tail-body-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli)
+          (cd .ci-cli-output-baseline && CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli)
           CCI_TAIL_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-body-contract" go test -count=1 -run '^TestTailBodyContract' -v ./internal/cli
       - uses: actions/checkout@v7
         if: env.FULL_CI == 'true'
@@ -323,20 +323,20 @@ jobs:
       - name: Reader and mailbox addressed done Body immutable current contract
         if: env.FULL_CI == 'true'
         run: |
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = fbc0e5bd6479118800bf57b118ae6dfeaf6bbee3
-          cp internal/cli/addressed_body_contract_test.go .ci-compact-line-baseline/internal/cli/
+          test "$(git -C .ci-cli-output-baseline rev-parse HEAD)" = 70ea38a2108e20eadf526838d9d97797c63cdcec
+          cp internal/cli/addressed_body_contract_test.go .ci-cli-output-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-addressed-body-contract"
-          (cd .ci-compact-line-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
+          (cd .ci-cli-output-baseline && CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli)
           CCI_ADDRESSED_BODY_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-addressed-body-contract" go test -count=1 -run '^TestAddressedDone(Body|ErrorAndBudget)Contract$' -v ./internal/cli
       - name: Tail page assembly current-head parity and allocation scaling
         if: env.FULL_CI == 'true'
         run: |
           test "$(git -C .ci-tail-page-baseline rev-parse HEAD)" = fe73b8c28964aa004782c8f0c7dd1fcca2ee082b
           cp internal/inbox/tail_page_assembly_test.go .ci-tail-page-baseline/internal/inbox/
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = fbc0e5bd6479118800bf57b118ae6dfeaf6bbee3
-          cp internal/cli/tail_page_assembly_contract_test.go .ci-compact-line-baseline/internal/cli/
+          test "$(git -C .ci-cli-output-baseline rev-parse HEAD)" = 70ea38a2108e20eadf526838d9d97797c63cdcec
+          cp internal/cli/tail_page_assembly_contract_test.go .ci-cli-output-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-tail-page-contract"
-          (cd .ci-compact-line-baseline && CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailPageAssemblyContract$' -v ./internal/cli)
+          (cd .ci-cli-output-baseline && CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" CCI_TAIL_BODY_CONTRACT_WRITE=1 go test -count=1 -run '^TestTailPageAssemblyContract$' -v ./internal/cli)
           CCI_TAIL_PAGE_CONTRACT_SNAPSHOTS="$RUNNER_TEMP/cci-tail-page-contract" go test -count=1 -run '^TestTailPageAssemblyContract$' -v ./internal/cli
           if (cd .ci-tail-page-baseline && CCI_TAIL_PAGE_ALLOCATION=1 go test -count=1 -run '^TestTailPageAssemblyAllocationScaling$' -v ./internal/inbox) > "$RUNNER_TEMP/tail-page-negative.log" 2>&1; then
             cat "$RUNNER_TEMP/tail-page-negative.log"
@@ -906,12 +906,12 @@ jobs:
           cat "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           grep -F 'null argv reached core: status=200' "$RUNNER_TEMP/cci-native-tail-null-negative.log"
           test "$(git -C .ci-native-tail-baseline rev-parse HEAD)" = 7f5c374e7cd07911aa432b3434036a27b9007de9
-          test "$(git -C .ci-compact-line-baseline rev-parse HEAD)" = fbc0e5bd6479118800bf57b118ae6dfeaf6bbee3
+          test "$(git -C .ci-cli-output-baseline rev-parse HEAD)" = 70ea38a2108e20eadf526838d9d97797c63cdcec
           cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-native-tail-baseline/internal/cli/
-          cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-compact-line-baseline/internal/cli/
+          cp internal/cli/native_tail_reference_test.go internal/cli/native_tail_fixture_test.go .ci-cli-output-baseline/internal/cli/
           mkdir -p "$RUNNER_TEMP/cci-native-tail-snapshots" "$RUNNER_TEMP/cci-native-tail-text-snapshots"
           (cd .ci-native-tail-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
-          (cd .ci-compact-line-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
+          (cd .ci-cli-output-baseline && CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" CCI_NATIVE_TAIL_SNAPSHOT_WRITE=1 go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli)
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_TEXT_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" go test -count=1 -run '^TestNativeTailCLIReference$' -v ./internal/cli
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_TEXT_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" go test -count=1 -run '^TestNativeTailHTTPParity$' -v ./internal/cli
           CCI_NATIVE_TAIL_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-snapshots" CCI_NATIVE_TAIL_TEXT_SNAPSHOTS="$RUNNER_TEMP/cci-native-tail-text-snapshots" go test -count=1 -run '^TestNativeTail' -skip '^TestNativeTail(CLIReference|HTTPParity)$' -v ./internal/cli
