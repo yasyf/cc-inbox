@@ -56,6 +56,7 @@ jobs:
         os: ${{ fromJSON(github.event_name == 'schedule' && '["ubuntu-latest", "macos-latest"]' || '["ubuntu-latest"]') }}
     env:
       FULL_CI: ${{ matrix.os == 'ubuntu-latest' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) }}
+      TZ: America/Los_Angeles
       RACE_STEP_TESTS: '^TestAddressedDoneBodyTransferDiagnostic$|^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$'
       TAIL_COST_TESTS: '^TestTailRecipientHistoryBaseline$|^TestTailResolverHistoryBaseline$|^TestTailPreservesRequested80000JSONRecords$|^TestTailNewestLimitDoesNotWalkSameDriveHistory$|^TestTailPeerFanInKeepsNewestLookupBounded$'
       WORK_COUNT_TESTS: '^TestAudienceActualCLIQueryWorkDiagnostic$|^TestGrepSelectedRepliesDoNotReadUnrelatedRecords$|^TestGrepReadsHistoryOnceForAnnotations$|^TestNativeTailBorrowedStoreOperationCounts$|^TestGrepTextBodyProjectionWork$|^TestDaemonLaneHistoryDoesNotScaleWithOldRows$|^TestTailTextBodyTransferDiagnostic$|^TestAudienceQueryPlanDiagnostic$|^TestAudienceKindQueryAndCountWork$|^TestSelectedClosureKeyComparisonsStayBounded$|^TestRegisteredLaneComparisonsStayBounded$|^TestSelectedRecordsPKWorkStaysBounded$'
