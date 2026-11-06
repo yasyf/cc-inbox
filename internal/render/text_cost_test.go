@@ -79,6 +79,13 @@ func TestRenderedTextWhitespace(t *testing.T) {
 var renderedTextCost string
 
 func BenchmarkRenderedText(b *testing.B) {
+	host := time.Local
+	zone, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		b.Fatal(err)
+	}
+	time.Local = zone
+	b.Cleanup(func() { time.Local = host })
 	at := time.Date(2026, 11, 1, 6, 22, 0, 0, time.UTC)
 	for _, tt := range []struct {
 		name, text string
