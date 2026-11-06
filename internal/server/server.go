@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -26,7 +28,7 @@ const (
 // FollowPath is where a reader posts a FollowRequest for its stream of wakes.
 const FollowPath = "/v1/follow"
 
-const followHeartbeat = 30 * time.Second
+const heartbeat = 30 * time.Second
 
 // FollowRequest names the store a reader reads and what it reads.
 type FollowRequest struct {
@@ -254,13 +256,30 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
-	if !s.emit(r.Context(), w, &f, head) {
+	owed, failing := head, false
+	deliver := func(ctx context.Context) bool {
+		err := s.emit(ctx, w, &f, owed)
+		var unread unreadable
+		switch {
+		case err == nil:
+			owed, failing = 0, false
+		case ctx.Err() != nil || !errors.As(err, &unread):
+			return false
+		case !failing:
+			failing = true
+			slog.Warn("cci stream could not read the store; it reads again on its next tick", "drive", f.Drive, "to", f.To, "after", f.After, "err", err)
+		}
+		return true
+	}
+	if !deliver(r.Context()) {
 		return
 	}
 	follower := s.hub.Follow(f) //nolint:contextcheck // the hub outlives one request.
 	defer follower.Leave()
 	tick := time.NewTicker(s.interval)
 	defer tick.Stop()
+	beat := time.NewTicker(heartbeat)
+	defer beat.Stop()
 	for {
 		flusher.Flush()
 		select {
@@ -271,7 +290,9 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		case <-follower.Ready():
 			wake := follower.Take()
 			f.After = max(f.After, wake.First-1)
-			if !s.emit(r.Context(), w, &f, wake.Head) {
+			owed = max(owed, wake.Head)
+		case <-beat.C:
+			if _, err := io.WriteString(w, ": heartbeat\n\n"); err != nil {
 				return
 			}
 		case <-tick.C:
@@ -279,25 +300,30 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if owed > 0 && !deliver(r.Context()) {
+			return
+		}
 	}
 }
 
-func (s *Server) emit(ctx context.Context, w http.ResponseWriter, f *store.Filter, head int64) bool {
+type unreadable struct{ error }
+
+func (s *Server) emit(ctx context.Context, w http.ResponseWriter, f *store.Filter, head int64) error {
 	for {
 		page := *f
 		page.Before = head + 1
 		records, err := s.st.Query(ctx, page)
 		if err != nil {
-			return false
+			return unreadable{err}
 		}
 		for _, rec := range records {
 			if _, err := fmt.Fprintf(w, "id: %d\nevent: record\ndata: %s\n\n", rec.Seq, render.JSON(rec)); err != nil {
-				return false
+				return err
 			}
 			f.After = rec.Seq
 		}
 		if len(records) < f.Limit {
-			return true
+			return nil
 		}
 	}
 }
@@ -323,8 +349,8 @@ func (s *Server) follow(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 	lines := json.NewEncoder(w)
-	heartbeat := time.NewTicker(followHeartbeat)
-	defer heartbeat.Stop()
+	beat := time.NewTicker(heartbeat)
+	defer beat.Stop()
 	for {
 		var wake store.Wake
 		select {
@@ -334,7 +360,7 @@ func (s *Server) follow(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-follower.Ready():
 			wake = follower.Take()
-		case <-heartbeat.C:
+		case <-beat.C:
 		}
 		if err := lines.Encode(wake); err != nil {
 			return
