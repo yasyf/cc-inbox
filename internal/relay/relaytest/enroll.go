@@ -15,6 +15,40 @@ func (s *Server) enrollRoutes() {
 	s.Mux.HandleFunc("POST /v1/found", s.found)
 	s.Mux.HandleFunc("POST /v1/nonce", s.signed(s.nonce))
 	s.Mux.HandleFunc("POST /v1/enroll", s.signed(s.enroll))
+	s.Mux.HandleFunc("POST /v1/issuer", s.signed(s.issuer))
+}
+
+func (s *Server) issuer(w http.ResponseWriter, r *http.Request, caller Member, body []byte) {
+	var req struct {
+		Expires     string
+		Nonce       []byte
+		Attestation attestation
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		fail(w, 400, "bad_request", err.Error())
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	nonce := base64.StdEncoding.EncodeToString(req.Nonce)
+	switch {
+	case caller.Tier != e2e.TierOwner:
+		fail(w, 403, "forbidden", "owner only")
+	case s.nonces[nonce] != caller.ID:
+		fail(w, 403, "forbidden", "unknown or spent nonce")
+	case !s.attests(req.Attestation, nonce, []string{"cci", "relay", "grant", node.FingerprintOf(caller.Pub), req.Expires}):
+		fail(w, 403, "forbidden", "attestation does not verify against an enrolled consent key")
+	default:
+		delete(s.nonces, nonce)
+		s.issuers[caller.ID] = req.Expires
+		reply(w, map[string]any{})
+	}
+}
+
+func (s *Server) Issuer(id string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.issuers[id]
 }
 
 func (s *Server) found(w http.ResponseWriter, r *http.Request) {

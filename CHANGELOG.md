@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci relay grant` asks the owner's Touch ID once and lets this node issue
+  `cci relay delegate` delegations for the next 24 hours; the relay refuses a
+  delegation from an owner with no live grant.
 - `cci relay delegate --pub <key> --drive <drive>` lets an owner sign a worker
   key a delegation of at most 24 hours, wrap it every group key, and register
   both with the relay, then prints the delegation. `cci relay join --delegation -`
