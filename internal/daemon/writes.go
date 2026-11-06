@@ -96,13 +96,24 @@ func (q *queue) Commit(ctx context.Context, w store.Write) (store.Written, error
 
 func (q *queue) run() {
 	defer close(q.stopped)
-	for first := range q.jobs {
+	var carried []job
+	for {
+		first, ok := job{}, true
+		if len(carried) > 0 {
+			first, carried = carried[0], nil
+		} else if first, ok = <-q.jobs; !ok {
+			return
+		}
 		batch, rows := []job{first}, first.w.Rows()
 	gather:
 		for len(batch) < batchLimit && rows < store.WritePage {
 			select {
 			case j, ok := <-q.jobs:
 				if !ok {
+					break gather
+				}
+				if rows+j.w.Rows() > store.WritePage {
+					carried = []job{j}
 					break gather
 				}
 				batch, rows = append(batch, j), rows+j.w.Rows()

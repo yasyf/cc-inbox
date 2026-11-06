@@ -69,6 +69,13 @@ type Applied struct {
 	Released  int `json:"released"`
 }
 
+func (a *Applied) add(b Applied) {
+	a.Inserted += b.Inserted
+	a.Duplicate += b.Duplicate
+	a.Buffered += b.Buffered
+	a.Released += b.Released
+}
+
 const exportColumns = columns + ", re_origin, re_origin_seq, resolves_origin, resolves_origin_seq, COALESCE(also_resolves_origin, '')"
 
 // Export returns origin's rows with origin_seq above since, oldest first,

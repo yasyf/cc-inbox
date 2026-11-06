@@ -125,10 +125,17 @@ func (s *Store) Dedicated(busy time.Duration) (*Store, error) {
 	return &Store{db: db, rw: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now, floors: s.floors, reads: s.reads}, nil
 }
 
-// Commit applies w in one transaction, through the store's Writer when it
-// has one.
+// Commit writes the bodies of w's relayed rows to this node's blobs, then
+// applies w in one transaction, through the store's Writer when it has one.
 func (s *Store) Commit(ctx context.Context, w Write) (Written, error) {
 	if err := w.check(); err != nil {
+		return Written{}, err
+	}
+	var err error
+	if w.Apply, err = s.blobbed(w.Apply); err != nil {
+		return Written{}, err
+	}
+	if w.Backfill, err = s.blobbed(w.Backfill); err != nil {
 		return Written{}, err
 	}
 	if s.writer != nil {
@@ -245,14 +252,15 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, w Write) (Written, error)
 		if err != nil {
 			return Written{}, err
 		}
-		done.Applied = applied
+		done.Applied.add(applied)
 	}
 	if len(w.Backfill) > 0 {
 		applied, span, err := s.backfillRows(ctx, tx, w.Backfill)
 		if err != nil {
 			return Written{}, err
 		}
-		done.Applied, w.Cursors = applied, append(slices.Clone(w.Cursors), span...)
+		done.Applied.add(applied)
+		w.Cursors = append(slices.Clone(w.Cursors), span...)
 	}
 	if w.Settle != nil {
 		absent := make(map[Pointer]bool, len(w.Settle.Absent))
