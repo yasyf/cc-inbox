@@ -81,6 +81,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the board build also read every body file while it held the lock, so
   posts and hooks failed with `SQLITE_BUSY` after each daemon start on a large
   store.
+- While the daemon runs, `cci import`, `cci compact`, `cci relay seed` and
+  relay sync send each page to the daemon's write queue instead of taking
+  SQLite's write lock themselves. A post or a hook queued behind a page gets
+  the next turn. Before, it raced the page for the lock in SQLite's busy
+  handler and could lose every retry until its budget ran out. With no
+  daemon, or a daemon older than this release, each page commits locally as
+  before.
 - The `--lane` help on `cci tail`, `cci grep` and the other readers says it
   keeps the records those lanes wrote, never the ones addressed to them, which
   `--to` reads. A Sprite lane read its parent's evidence with
