@@ -141,16 +141,13 @@ func (n *Node) Issue(ctx context.Context, pub []byte, drives, kinds []string, tt
 		return e2e.Delegation{}, fmt.Errorf("relay: a delegation lasts at most %s, not %s", instanceLife, ttl)
 	}
 	var d e2e.Delegation
-	err := withIssued(n.Home, n.Config.Mesh, func(issued map[string]e2e.Delegation) error {
+	err := withIssued(n.Home, n.Config.Mesh, func(issued map[string]issuedGrant) error {
 		var err error
 		if d, err = n.issue(ctx, pub, drives, kinds, ttl, issued); errors.Is(err, errRotatedMeanwhile) {
 			if err := n.RefreshKeys(ctx); err != nil {
 				return err
 			}
 			d, err = n.issue(ctx, pub, drives, kinds, ttl, issued)
-		}
-		if err == nil {
-			issued[d.Instance] = d
 		}
 		return err
 	})
@@ -164,7 +161,7 @@ func expiry(d e2e.Delegation) time.Time {
 	return at
 }
 
-func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, ttl time.Duration, issued map[string]e2e.Delegation) (e2e.Delegation, error) {
+func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, ttl time.Duration, issued map[string]issuedGrant) (e2e.Delegation, error) {
 	d, err := e2e.Delegate(n.Identity, n.Config.Mesh, pub, drives, kinds, time.Now().Add(ttl))
 	if err != nil {
 		return e2e.Delegation{}, err
@@ -172,7 +169,11 @@ func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, tt
 	if d.Instance == n.Identity.ID() {
 		return e2e.Delegation{}, errors.New("relay: an owner never delegates its own key")
 	}
-	if held, ok := issued[d.Instance]; ok && !expiry(d).After(expiry(held)) {
+	held, ok := issued[d.Instance]
+	switch {
+	case ok && held.Revoked:
+		return e2e.Delegation{}, fmt.Errorf("relay: %s was revoked; this owner issues it nothing before its last delegation expires at %s", d.Instance, held.Expires)
+	case ok && !expiry(d).After(expiry(held.Delegation)):
 		return e2e.Delegation{}, fmt.Errorf("relay: %s already holds a delegation expiring %s; a renewal must outlast it", d.Instance, held.Expires)
 	}
 	members, err := n.Members(ctx)
@@ -192,6 +193,7 @@ func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, tt
 		}
 		wraps = append(wraps, w)
 	}
+	issued[d.Instance] = issuedGrant{Delegation: d}
 	req := delegateRequest{Mesh: n.Config.Mesh, Delegation: d, Wraps: wraps}
 	if err := n.client().Call(ctx, http.MethodPost, "/v1/delegate", req, nil); err != nil {
 		var se *StatusError
@@ -206,12 +208,14 @@ func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, tt
 // Revoke ends an instance this owner delegated: the relay drops its queue and
 // wraps, and the group key rotates so the instance reads nothing written after.
 func (n *Node) Revoke(ctx context.Context, instance string) error {
-	err := withIssued(n.Home, n.Config.Mesh, func(issued map[string]e2e.Delegation) error {
-		if err := n.client().Call(ctx, http.MethodPost, "/v1/unpair", unpairRequest{Mesh: n.Config.Mesh, Node: instance}, nil); err != nil {
-			return err
+	err := withIssued(n.Home, n.Config.Mesh, func(issued map[string]issuedGrant) error {
+		held, ok := issued[instance]
+		if !ok {
+			return fmt.Errorf("relay: this owner holds no live delegation of %s", instance)
 		}
-		delete(issued, instance)
-		return nil
+		held.Revoked = true
+		issued[instance] = held
+		return n.client().Call(ctx, http.MethodPost, "/v1/unpair", unpairRequest{Mesh: n.Config.Mesh, Node: instance}, nil)
 	})
 	if err != nil {
 		return err
@@ -491,9 +495,9 @@ func (n *Node) wrapAll(ctx context.Context, k e2e.GroupKey) ([]e2e.Wrap, error) 
 		return nil, err
 	}
 	live := time.Now().Add(instanceSkew)
-	for _, d := range issued {
-		if expires, err := time.Parse(time.RFC3339Nano, d.Expires); err == nil && live.Before(expires) {
-			to = append(to, e2e.Member{Node: d.Instance, PublicKey: d.InstancePub, Tier: e2e.TierService})
+	for _, g := range issued {
+		if !g.Revoked && live.Before(expiry(g.Delegation)) {
+			to = append(to, e2e.Member{Node: g.Instance, PublicKey: g.InstancePub, Tier: e2e.TierService})
 		}
 	}
 	for _, m := range to {
