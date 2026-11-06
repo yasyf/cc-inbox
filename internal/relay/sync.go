@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"os"
@@ -195,26 +196,124 @@ func (n *Node) issue(ctx context.Context, pub []byte, drives, kinds []string, tt
 	if _, err := n.Keyring.Current(n.Identity, n.Config.Mesh, members); err != nil {
 		return e2e.Delegation{}, err
 	}
-	keys, _ := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
-	to := e2e.Member{Node: d.Instance, PublicKey: pub, Tier: e2e.TierService}
-	wraps := make([]e2e.Wrap, 0, len(keys))
-	for _, k := range keys {
-		w, err := e2e.WrapKey(k, n.Config.Mesh, n.Identity, to)
-		if err != nil {
-			return e2e.Delegation{}, err
-		}
-		wraps = append(wraps, w)
+	ring, err := n.currentRing(ctx, members, issued)
+	if err != nil {
+		return e2e.Delegation{}, err
+	}
+	wrap, err := e2e.WrapKey(ring, e2e.RingMesh(n.Config.Mesh), n.Identity, e2e.Member{Node: d.Instance, PublicKey: pub, Tier: e2e.TierService})
+	if err != nil {
+		return e2e.Delegation{}, err
 	}
 	issued[d.Instance] = issuedGrant{Delegation: d}
-	req := delegateRequest{Mesh: n.Config.Mesh, Delegation: d, Wraps: wraps}
+	req := delegateRequest{Mesh: n.Config.Mesh, Delegation: d, RingWrap: wrap}
 	if err := n.client().Call(ctx, http.MethodPost, "/v1/delegate", req, nil); err != nil {
 		var se *StatusError
-		if errors.As(err, &se) && se.Code == http.StatusConflict && strings.Contains(se.Message, "rotated") {
+		if errors.As(err, &se) && se.Code == http.StatusConflict {
 			return e2e.Delegation{}, fmt.Errorf("%w: %w", errRotatedMeanwhile, err)
 		}
 		return e2e.Delegation{}, err
 	}
 	return d, nil
+}
+
+func (n *Node) ring(ctx context.Context) (ringResponse, error) {
+	var rr ringResponse
+	err := n.client().Call(ctx, http.MethodGet, "/v1/ring?"+url.Values{"mesh": {n.Config.Mesh}}.Encode(), nil, &rr)
+	return rr, err
+}
+
+func (n *Node) currentRing(ctx context.Context, members map[string]e2e.Member, issued map[string]issuedGrant) (e2e.GroupKey, error) {
+	rr, err := n.ring(ctx)
+	if err != nil {
+		return e2e.GroupKey{}, err
+	}
+	if rr.Wrap == nil {
+		return n.writeRing(ctx, rr.Gen+1, members, issued)
+	}
+	ring, err := e2e.UnwrapKey(*rr.Wrap, e2e.RingMesh(n.Config.Mesh), n.Identity, members)
+	if err != nil {
+		return e2e.GroupKey{}, err
+	}
+	keys, err := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
+	if err != nil {
+		return e2e.GroupKey{}, err
+	}
+	for epoch, k := range keys {
+		if slices.ContainsFunc(rr.Epochs, func(s e2e.SealedEpoch) bool { return s.Epoch == epoch }) {
+			continue
+		}
+		s, err := e2e.SealEpoch(ring, n.Config.Mesh, k, n.Identity)
+		if err != nil {
+			return e2e.GroupKey{}, err
+		}
+		if err := n.client().Call(ctx, http.MethodPost, "/v1/ring/epoch", ringEpochRequest{Mesh: n.Config.Mesh, Sealed: s}, nil); err != nil {
+			return e2e.GroupKey{}, err
+		}
+	}
+	return ring, nil
+}
+
+func (n *Node) writeRing(ctx context.Context, gen uint64, members map[string]e2e.Member, issued map[string]issuedGrant) (e2e.GroupKey, error) {
+	ring, err := e2e.NewGroupKey(gen)
+	if err != nil {
+		return e2e.GroupKey{}, err
+	}
+	keys, err := n.Keyring.Keys(n.Config.Mesh, n.Identity, members)
+	if err != nil {
+		return e2e.GroupKey{}, err
+	}
+	req := ringRequest{Mesh: n.Config.Mesh, Gen: gen}
+	for _, k := range keys {
+		s, err := e2e.SealEpoch(ring, n.Config.Mesh, k, n.Identity)
+		if err != nil {
+			return e2e.GroupKey{}, err
+		}
+		req.Epochs = append(req.Epochs, s)
+	}
+	to := []ringMemberWrap{{Wrap: e2e.Wrap{To: n.Identity.ID()}}}
+	live := time.Now().Add(instanceSkew)
+	for _, g := range issued {
+		if !g.Revoked && live.Before(expiry(g.Delegation)) {
+			to = append(to, ringMemberWrap{Wrap: e2e.Wrap{To: g.Instance}, Expires: g.Expires})
+		}
+	}
+	for _, m := range to {
+		pub := n.Identity.PublicKey()
+		if m.Wrap.To != n.Identity.ID() {
+			pub = issued[m.Wrap.To].InstancePub
+		}
+		w, err := e2e.WrapKey(ring, e2e.RingMesh(n.Config.Mesh), n.Identity, e2e.Member{Node: m.Wrap.To, PublicKey: pub})
+		if err != nil {
+			return e2e.GroupKey{}, err
+		}
+		req.Wraps = append(req.Wraps, ringMemberWrap{Wrap: w, Expires: m.Expires})
+	}
+	if err := n.client().Call(ctx, http.MethodPut, "/v1/ring", req, nil); err != nil {
+		return e2e.GroupKey{}, fmt.Errorf("write ring %d: %w", gen, err)
+	}
+	return ring, nil
+}
+
+func (n *Node) rekeyRing(ctx context.Context) error {
+	if n.Config.Tier != e2e.TierOwner {
+		return nil
+	}
+	return withIssued(n.Home, n.Config.Mesh, func(issued map[string]issuedGrant) error {
+		live := time.Now().Add(instanceSkew)
+		if !slices.ContainsFunc(slices.Collect(maps.Values(issued)), func(g issuedGrant) bool { return !g.Revoked && live.Before(expiry(g.Delegation)) }) {
+			return nil
+		}
+		members, err := n.Members(ctx)
+		if err != nil {
+			return err
+		}
+		rr, err := n.ring(ctx)
+		if err != nil {
+			return err
+		}
+		_, err = n.writeRing(ctx, rr.Gen+1, members, issued)
+		return err
+	})
 }
 
 // Revoke ends an instance this owner delegated: the relay drops its queue and
@@ -409,6 +508,13 @@ func (n *Node) RefreshKeys(ctx context.Context) error {
 			added = true
 		}
 	}
+	if kr.Ring != nil && kr.Ring.Wrap != nil {
+		if _, err := e2e.UnwrapKey(*kr.Ring.Wrap, e2e.RingMesh(n.Config.Mesh), n.Identity, members); err != nil {
+			slog.Warn("relay ring wrap refused", "mesh", n.Config.Mesh, "ring", kr.Ring.Wrap.Epoch, "from", kr.Ring.Wrap.From, "err", err)
+		} else if n.Keyring.AddRing(*kr.Ring.Wrap, kr.Ring.Epochs) {
+			added = true
+		}
+	}
 	if !added {
 		return nil
 	}
@@ -448,18 +554,10 @@ func (n *Node) RotateAfter(ctx context.Context, base uint64) (uint64, error) {
 		return 0, err
 	}
 	n.Keyring.Add(wraps[0])
-	return k.Epoch, n.Keyring.Save(n.Home, n.Config.Mesh)
-}
-
-func (n *Node) shareWithIssued(ctx context.Context) error {
-	if n.Config.Tier != e2e.TierOwner {
-		return nil
+	if err := n.Keyring.Save(n.Home, n.Config.Mesh); err != nil {
+		return k.Epoch, err
 	}
-	issued, err := loadIssued(n.Home, n.Config.Mesh)
-	if err != nil || len(issued) == 0 {
-		return err
-	}
-	return n.Share(ctx)
+	return k.Epoch, n.rekeyRing(ctx)
 }
 
 func (n *Node) Share(ctx context.Context) error {
@@ -500,16 +598,6 @@ func (n *Node) wrapAll(ctx context.Context, k e2e.GroupKey) ([]e2e.Wrap, error) 
 		m, ok := local[rm.ID]
 		if ok && rm.ID != n.Identity.ID() && slices.Equal(m.PublicKey, rm.Pub) {
 			to = append(to, m)
-		}
-	}
-	issued, err := loadIssued(n.Home, n.Config.Mesh)
-	if err != nil {
-		return nil, err
-	}
-	live := time.Now().Add(instanceSkew)
-	for _, g := range issued {
-		if !g.Revoked && live.Before(expiry(g.Delegation)) {
-			to = append(to, e2e.Member{Node: g.Instance, PublicKey: g.InstancePub, Tier: e2e.TierService})
 		}
 	}
 	for _, m := range to {
@@ -1144,8 +1232,8 @@ func (n *Node) control(ctx context.Context, c e2e.Control, handle ControlHandler
 		if err := n.RefreshKeys(ctx); err != nil {
 			return false, err
 		}
-		if err := n.shareWithIssued(ctx); err != nil {
-			slog.Warn("relay share with issued instances after a rekey failed", "mesh", n.Config.Mesh, "err", err)
+		if err := n.rekeyRing(ctx); err != nil {
+			slog.Warn("relay ring rekey after a rotation failed", "mesh", n.Config.Mesh, "err", err)
 		}
 	case e2e.ControlJoined:
 		if err := n.Share(ctx); err != nil {

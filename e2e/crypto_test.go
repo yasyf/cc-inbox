@@ -204,3 +204,43 @@ func TestAnOwnerDelegatesAndAPairedNodeCannot(t *testing.T) {
 		})
 	}
 }
+
+func TestASealedEpochOpensOnlyUnderItsRingFromAPinnedOwner(t *testing.T) {
+	owner, service := e2etest.NewIdentity(t), e2etest.NewIdentity(t)
+	ring, _ := e2e.NewGroupKey(3)
+	other, _ := e2e.NewGroupKey(3)
+	k, _ := e2e.NewGroupKey(7)
+	pinned := members(member(owner, e2e.TierOwner), member(service, e2e.TierService))
+	s, err := e2e.SealEpoch(ring, "default", k, owner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := e2e.OpenEpoch(ring, "default", s, pinned); err != nil || got.Epoch != 7 || !bytes.Equal(got.Key, k.Key) {
+		t.Fatalf("opened %d/%x, %v; want 7/%x", got.Epoch, got.Key, err, k.Key)
+	}
+	if _, err := e2e.OpenEpoch(other, "default", s, pinned); err == nil {
+		t.Fatal("a sealed epoch opened under another ring key")
+	}
+	if _, err := e2e.OpenEpoch(ring, "elsewhere", s, pinned); err == nil {
+		t.Fatal("a sealed epoch opened for another mesh")
+	}
+	forged, err := e2e.SealEpoch(ring, "default", k, service)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e2e.OpenEpoch(ring, "default", forged, pinned); !errors.Is(err, e2e.ErrNotOwner) {
+		t.Fatalf("a service-sealed epoch: err = %v, want ErrNotOwner", err)
+	}
+	relabelled := s
+	relabelled.Epoch = 8
+	if _, err := e2e.OpenEpoch(ring, "default", relabelled, pinned); !errors.Is(err, e2e.ErrBadSignature) {
+		t.Fatalf("a relabelled sealed epoch: err = %v, want ErrBadSignature", err)
+	}
+	ringWrap, err := e2e.WrapKey(ring, e2e.RingMesh("default"), owner, member(service, e2e.TierService))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e2e.UnwrapKey(ringWrap, "default", service, pinned); err == nil {
+		t.Fatal("a ring wrap unwrapped as a group key wrap of the mesh")
+	}
+}
