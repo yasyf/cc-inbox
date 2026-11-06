@@ -51,6 +51,21 @@ func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Re
 	return open, s.numbered(ctx, open)
 }
 
+// OpenHoldsAmong returns, in seq order and numbered as OpenAmong numbers them,
+// the holds among seqs that sit in drive and that no lift or resolver has
+// closed, tracked or not.
+func (s *Store) OpenHoldsAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
+	openers, err := s.openersAmong(ctx, drive, seqs)
+	if err != nil {
+		return nil, err
+	}
+	open, err := s.unclosedAmong(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return o.Kind != kinds.Hold }))
+	if err != nil {
+		return nil, err
+	}
+	return open, s.numbered(ctx, open)
+}
+
 func (s *Store) openRecords(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
 	if m := s.reads.model.Load(); m != nil {
 		if open, ok := m.openRecordsAmong(ctx, s, drive, seqs); ok {
