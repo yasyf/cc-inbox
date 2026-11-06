@@ -894,6 +894,64 @@ func TestConcurrentPushesFromOneHomeSendEachRecordOnce(t *testing.T) {
 	}
 }
 
+func TestABacklogOverTheRelaysBodyLimitPushesInOrderedPagesUnderIt(t *testing.T) {
+	srv, a, _, _ := mesh(t)
+	const records = 230
+	for i := range records {
+		testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: fmt.Sprintf("record %d", i), Fields: store.Fields{Attrs: map[string]string{"inputs": strings.Repeat("x", 40<<10)}}})
+	}
+	res, err := a.node.Push(context.Background(), configs(t, a))
+	if err != nil || res.Pushed != records || len(res.Rejected) != 0 {
+		t.Fatalf("push = %d pushed, %d refused, %v; want %d pushed", res.Pushed, len(res.Rejected), err, records)
+	}
+	seqs := make([]int64, 0, records)
+	sent := 0
+	for _, body := range srv.Pushes {
+		if len(body) > 1<<20 {
+			t.Fatalf("a page is %d bytes, over the relay's 1 MiB body limit", len(body))
+		}
+		sent += len(body)
+		var page struct {
+			Envelopes []e2e.Envelope `json:"envelopes"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range page.Envelopes {
+			seqs = append(seqs, e.OriginSeq)
+		}
+	}
+	if sent <= 1<<20 {
+		t.Fatalf("the backlog sealed to %d bytes, want more than 1 MiB", sent)
+	}
+	if len(seqs) != records || !slices.IsSorted(seqs) || len(slices.Compact(slices.Clone(seqs))) != records {
+		t.Fatalf("%d pages carried %d records out of seq order or twice; want each of %d once, in order", len(srv.Pushes), len(seqs), records)
+	}
+	if again, err := a.node.Push(context.Background(), configs(t, a)); err != nil || again.Pushed != 0 {
+		t.Fatalf("second push = %+v, %v; want nothing left", again, err)
+	}
+}
+
+func TestARecordNoPushCanCarryIsRefusedAloneAndTheRecordsBehindItPush(t *testing.T) {
+	_, a, b, _ := mesh(t)
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: "before"})
+	big := testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: "too large", Fields: store.Fields{Attrs: map[string]string{"inputs": strings.Repeat("x", 1<<20)}}})
+	testutil.Post(t, a.st, store.Record{Kind: kinds.Note, Text: "after"})
+	res, err := a.node.Push(context.Background(), configs(t, a))
+	if err != nil || res.Pushed != 2 || len(res.Rejected) != 1 || res.Rejected[0].OriginSeq != big.Seq || !strings.HasPrefix(res.Rejected[0].Reason, "too_large: ") {
+		t.Fatalf("push = %+v, %v; want 2 pushed and #%d refused as too_large", res, err, big.Seq)
+	}
+	pull(t, b)
+	got := texts(t, b.st)
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"after", "before"}) {
+		t.Fatalf("peer holds %q, want the records around the refused one", got)
+	}
+	if again, err := a.node.Push(context.Background(), configs(t, a)); err != nil || again.Pushed != 0 || len(again.Rejected) != 0 {
+		t.Fatalf("second push = %+v, %v; want the refused record acknowledged past", again, err)
+	}
+}
+
 func TestDelegatedInstanceReopensWithoutTheServiceKeyInItsEnvironment(t *testing.T) {
 	srv := relaytest.NewServer(t)
 	a := newPeer(t, srv, node.TierOwner)
