@@ -64,6 +64,7 @@ SELECT 'd','reviewer','review',x,'REVIEW selected '||x,'post','selected-'||x FRO
 			invoke := func(binary string) ([]byte, []byte, int) {
 				t.Helper()
 				command := exec.CommandContext(ctx, binary, "grep", "REVIEW", "--drive", "d", "--kind", "review", "--budget", "4194304")
+				command.Env = append(os.Environ(), "TZ=America/Los_Angeles")
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				err := command.Run()

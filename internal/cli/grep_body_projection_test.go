@@ -114,6 +114,7 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 				args = append(args, "grep", test.pattern, "--drive", "d", "--since", "24h", "-n", "800", "--budget", "600000")
 				args = append(args, test.args...)
 				command := exec.CommandContext(t.Context(), binary, args...)
+				command.Env = append(os.Environ(), "TZ=America/Los_Angeles")
 				var stdout, stderr bytes.Buffer
 				command.Stdout, command.Stderr = &stdout, &stderr
 				if err := command.Run(); err != nil {
