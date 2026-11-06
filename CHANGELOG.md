@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Sprite, the label hint, `{at}` and every reader's stamp printed UTC, such as
   `12:40 AM` for a post made at 4:40 PM Pacific. A Pacific clock or date given
   to `--since` is read as Pacific there too.
+- `client.Open` and every other open-record read now name each record the way
+  every node does: bare when an owner node wrote it, else `#<n>@<node>`. Before,
+  they carried no cross-node name, so `Name()` on a node other than the Mac gave
+  that node's own seq. lr's landing pass on a landing host named root's holds on
+  #48034 and #50750 as `#197289` and `#330048`, which on the Mac are a register
+  note and a HEAD line, so root lifted the wrong records.
 - A lane no longer reads a seed's backfill as new mail. A record that `cci
   relay seed` applies after the lane bound, stamped before the lane started,
   stays out of the lane's hook delivery, its `cci tail --mail` wait, its

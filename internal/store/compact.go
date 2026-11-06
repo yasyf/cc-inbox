@@ -36,13 +36,22 @@ func (s *Store) UntrackedHolds(ctx context.Context, drive string) ([]Record, err
 	return s.open(ctx, drive, func(r Record) bool { return r.Kind == kinds.Hold && !r.Tracked() })
 }
 
-// OpenAmong returns, in seq order, the tracked openers among seqs that sit in
-// drive and that no closer or resolver has closed. It rereads those openers
-// and the drive's closers and resolvers, so a seq that a reparse took out of
-// the opener kinds or out of tracking, or that compaction folded, is not
-// returned. seqs travels as one JSON array parameter, so its length is not
-// bounded by SQLite's limit on bound variables.
+// OpenAmong returns, in seq order and named the way every node names them, the
+// tracked openers among seqs that sit in drive and that no closer or resolver
+// has closed. It rereads those openers and the drive's closers and resolvers,
+// so a seq that a reparse took out of the opener kinds or out of tracking, or
+// that compaction folded, is not returned. seqs travels as one JSON array
+// parameter, so its length is not bounded by SQLite's limit on bound
+// variables.
 func (s *Store) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
+	open, err := s.openRecords(ctx, drive, seqs)
+	if err != nil {
+		return nil, err
+	}
+	return open, s.numbered(ctx, open)
+}
+
+func (s *Store) openRecords(ctx context.Context, drive string, seqs []int64) ([]Record, error) {
 	if m := s.reads.model.Load(); m != nil {
 		if open, ok := m.openRecordsAmong(ctx, s, drive, seqs); ok {
 			return open, nil
@@ -92,7 +101,7 @@ func (s *Store) OpenSeqsAmong(ctx context.Context, drive string, seqs []int64) (
 			return open, nil
 		}
 	}
-	open, err := s.OpenAmong(ctx, drive, seqs)
+	open, err := s.openRecords(ctx, drive, seqs)
 	if err != nil {
 		return nil, err
 	}
