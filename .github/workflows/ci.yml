@@ -455,8 +455,10 @@ jobs:
           go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
           go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
 
+      - name: Test (race, store)
+        run: go test -json -race -timeout 20m -skip "$TAIL_COST_TESTS|$RACE_STEP_TESTS|$WORK_COUNT_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./internal/store
       - name: Test (race)
-        run: go test -json -race -timeout 20m -skip "$TAIL_COST_TESTS|$RACE_STEP_TESTS|$WORK_COUNT_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./...
+        run: go list ./... | grep -vx github.com/yasyf/cc-inbox/internal/store | xargs go test -json -race -timeout 20m -skip "$TAIL_COST_TESTS|$RACE_STEP_TESTS|$WORK_COUNT_TESTS|^TestIncident|^TestUrgentRepeatIndex"
       - name: Test (work counts)
         run: go test -count=1 -timeout 20m -run "$WORK_COUNT_TESTS" -v ./internal/cli ./internal/store
       - uses: actions/checkout@v7
