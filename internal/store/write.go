@@ -11,6 +11,8 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
+const writePage = 64
+
 // Write is the mutations one caller commits together, applied in field
 // order: touches, retirements, the lane binding, records, then cursor moves.
 // A Write whose turn comes after StartBy applies nothing and fails with

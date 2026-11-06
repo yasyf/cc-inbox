@@ -68,6 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `cci relay sync` resumes from them. A lane bound while the seed runs still
   reads none of its backfill as mail, and a live reply that waited in the store
   for a parent the seed brings still reaches the lane.
+- `cci import`, `cci compact`, and the relay sync step that stores replies
+  whose parent never arrived hold the store's write lock one page at a time,
+  not for as long as their input is large. Each stores, folds or settles 64
+  records per transaction, so a post or a hook with a 2 s budget waits for one
+  page at most. A run that stops partway keeps the pages it committed, and
+  running it again does the rest. A synced record's body file is written
+  before its transaction starts, not while it holds the lock.
 - The `--lane` help on `cci tail`, `cci grep` and the other readers says it
   keeps the records those lanes wrote, never the ones addressed to them, which
   `--to` reads. A Sprite lane read its parent's evidence with

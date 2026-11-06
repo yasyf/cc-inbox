@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"slices"
 	"time"
 	"unicode/utf8"
 
@@ -200,12 +201,17 @@ func pointer(p Pointer) *Pointer {
 	return &p
 }
 
-// Apply ingests rows from other nodes in one transaction. A row whose
-// (origin, origin_seq) is already stored, or whose origin is this node, is a
-// duplicate. A row whose re or resolves target has not arrived waits in
-// pending until it does. The caller has already verified each row's
-// provenance; Apply stores what it is given, keeping its time and source.
+// Apply ingests rows from other nodes in one transaction, after writing their
+// bodies to this node's blobs. A row whose (origin, origin_seq) is already
+// stored, or whose origin is this node, is a duplicate. A row whose re or
+// resolves target has not arrived waits in pending until it does. The caller
+// has already verified each row's provenance; Apply stores what it is given,
+// keeping its time and source.
 func (s *Store) Apply(ctx context.Context, rows []Row, receipt *Receipt) (Applied, error) {
+	rows, err := s.blobbed(rows)
+	if err != nil {
+		return Applied{}, err
+	}
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
@@ -234,27 +240,40 @@ ON CONFLICT (channel, origin) DO UPDATE SET change_id = excluded.change_id, revi
 // will send. A pointer to an absent record that this store neither holds nor
 // holds in pending is stored unresolved: the row keeps the pointer's origin
 // and origin_seq, and its re or resolves stays 0. A row waiting on an absent
-// record still in pending is stored once that record is.
+// record still in pending is stored once that record is. It commits a page of
+// absent records at a time, and a Settle that stops partway keeps the pages it
+// committed.
 func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return Applied{}, fmt.Errorf("begin settle: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	gone := make(map[Pointer]bool, len(absent))
 	for _, p := range absent {
 		gone[p] = true
 	}
 	var a Applied
-	for _, p := range absent {
-		if err := s.release(ctx, tx, p, &a, gone); err != nil {
-			return Applied{}, err
+	for page := range slices.Chunk(absent, writePage) {
+		if err := s.settle(ctx, page, gone, &a); err != nil {
+			return a, err
+		}
+	}
+	return a, nil
+}
+
+func (s *Store) settle(ctx context.Context, page []Pointer, gone map[Pointer]bool, a *Applied) error {
+	tx, err := s.rw.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin settle: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	settled := *a
+	for _, p := range page {
+		if err := s.release(ctx, tx, p, &settled, gone); err != nil {
+			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return Applied{}, fmt.Errorf("commit settle: %w", err)
+		return fmt.Errorf("commit settle: %w", err)
 	}
-	return a, nil
+	*a = settled
+	return nil
 }
 
 // Backfill ingests rows as Apply does and makes moves, in one transaction. The
@@ -263,6 +282,10 @@ func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
 // them, so it reaches the lane as a row Apply stores does. A Backfill that
 // starts where the last one ended extends that one's span.
 func (s *Store) Backfill(ctx context.Context, rows []Row, moves []CursorMove) (Applied, error) {
+	rows, err := s.blobbed(rows)
+	if err != nil {
+		return Applied{}, err
+	}
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
@@ -310,6 +333,24 @@ func (s *Store) Backfill(ctx context.Context, rows []Row, moves []CursorMove) (A
 		return Applied{}, fmt.Errorf("commit apply: %w", err)
 	}
 	return a, nil
+}
+
+func (s *Store) blobbed(rows []Row) ([]Row, error) {
+	if !slices.ContainsFunc(rows, func(row Row) bool { return row.PathBody != "" }) {
+		return rows, nil
+	}
+	out := slices.Clone(rows)
+	for i, row := range out {
+		if row.PathBody == "" {
+			continue
+		}
+		path, err := s.Blob(row.PathBody)
+		if err != nil {
+			return nil, fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
+		}
+		out[i].Refs.Path, out[i].PathBody = path, ""
+	}
+	return out, nil
 }
 
 func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, released bool, absent map[Pointer]bool, arrivals *[]Pointer) error {

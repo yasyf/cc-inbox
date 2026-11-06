@@ -472,23 +472,32 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 		day := r.At.In(pacific.Zone).Format(time.DateOnly)
 		days[day] = append(days[day], r)
 	}
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return CompactResult{}, fmt.Errorf("begin compact: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	var res CompactResult
 	for _, day := range slices.Sorted(maps.Keys(days)) {
-		if err := s.fold(ctx, tx, drive, day, days[day]); err != nil {
-			return CompactResult{}, err
+		for page := range slices.Chunk(days[day], writePage) {
+			if err := s.foldPage(ctx, drive, day, page); err != nil {
+				return res, err
+			}
+			res.Folded += len(page)
 		}
-		res.Folded += len(days[day])
 		res.Digests++
 	}
-	if err := tx.Commit(); err != nil {
-		return CompactResult{}, fmt.Errorf("commit compact: %w", err)
-	}
 	return res, nil
+}
+
+func (s *Store) foldPage(ctx context.Context, drive, day string, records []Record) error {
+	tx, err := s.rw.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin compact: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := s.fold(ctx, tx, drive, day, records); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit compact: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) foreignResolvers(ctx context.Context, drive string) (map[int64]bool, error) {

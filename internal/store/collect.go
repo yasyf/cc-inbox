@@ -865,7 +865,8 @@ func (s *Store) queuedWrites() ([]byte, error) {
 }
 
 func (s *Store) blobsNamed(ctx context.Context) (map[string]bool, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT refs FROM records WHERE instr(refs, ?) > 0", string(filepath.Separator)+blobDir+string(filepath.Separator))
+	marker := string(filepath.Separator) + blobDir + string(filepath.Separator)
+	rows, err := s.db.QueryContext(ctx, "SELECT refs FROM records WHERE instr(refs, ?) > 0 UNION ALL SELECT json_extract(row, '$.refs') FROM pending WHERE instr(row, ?) > 0", marker, marker)
 	if err != nil {
 		return nil, fmt.Errorf("read blob names: %w", err)
 	}
