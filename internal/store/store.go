@@ -936,7 +936,7 @@ type Ingestion struct {
 // committed, and running it again stores only the rest.
 func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
 	inserted := 0
-	for page := range slices.Chunk(items, writePage) {
+	for page := range slices.Chunk(items, WritePage) {
 		n, err := s.ingest(ctx, page)
 		if err != nil {
 			return inserted, err
@@ -952,6 +952,17 @@ func (s *Store) ingest(ctx context.Context, items []Ingestion) (int, error) {
 		return 0, fmt.Errorf("begin ingest: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	inserted, err := s.ingestPage(ctx, tx, items)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit ingest: %w", err)
+	}
+	return inserted, nil
+}
+
+func (s *Store) ingestPage(ctx context.Context, tx *sql.Tx, items []Ingestion) (int, error) {
 	inserted := 0
 	for _, it := range items {
 		unseen, err := consume(ctx, tx, it.LineHash)
@@ -973,16 +984,16 @@ func (s *Store) ingest(ctx context.Context, items []Ingestion) (int, error) {
 		}
 		inserted += int(n)
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit ingest: %w", err)
-	}
 	return inserted, nil
 }
 
-type reparsing struct {
-	updated, inserted int
-	parentAt          time.Time
-	parentText        string
+// Reparsing is how far a Reparse has come: what it rewrote and stored, and
+// the record the next split line takes its time from.
+type Reparsing struct {
+	Updated    int       `json:"updated"`
+	Inserted   int       `json:"inserted"`
+	ParentAt   time.Time `json:"parent_at,omitzero"`
+	ParentText string    `json:"parent_text,omitempty"`
 }
 
 // Reparse rewrites each item's record from its line, or stores it when the
@@ -990,24 +1001,36 @@ type reparsing struct {
 // line still takes its time from a record the page rewrote, so a parent and its
 // split lines commit together.
 func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (updated, inserted int, err error) {
-	var done reparsing
+	var done Reparsing
 	for len(items) > 0 {
 		n, err := s.reparse(ctx, items, fresh, &done)
 		if err != nil {
-			return done.updated, done.inserted, err
+			return done.Updated, done.Inserted, err
 		}
 		items = items[n:]
 	}
-	return done.updated, done.inserted, nil
+	return done.Updated, done.Inserted, nil
 }
 
-func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done *reparsing) (int, error) {
+func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done *Reparsing) (int, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin reparse: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	progress := *done
+	n, err := s.reparsePage(ctx, tx, items, fresh, &progress)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit reparse: %w", err)
+	}
+	*done = progress
+	return n, nil
+}
+
+func (s *Store) reparsePage(ctx context.Context, tx *sql.Tx, items []Ingestion, fresh bool, progress *Reparsing) (int, error) {
 	n := 0
 	for _, it := range items {
 		var (
@@ -1019,7 +1042,7 @@ func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done
 		if !found && !errors.Is(err, sql.ErrNoRows) {
 			return 0, fmt.Errorf("reparse record: %w", err)
 		}
-		if n >= writePage && (fresh || found || progress.parentText == "") {
+		if n >= WritePage && (fresh || found || progress.ParentText == "") {
 			break
 		}
 		n++
@@ -1032,16 +1055,16 @@ func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done
 			if _, err := tx.ExecContext(ctx, reparseSQL, reparseArgs(r, it.LineHash)...); err != nil {
 				return 0, fmt.Errorf("reparse record: %w", err)
 			}
-			progress.parentAt, progress.parentText = time.UnixMilli(at).UTC(), old
-			progress.updated++
+			progress.ParentAt, progress.ParentText = time.UnixMilli(at).UTC(), old
+			progress.Updated++
 			continue
 		}
 		switch {
 		case unseen && fresh:
-		case unseen && progress.parentText != "" && strings.Contains(progress.parentText, strings.Join(strings.Fields(it.Line), " ")):
-			r.At = progress.parentAt
+		case unseen && progress.ParentText != "" && strings.Contains(progress.ParentText, strings.Join(strings.Fields(it.Line), " ")):
+			r.At = progress.ParentAt
 		default:
-			progress.parentText = ""
+			progress.ParentText = ""
 			continue
 		}
 		r.ExpiresAt = expiry(r, 0)
@@ -1053,12 +1076,8 @@ func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done
 		if err != nil {
 			return 0, fmt.Errorf("reparse record: %w", err)
 		}
-		progress.inserted += int(inserted)
+		progress.Inserted += int(inserted)
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit reparse: %w", err)
-	}
-	*done = progress
 	return n, nil
 }
 

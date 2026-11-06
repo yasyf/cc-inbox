@@ -297,6 +297,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The daemon's write queue takes the paged writes of `cci import`, `cci
+  compact` and relay sync: a page of imported lines, a reparse page, a
+  compaction fold, a page of relayed rows, a backfill page and a settle page,
+  each committed on its one writer like a post. Its batch stops gathering once
+  it holds 64 records, so one import page never shares a transaction with
+  another. No cci sends these yet. The release that switches the client
+  ships after this daemon runs on every Mac and Sprite.
 - `cci tail`, `cci grep` and `cci show` print the compact line the hook and the
   MCP tools print, `<seq> <kind> <lane>[><to>] [^<re>] [x<closed>] … <text>`,
   under an `@<clock>` line each time the minute changes. `--json` is unchanged,

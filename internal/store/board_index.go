@@ -452,7 +452,7 @@ func boardErroredRows(ctx context.Context, tx *sql.Tx, scope *boardScope, affect
 
 func (index *BoardIndex) clear(ctx context.Context, table, column, scoped string, args ...any) error {
 	for {
-		deleted, err := index.store.rw.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+scoped+" AND "+column+"<=(SELECT "+column+" FROM "+table+" WHERE "+scoped+" ORDER BY "+column+" LIMIT 1 OFFSET "+fmt.Sprint(writePage-1)+")", args...)
+		deleted, err := index.store.rw.ExecContext(ctx, "DELETE FROM "+table+" WHERE "+scoped+" AND "+column+"<=(SELECT "+column+" FROM "+table+" WHERE "+scoped+" ORDER BY "+column+" LIMIT 1 OFFSET "+fmt.Sprint(WritePage-1)+")", args...)
 		if err != nil {
 			return err
 		}
@@ -474,7 +474,7 @@ func (index *BoardIndex) page(ctx context.Context, after int64, apply func(*sql.
 		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	rows, err := tx.QueryContext(ctx, "SELECT seq FROM records WHERE seq>? ORDER BY seq LIMIT ?", after, writePage)
+	rows, err := tx.QueryContext(ctx, "SELECT seq FROM records WHERE seq>? ORDER BY seq LIMIT ?", after, WritePage)
 	if err != nil {
 		return 0, err
 	}

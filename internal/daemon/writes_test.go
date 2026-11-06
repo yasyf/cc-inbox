@@ -208,3 +208,32 @@ func holdStore(t *testing.T, home string) func() {
 	t.Cleanup(release)
 	return release
 }
+
+func TestTheDaemonCommitsPagedWritesOnItsQueue(t *testing.T) {
+	home := t.TempDir()
+	st, err := store.Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	d, _, _ := serve(t, home)
+	w := daemon.Writes(d, home, st.Self())
+	awaitRouted(t, w)
+	line := store.Ingestion{Record: store.Record{Drive: "d", Lane: "importer", Kind: kinds.Note, At: time.Now(), Text: "an imported line", Source: "import:/inbox.md"}, LineHash: "imported", Line: "an imported line"}
+	ingested, err := commit(w, store.Write{Ingest: []store.Ingestion{line}}, 10*time.Second)
+	if err != nil || ingested.Ingested != 1 {
+		t.Fatalf("an import page through the daemon = %+v, %v; want its line stored", ingested, err)
+	}
+	reply := store.Row{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: time.Now(), Text: "a reply to a record no node holds", Source: "post", Re: &store.Pointer{Origin: "fedcba9876543210", Seq: 1}}
+	applied, err := commit(w, store.Write{Apply: []store.Row{reply}}, 10*time.Second)
+	if err != nil || applied.Applied.Buffered != 1 {
+		t.Fatalf("an apply page through the daemon = %+v, %v; want the reply held", applied, err)
+	}
+	settled, err := commit(w, store.Write{Settle: &store.SettlePage{Waiting: []store.Pointer{*reply.Re}, Absent: []store.Pointer{*reply.Re}}}, 10*time.Second)
+	if err != nil || settled.Applied.Released != 1 || len(settled.Waiting) != 0 {
+		t.Fatalf("a settle page through the daemon = %+v, %v; want the reply stored and nothing left waiting", settled, err)
+	}
+	if got := texts(t, st, "d"); !slices.Equal(got, []string{"a reply to a record no node holds", "an imported line"}) {
+		t.Fatalf("records = %q, want the imported line and the settled reply", got)
+	}
+}

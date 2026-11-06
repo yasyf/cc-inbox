@@ -13,7 +13,7 @@ func TestABoardColdRebuildHoldsTheWriteLockAPageAtATime(t *testing.T) {
 		if err := st.InstallBoardProjection(t.Context()); err != nil {
 			t.Fatal(err)
 		}
-		population := pages * writePage
+		population := pages * WritePage
 		if _, err := st.db.ExecContext(t.Context(), `WITH RECURSIVE history(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM history WHERE n<?)
 INSERT INTO records(seq,drive,lane,kind,at,text,source,hash,recipients,origin,origin_seq,id)
 SELECT n,'d','root','decide',?,'decide #'||n,'post','board-page-'||n,'[]',?,n,'board-page-'||n FROM history`, population, st.Now().UnixMilli(), st.Self()); err != nil {

@@ -5,33 +5,94 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"modernc.org/sqlite"
 	sqlite3 "modernc.org/sqlite/lib"
 )
 
-const writePage = 64
+// WritePage is how many records a paged write stores, folds or settles in
+// one transaction, and how many a writer's batch gathers before it commits.
+const WritePage = 64
 
 // Write is the mutations one caller commits together, applied in field
-// order: touches, retirements, the lane binding, records, then cursor moves.
-// A Write whose turn comes after StartBy applies nothing and fails with
-// ErrExpired.
+// order: touches, retirements, the lane binding, records, a page of rows from
+// other nodes, a backfill page, a settle page, a page of imported lines, a
+// reparse page, a compaction fold, then cursor moves. A Write whose turn
+// comes after StartBy applies nothing and fails with ErrExpired.
 type Write struct {
-	Touch   []PeerKey     `json:"touch,omitempty"`
-	Retire  []PeerKey     `json:"retire,omitempty"`
-	Bind    *LaneBinding  `json:"bind,omitempty"`
-	Records []Record      `json:"records,omitempty"`
-	TTL     time.Duration `json:"ttl,omitempty"`
-	At      time.Time     `json:"at,omitzero"`
-	Cursors []CursorMove  `json:"cursors,omitempty"`
-	StartBy time.Time     `json:"start_by,omitzero"`
+	Touch    []PeerKey     `json:"touch,omitempty"`
+	Retire   []PeerKey     `json:"retire,omitempty"`
+	Bind     *LaneBinding  `json:"bind,omitempty"`
+	Records  []Record      `json:"records,omitempty"`
+	TTL      time.Duration `json:"ttl,omitempty"`
+	At       time.Time     `json:"at,omitzero"`
+	Apply    []Row         `json:"apply,omitempty"`
+	Receipt  *Receipt      `json:"receipt,omitempty"`
+	Backfill []Row         `json:"backfill,omitempty"`
+	Settle   *SettlePage   `json:"settle,omitempty"`
+	Ingest   []Ingestion   `json:"ingest,omitempty"`
+	Reparse  *ReparsePage  `json:"reparse,omitempty"`
+	Fold     *FoldPage     `json:"fold,omitempty"`
+	Cursors  []CursorMove  `json:"cursors,omitempty"`
+	StartBy  time.Time     `json:"start_by,omitzero"`
+}
+
+// SettlePage releases a page of the rows pending holds for Waiting, storing a
+// pointer to a record in Absent unresolved.
+type SettlePage struct {
+	Waiting []Pointer `json:"waiting"`
+	Absent  []Pointer `json:"absent"`
+}
+
+// ReparsePage rewrites a page of Items, carrying From across pages. More says
+// Items stops short of the input: a page that would end there while a split
+// line may still follow applies nothing and consumes no item, so the caller
+// sends a longer page.
+type ReparsePage struct {
+	Items []Ingestion `json:"items"`
+	Fresh bool        `json:"fresh,omitempty"`
+	More  bool        `json:"more,omitempty"`
+	From  Reparsing   `json:"from"`
+}
+
+// FoldPage folds the Records of Day still stored on Drive into that day's
+// digest.
+type FoldPage struct {
+	Drive   string   `json:"drive"`
+	Day     string   `json:"day"`
+	Records []Record `json:"records"`
 }
 
 // Written is what one Write stored: each record it posted, or the stored
-// record that record duplicated.
+// record that record duplicated, and what its pages applied: rows Applied,
+// pointers still Waiting after a settle page, lines Ingested, the Reparsed
+// progress and the Items it consumed, and the records Folded.
 type Written struct {
-	Posted []Posted `json:"posted,omitempty"`
+	Posted   []Posted   `json:"posted,omitempty"`
+	Applied  Applied    `json:"applied,omitzero"`
+	Waiting  []Pointer  `json:"waiting,omitempty"`
+	Ingested int        `json:"ingested,omitempty"`
+	Reparsed *Reparsing `json:"reparsed,omitempty"`
+	Items    int        `json:"items,omitempty"`
+	Folded   int        `json:"folded,omitempty"`
+}
+
+// Rows is how many records w stores, folds or settles at most, the weight a
+// writer's batch counts toward WritePage.
+func (w Write) Rows() int {
+	n := len(w.Records) + len(w.Apply) + len(w.Backfill) + len(w.Ingest)
+	if w.Settle != nil {
+		n += WritePage
+	}
+	if w.Reparse != nil {
+		n += len(w.Reparse.Items)
+	}
+	if w.Fold != nil {
+		n += len(w.Fold.Records)
+	}
+	return n
 }
 
 // Writer commits a Write in the process that owns this store's writes.
@@ -68,10 +129,17 @@ func (s *Store) Dedicated(busy time.Duration) (*Store, error) {
 	return &Store{db: db, rw: db, home: s.home, node: s.node, owner: s.owner, Now: s.Now, floors: s.floors, reads: s.reads}, nil
 }
 
-// Commit applies w in one transaction, through the store's Writer when it
-// has one.
+// Commit writes the bodies of w's relayed rows to this node's blobs, then
+// applies w in one transaction, through the store's Writer when it has one.
 func (s *Store) Commit(ctx context.Context, w Write) (Written, error) {
 	if err := w.check(); err != nil {
+		return Written{}, err
+	}
+	var err error
+	if w.Apply, err = s.blobbed(w.Apply); err != nil {
+		return Written{}, err
+	}
+	if w.Backfill, err = s.blobbed(w.Backfill); err != nil {
 		return Written{}, err
 	}
 	if s.writer != nil {
@@ -182,6 +250,66 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, w Write) (Written, error)
 			return Written{}, err
 		}
 		done.Posted = append(done.Posted, Posted{Record: posted, Duplicate: duplicate})
+	}
+	if len(w.Apply) > 0 || w.Receipt != nil {
+		applied, err := s.applyRows(ctx, tx, w.Apply, w.Receipt)
+		if err != nil {
+			return Written{}, err
+		}
+		done.Applied.add(applied)
+	}
+	if len(w.Backfill) > 0 {
+		applied, span, err := s.backfillRows(ctx, tx, w.Backfill)
+		if err != nil {
+			return Written{}, err
+		}
+		done.Applied.add(applied)
+		w.Cursors = append(slices.Clone(w.Cursors), span...)
+	}
+	if w.Settle != nil {
+		absent := make(map[Pointer]bool, len(w.Settle.Absent))
+		for _, p := range w.Settle.Absent {
+			absent[p] = true
+		}
+		waiting, err := s.settlePage(ctx, tx, slices.Clone(w.Settle.Waiting), absent, &done.Applied)
+		if err != nil {
+			return Written{}, err
+		}
+		done.Waiting = waiting
+	}
+	if len(w.Ingest) > 0 {
+		ingested, err := s.ingestPage(ctx, tx, w.Ingest)
+		if err != nil {
+			return Written{}, err
+		}
+		done.Ingested = ingested
+	}
+	if p := w.Reparse; p != nil {
+		if _, err := tx.ExecContext(ctx, "SAVEPOINT reparse"); err != nil {
+			return Written{}, fmt.Errorf("begin reparse page: %w", err)
+		}
+		reparsed := p.From
+		items, err := s.reparsePage(ctx, tx, p.Items, p.Fresh, &reparsed)
+		if err != nil {
+			return Written{}, err
+		}
+		if p.More && items == len(p.Items) && !p.Fresh && reparsed.ParentText != "" {
+			if _, err := tx.ExecContext(ctx, "ROLLBACK TO reparse"); err != nil {
+				return Written{}, fmt.Errorf("roll back reparse page: %w", err)
+			}
+			items, reparsed = 0, p.From
+		}
+		if _, err := tx.ExecContext(ctx, "RELEASE reparse"); err != nil {
+			return Written{}, fmt.Errorf("end reparse page: %w", err)
+		}
+		done.Reparsed, done.Items = &reparsed, items
+	}
+	if p := w.Fold; p != nil {
+		folded, err := s.fold(ctx, tx, p.Drive, p.Day, p.Records)
+		if err != nil {
+			return Written{}, err
+		}
+		done.Folded = folded
 	}
 	for _, m := range w.Cursors {
 		set := "MAX(seq, excluded.seq)"

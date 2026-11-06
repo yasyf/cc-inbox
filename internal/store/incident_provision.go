@@ -120,7 +120,7 @@ func (s *Store) admitIncidentPage(ctx context.Context, drive string, after int64
 	}
 	defer func() { _ = tx.Rollback() }()
 	var last sql.NullInt64
-	if err := tx.QueryRowContext(ctx, "SELECT max(seq) FROM (SELECT seq FROM records WHERE drive=? AND kind='incident' AND seq>? ORDER BY seq LIMIT ?)", drive, after, writePage).Scan(&last); err != nil {
+	if err := tx.QueryRowContext(ctx, "SELECT max(seq) FROM (SELECT seq FROM records WHERE drive=? AND kind='incident' AND seq>? ORDER BY seq LIMIT ?)", drive, after, WritePage).Scan(&last); err != nil {
 		return 0, err
 	}
 	if !last.Valid {

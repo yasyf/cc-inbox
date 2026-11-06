@@ -133,7 +133,7 @@ func TestSettleStoresAPageOfHeldRowsPerTransaction(t *testing.T) {
 			largest := map[int]int{}
 			for _, pages := range pagesAtN {
 				st, w := pagedStore(t)
-				n := pages * writePage
+				n := pages * WritePage
 				rows := foreignNotes(n, time.Now().Add(-time.Hour))
 				absent := shape(rows)
 				if a, err := st.Apply(ctx, rows, nil); err != nil || a.Buffered != n {
@@ -157,7 +157,7 @@ func TestApplyWritesEveryBodyBeforeItTakesTheWriteLock(t *testing.T) {
 	ctx := t.Context()
 	for _, pages := range pagesAtN {
 		st, _ := pagedStore(t)
-		n := pages * writePage
+		n := pages * WritePage
 		rows := foreignNotes(n, time.Now().Add(-time.Hour))
 		for i := range rows {
 			rows[i].PathBody = fmt.Sprintf("body %d", i)
@@ -216,7 +216,7 @@ func TestIngestAllStoresAPageOfLinesPerTransaction(t *testing.T) {
 	largest := map[int]int{}
 	for _, pages := range pagesAtN {
 		st, w := pagedStore(t)
-		n := pages * writePage
+		n := pages * WritePage
 		inserted, err := st.IngestAll(ctx, lineItems(n, time.Now().Add(-time.Hour)))
 		if err != nil || inserted != n {
 			t.Fatalf("ingest of %d lines = %d, %v; want every line", n, inserted, err)
@@ -233,7 +233,7 @@ func TestReparseStoresAPageOfLinesPerTransaction(t *testing.T) {
 	largest := map[int]int{}
 	for _, pages := range pagesAtN {
 		st, w := pagedStore(t)
-		n := pages * writePage
+		n := pages * WritePage
 		updated, inserted, err := st.Reparse(ctx, lineItems(n, time.Now().Add(-time.Hour)), true)
 		if err != nil || updated != 0 || inserted != n {
 			t.Fatalf("fresh reparse of %d lines = %d updated, %d inserted, %v; want every line inserted", n, updated, inserted, err)
@@ -249,13 +249,13 @@ func TestReparseCarriesASplitLinesParentAcrossPages(t *testing.T) {
 	ctx := t.Context()
 	st, _ := pagedStore(t)
 	parentAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	items := lineItems(writePage+1, time.Now().Add(-time.Hour))
-	parent := &items[writePage-1]
+	items := lineItems(WritePage+1, time.Now().Add(-time.Hour))
+	parent := &items[WritePage-1]
 	parent.Record.At, parent.Record.Text = parentAt, "the parent line and a split line"
 	if inserted, err := st.IngestAll(ctx, []Ingestion{*parent}); err != nil || inserted != 1 {
 		t.Fatalf("ingest of the parent = %d, %v", inserted, err)
 	}
-	split := &items[writePage]
+	split := &items[WritePage]
 	split.Line, split.Record.Text = "a split line", "a split line"
 	updated, inserted, err := st.Reparse(ctx, items, false)
 	if err != nil || updated != 1 || inserted != 1 {
@@ -276,7 +276,7 @@ func TestCompactFoldsAPageOfRecordsPerTransaction(t *testing.T) {
 	day := time.Date(2026, 1, 2, 12, 0, 0, 0, pacific.Zone)
 	for _, pages := range pagesAtN {
 		st, w := pagedStore(t)
-		n := pages * writePage
+		n := pages * WritePage
 		if inserted, err := st.IngestAll(ctx, lineItems(n, day)); err != nil || inserted != n {
 			t.Fatalf("ingest of %d lines = %d, %v", n, inserted, err)
 		}
@@ -296,14 +296,14 @@ func TestAReparseRetriedAfterAFailedPageStillStampsASplitLine(t *testing.T) {
 	ctx := t.Context()
 	st, _ := pagedStore(t)
 	parentAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	items := lineItems(writePage+1, time.Now().Add(-time.Hour))
-	parent := &items[writePage-1]
+	items := lineItems(WritePage+1, time.Now().Add(-time.Hour))
+	parent := &items[WritePage-1]
 	parent.Record.At, parent.Record.Text = parentAt, "the parent line and a split line"
 	if inserted, err := st.IngestAll(ctx, []Ingestion{*parent}); err != nil || inserted != 1 {
 		t.Fatalf("ingest of the parent = %d, %v", inserted, err)
 	}
 	parent.Record.Text = "the parent line"
-	split := &items[writePage]
+	split := &items[WritePage]
 	split.Line, split.Record.Text = "a split line", "a split line"
 	if _, err := st.db.ExecContext(ctx, "CREATE TRIGGER interrupt BEFORE INSERT ON records WHEN NEW.text = 'a split line' BEGIN SELECT RAISE(ABORT, 'interrupted'); END"); err != nil {
 		t.Fatal(err)

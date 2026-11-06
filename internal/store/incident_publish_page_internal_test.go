@@ -9,12 +9,12 @@ func TestAnIncidentScopesFirstPublishHoldsTheWriteLockAPageAtATime(t *testing.T)
 		st, writes := pagedStore(t)
 		if _, err := st.db.ExecContext(t.Context(), `WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?)
 INSERT INTO records(drive,lane,kind,at,text,source,hash)
-SELECT 'd','seed','incident',x,'incident #'||x,'post','paged-'||x FROM n`, pages*writePage); err != nil {
+SELECT 'd','seed','incident',x,'incident #'||x,'post','paged-'||x FROM n`, pages*WritePage); err != nil {
 			t.Fatal(err)
 		}
 		writes.reset()
 		report, err := st.ProvisionIncidentScope(t.Context(), "d")
-		if err != nil || !report.Ready || report.Records != int64(pages*writePage) {
+		if err != nil || !report.Ready || report.Records != int64(pages*WritePage) {
 			t.Fatalf("pages=%d provision=%+v, %v", pages, report, err)
 		}
 		byPages[pages] = largest{records: writes.of("incident_records"), versions: writes.of("incident_versions")}
@@ -25,7 +25,7 @@ SELECT 'd','seed','incident',x,'incident #'||x,'post','paged-'||x FROM n`, pages
 	if byPages[1] != byPages[100] {
 		t.Fatalf("largest incident write transaction at 1 page=%+v, at 100 pages=%+v", byPages[1], byPages[100])
 	}
-	t.Logf("records=%d..%d largest_transaction=%+v", writePage, 100*writePage, byPages[100])
+	t.Logf("records=%d..%d largest_transaction=%+v", WritePage, 100*WritePage, byPages[100])
 }
 
 func TestAnIncidentChangeQueuedBehindAPublishedPageIsCapturedNext(t *testing.T) {
@@ -33,7 +33,7 @@ func TestAnIncidentChangeQueuedBehindAPublishedPageIsCapturedNext(t *testing.T) 
 	st, _ := pagedStore(t)
 	if _, err := st.db.ExecContext(ctx, `WITH RECURSIVE n(x) AS(VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<?)
 INSERT INTO records(drive,lane,kind,at,text,source,hash)
-SELECT 'd','seed','incident',x,'incident #'||x,'post','queued-'||x FROM n`, writePage+1); err != nil {
+SELECT 'd','seed','incident',x,'incident #'||x,'post','queued-'||x FROM n`, WritePage+1); err != nil {
 		t.Fatal(err)
 	}
 	if report, err := st.ProvisionIncidentScope(ctx, "d"); err != nil || !report.Ready {
@@ -43,7 +43,7 @@ SELECT 'd','seed','incident',x,'incident #'||x,'post','queued-'||x FROM n`, writ
 		t.Fatal(err)
 	}
 	first, err := st.captureIncidentChanges(ctx)
-	if err != nil || len(first) != writePage || first[0].Seq != 1 {
+	if err != nil || len(first) != WritePage || first[0].Seq != 1 {
 		t.Fatalf("first capture = %d changes from seq %v, %v; want a page from seq 1", len(first), first, err)
 	}
 	if err := st.publishIncidentChanges(ctx, first); err != nil {
@@ -60,7 +60,7 @@ SELECT 'd','seed','incident',x,'incident #'||x,'post','queued-'||x FROM n`, writ
 	for _, change := range next {
 		captured[change.Seq] = true
 	}
-	if !captured[1] || !captured[int64(writePage+1)] {
-		t.Fatalf("the capture after a published page holds seqs %v; want seq 1, queued again behind the page, and seq %d", captured, writePage+1)
+	if !captured[1] || !captured[int64(WritePage+1)] {
+		t.Fatalf("the capture after a published page holds seqs %v; want seq 1, queued again behind the page, and seq %d", captured, WritePage+1)
 	}
 }

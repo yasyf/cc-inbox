@@ -31,7 +31,7 @@ func (s *Store) captureIncidentChanges(ctx context.Context) ([]incidentChange, e
 		return nil, err
 	}
 	defer func() { _, _ = connection.ExecContext(context.WithoutCancel(ctx), "ROLLBACK") }()
-	rows, err := connection.QueryContext(ctx, "SELECT source_seq,revision FROM incident_changes ORDER BY source_seq LIMIT ?", writePage)
+	rows, err := connection.QueryContext(ctx, "SELECT source_seq,revision FROM incident_changes ORDER BY source_seq LIMIT ?", WritePage)
 	if err != nil {
 		return nil, err
 	}

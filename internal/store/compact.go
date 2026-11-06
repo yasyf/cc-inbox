@@ -475,7 +475,7 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 	var res CompactResult
 	for _, day := range slices.Sorted(maps.Keys(days)) {
 		digested := false
-		for page := range slices.Chunk(days[day], writePage) {
+		for page := range slices.Chunk(days[day], WritePage) {
 			folded, err := s.foldPage(ctx, drive, day, page)
 			res.Folded += folded
 			if folded > 0 && !digested {
