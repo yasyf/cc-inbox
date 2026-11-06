@@ -38,7 +38,7 @@ func TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication(t *testi
 		if _, err := st.db.ExecContext(ctx, "UPDATE records SET text='summary #43' WHERE seq=?", record.Seq); err != nil {
 			t.Fatal(err)
 		}
-		stale, err := st.captureIncidentChanges(ctx)
+		stale, err := st.captureIncidentChanges(ctx, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -48,7 +48,7 @@ func TestIncidentProjectionRejectsConcurrentProjectorsBeforePublication(t *testi
 		if got, err := second.Holds(ctx, other, "d", []string{"44"}); err != nil || got["44"].Seq != record.Seq {
 			t.Fatalf("newer projector did not publish: %v/%v", got, err)
 		}
-		if _, err := st.publishIncidentChanges(ctx, stale); err != nil {
+		if err := st.publishIncidentChanges(ctx, stale); err != nil {
 			t.Fatal(err)
 		}
 		got, err := second.Holds(ctx, other, "d", []string{"43", "44"})

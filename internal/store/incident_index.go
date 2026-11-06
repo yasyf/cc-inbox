@@ -263,17 +263,21 @@ func (index *IncidentIndex) reconcile(ctx context.Context) error {
 		index.authorityError = err
 		return &IncidentError{Code: "watch_authority_lost", Cause: err}
 	}
-	changes, err := index.store.captureIncidentChanges(ctx)
-	if err != nil {
-		return err
-	}
-	started := time.Now()
-	paths, err := index.store.publishIncidentChanges(ctx, changes)
-	if len(changes) != 0 {
+	for after := int64(0); ; {
+		changes, err := index.store.captureIncidentChanges(ctx, after)
+		if err != nil {
+			return err
+		}
+		if len(changes) == 0 {
+			break
+		}
+		started := time.Now()
+		err = index.store.publishIncidentChanges(ctx, changes)
 		index.stats.MaxWritePhase = max(index.stats.MaxWritePhase, time.Since(started))
-	}
-	if err != nil {
-		return err
+		if err != nil {
+			return err
+		}
+		after = changes[len(changes)-1].Seq
 	}
 	rows, err := index.store.db.QueryContext(ctx, "SELECT path FROM incident_body_changes")
 	if err != nil {
@@ -285,13 +289,10 @@ func (index *IncidentIndex) reconcile(ctx context.Context) error {
 			_ = rows.Close()
 			return err
 		}
-		paths[path] = true
+		index.pending[path] = true
 	}
 	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
 		return err
-	}
-	for path := range paths {
-		index.pending[path] = true
 	}
 	for path := range index.pending {
 		if err := index.publishBody(ctx, path); err != nil {
