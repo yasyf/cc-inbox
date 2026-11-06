@@ -70,6 +70,45 @@ func TestEveryNodeNamesARecordByItsOriginNumber(t *testing.T) {
 	}
 }
 
+func TestAnOpenHoldALandingNodeReadsCarriesTheNumberTheMacResolvesToTheSameHold(t *testing.T) {
+	ctx := context.Background()
+	mac, _ := testutil.Store(t)
+	landing, _ := testutil.Store(t)
+	landing.SetOwner(false)
+	if err := landing.PutMember(ctx, store.Member{Node: mac.Self(), PublicKey: mac.Node().PublicKey(), Tier: node.TierOwner, Via: "relay", By: "test", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Post(t, landing, store.Record{Lane: "desk-runner", Kind: kinds.Note, Text: "landing pass 1"})
+	testutil.Post(t, landing, store.Record{Lane: "desk-runner", Kind: kinds.Note, Text: "landing pass 2"})
+	testutil.Post(t, mac, store.Record{Lane: "register-seed", Kind: kinds.Note, Text: "a register row"})
+	hold := testutil.Post(t, mac, store.Record{Lane: "root", Kind: kinds.Hold, Text: "hold #48034 until its reader is live", To: []string{"root"}, Refs: store.Refs{PRs: []store.PR{{Repo: "Forge-AI/monorepo", Number: 48034}}}})
+	rows, err := mac.Export(ctx, mac.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := landing.Apply(ctx, rows, nil); err != nil {
+		t.Fatal(err)
+	}
+	held, err := landing.Query(ctx, store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Hold}})
+	if err != nil || len(held) != 1 {
+		t.Fatalf("landing holds = %+v, %v", held, err)
+	}
+	open, err := landing.OpenAmong(ctx, "d", []int64{held[0].Seq})
+	if err != nil || len(open) != 1 {
+		t.Fatalf("landing open holds = %+v, %v", open, err)
+	}
+	if open[0].Seq == hold.Seq || open[0].Name() != hold.Name() {
+		t.Fatalf("landing names its open hold %s at its own seq %d; want the Mac's %s", open[0].Name(), open[0].Seq, hold.Name())
+	}
+	seq, err := mac.Resolve(ctx, open[0].Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back, err := mac.Get(ctx, seq); err != nil || back.Text != hold.Text {
+		t.Fatalf("the Mac resolves the landing node's %s to %+v, %v; want the hold", open[0].Name(), back, err)
+	}
+}
+
 func TestABareNumberTwoNodesShareInADriveIsRefused(t *testing.T) {
 	ctx := context.Background()
 	mac, _ := testutil.Store(t)
