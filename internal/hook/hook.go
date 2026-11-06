@@ -336,8 +336,7 @@ func acknowledge(ctx context.Context, st *store.Store, w io.Writer, event, text 
 // Owed returns, in seq order, the open asks, blockers and question-ending
 // decides that name reader or one of its aliases first and came from another
 // lane: the asks the hook lists and cci tail --open prints. The thread k bound
-// as reader owes none of the backfill a relay seed or sync applied after it
-// bound.
+// as reader owes none of the backfill a relay seed applied after it bound.
 func Owed(ctx context.Context, st *store.Store, k store.PeerKey, drive, reader string) ([]store.Record, error) {
 	open, err := st.OpenTo(ctx, k, drive, reader, askKinds)
 	if err != nil {

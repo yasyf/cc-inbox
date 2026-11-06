@@ -258,20 +258,34 @@ func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
 
 // ApplyAll ingests every row rows yields as Apply does, then makes the cursor
 // moves moves returns once rows ends, all in one transaction: a copy of a
-// whole drive commits once, and a row Apply refuses keeps none of it.
+// whole drive commits once, and a row Apply refuses keeps none of it. The rows
+// it stores are backfill: a lane bound before them reads none stamped before
+// it started as mail, while a row Apply stores always reaches the lane.
 func (s *Store) ApplyAll(ctx context.Context, rows iter.Seq[Row], moves func() []CursorMove) (Applied, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return Applied{}, fmt.Errorf("begin apply: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
+	var before int64
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&before); err != nil {
+		return Applied{}, fmt.Errorf("read the head before a backfill: %w", err)
+	}
 	var a Applied
 	for row := range rows {
 		if err := s.apply(ctx, tx, row, &a, false, nil); err != nil {
 			return Applied{}, err
 		}
 	}
-	if _, err := s.write(ctx, tx, Write{Cursors: moves()}); err != nil {
+	var after int64
+	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(MAX(seq), 0) FROM records").Scan(&after); err != nil {
+		return Applied{}, fmt.Errorf("read the head after a backfill: %w", err)
+	}
+	cursors := moves()
+	if after > before {
+		cursors = append(cursors, CursorMove{Name: backfillCursor(before), Seq: after, Exact: true})
+	}
+	if _, err := s.write(ctx, tx, Write{Cursors: cursors}); err != nil {
 		return Applied{}, err
 	}
 	if err := tx.Commit(); err != nil {

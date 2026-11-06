@@ -319,7 +319,9 @@ func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.
 	}
 }
 
-func TestALaneOwesNothingARelayBackfilledAfterItBound(t *testing.T) {
+func noMoves() []store.CursorMove { return nil }
+
+func TestALaneOwesNothingASeedBackfilledAfterItBound(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"lane-x"}, Text: "posted before the lane bound"})
@@ -329,10 +331,10 @@ func TestALaneOwesNothingARelayBackfilledAfterItBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	backfilled := clock.Now().Add(-time.Hour)
-	if _, err := st.Apply(ctx, []store.Row{
+	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{
 		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Ask, At: backfilled, Text: "a backfilled ask", To: []string{"lane-x"}, Source: "post"},
 		{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: kinds.Note, At: backfilled, Text: "a backfilled note", To: []string{"lane-x"}, Source: "post"},
-	}, nil); err != nil {
+	}), noMoves); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(time.Minute)
@@ -352,6 +354,42 @@ func TestALaneOwesNothingARelayBackfilledAfterItBound(t *testing.T) {
 	}
 	if len(owed) != 1 || owed[0].Text != "posted before the lane bound" {
 		t.Fatalf("owed = %+v; want only the ask posted before the lane bound", owed)
+	}
+}
+
+func TestARecordPostedWhileALaneSpawnedReachesItLiveAfterItBound(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	posted := clock.Now()
+	clock.Advance(10 * time.Minute)
+	k := store.PeerKey{Session: "s1"}
+	if err := st.BindLane(ctx, k, "d", "lane-x", clock.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{
+		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: posted.Add(-time.Hour), Text: "a seeded note", To: []string{"lane-x"}, Source: "post"},
+	}), noMoves); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, []store.Row{
+		{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: kinds.Ask, At: posted, Text: "instructions sent while the lane spawned", To: []string{"lane-x"}, Source: "post"},
+	}, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, st, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "instructions sent while the lane spawned") || strings.Contains(got, "a seeded note") {
+		t.Fatalf("additionalContext = %q; want the record a live delivery brought after the bind, and not the seeded one", got)
+	}
+	owed, err := hook.Owed(ctx, st, k, "d", "lane-x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owed) != 1 || owed[0].Text != "instructions sent while the lane spawned" {
+		t.Fatalf("owed = %+v; want the ask a live delivery brought after the bind", owed)
 	}
 }
 

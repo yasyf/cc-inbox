@@ -46,6 +46,7 @@ type Filter struct {
 	broadcastAfter *int64
 	laneStart      int64
 	laneHead       int64
+	backfills      [][2]int64
 	AliasFloor     bool
 	aliasSince     int64
 	aliasOrders    int64
@@ -214,7 +215,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		params = append(params, string(kinds.Urgent), f.RepeatWindow.Milliseconds())
 	}
 	if f.LaneFloor != "" {
-		clauses = append(clauses, "(seq <= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), seq) OR at >= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0))")
+		clauses = append(clauses, "(records.seq <= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), records.seq) OR records.at >= COALESCE((SELECT cursors.seq FROM cursors WHERE cursors.name = ? AND cursors.drive = ?), 0) OR NOT EXISTS (SELECT 1 FROM ("+backfillSpans+") backfill WHERE records.seq > backfill.low AND records.seq <= backfill.high))")
 		params = append(params, headCursor(f.LaneFloor), f.Drive, startCursor(f.LaneFloor), f.Drive)
 	}
 	if f.After > 0 {
@@ -812,11 +813,36 @@ func headCursor(floor string) string {
 	return floor + "-head"
 }
 
+const backfillPrefix = "backfill:"
+
+func backfillCursor(after int64) string {
+	return backfillPrefix + strconv.FormatInt(after, 10)
+}
+
+var backfillSpans = "SELECT CAST(substr(name, " + strconv.Itoa(len(backfillPrefix)+1) + ") AS INTEGER) AS low, seq AS high FROM cursors WHERE name GLOB '" + backfillPrefix + "*' AND drive = ''"
+
+func (s *Store) backfills(ctx context.Context, after int64) ([][2]int64, error) {
+	rows, err := s.db.QueryContext(ctx, backfillSpans+" AND seq > ?", after)
+	if err != nil {
+		return nil, fmt.Errorf("read backfills: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out [][2]int64
+	for rows.Next() {
+		var span [2]int64
+		if err := rows.Scan(&span[0], &span[1]); err != nil {
+			return nil, fmt.Errorf("scan a backfill: %w", err)
+		}
+		out = append(out, span)
+	}
+	return out, rows.Err()
+}
+
 const ownPR = `EXISTS (SELECT 1 FROM json_each(records.refs, '$.prs') graded JOIN records own ON own.drive = records.drive AND own.kind = 'opened' JOIN json_each(own.refs, '$.prs') opened ON CASE opened.type WHEN 'integer' THEN CAST(opened.value AS TEXT) ELSE substr(opened.value, instr(opened.value, '#') + 1) END = CASE graded.type WHEN 'integer' THEN CAST(graded.value AS TEXT) ELSE substr(graded.value, instr(graded.value, '#') + 1) END WHERE own.lane`
 
 // LaneMail is what the thread k bound as b reads as mail. A bound lane hears
-// no broadcast from before it started, and no record a relay seed or sync
-// applied after it bound that is stamped before it started.
+// no broadcast from before it started, and no record ApplyAll backfilled after
+// it bound that is stamped before it started.
 func LaneMail(k PeerKey, b Binding) Filter {
 	f := Filter{Drive: b.Drive, Peer: k.String(), To: b.Lane, RepeatWindow: UrgentRepeat}
 	if b.Lane != "" {
