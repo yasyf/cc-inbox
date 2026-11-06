@@ -274,6 +274,11 @@ func newPostCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if k == kinds.Lift {
+				if err := refuseStrayLift(cmd.Context(), st, records); err != nil {
+					return err
+				}
+			}
 			for i := range records {
 				if len(records[i].To) == 0 && records[i].Re != 0 {
 					if records[i].To, err = replyTo(cmd.Context(), st, records[i]); err != nil {

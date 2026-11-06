@@ -603,7 +603,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`, which must name a record of the withdrawal's own drive. |
 | `go` | None | Closes a matching `ask` or `decide`. |
 | `hold` | None | Open until `lift`. It holds exactly the PRs its `--pr` names, and its text is prose; a hold whose text or topic names `#<number>` with no `--pr` at all is refused, so guards that read pull request refs see the hold, and a hold with `--pr` whose text names other pull requests posts with a line listing them as not held. |
-| `lift` | None | Closes `hold`; requires `--re`, `--topic`, or `--resolves`. |
+| `lift` | None | Closes `hold`; its `--re` or `--resolves` must name an open hold, and a lift that names none is refused with the open holds on its `--pr` and on the pull requests of the records it named. |
 | `incident`, `defect` | None | Open until `fix-live`, `done`, or an explicit resolver. |
 | `fix-live` | None | Closes a matching `incident` or `defect`. |
 | `done` | None | Closes a matching `incident`, `defect`, or `blocker`. |

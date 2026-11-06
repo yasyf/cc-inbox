@@ -130,7 +130,9 @@ Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
 `--resolves <seq>` must name an existing record in the same drive. Only a later
 record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`.
 `go`, `opened`, `landed`, and `fix-live` can all carry `--resolves`.
-`answer`, `lift`, `withdraw`, and `unblock` require `--re`, `--topic`, or `--resolves`.
+`answer`, `withdraw`, and `unblock` require `--re`, `--topic`, or `--resolves`.
+A `lift` needs `--re` or `--resolves` naming an open hold; one that names none
+is refused with the open holds on its pull requests, so pass one of those.
 Withdraw a go with `cci post --kind withdraw --re <go seq>`, one `--re` per go;
 `cci post` refuses a go withdrawal written as a sentence in any other kind.
 Repeat `--resolves`, or give a comma list, to close several at once: one record
@@ -621,7 +623,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `blocked` / `unblock` | None | A deploy block stays open until unblock or a resolver. |
 | `answer`, `withdraw` | None | Close asks, decision requests, or blockers; require a link. |
 | `go` | None | Closes a matching ask or decision request. |
-| `hold` / `lift` | None | Lift closes hold and requires a link. A hold holds exactly its `--pr` PRs; a hold naming `#<number>` with no `--pr` is refused. |
+| `hold` / `lift` | None | Lift closes the open hold its `--re` or `--resolves` names. A hold holds exactly its `--pr` PRs; a hold naming `#<number>` with no `--pr` is refused. |
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |

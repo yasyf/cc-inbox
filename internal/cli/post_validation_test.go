@@ -126,3 +126,28 @@ func TestPostLongTextBesideAPathSpillsBoth(t *testing.T) {
 		t.Errorf("show 1 = %q, %v; want the whole text and the attached file", out, err)
 	}
 }
+
+func TestALiftNamingAnAskIsRefusedWithTheOpenHoldsOnItsPR(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CODEX_THREAD_ID", "")
+	post := func(lane string, args ...string) (string, error) {
+		return run(t, append([]string{"post", "--drive", "d", "--lane", lane}, args...)...)
+	}
+	if _, err := post("flake", "--kind", "hold", "--pr", "51292", "--text", "holding for his card"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := post("flake", "--kind", "ask", "--pr", "51292", "--to", "root", "--text", "the hold blocks the grade"); err != nil {
+		t.Fatal(err)
+	}
+	const held = "1 hold flake #51292 holding for his card"
+	if out, err := post("root", "--kind", "lift", "--re", "2", "--pr", "51292", "--text", "lift the hold"); err == nil || !strings.Contains(err.Error(), "#2 (ask)") || !strings.Contains(err.Error(), held) {
+		t.Fatalf("lift --re the ask = %q, %v; want a refusal naming the ask and listing hold 1", out, err)
+	}
+	if text, isErr := callTool(t, "close", map[string]any{"drive": "d", "lane": "root", "seqs": []any{2}, "how": "lift", "text": "lift the hold"}); !isErr || !strings.Contains(text, held) {
+		t.Errorf("close how lift on the ask = %q, %v; want the refusal listing hold 1", text, isErr)
+	}
+	if out, err := post("root", "--kind", "lift", "--re", "1", "--pr", "51292", "--text", "lift the hold"); err != nil || out != "#3\n" {
+		t.Fatalf("lift --re the hold = %q, %v; want #3", out, err)
+	}
+}

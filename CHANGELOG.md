@@ -25,6 +25,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci post --kind lift` is refused unless its `--re` or `--resolves` names an
+  open hold, and the refusal lists the open holds on the lift's `--pr` and on
+  the pull requests of the records it named, so the poster can pick one. On
+  Nov 5 a lift meant for a hold named an ask with `--re`, closed nothing, and
+  the hold kept a pull request from its grade for two hours. The MCP `close`
+  tool posts through the same check. A lift naming an open hold posts as
+  before.
 - The `--lane` help on `cci tail`, `cci grep` and the other readers says it
   keeps the records those lanes wrote, never the ones addressed to them, which
   `--to` reads. A Sprite lane read its parent's evidence with
