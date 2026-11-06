@@ -25,6 +25,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `--lane` help on `cci tail`, `cci grep` and the other readers says it
+  keeps the records those lanes wrote, never the ones addressed to them, which
+  `--to` reads. A Sprite lane read its parent's evidence with
+  `cci tail --lane <parent>`, got nothing, because root and the evidence lane
+  had written it to the parent, and fell back to `cci show` seq by seq.
 - Moving the daemon onto a newer install no longer refuses connections. While
   the old daemon drained and the new one started, http://127.0.0.1:7377
   refused every connection, so each `lr wait` on a cci source and the drive

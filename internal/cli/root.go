@@ -212,7 +212,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "only these kinds (repeatable)")
 		cmd.Flags().StringSliceVar(&f.mute, "mute-kinds", nil, "never these kinds, even addressed to --reader (repeatable)")
 		cmd.Flags().StringSliceVar(&f.toKinds, "to-kind", nil, "only these kinds among records addressed to --reader or --to; broadcasts still follow --kind (repeatable)")
-		cmd.Flags().StringSliceVar(&f.lanes, "lane", nil, "only these lanes (repeatable); a name with no number reads every lane that has held it, a numbered name that lane alone")
+		cmd.Flags().StringSliceVar(&f.lanes, "lane", nil, "only records these lanes wrote (repeatable), never those addressed to them, which --to reads; a name with no number reads every lane that has held it, a numbered name that lane alone")
 		cmd.Flags().StringVar(&f.to, "to", "", "only records addressed to this lane")
 		cmd.Flags().StringVar(&f.reader, "reader", "", "deliver to this lane: records addressed to it, plus other lanes' broadcasts that match --kind, --lane and --topic")
 		cmd.Flags().StringSliceVar(&f.topics, "topic", nil, "only these topics (repeatable)")
