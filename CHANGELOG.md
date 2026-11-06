@@ -25,6 +25,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Moving the daemon onto a newer install no longer refuses connections. While
+  the old daemon drained and the new one started, http://127.0.0.1:7377
+  refused every connection, so each `lr wait` on a cci source and the drive
+  dashboard lost the daemon for the whole move; on Nov 5 from about 5:37 to
+  5:39 PM every lane's wait on this Mac exited 127. The process that makes the
+  move, whether `cci upgrade`, a session start that finds a newer install, or
+  the daemon's own upgrade check, now takes the daemon's listening socket
+  before the old daemon drains and holds it until the new daemon serves it, so
+  a connection made in between waits for the new daemon instead of being
+  refused. That move also runs in its own session: the session-start hook's
+  10 s wait and a cancelled `cci upgrade` used to kill it partway, which could
+  stop the old daemon and never start the new one. The first move onto this
+  release still refuses connections briefly, since the daemon it replaces does
+  not offer its socket.
 - `--to <stem>` reaches the stem's own live lane, never a successor from another
   stem. When red-sweep-5 stood down naming dev-red-d12370de07-fix-case2 as its
   successor, `--to red-sweep` reached that successor instead of the live

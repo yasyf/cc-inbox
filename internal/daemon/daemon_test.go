@@ -77,6 +77,16 @@ func TestDaemonServesDigestAndHTTP(t *testing.T) {
 
 func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener, func() error) {
 	t.Helper()
+	ln, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, stopped := serveOn(t, home, ln)
+	return d, ln, stopped
+}
+
+func serveOn(t *testing.T, home string, ln *net.TCPListener) (daemonkit.Daemon, func() error) {
+	t.Helper()
 	kit, err := os.MkdirTemp("/tmp", "cci-dk")
 	if err != nil {
 		t.Fatal(err)
@@ -88,10 +98,6 @@ func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener, func() er
 		t.Fatal(err)
 	}
 	d.Label = daemonkit.Label(fmt.Sprintf("com.yasyf.cc-inbox.test%d.%s", os.Getpid(), filepath.Base(home)))
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() {
@@ -109,7 +115,7 @@ func serve(t *testing.T, home string) (daemonkit.Daemon, net.Listener, func() er
 			t.Errorf("Serve() = %v", err)
 		}
 	})
-	return d, ln, stopped
+	return d, stopped
 }
 
 func TestDaemonStopsWithAStreamStillOpen(t *testing.T) {
@@ -149,7 +155,7 @@ func TestDaemonReportsAListenerFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	d.Label = daemonkit.Label(fmt.Sprintf("com.yasyf.cc-inbox.test%d.fail", os.Getpid()))
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	ln, err := net.ListenTCP("tcp", &net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
 		t.Fatal(err)
 	}
