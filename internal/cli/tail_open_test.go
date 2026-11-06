@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -75,7 +76,7 @@ func TestTailOpenListsTheAsksTheBoundLaneOwes(t *testing.T) {
 	}
 }
 
-func TestALanesWaitAndOpenAsksSkipWhatARelayBackfilledAfterItBound(t *testing.T) {
+func TestALanesWaitAndOpenAsksSkipWhatASeedBackfilledAfterItBound(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
@@ -90,9 +91,14 @@ func TestALanesWaitAndOpenAsksSkipWhatARelayBackfilledAfterItBound(t *testing.T)
 		t.Fatal(err)
 	}
 	backfilled := time.Now().Add(-time.Hour)
-	if _, err := st.Apply(ctx, []store.Row{
+	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{
 		{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: "ask", At: backfilled, Text: "a backfilled ask", To: []string{"api"}, Source: "post"},
 		{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: "go", At: backfilled, Text: "a backfilled go", To: []string{"api"}, Source: "post"},
+	}), func() []store.CursorMove { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, []store.Row{
+		{Origin: "0123456789abcdef", OriginSeq: 3, Drive: "d", Lane: "root", Kind: "ask", At: time.Now().Add(-10 * time.Minute), Text: "asked while the lane spawned", To: []string{"api"}, Source: "post"},
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -100,10 +106,10 @@ func TestALanesWaitAndOpenAsksSkipWhatARelayBackfilledAfterItBound(t *testing.T)
 		t.Fatal(err)
 	}
 	out, err := run(t, "tail", "--drive", "d", "--to", "api", "--cursor", "api-wake", "--seed", "api", "--mail")
-	if err != nil || !strings.Contains(out, "asked since the lane started") || strings.Contains(out, "backfilled") {
-		t.Fatalf("the lane's wait = %q, %v; want the new ask and nothing a relay backfilled after the lane bound", out, err)
+	if err != nil || !strings.Contains(out, "asked since the lane started") || !strings.Contains(out, "asked while the lane spawned") || strings.Contains(out, "backfilled") {
+		t.Fatalf("the lane's wait = %q, %v; want both asks and nothing a seed backfilled after the lane bound", out, err)
 	}
-	if out, err := run(t, "tail", "--open"); err != nil || !strings.Contains(out, "asked since the lane started") || strings.Contains(out, "backfilled") {
-		t.Fatalf("tail --open = %q, %v; want the new ask and no ask a relay backfilled after the lane bound", out, err)
+	if out, err := run(t, "tail", "--open"); err != nil || !strings.Contains(out, "asked since the lane started") || !strings.Contains(out, "asked while the lane spawned") || strings.Contains(out, "backfilled") {
+		t.Fatalf("tail --open = %q, %v; want both asks and no ask a seed backfilled after the lane bound", out, err)
 	}
 }

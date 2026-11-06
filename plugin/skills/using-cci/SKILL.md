@@ -271,8 +271,9 @@ session, and later posts keep that drive and default `--lane` to that lane.
 A subagent or teammate spawned with a name is that lane already: `cci me`
 binds it, and its posts default `--lane` to the name. Records posted to a
 lane before any thread bound it arrive on the first binding. A record stamped
-before the lane started that a relay seed or sync applies after it bound stays
-out of its mail and its open asks; `cci tail --to <lane>` still reads it. `--drive` on a
+before the lane started that `cci relay seed` applies after it bound stays out
+of its mail and its open asks, while `cci relay sync` and the relay stream
+always deliver; `cci tail --to <lane>` still reads it. `--drive` on a
 post or cursor applies to that one call. A post never rebinds a bound thread;
 only an explicit binding moves it: `cci drive use`, `cci announce --lane
 <lane>`, or `cci subscribe --reader <lane>`, which binds the window's root

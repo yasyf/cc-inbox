@@ -21,8 +21,8 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 
 // OpenTo returns, in seq order, the tracked openers of ks addressed to reader
 // that no closer or resolver has closed, less what the thread k bound as
-// reader holds as backfill: a record a relay seed or sync applied after k
-// bound that is stamped before k started.
+// reader holds as backfill: a record ApplyAll stored after k bound that is
+// stamped before k started.
 func (s *Store) OpenTo(ctx context.Context, k PeerKey, drive, reader string, ks []kinds.Kind) ([]Record, error) {
 	openers, err := s.Query(ctx, Filter{Drive: drive, To: reader, LaneFloor: BroadcastCursor(k), Kinds: ks, IncludeExpired: true})
 	if err != nil {

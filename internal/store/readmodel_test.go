@@ -117,7 +117,7 @@ func TestReadModelMatchesTheStore(t *testing.T) {
 	}
 }
 
-func TestReadModelSkipsWhatARelayBackfilledAfterALaneBound(t *testing.T) {
+func TestReadModelSkipsWhatASeedBackfilledAfterALaneBound(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := t.Context()
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"worker"}, Text: "posted before the bind"})
@@ -125,7 +125,11 @@ func TestReadModelSkipsWhatARelayBackfilledAfterALaneBound(t *testing.T) {
 	if err := st.BindLane(ctx, k, "d", "worker", clock.Now()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Apply(ctx, []store.Row{{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: clock.Now().Add(-time.Hour), Text: "backfilled", To: []string{"worker"}, Source: "post"}}, nil); err != nil {
+	old := clock.Now().Add(-time.Hour)
+	if _, err := st.ApplyAll(ctx, slices.Values([]store.Row{{Origin: "0123456789abcdef", OriginSeq: 1, Drive: "d", Lane: "root", Kind: kinds.Note, At: old, Text: "backfilled", To: []string{"worker"}, Source: "post"}}), func() []store.CursorMove { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Apply(ctx, []store.Row{{Origin: "0123456789abcdef", OriginSeq: 2, Drive: "d", Lane: "root", Kind: kinds.Note, At: old, Text: "delivered live", To: []string{"worker"}, Source: "post"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	clock.Advance(time.Minute)
@@ -145,8 +149,8 @@ func TestReadModelSkipsWhatARelayBackfilledAfterALaneBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	sameRecords(t, got, want)
-	if len(want) != 2 || want[0].Text != "posted before the bind" || want[1].Text != "posted since the bind" {
-		t.Fatalf("lane mail = %+v; want both posts and not the backfilled record", want)
+	if len(want) != 3 || want[0].Text != "posted before the bind" || want[1].Text != "delivered live" || want[2].Text != "posted since the bind" {
+		t.Fatalf("lane mail = %+v; want both posts and the live delivery, not the seeded record", want)
 	}
 }
 

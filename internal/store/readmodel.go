@@ -864,6 +864,10 @@ func (m *ReadModel) prepared(ctx context.Context, s *Store, f Filter) (Filter, b
 		f.laneHead = math.MaxInt64
 		if bound {
 			f.laneHead = head
+			if f.backfills, err = s.backfills(ctx, head); err != nil {
+				m.failures.Add(1)
+				return f, false
+			}
 		}
 	}
 	if err := m.catchUp(ctx); err != nil {
@@ -1211,7 +1215,7 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 	if f.RepeatWindow > 0 && r.kind == sel.urgent && v.topic != "" && sel.repeats(r) {
 		return false, true
 	}
-	if sel.laneBound && r.seq > sel.laneHead && r.at < sel.laneStart {
+	if sel.laneBound && r.seq > sel.laneHead && r.at < sel.laneStart && slices.ContainsFunc(sel.f.backfills, func(span [2]int64) bool { return r.seq > span[0] && r.seq <= span[1] }) {
 		return false, true
 	}
 	if f.After > 0 && r.seq <= f.After || f.Before > 0 && r.seq >= f.Before {

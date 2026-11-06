@@ -25,12 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A lane no longer reads a relay's backfill as new mail. A record that `cci
-  relay seed` or `cci relay sync` applies after the lane bound, stamped before
-  the lane started, stays out of the lane's hook delivery, its `cci tail
-  --mail` wait, its open-ask list, and its stop nudge. Before, every such record
-  took a seq past the lane's cursor, so a Sprite lane bound before its copy
-  finished read days of the drive's old records as mail. A record posted to a
+- A lane no longer reads a seed's backfill as new mail. A record that `cci
+  relay seed` applies after the lane bound, stamped before the lane started,
+  stays out of the lane's hook delivery, its `cci tail --mail` wait, its
+  open-ask list, and its stop nudge. Before, every such record took a seq past
+  the lane's cursor, so a Sprite lane bound before its copy finished read days
+  of the drive's old records as mail. A record that `cci relay sync` or the
+  relay stream delivers always reaches the lane, whatever its date, so
+  instructions posted while a lane spawns still arrive. A record posted to a
   lane before it bound still arrives on its first binding.
 - `cci relay seed` applies a whole drive and moves its sync cursors in one
   transaction. It committed every 2,000 rows and then once per origin for the
