@@ -550,11 +550,13 @@ func (n *Node) Seed(ctx context.Context, drive string, from io.Reader) (store.Ap
 	return a, broken
 }
 
-// ExportDrive writes a drive's rows as gzipped JSON lines for Seed on another node.
-func ExportDrive(ctx context.Context, st *store.Store, drive string, to io.Writer) error {
+// ExportDrive writes a drive's rows as gzipped JSON lines for Seed on another
+// node, from the first record st took that was written at or after since; the
+// zero since writes them all.
+func ExportDrive(ctx context.Context, st *store.Store, drive string, since time.Time, to io.Writer) error {
 	zipped := gzip.NewWriter(to)
 	encoder := json.NewEncoder(zipped)
-	if err := st.VisitDriveExports(ctx, drive, func(row store.Row) error { return encoder.Encode(row) }); err != nil {
+	if err := st.VisitDriveExports(ctx, drive, since, func(row store.Row) error { return encoder.Encode(row) }); err != nil {
 		return err
 	}
 	return zipped.Close()

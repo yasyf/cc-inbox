@@ -39,6 +39,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stop the old daemon and never start the new one. The first move onto this
   release still refuses connections briefly, since the daemon it replaces does
   not offer its socket.
+- `cci relay export --since <time>` writes only what the store took from the
+  first record written at or after that time, so a node that joins the relay
+  can be seeded with the minutes before its join instead of the whole drive.
+  A relay queue holds only what was posted after the join, so a Sprite lane
+  launched at 7:15 PM never held the incident record and evidence reports the
+  Mac posted to it before its 7:19 PM join. A time past every record writes
+  nothing, and a seq is refused, since export reads a time.
 - `--to <stem>` reaches the stem's own live lane, never a successor from another
   stem. When red-sweep-5 stood down naming dev-red-d12370de07-fix-case2 as its
   successor, `--to red-sweep` reached that successor instead of the live
