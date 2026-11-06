@@ -80,6 +80,7 @@ type Server struct {
 	pairs    map[string]*pairCode
 	consent  map[string][]byte
 	nonces   map[string]string
+	issuers  map[string]string
 	Pushes   [][]byte
 	Proofs   []json.RawMessage
 }
@@ -101,6 +102,7 @@ func NewServer(t testing.TB) *Server {
 		pairs:    map[string]*pairCode{},
 		consent:  map[string][]byte{},
 		nonces:   map[string]string{},
+		issuers:  map[string]string{},
 	}
 	s.Mux.HandleFunc("GET /v1/relay", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, map[string]any{"pub": s.Pub(), "fingerprint": ""})

@@ -340,6 +340,8 @@ cci relay delegate --pub <the worker's public key> --drive <drive> \
   | ssh worker cci relay join --url https://<relay URL> --owner <this owner's public key> --delegation -
 ```
 
+An owner issues delegations only under a live issuer grant: `cci relay grant` asks for Touch ID once at the Mac and covers the next 24 hours, and with no live grant the relay refuses `cci relay delegate`.
+
 Run `cci relay delegate` for the same key again before the delegation expires to renew it. The relay takes the renewal at once and still accepts the delegation it replaced, the worker adopts the renewal from its next pull, and a worker its owner stops renewing drops off the relay when the delegation expires. `cci relay revoke <instance>` ends one sooner.
 
 ### Hear Trunk merge-queue changes as records
