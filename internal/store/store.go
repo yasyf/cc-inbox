@@ -937,27 +937,11 @@ type Ingestion struct {
 func (s *Store) IngestAll(ctx context.Context, items []Ingestion) (int, error) {
 	inserted := 0
 	for page := range slices.Chunk(items, WritePage) {
-		n, err := s.ingest(ctx, page)
+		done, err := s.Commit(ctx, Write{Ingest: page})
 		if err != nil {
-			return inserted, err
+			return inserted, fmt.Errorf("ingest: %w", err)
 		}
-		inserted += n
-	}
-	return inserted, nil
-}
-
-func (s *Store) ingest(ctx context.Context, items []Ingestion) (int, error) {
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin ingest: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	inserted, err := s.ingestPage(ctx, tx, items)
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit ingest: %w", err)
+		inserted += done.Ingested
 	}
 	return inserted, nil
 }
@@ -1001,34 +985,18 @@ type Reparsing struct {
 // line still takes its time from a record the page rewrote, so a parent and its
 // split lines commit together.
 func (s *Store) Reparse(ctx context.Context, items []Ingestion, fresh bool) (updated, inserted int, err error) {
-	var done Reparsing
+	var from Reparsing
 	for len(items) > 0 {
-		n, err := s.reparse(ctx, items, fresh, &done)
+		done, err := s.Commit(ctx, Write{Reparse: &ReparsePage{Items: items[:min(len(items), reparseWindow)], Fresh: fresh, From: from}})
 		if err != nil {
-			return done.Updated, done.Inserted, err
+			return from.Updated, from.Inserted, fmt.Errorf("reparse: %w", err)
 		}
-		items = items[n:]
+		from, items = *done.Reparsed, items[done.Items:]
 	}
-	return done.Updated, done.Inserted, nil
+	return from.Updated, from.Inserted, nil
 }
 
-func (s *Store) reparse(ctx context.Context, items []Ingestion, fresh bool, done *Reparsing) (int, error) {
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, fmt.Errorf("begin reparse: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	progress := *done
-	n, err := s.reparsePage(ctx, tx, items, fresh, &progress)
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit reparse: %w", err)
-	}
-	*done = progress
-	return n, nil
-}
+const reparseWindow = WritePage + MaxText
 
 func (s *Store) reparsePage(ctx context.Context, tx *sql.Tx, items []Ingestion, fresh bool, progress *Reparsing) (int, error) {
 	n := 0

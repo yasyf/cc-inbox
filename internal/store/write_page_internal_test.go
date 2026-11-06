@@ -349,3 +349,36 @@ func TestAFoldCountsOnlyTheRecordsItDeletes(t *testing.T) {
 		t.Fatalf("digests = %+v, %v; want one counting 2 records", digests, err)
 	}
 }
+
+type routedWrites struct {
+	st     *Store
+	writes []Write
+}
+
+func (r *routedWrites) Commit(ctx context.Context, w Write) (Written, error) {
+	r.writes = append(r.writes, w)
+	done, errs := r.st.CommitAll(ctx, []Write{w})
+	return done[0], errs[0]
+}
+
+func TestPagedWritesReachTheStoresWriterAPageAtATime(t *testing.T) {
+	ctx := t.Context()
+	st, _ := pagedStore(t)
+	routed := &routedWrites{st: st}
+	st.WriteThrough(routed)
+	if inserted, err := st.IngestAll(ctx, lineItems(WritePage+1, time.Now().Add(-time.Hour))); err != nil || inserted != WritePage+1 {
+		t.Fatalf("ingest = %d, %v", inserted, err)
+	}
+	rows := foreignNotes(1, time.Now().Add(-time.Hour))
+	rows[0].PathBody = "a relayed body"
+	if applied, err := st.Apply(ctx, rows, nil); err != nil || applied.Inserted != 1 {
+		t.Fatalf("apply = %+v, %v", applied, err)
+	}
+	if len(routed.writes) != 3 || len(routed.writes[0].Ingest) != WritePage || len(routed.writes[1].Ingest) != 1 {
+		t.Fatalf("the writer took %d writes; want two import pages of %d and 1, then the apply", len(routed.writes), WritePage)
+	}
+	relayed := routed.writes[2].Apply
+	if len(relayed) != 1 || relayed[0].PathBody != "" || filepath.Dir(relayed[0].Refs.Path) != filepath.Join(st.HomeDir(), blobDir) {
+		t.Fatalf("the writer took the relayed row %+v; want its body already in this node's blobs", relayed)
+	}
+}
