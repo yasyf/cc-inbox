@@ -585,7 +585,8 @@ name `--to-kind`. `cci watch --reader root` applies the same default.
 tag carries them together, at most every five minutes and at once ahead of any
 other record, so they never wake it alone. `cci tail --to <lane> --mail`, from
 the thread bound as that lane, reads its mail through the hook's cursor, so a
-wait and the hook deliver a record once. A delivered line names no recipients;
+wait and the hook deliver a record once. `--to <stem> --mail` from a numbered
+lane that holds the stem reads the same mail through the same cursor. A delivered line names no recipients;
 `cci show <seq>` does.
 `--mute-kinds state,review,note` keeps those kinds off the channel and out of
 the root's hook delivery, even when addressed to the root; `cci tail` still

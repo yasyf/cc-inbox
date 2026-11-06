@@ -68,7 +68,7 @@ func tailCommand(peer string) (*cobra.Command, *tailFlags) {
 	cmd.Flags().StringVar(&f.cursor, "cursor", peer, "cursor name, read and advanced when --since is absent")
 	cmd.Flags().StringVar(&f.seed, "seed", "", "start --cursor no earlier than where this cursor stands, so it never replays what this one read, and a --cursor that does not exist yet at the newest record when this one does not exist either, instead of an hour back")
 	cmd.Flags().BoolVar(&f.oldest, "oldest", false, "when the budget cuts a text --since window, keep its oldest records instead of its newest, as --json reads always do")
-	cmd.Flags().BoolVar(&f.mail, "mail", false, "when this thread is bound as --to, read its lane mail through the cursor the PostToolUse hook advances, so a record reaches the window once")
+	cmd.Flags().BoolVar(&f.mail, "mail", false, "when this thread is bound as --to, or as the lane --to's mail reaches, such as a numbered lane holding its stem, read its lane mail through the cursor the PostToolUse hook advances, so a record reaches the window once")
 	cmd.Flags().BoolVar(&f.open, "open", false, "print every open ask, blocker and question-ending decide that names --to, or the lane this thread is bound as, first, newest first at any age; reads no cursor")
 	cmd.Flags().StringArrayVar(&f.seqs, "seqs", nil, "read these internal store sequences")
 	_ = cmd.Flags().MarkHidden("seqs")
@@ -132,8 +132,17 @@ func (f *tailFlags) runMail(ctx context.Context, cmd *cobra.Command, st *store.S
 		return false, err
 	}
 	b, bound, err := st.Binding(ctx, peer)
-	if err != nil || !bound || b.Drive != drive || !store.SameLane(b.Lane, f.rf.to) {
+	if err != nil || !bound || b.Drive != drive {
 		return false, err
+	}
+	if !store.SameLane(b.Lane, f.rf.to) {
+		if b.Lane == "" {
+			return false, nil
+		}
+		aliases, err := st.Aliases(ctx, drive, b.Lane)
+		if err != nil || !slices.Contains(aliases, f.rf.to) {
+			return false, err
+		}
 	}
 	mail, err := st.WindowMail(ctx, peer, b)
 	if err != nil {
