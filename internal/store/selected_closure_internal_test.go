@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
-	"time"
+
+	"modernc.org/sqlite"
 )
 
 func selectedPost(t *testing.T, st *Store, r Record) Record {
@@ -180,7 +184,7 @@ func TestSelectedClosureProjectionFollowsActualOldWriter(t *testing.T) {
 	}
 }
 
-func TestSelectedClosureProvisioningWithinWriterBudget(t *testing.T) {
+func TestSelectedClosureProvisioningWorkIsFlatInRows(t *testing.T) {
 	raw := os.Getenv("CCI_CLOSER_PROVISION_ROWS")
 	if raw == "" {
 		t.Skip("CI supplies the representative closer projection population")
@@ -189,44 +193,73 @@ func TestSelectedClosureProvisioningWithinWriterBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if os.Getenv("CCI_OLD_STORE_PROBE") == "" {
-		t.Fatal("the native writer-budget profile requires CCI_OLD_STORE_PROBE")
-	}
-	for _, population := range []int{32, 10000} {
-		t.Run("old-writer-"+strconv.Itoa(population), func(t *testing.T) {
-			if elapsed := selectedClosureOldCloserWriter(t, population); elapsed >= 5*time.Second {
-				t.Fatalf("native old-writer wait exceeds budget: rows=%d elapsed=%s", population, elapsed)
-			}
-		})
-	}
 	ctx := t.Context()
-	var st *Store
-	var fingerprint string
-	var report IndexMaintenanceReport
-	for attempt := 1; attempt <= 2; attempt++ {
-		st, fingerprint, report = selectedClosureProvision(t, population)
-		t.Logf("closer_projection_attempt=%d elapsed=%s", attempt, report.Elapsed)
-		if report.Elapsed < 5*time.Second {
-			break
+	var single provisionWork
+	for _, rows := range []int{1, population} {
+		st, fingerprint, report, work := selectedClosureProvision(t, rows)
+		var keys, records int
+		if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM record_closer_keys").Scan(&keys); err != nil {
+			t.Fatal(err)
 		}
+		if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records").Scan(&records); err != nil {
+			t.Fatal(err)
+		}
+		if len(report.Memberships) != len(closerMemberships) || keys != 4*rows || records != rows || st.SchemaFingerprint() != fingerprint {
+			t.Fatalf("projection changed logical state/keys: rows=%d keys=%d records=%d fingerprint=%s report=%+v", rows, keys, records, st.SchemaFingerprint(), report)
+		}
+		if work.recordWrites != 0 {
+			t.Fatalf("provisioning %d rows rewrote %d records; it reads records and writes only the projection", rows, work.recordWrites)
+		}
+		if rows == 1 {
+			single = work
+		} else if work.commits != single.commits {
+			t.Fatalf("provisioning %d rows took %d commits and 1 row took %d; the writer's transactions must not grow with the rows", rows, work.commits, single.commits)
+		}
+		t.Logf("closer_projection_records=%d keys=%d commits=%d record_writes=%d elapsed=%s", records, keys, work.commits, work.recordWrites, report.Elapsed)
 	}
-	if len(report.Memberships) != len(closerMemberships) || report.Elapsed >= 5*time.Second {
-		t.Fatalf("new closer projection writer budget: records=%d report=%+v", population, report)
-	}
-	var keys, records int
-	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM record_closer_keys").Scan(&keys); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records").Scan(&records); err != nil {
-		t.Fatal(err)
-	}
-	if keys != 4*population || records != population || st.SchemaFingerprint() != fingerprint {
-		t.Fatalf("projection changed logical state/keys: keys=%d records=%d fingerprint=%s", keys, records, st.SchemaFingerprint())
-	}
-	t.Logf("closer_projection_records=%d keys=%d elapsed=%s writer_budget=%s before=%+v after=%+v", records, keys, report.Elapsed, 5*time.Second, report.Before, report.After)
 }
 
-func selectedClosureProvision(t *testing.T, population int) (*Store, string, IndexMaintenanceReport) {
+type provisionWork struct {
+	commits, recordWrites int64
+}
+
+type provisionCounters struct {
+	commits, recordWrites atomic.Int64
+}
+
+var (
+	provisionHook     sync.Once
+	provisionCounting sync.Map
+)
+
+func countProvisionWork(home string) *provisionCounters {
+	provisionHook.Do(func() {
+		sqlite.RegisterConnectionHook(func(conn sqlite.ExecQuerierContext, dsn string) error {
+			path, _, _ := strings.Cut(strings.TrimPrefix(dsn, "file:"), "?")
+			counted, ok := provisionCounting.Load(filepath.Dir(path))
+			if !ok {
+				return nil
+			}
+			counters := counted.(*provisionCounters)
+			hooks := conn.(sqlite.HookRegisterer)
+			hooks.RegisterCommitHook(func() int32 {
+				counters.commits.Add(1)
+				return 0
+			})
+			hooks.RegisterPreUpdateHook(func(d sqlite.SQLitePreUpdateData) {
+				if d.TableName == "records" {
+					counters.recordWrites.Add(1)
+				}
+			})
+			return nil
+		})
+	})
+	counters := &provisionCounters{}
+	provisionCounting.Store(home, counters)
+	return counters
+}
+
+func selectedClosureProvision(t *testing.T, population int) (*Store, string, IndexMaintenanceReport, provisionWork) {
 	t.Helper()
 	ctx := t.Context()
 	st, _ := openStore(t)
@@ -244,9 +277,12 @@ func selectedClosureProvision(t *testing.T, population int) (*Store, string, Ind
 		t.Fatal(err)
 	}
 	fingerprint := st.SchemaFingerprint()
+	counters := countProvisionWork(st.HomeDir())
 	report, err := MaintainIndexes(ctx, st.HomeDir())
+	work := provisionWork{commits: counters.commits.Load(), recordWrites: counters.recordWrites.Load()}
+	provisionCounting.Delete(st.HomeDir())
 	if err != nil {
 		t.Fatalf("new closer projection maintenance: records=%d report=%+v error=%v", population, report, err)
 	}
-	return st, fingerprint, report
+	return st, fingerprint, report, work
 }
