@@ -436,7 +436,7 @@ func closeTool() mcp.Tool {
 		InputSchema: schema([]string{"lane", "seqs", "how", "text"}, map[string]any{
 			"lane":  laneProp,
 			"seqs":  list("seqs to close"),
-			"how":   map[string]any{"type": "string", "enum": []string{"answer", "done", "withdraw", "lift", "go", "unblock", "fix-live"}},
+			"how":   map[string]any{"type": "string", "enum": []string{"answer", "withdraw", "lift", "go", "unblock", "fix-live"}},
 			"text":  prop("string", "the closing line"),
 			"to":    list("addressed lanes (default: the closed records' writers)"),
 			"drive": driveProp,
