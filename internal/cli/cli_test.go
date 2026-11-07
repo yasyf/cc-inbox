@@ -1827,7 +1827,7 @@ func TestAnOwnerWhoseChainEndedGetsNoCopyAndALiveOwnerStillDoes(t *testing.T) {
 	}
 }
 
-func TestStandDownForwardsToTheSuccessor(t *testing.T) {
+func TestStandDownNamesTheSuccessor(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	for _, name := range peers.IdentityEnv {
@@ -1866,11 +1866,10 @@ func TestStandDownForwardsToTheSuccessor(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	out, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "desk-1", "--text", "take #12", "--json")
-	if err != nil || !strings.Contains(out, `"to":["desk"]`) {
-		t.Fatalf("go to a stood-down lane = %q, %v; want it addressed to the stem its last successor holds", out, err)
+	if _, err := run(t, "post", "--lane", "root", "--kind", "go", "--to", "desk-1", "--text", "take #12", "--json"); err == nil || !strings.HasSuffix(err.Error(), "post to its successor desk-3, or to root") {
+		t.Fatalf("go to a stood-down lane = %v; want it refused naming its last successor", err)
 	}
-	out, err = run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json")
+	out, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "desk-1", "--text", "again", "--json")
 	if err != nil || !strings.Contains(out, `"to":["desk-1"]`) {
 		t.Fatalf("a stand-down is forwarded = %q, %v", out, err)
 	}

@@ -49,6 +49,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci post --to <lane>` refuses a lane that stood down, or a stem whose every
+  lane stood down, before anything is written, and exits 1 with one line naming
+  when it stood down and its live successor, or `root` when it has none. An
+  alias whose newest lane is live still posts. When the refused post is an owner
+  record or comes from `owner-relay`, cci also posts a blocker to `owner-relay`
+  carrying the refused text, so an owner order sent to a retired lane is never
+  left unread.
+- A post to a lane that stood down and has posted since, such as `owner-relay`
+  after `owner-relay-2` and `owner-relay-3` retired, no longer copies that
+  stand-down's successors, and an ask, decide or defect to an owned lane no
+  longer copies an owner that stood down naming no successor, even while an
+  older generation of the owner's stem never stood down. Such a copy reached
+  only retired lanes, so lr flagged it ASSIGNMENT-UNREAD.
+- A second binder's `defect` to root keeps its first 400 characters and points
+  at the full text, so a refusal whose release hint runs long still reaches
+  root rather than failing the post.
 - A thread's `cci post --lane <alias>` under a name with no registry row of its
   own posts as the registered live lane the alias reaches, such as
   `redo-epoch-reopen-1` for `redo-epoch-reopen`, instead of being refused. A

@@ -84,7 +84,7 @@ that looks like a slip for a live one, one or two edits from it or an older
 number of it, and names that lane; `--force` addresses it as typed. When a
 lane is replaced, record it once with
 `cci post --lane root --kind stand-down --to <old> --successor <new> "<why>"`:
-later records addressed to `<old>` reach `<new>` too, `cci who` marks `<old>`
+a later `--to <old>` is refused naming `<new>`, `cci who` marks `<old>`
 stood down, and `cci who --successor-of <old> --json` names who stands in.
 A stand-down stands down its first `--to` lane only; the lanes it copies stay live.
 A thread cannot bind a lane another live thread holds until that lane stands

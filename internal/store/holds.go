@@ -450,6 +450,20 @@ func (s *Store) Successors(ctx context.Context, drive, lane string) (chain []str
 	}
 }
 
+// LastDown names the lane behind name on drive that stood down last and the
+// seq of that stand-down: name itself when it carries a number, else the
+// newest stood-down lane of the stem name. Seq is 0 when none stood down.
+func (s *Store) LastDown(ctx context.Context, drive, name string) (lane string, seq int64, err error) {
+	err = s.db.QueryRowContext(ctx, "SELECT lane, down FROM lane_holds WHERE drive = ?1 AND (lane = ?2 OR ?3 AND stem = ?2 AND "+ownStem("lane_holds")+") AND down > 0 ORDER BY down DESC LIMIT 1", drive, name, Stem(name) == name).Scan(&lane, &seq)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", 0, nil
+	}
+	if err != nil {
+		return "", 0, fmt.Errorf("read the last stand-down under %s on %s: %w", name, drive, err)
+	}
+	return lane, seq, nil
+}
+
 // Generations lists every lane registered under stem on drive, live or stood
 // down, oldest name first: the names a launch numbers past, so none is reused.
 // The query reads the stem's own rows through its index.
