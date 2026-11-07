@@ -90,7 +90,7 @@ func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey,
 	}
 	for _, v := range views {
 		sameWindow := window.PID != 0 && v.PID == window.PID && v.PIDStarted == window.Started
-		if v.Drive == drive && v.Lane == lane && v.Key() != self && v.Key() != owner && !sameWindow && st.Now().Sub(v.SeenAt) < peers.StaleAfter {
+		if v.Drive == drive && v.Lane == lane && v.Key() != self && v.Key() != owner && !sameWindow && holds(v, st.Now()) {
 			return v, true, nil
 		}
 	}
@@ -100,6 +100,13 @@ func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey,
 	}
 	session, agent, _ := strings.Cut(r.Fields.Attrs[store.BinderAttr], "/")
 	return peers.View{Peer: store.Peer{Session: session, Agent: agent, Origin: r.Origin, Drive: drive, Lane: lane, SeenAt: r.At}, Name: lane}, true, nil
+}
+
+func holds(v peers.View, now time.Time) bool {
+	if v.Agent == "" {
+		return now.Sub(v.SeenAt) < peers.StaleAfter
+	}
+	return v.Live
 }
 
 func predecessors(lane string) []string {

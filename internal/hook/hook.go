@@ -45,6 +45,7 @@ type Payload struct {
 	Source          string            `json:"source"`
 	Prompt          string            `json:"prompt"`
 	ToolName        string            `json:"tool_name"`
+	ToolInput       json.RawMessage   `json:"tool_input"`
 	LastMessage     string            `json:"last_assistant_message"`
 	Error           string            `json:"error"`
 	BackgroundTasks []json.RawMessage `json:"background_tasks"`
@@ -206,12 +207,20 @@ func keepSubscribedLane(ctx context.Context, st *store.Store, p Payload, window 
 // peer:<session>/<label>. A subagent or teammate the registry does not list as
 // live is announced as its own peer first, with window naming the harness
 // process it runs in.
+//
+// A TaskStop call retires the subagent or teammate it stopped, since the
+// harness sends no SubagentStop for it.
 func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() (store.Window, error), w io.Writer) error {
 	return PostToolUseNoted(ctx, st, p, "", window, w)
 }
 
 // PostToolUseNoted is PostToolUse with a line for the session ahead of its records.
 func PostToolUseNoted(ctx context.Context, st *store.Store, p Payload, note string, window func() (store.Window, error), w io.Writer) error {
+	if p.ToolName == "TaskStop" {
+		if err := retireStopped(ctx, st, p); err != nil {
+			return err
+		}
+	}
 	if p.AgentID != "" {
 		if err := AnnounceAgent(ctx, st, p, window); err != nil {
 			return err
@@ -230,6 +239,29 @@ func PostToolUseNoted(ctx context.Context, st *store.Store, p Payload, note stri
 		return deliver(ctx, st, p.Key(), store.Binding{}, p.Event, false, "", w)
 	}
 	return nil
+}
+
+func retireStopped(ctx context.Context, st *store.Store, p Payload) error {
+	var stop struct {
+		TaskID  string `json:"task_id"`
+		ShellID string `json:"shell_id"`
+	}
+	if err := json.Unmarshal(p.ToolInput, &stop); err != nil {
+		return fmt.Errorf("read the TaskStop input: %w", err)
+	}
+	stopped, err := st.Peers(ctx, store.PeerQuery{Session: p.SessionID, Agent: cmp.Or(stop.TaskID, stop.ShellID), All: true})
+	if err != nil {
+		return err
+	}
+	retire := make([]store.PeerKey, 0, len(stopped))
+	for _, peer := range stopped {
+		retire = append(retire, peer.Key())
+	}
+	if len(retire) == 0 {
+		return nil
+	}
+	_, err = st.Commit(ctx, store.Write{Retire: retire})
+	return err
 }
 
 // AnnounceAgent registers the subagent or teammate p names as its own peer,
