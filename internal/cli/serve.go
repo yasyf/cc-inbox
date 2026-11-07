@@ -289,6 +289,17 @@ func newHookCmd() *cobra.Command {
 			}),
 		},
 		&cobra.Command{
+			Use:  "task-stop",
+			Args: cobra.NoArgs,
+			RunE: withHookStore(hookRunBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {
+				p, err := hook.Read(cmd.InOrStdin())
+				if err != nil {
+					return err
+				}
+				return hook.TaskStop(cmd.Context(), st, p)
+			}),
+		},
+		&cobra.Command{
 			Use:  "stop-failure",
 			Args: cobra.NoArgs,
 			RunE: withHookStore(hookRunBudget, func(cmd *cobra.Command, st *store.Store, _ []string) error {

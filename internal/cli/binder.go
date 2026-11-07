@@ -59,7 +59,7 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, wi
 			continue
 		}
 		seen := st.Now().Sub(holder.SeenAt).Round(time.Minute)
-		name := holder.Name + " " + holder.Key().String()
+		name := strings.TrimSpace(holder.Name + " " + holder.Key().String())
 		if holder.Origin != "" {
 			name += " on node " + holder.Origin
 		}
@@ -70,14 +70,22 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, wi
 			}
 			continue
 		}
-		text := fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it", lane, self, name, seen, lane)
+		release := orphanRelease(holder, seen)
+		text := fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it%s", lane, self, name, seen, lane, release)
 		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
 		if err != nil {
 			return err
 		}
-		return &HeldLane{fmt.Sprintf("lane %s is held by live thread %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d. The name passes to another thread only after a stand-down: cci post --drive %s --lane root --kind stand-down --to %s --successor <lane> --text '<why>'", lane, name, seen, defect.Seq, drive, lane)}
+		return &HeldLane{fmt.Sprintf("lane %s is held by live thread %s, seen %s ago, and never stood down, so this thread did not bind it and posted nothing; stop and report to root, which heard defect #%d. The name passes to another thread only after a stand-down: cci post --drive %s --lane root --kind stand-down --to %s --successor <lane> --text '<why>'%s", lane, name, seen, defect.Seq, drive, lane, release)}
 	}
 	return nil
+}
+
+func orphanRelease(holder peers.View, seen time.Duration) string {
+	if holder.Agent == "" || holder.Origin != "" {
+		return ""
+	}
+	return fmt.Sprintf(". Subagent %s of session %s last ran a tool %s ago; if the harness stopped it, as the tasks panel and Esc do without telling cci, free the lane in one step: echo '{\"session_id\":\"%s\",\"tool_input\":{\"task_id\":\"%s\"}}' | cci hook task-stop", holder.Agent, holder.Session, seen, holder.Session, holder.Agent)
 }
 
 func liveHolder(ctx context.Context, st *store.Store, self, owner store.PeerKey, window store.Window, drive, lane string) (peers.View, bool, error) {
