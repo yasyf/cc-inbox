@@ -63,7 +63,7 @@ func TestAPostToAnAliasIsNoSlipWhileANumberedLaneOnTheDriveAnswersToIt(t *testin
 	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", "diagnosis-1", "--text", "diagnosis-1 is done"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := run(t, "post", "--drive", "d", "--lane", "fix", "--kind", "note", "--to", "diagnosis", "--text", "after it finished"); err != nil {
-		t.Fatalf("post --to diagnosis: %v; want it stored for the alias", err)
+	if _, err := run(t, "post", "--drive", "d", "--lane", "fix", "--kind", "note", "--to", "diagnosis", "--text", "after it finished"); err == nil || strings.Contains(err.Error(), "slip") || !strings.Contains(err.Error(), "post to root") {
+		t.Fatalf("post --to diagnosis: %v; want the retired alias refused naming root, not read as a slip", err)
 	}
 }

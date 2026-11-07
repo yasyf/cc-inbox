@@ -35,20 +35,16 @@ func TestAPostToALaneNoLiveLaneReadsTellsThePoster(t *testing.T) {
 	if _, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "sv-2", "--text", "sv-2 stands down"); err != nil {
 		t.Fatal(err)
 	}
-	out, err = run(t, "post", "--lane", "root", "--kind", "note", "--to", "sv-2", "--text", "late word")
-	if err != nil || !strings.HasPrefix(out, "cci: --to sv-2: sv-2 stood down, so this reaches sv-3; --to sv reaches whichever lane holds it\n") {
-		t.Fatalf("post to a retired sv-2 = %q, %v; want the hint naming sv", out, err)
-	}
 	out, err = run(t, "tail", "--drive", "d", "--since", "0", "--reader", "sv-3")
-	if err != nil || !strings.Contains(out, "note root>sv late word") || !strings.Contains(out, "note root>sv pool word") {
-		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's mail, retired sv-2's stored for the stem", out, err)
+	if err != nil || !strings.Contains(out, "note root>sv pool word") {
+		t.Fatalf("tail --reader sv-3 = %q, %v; want the stem's mail", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "root", "--kind", "stand-down", "--to", "sv-3", "--text", "sv-3 stands down"); err != nil {
 		t.Fatal(err)
 	}
-	out, err = run(t, "post", "--lane", "root", "--kind", "note", "--to", "sv", "--text", "anyone?")
-	if err != nil || !strings.HasPrefix(out, "cci: --to sv: no lane holds sv; the first lane to register as sv or sv-<n> reads this\n") {
-		t.Fatalf("post to a stem no lane holds = %q, %v; want the poster told", out, err)
+	out, err = run(t, "post", "--lane", "root", "--kind", "note", "--to", "fresh", "--text", "anyone?")
+	if err != nil || !strings.HasPrefix(out, "cci: --to fresh: no lane holds fresh; the first lane to register as fresh or fresh-<n> reads this\n") {
+		t.Fatalf("post to a stem no lane ever held = %q, %v; want the poster told", out, err)
 	}
 	if _, err := run(t, "post", "--lane", "sv-4", "--kind", "state", "--text", "sv-4 up"); err != nil {
 		t.Fatal(err)
@@ -58,8 +54,8 @@ func TestAPostToALaneNoLiveLaneReadsTellsThePoster(t *testing.T) {
 		t.Fatalf("post to a stem one lane holds = %q, %v; want no notice", out, err)
 	}
 	out, err = run(t, "tail", "--drive", "d", "--since", "0", "--reader", "sv-4")
-	if err != nil || !strings.Contains(out, "note root>sv anyone?") || !strings.Contains(out, "note root>sv welcome") {
-		t.Fatalf("tail --reader sv-4 = %q, %v; want what waited on the stem and what followed", out, err)
+	if err != nil || !strings.Contains(out, "note root>sv welcome") {
+		t.Fatalf("tail --reader sv-4 = %q, %v; want the stem's mail", out, err)
 	}
 }
 
@@ -249,8 +245,8 @@ func TestAStemOrderTheHookShowedDoesNotWakeTheLanesStemWait(t *testing.T) {
 const handedSuccessor = "dev-red-d12370de07-fix-case2"
 
 var handedReaders = []struct{ lane, hears, misses string }{
-	{"red-sweep-7", "the order for the stem", "the note for the stood-down lane"},
-	{handedSuccessor, "the note for the stood-down lane", "the order for the stem"},
+	{"red-sweep-7", "the order for the stem", "the note for the successor"},
+	{handedSuccessor, "the note for the successor", "the order for the stem"},
 }
 
 func handedToAnotherStem(t *testing.T) (*store.Store, map[string]store.PeerKey) {
@@ -294,9 +290,10 @@ func handedToAnotherStem(t *testing.T) (*store.Store, map[string]store.PeerKey) 
 	if out := post("--lane", "root", "--kind", "go", "--to", "red-sweep", "--text", "the order for the stem"); strings.HasPrefix(out, "cci:") {
 		t.Fatalf("post --to red-sweep = %q; want no notice, red-sweep-7 alone holding red-sweep", out)
 	}
-	if out := post("--lane", "root", "--kind", "note", "--to", "red-sweep-5", "--text", "the note for the stood-down lane"); !strings.HasPrefix(out, "cci: --to red-sweep-5: red-sweep-5 stood down, so this reaches "+handedSuccessor+"; --to red-sweep reaches whichever lane holds it\n") {
-		t.Fatalf("post --to red-sweep-5 = %q; want the notice naming %s", out, handedSuccessor)
+	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "note", "--to", "red-sweep-5", "--text", "late"); err == nil || !strings.HasSuffix(err.Error(), "post to its successor "+handedSuccessor+", or to root") {
+		t.Fatalf("post --to red-sweep-5 = %v; want it refused naming %s", err, handedSuccessor)
 	}
+	post("--lane", "root", "--kind", "note", "--to", handedSuccessor, "--text", "the note for the successor")
 	post("--lane", handedSuccessor, "--kind", "state", "--text", "the successor works")
 	post("--lane", "red-sweep-7", "--kind", "state", "--text", "red-sweep-7 works")
 	return st, threads

@@ -72,7 +72,11 @@ func refuseHeldLane(ctx context.Context, st *store.Store, self store.PeerKey, wi
 		}
 		release := orphanRelease(holder, seen)
 		text := fmt.Sprintf("second binder of %s refused: thread %s tried to bind it while thread %s holds it live, seen %s ago, and it never stood down; stop the duplicate, or stand %s down before another thread takes it%s", lane, self, name, seen, lane, release)
-		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: text, Source: "post"}, 0, at)
+		excerpt, path, err := st.Fit(text)
+		if err != nil {
+			return err
+		}
+		defect, _, err := st.PostAt(ctx, store.Record{ID: "second-binder:" + held + ":" + self.String(), Drive: drive, Lane: lane, Kind: kinds.Defect, To: []string{"root"}, Text: excerpt, Refs: store.Refs{Path: path}, Source: "post"}, 0, at)
 		if err != nil {
 			return err
 		}

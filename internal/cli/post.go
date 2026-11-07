@@ -227,6 +227,11 @@ func newPostCmd() *cobra.Command {
 				}
 			}
 			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, k, force, cmd.ErrOrStderr()); err != nil {
+				var retired *RetiredLane
+				if errors.As(err, &retired) && (k == kinds.Owner || store.Stem(lane) == ownerRelay) {
+					_, _, raised := st.Post(cmd.Context(), store.Record{Drive: r.Drive, Lane: "cci", Kind: kinds.Blocker, To: []string{ownerRelay}, Text: store.Clip(fmt.Sprintf("%s; the refused %s record from %s read: %s", retired, cmp.Or(string(k), "note"), lane, text)), Source: "post"}, 0)
+					return errors.Join(err, raised)
+				}
 				return err
 			}
 			switch {
@@ -348,7 +353,7 @@ func newPostCmd() *cobra.Command {
 	f.StringVar(&ownedBy, "owned-by", "", "with --kind decide, the lane that owns the one --to lane, such as the lane that maintains a script posting as that lane: stored as fields.attrs.owned-by: later asks, decides and defects addressed to the owned lane reach its owner, and the owner's successors, too; the newest such decide wins")
 	f.StringVar(&successor, "successor", "", "with --kind stand-down, the lane taking over the one --to lane: stored as fields.attrs.successor: later records addressed to the stood-down lane reach the successor too, and cci who marks the lane stood down")
 	f.StringVar(&r.Topic, "topic", "", "pairing key, e.g. #30427 or an incident name")
-	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane a stand-down handed to a successor is addressed with its successors too; a name ending -<n> answers under its stem, the name without it: --to <stem> reaches the stem's newest live lane, a numbered name is stored as its stem while the stem reaches that same lane, a stood-down lane's mail reaches the successor it named or else that lane, and the post prints one line when no live lane reads a name or several running lanes share its stem; owner and all always pass; a record every --to of which names the posting lane itself is refused, naming who wrote the record it answers")
+	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane that stood down, or a stem whose every lane stood down, is refused before anything is written, naming its live successor or root, and an owner record or an owner-relay post so refused also raises a blocker to owner-relay; a name ending -<n> answers under its stem, the name without it: --to <stem> reaches the stem's newest live lane, a numbered name is stored as its stem while the stem reaches that same lane, and the post prints one line when no live lane reads a name or several running lanes share its stem; owner and all always pass; a record every --to of which names the posting lane itself is refused, naming who wrote the record it answers")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) or alias (t:<topic>, ccn:<id or text prefix>, card:<id>, pr#N, last:<kind>[:<lane>]) of the record this one answers or closes; an alias names its one open record, else its one record, and refuses naming the candidates; repeated, each gets its own record; with no --to, each is addressed to the lane that wrote the record it answers, as <lane>@<drive> when that record is on another drive")
 	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) or alias, as for --re but naming an open record, of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
@@ -562,6 +567,8 @@ func selfAddressed(ctx context.Context, st *store.Store, r store.Record, lane st
 	return fmt.Errorf("%s; #%d came from %s, which a reply with no --to reaches", why, r.Re, to)
 }
 
+const ownerRelay = "owner-relay"
+
 var ownerForwarded = []kinds.Kind{kinds.Ask, kinds.Decide, kinds.Defect}
 
 func forwarded(ctx context.Context, st *store.Store, drive string, to []string, kind kinds.Kind) ([]string, error) {
@@ -578,6 +585,13 @@ func forwarded(ctx context.Context, st *store.Store, drive string, to []string, 
 		if err != nil {
 			return nil, err
 		}
+		live, err := liveLane(ctx, st, laneDrive, lane)
+		if err != nil {
+			return nil, err
+		}
+		if live {
+			chain = nil
+		}
 		owner := ""
 		if slices.Contains(ownerForwarded, kind) {
 			if owner, err = st.LaneOwner(ctx, laneDrive, lane); err != nil {
@@ -589,11 +603,14 @@ func forwarded(ctx context.Context, st *store.Store, drive string, to []string, 
 			if err != nil && !errors.Is(err, store.ErrNoLaneRegistry) {
 				return nil, err
 			}
-			if !reach.Started || reach.Lane != "" {
-				owners, _, err := st.Successors(ctx, laneDrive, owner)
-				if err != nil {
-					return nil, err
-				}
+			owners, _, err := st.Successors(ctx, laneDrive, owner)
+			if err != nil {
+				return nil, err
+			}
+			if reach.Started && !reach.Down {
+				owners = nil
+			}
+			if !reach.Started || !reach.Down || len(owners) > 0 {
 				chain = append(append(chain, owner), owners...)
 			}
 		}
@@ -607,6 +624,14 @@ func forwarded(ctx context.Context, st *store.Store, drive string, to []string, 
 		}
 	}
 	return out, nil
+}
+
+func liveLane(ctx context.Context, st *store.Store, drive, lane string) (bool, error) {
+	reach, err := st.Reach(ctx, drive, lane)
+	if errors.Is(err, store.ErrNoLaneRegistry) {
+		return false, nil
+	}
+	return reach.Started && !reach.Down, err
 }
 
 var errManyTargets = errors.New("post takes several --re or several --resolves, not both: each seq of a repeated --re becomes its own record")

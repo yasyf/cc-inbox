@@ -726,6 +726,9 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 					registry, err = false, nil
 				}
 			}
+			if err == nil && registry && kind != kinds.StandDown {
+				err = refuseRetired(ctx, st, drive, t, reach)
+			}
 			if err == nil && !force && len(reading[t]) == 0 && (!registry || !reach.Started && (t != reach.Stem || len(reach.Holders) == 0)) {
 				err = mistypedLane(ctx, st, drive, t)
 			}
@@ -813,6 +816,31 @@ func routeLane(lane, drive string, reading []string, notices io.Writer) (string,
 	return addr, err
 }
 
+// RetiredLane refuses a post addressed to a lane that stood down, so no order
+// waits in a mailbox nobody reads.
+type RetiredLane struct{ line string }
+
+func (e *RetiredLane) Error() string { return e.line }
+
+func refuseRetired(ctx context.Context, st *store.Store, drive, to string, reach store.Reach) error {
+	if reach.Lane != "" && (!reach.Down || to == reach.Stem) {
+		return nil
+	}
+	lane, seq, err := st.LastDown(ctx, drive, to)
+	if err != nil || seq == 0 {
+		return err
+	}
+	down, err := st.Get(ctx, seq)
+	if err != nil {
+		return err
+	}
+	heir := "root"
+	if reach.Lane != "" {
+		heir = "its successor " + reach.Lane + ", or to root"
+	}
+	return &RetiredLane{fmt.Sprintf("REFUSED: --to %s: %s stood down at %s (#%d); post to %s", to, lane, render.Stamp(down.At, st.Now()), seq, heir)}
+}
+
 func noticeReach(w io.Writer, to string, r store.Reach) error {
 	var line string
 	switch {
@@ -823,10 +851,8 @@ func noticeReach(w io.Writer, to string, r store.Reach) error {
 		}
 		line = fmt.Sprintf("%s run under %s at once; this reaches %s", strings.Join(r.Holders, ", "), r.Stem, strings.Join(readers, " and "))
 	case r.Started && !r.Down:
-	case r.Down && r.Lane != "":
-		line = fmt.Sprintf("%s stood down, so this reaches %s; --to %s reaches whichever lane holds it", to, r.Lane, r.Stem)
 	case r.Down:
-		line = fmt.Sprintf("%s stood down and no live lane holds %s; the next lane to register as %s or %s-<n> reads this", to, r.Stem, r.Stem, r.Stem)
+		line = fmt.Sprintf("%s stood down, so this reaches %s", to, r.Lane)
 	case to == r.Stem && len(r.Holders) == 0:
 		line = fmt.Sprintf("no lane holds %s; the first lane to register as %s or %s-<n> reads this", to, to, to)
 	case to != r.Stem && len(r.Holders) > 0:
