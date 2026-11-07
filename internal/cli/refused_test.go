@@ -155,8 +155,47 @@ func TestAPostUnderTheAliasItsSessionHoldsGoesOutAsThatSessionsLane(t *testing.T
 	if out := post("meta-desk", "019a3c3e-desk"); !strings.Contains(out, `"lane":"meta-desk-3"`) || !strings.Contains(out, "err=<nil>") {
 		t.Fatalf("a post under the alias the session holds = %s; want it stored as meta-desk-3", out)
 	}
-	if out := post("meta-desk", "019a3c3e-other"); !strings.Contains(out, "has no registry row") {
-		t.Fatalf("another session's post under that alias = %s; want it refused", out)
+	if out := post("meta-desk", "019a3c3e-other"); !strings.Contains(out, "lane meta-desk-3 is held by live thread") {
+		t.Fatalf("another session's post under that alias = %s; want it refused as a second binder of meta-desk-3", out)
+	}
+}
+
+func TestAnAliasPostGoesOutAsTheRegisteredLiveLaneOfItsFamily(t *testing.T) {
+	if lane := os.Getenv("CCI_TEST_FAMILY"); lane != "" {
+		out, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", "working", "--json")
+		fmt.Printf("out=%s err=%v\n", strings.TrimSpace(out), err)
+		return
+	}
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lane := range []string{"turn-error-evidence-1", "ended-lane-1", "plain-lane"} {
+		if _, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "root", Kind: kinds.Spawn, Text: "SPAWNED " + lane, Refs: store.Refs{Lanes: []string{lane}}, Fields: store.Fields{Attrs: map[string]string{"brief": "/briefs/" + lane + ".md", "model": "opus"}}}, 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "root", Kind: kinds.StandDown, To: []string{"ended-lane-1"}, Text: "ended-lane-1 is done"}, 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	post := func(lane, id string) string {
+		t.Helper()
+		return inWindow(t, "TestAnAliasPostGoesOutAsTheRegisteredLiveLaneOfItsFamily", home, id, "CCI_TEST_FAMILY="+lane)
+	}
+	if out := post("turn-error-evidence", "019a3c3e-evidence"); !strings.Contains(out, `"lane":"turn-error-evidence-1"`) || !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("a first post under the alias of a launched numbered lane = %s; want it stored as turn-error-evidence-1", out)
+	}
+	if out := post("ended-lane", "019a3c3e-ended"); !strings.Contains(out, "lane ended-lane has no registry row") {
+		t.Fatalf("a post under an alias whose only lane stood down = %s; want it refused", out)
+	}
+	if out := post("plain-lane", "019a3c3e-plain"); !strings.Contains(out, `"lane":"plain-lane"`) || !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("a launched lane's own post = %s; want it stored as plain-lane", out)
 	}
 }
 
