@@ -537,7 +537,7 @@ func TestASeedCutOffPartwayKeepsWhatItReadAndSyncReadsOnlyTheRest(t *testing.T) 
 		t.Fatal(err)
 	}
 	var copied bytes.Buffer
-	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, &copied); err != nil {
+	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, "", &copied); err != nil {
 		t.Fatal(err)
 	}
 	late := newPeer(t, srv, node.TierOwner)
@@ -569,7 +569,7 @@ func TestSeedLoadsAnExportedDriveSoSyncReadsOnlyWhatArrivedSince(t *testing.T) {
 		t.Fatal(err)
 	}
 	var copied bytes.Buffer
-	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, &copied); err != nil {
+	if err := relay.ExportDrive(context.Background(), a.st, "d", time.Time{}, "", &copied); err != nil {
 		t.Fatal(err)
 	}
 	late := newPeer(t, srv, node.TierOwner)
@@ -619,7 +619,7 @@ func TestAnExportSinceALaunchSeedsOnlyWhatTheStoreTookFromThen(t *testing.T) {
 		{launch, []string{"at the launch", "before the join"}},
 	} {
 		var copied bytes.Buffer
-		if err := relay.ExportDrive(context.Background(), a.st, "d", step.since, &copied); err != nil {
+		if err := relay.ExportDrive(context.Background(), a.st, "d", step.since, "", &copied); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := late.node.Seed(context.Background(), "d", &copied); err != nil {
@@ -628,6 +628,32 @@ func TestAnExportSinceALaunchSeedsOnlyWhatTheStoreTookFromThen(t *testing.T) {
 		if got := texts(t, late.st); !slices.Equal(got, step.want) {
 			t.Fatalf("a seed from an export since %s left the store holding %q, want %q", step.since, got, step.want)
 		}
+	}
+}
+
+func TestAnExportForASuccessorCarriesItsPredecessorsRecordsFromBeforeTheLaunch(t *testing.T) {
+	srv, a, b, _ := mesh(t)
+	launch := a.st.Now().Add(time.Hour)
+	testutil.Post(t, a.st, store.Record{Lane: "fix", Kind: kinds.Note, Text: "the predecessor's finding"})
+	testutil.Post(t, a.st, store.Record{Lane: "fix-other", Kind: kinds.Note, Text: "a lane sharing a prefix"})
+	testutil.Post(t, a.st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"fix"}, Text: "root's answer to the predecessor"})
+	testutil.Post(t, a.st, store.Record{Lane: "evidence", Kind: kinds.Note, Text: "another lane before the launch"})
+	a.st.Now = func() time.Time { return launch }
+	testutil.Post(t, a.st, store.Record{Lane: "evidence", Kind: kinds.Note, Text: "another lane at the launch"})
+	late := newPeer(t, srv, node.TierOwner)
+	pin(t, late, a, b)
+	join(t, srv, late)
+
+	var copied bytes.Buffer
+	if err := relay.ExportDrive(context.Background(), a.st, "d", launch, "fix-2", &copied); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := late.node.Seed(context.Background(), "d", &copied); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"the predecessor's finding", "root's answer to the predecessor", "another lane at the launch"}
+	if got := texts(t, late.st); !slices.Equal(got, want) {
+		t.Fatalf("the successor's store holds %q, want %q", got, want)
 	}
 }
 
