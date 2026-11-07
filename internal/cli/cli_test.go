@@ -1008,7 +1008,7 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	if err != nil || !strings.Contains(out, "ask root>peer:bbbb2222 take #34363?") || !strings.Contains(out, "go root@drive-a>root@drive-b GO") || len(recordLines(out)) != 2 {
 		t.Fatalf("b tail = %q, %v", out, err)
 	}
-	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "1", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#3\n" {
+	if out, err = run(t, "post", "--lane", "root", "--kind", "answer", "--resolves", "1", "--to", "peer:aaaa", "--text", "yes"); err != nil || out != "#3\ncci: resolved #1 ask root: take #34363?\n" {
 		t.Fatalf("answer across drives = %q, %v", out, err)
 	}
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
@@ -1402,11 +1402,12 @@ func TestRepeatedResolvesClosesEverySeq(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	const sweptAsks = "cci: resolved #1 ask lane-a: first?\ncci: resolved #2 ask lane-a: second?\ncci: resolved #3 ask lane-a: third?\n"
 	out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1", "--resolves", "2,3,2", "--id", "sweep", "--text", "stale")
-	if err != nil || out != "#4\n" {
+	if err != nil || out != "#4\n"+sweptAsks {
 		t.Fatalf("post with three --resolves = %q, %v; want one record", out, err)
 	}
-	if out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1,2,3", "--id", "sweep", "--text", "stale"); err != nil || out != "#4 (duplicate)\n" {
+	if out, err := run(t, "post", "--lane", "root", "--kind", "note", "--resolves", "1,2,3", "--id", "sweep", "--text", "stale"); err != nil || out != "#4 (duplicate)\n"+sweptAsks {
 		t.Fatalf("repost = %q, %v", out, err)
 	}
 	if out, err := run(t, "tail", "--since", "0", "--kind", "ask"); err != nil || strings.Count(out, "[RESOLVED #4]") != 3 {

@@ -49,7 +49,7 @@ func TestPostMachineReferencesKeepInternalTargetsOnNonownerNodes(t *testing.T) {
 	}
 	for _, target := range []*store.Store{st, owner} {
 		for i := range 7 {
-			if _, _, err := target.Post(t.Context(), store.Record{Drive: "test-drive", Lane: "root", Kind: kinds.Note, Text: fmt.Sprintf("seed %d", i)}, 0); err != nil {
+			if _, _, err := target.Post(t.Context(), store.Record{Drive: "test-drive", Lane: "root", Kind: kinds.Blocker, Text: fmt.Sprintf("seed %d", i)}, 0); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -61,7 +61,7 @@ func TestPostMachineReferencesKeepInternalTargetsOnNonownerNodes(t *testing.T) {
 	if _, err := st.Apply(t.Context(), rows, nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.Apply(t.Context(), []store.Row{{Origin: "bbbbbbbbbbbbbbbb", OriginSeq: 100, Drive: "test-drive", Lane: "root", Kind: kinds.Note, At: time.Now(), Text: "remote target", Source: "post"}}, nil); err != nil {
+	if _, err := st.Apply(t.Context(), []store.Row{{Origin: "bbbbbbbbbbbbbbbb", OriginSeq: 100, Drive: "test-drive", Lane: "root", Kind: kinds.Blocker, At: time.Now(), Text: "remote target", Source: "post"}}, nil); err != nil {
 		t.Fatal(err)
 	}
 	ownerSeq, err := st.Resolve(t.Context(), "#7")
@@ -95,7 +95,7 @@ func TestPostMachineReferencesKeepInternalTargetsOnNonownerNodes(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				lines := strings.Split(strings.TrimSpace(out), "\n")
+				lines := strings.Split(strings.TrimSpace(withoutResolved(out)), "\n")
 				if len(lines) != len(tt.want) {
 					t.Fatalf("post returned %d JSON records, want %d: %s", len(lines), len(tt.want), out)
 				}

@@ -65,6 +65,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A second binder's `defect` to root keeps its first 400 characters and points
   at the full text, so a refusal whose release hint runs long still reaches
   root rather than failing the post.
+- `cci post --resolves <seq>` prints one `cci: resolved <name> <kind> <lane>:
+  <first 80 characters>` line on stderr for each record it closed, so a lane
+  sees when it named the wrong number. It refuses, before anything is written,
+  a seq whose record opens nothing to resolve, such as an answer or a note;
+  asks, decides, blockers, blocked records, defects, holds and incidents still
+  resolve.
 - A thread's `cci post --lane <alias>` under a name with no registry row of its
   own posts as the registered live lane the alias reaches, such as
   `redo-epoch-reopen-1` for `redo-epoch-reopen`, instead of being refused. A
