@@ -33,17 +33,24 @@ func bindsCaller(ctx context.Context, lane string) bool {
 	return inv == nil || !inv.embedder || getenv(ctx, launcherLaneEnv) == lane
 }
 
-// refuseUnregistered refuses a thread's first post as a lane nothing launched,
-// which no supervisor would ever notice going quiet.
-func refuseUnregistered(ctx context.Context, st *store.Store, drive, lane string) error {
+func registeredLane(ctx context.Context, st *store.Store, drive, lane string) (string, error) {
 	if store.RootName(lane) || lane == "owner" || getenv(ctx, launcherLaneEnv) == lane {
-		return nil
+		return lane, nil
 	}
 	registered, err := st.LaneRegistered(ctx, drive, lane)
 	if err != nil || registered {
-		return err
+		return lane, err
 	}
-	return fmt.Errorf("lane %s has no registry row on drive %s, so nothing would supervise it: launch it through its launcher, or have the launcher post cci post --drive %s --lane <launcher> --kind spawn --lane-ref %s --attr brief=<absolute brief path> --attr model=<model> --text 'SPAWNED %s'", lane, drive, drive, lane, lane)
+	reach, err := st.Reach(ctx, drive, lane)
+	if err != nil && !errors.Is(err, store.ErrNoLaneRegistry) {
+		return "", err
+	}
+	if reach.Lane != "" && reach.Lane != lane {
+		if registered, err := st.LaneRegistered(ctx, drive, reach.Lane); err != nil || registered {
+			return reach.Lane, err
+		}
+	}
+	return "", fmt.Errorf("lane %s has no registry row on drive %s, so nothing would supervise it: launch it through its launcher, or have the launcher post cci post --drive %s --lane <launcher> --kind spawn --lane-ref %s --attr brief=<absolute brief path> --attr model=<model> --text 'SPAWNED %s'", lane, drive, drive, lane, lane)
 }
 
 // refuseProseEnd refuses a lane's own end written as a sentence in a record the
