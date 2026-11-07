@@ -261,6 +261,23 @@ func newPostCmd() *cobra.Command {
 					return err
 				}
 			}
+			var resolved []store.Record
+			for _, seq := range resolvesSeqs {
+				if slices.ContainsFunc(resolved, func(o store.Record) bool { return o.Seq == seq }) {
+					continue
+				}
+				o, err := st.Get(cmd.Context(), seq)
+				if err != nil {
+					return fmt.Errorf("--resolves #%d: %w", seq, err)
+				}
+				if o.Num, err = st.Number(cmd.Context(), o); err != nil {
+					return err
+				}
+				if !o.Kind.Opens() {
+					return fmt.Errorf("--resolves %s: it is a %s from %s, which opens nothing to resolve; name the ask, decide, blocker, blocked, defect, hold or incident this record resolves", o.Name(), o.Kind, o.Lane)
+				}
+				resolved = append(resolved, o)
+			}
 			for _, ref := range namedPRs {
 				prs, err := namedRefPRs(cmd.Context(), st, r.Drive, ref)
 				if err != nil {
@@ -338,6 +355,11 @@ func newPostCmd() *cobra.Command {
 					return err
 				}
 				if err := printPosted(cmd.OutOrStdout(), p.Record, p.Duplicate, asJSON); err != nil {
+					return err
+				}
+			}
+			for _, o := range resolved {
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: resolved %s %s %s: %s\n", o.Name(), o.Kind, o.Lane, render.Clip(o.Text, 80)); err != nil {
 					return err
 				}
 			}

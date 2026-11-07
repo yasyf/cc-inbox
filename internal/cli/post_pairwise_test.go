@@ -29,7 +29,7 @@ func TestPostPairwisePreservesOrderedPairs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			lines := strings.Split(strings.TrimSpace(out), "\n")
+			lines := strings.Split(strings.TrimSpace(withoutResolved(out)), "\n")
 			if len(lines) != len(tt.want) {
 				t.Fatalf("post returned %d records, want %d: %q", len(lines), len(tt.want), out)
 			}
@@ -50,10 +50,10 @@ func TestPostPairwiseIdempotencyIncludesBothTargets(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	seedPairwiseTargets(t)
 	args := []string{"post", "--drive", "test-drive", "--lane", "root", "--kind", "note", "--pairwise", "--re", "1,1", "--resolves", "3,4", "--id", "paired", "--topic", "paired", "--text", "summary"}
-	if out, err := run(t, args...); err != nil || out != "#5\n#6\n" {
+	if out, err := run(t, args...); err != nil || withoutResolved(out) != "#5\n#6\n" {
 		t.Fatalf("post = %q, %v; want two distinct pairs", out, err)
 	}
-	if out, err := run(t, args...); err != nil || out != "#5 (duplicate)\n#6 (duplicate)\n" {
+	if out, err := run(t, args...); err != nil || withoutResolved(out) != "#5 (duplicate)\n#6 (duplicate)\n" {
 		t.Fatalf("repost = %q, %v; want the same two records", out, err)
 	}
 	if out, err := run(t, "tail", "--drive", "test-drive", "--since", "0", "--topic", "paired", "--json"); err != nil || strings.Count(strings.TrimSpace(out), "\n") != 1 {
@@ -64,7 +64,7 @@ func TestPostPairwiseIdempotencyIncludesBothTargets(t *testing.T) {
 func seedPairwiseTargets(t *testing.T) {
 	t.Helper()
 	for _, text := range []string{"first", "second", "third", "fourth"} {
-		if _, err := run(t, "post", "--drive", "test-drive", "--lane", "root", "--kind", "note", "--text", text); err != nil {
+		if _, err := run(t, "post", "--drive", "test-drive", "--lane", "root", "--kind", "blocker", "--text", text); err != nil {
 			t.Fatal(err)
 		}
 	}
