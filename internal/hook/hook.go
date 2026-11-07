@@ -428,7 +428,7 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 		newest := open[max(0, len(open)-openShown):]
 		ids := make([]string, len(newest))
 		for i, r := range newest {
-			ids[len(newest)-1-i] = fmt.Sprintf("#%d %s %dm", r.Seq, r.Lane, int(now.Sub(r.At).Minutes()))
+			ids[len(newest)-1-i] = fmt.Sprintf("%s %s %dm", r.Name(), r.Lane, int(now.Sub(r.At).Minutes()))
 		}
 		_, _ = fmt.Fprintf(w, "%d open asks addressed to %s, changed since the last list; newest: %s; cci show <seq> prints one, cci tail --open lists them\n", len(open), b.Lane, strings.Join(ids, ", "))
 		return ack, nil
@@ -493,7 +493,7 @@ func nudgeOverdue(ctx context.Context, st *store.Store, p Payload, b store.Bindi
 		return false, nil
 	}
 	newest := late[len(late)-1]
-	reason := fmt.Sprintf("cci #%d %s from %s to %s has waited %dm unanswered: %s. Answer it, then close it with cci post --resolves %d.", newest.Seq, strings.ToUpper(string(newest.Kind)), newest.Lane, b.Lane, int(now.Sub(newest.At).Minutes()), render.Clip(strings.Join(strings.Fields(newest.Text), " "), openWidth), newest.Seq)
+	reason := fmt.Sprintf("cci %s %s from %s to %s has waited %dm unanswered: %s. Answer it, then close it with cci post --resolves %s.", newest.Name(), strings.ToUpper(string(newest.Kind)), newest.Lane, b.Lane, int(now.Sub(newest.At).Minutes()), render.Clip(strings.Join(strings.Fields(newest.Text), " "), openWidth), strings.TrimPrefix(newest.Name(), "#"))
 	if len(late) > 1 {
 		reason += fmt.Sprintf(" %d older overdue asks also wait.", len(late)-1)
 	}

@@ -69,7 +69,7 @@ func TestABareNumberANonownerNodePrintedResolvesOnThatNode(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &reply); err != nil {
 		t.Fatal(err)
 	}
-	want, err := sprite.Resolve(t.Context(), printed)
+	want, _, err := sprite.Resolve(t.Context(), printed, "")
 	if err != nil {
 		t.Fatal(err)
 	}

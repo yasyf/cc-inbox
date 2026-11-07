@@ -50,49 +50,18 @@ func (s *BoardSnapshot) numbered(ctx context.Context, records []Record) error {
 		targets = append(targets, r.Re, r.Resolves)
 		targets = append(targets, r.AlsoResolves...)
 	}
-	names, err := s.names(ctx, owners, targets)
+	shared, names, err := s.store.names(ctx, s.tx, owners, records, targets)
 	if err != nil {
 		return err
 	}
 	for i := range records {
 		r := &records[i]
-		r.Num, r.ReNum, r.CloseNums = s.store.name(owners, *r), names[r.Re], nil
+		r.Num, r.ReNum, r.CloseNums = s.store.name(owners, shared, *r), names[r.Re], nil
 		for _, seq := range r.Closes() {
 			r.CloseNums = append(r.CloseNums, names[seq])
 		}
 	}
 	return nil
-}
-
-func (s *BoardSnapshot) names(ctx context.Context, owners map[string]bool, seqs []int64) (map[int64]string, error) {
-	var wanted []int64
-	for _, seq := range seqs {
-		if seq != 0 {
-			wanted = append(wanted, seq)
-		}
-	}
-	out := map[int64]string{}
-	if len(wanted) == 0 {
-		return out, nil
-	}
-	ids, _ := json.Marshal(wanted)
-	rows, err := s.tx.QueryContext(ctx, "SELECT seq, origin, origin_seq FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(ids))
-	if err != nil {
-		return nil, fmt.Errorf("name targets: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var (
-			r      Record
-			origin string
-		)
-		if err := rows.Scan(&r.Seq, &origin, &r.OriginSeq); err != nil {
-			return nil, fmt.Errorf("scan target: %w", err)
-		}
-		r.Origin = s.store.local(origin)
-		out[r.Seq] = s.store.name(owners, r)
-	}
-	return out, rows.Err()
 }
 
 func (s *BoardSnapshot) OpenAmong(ctx context.Context, drive string, seqs []int64) ([]Record, error) {

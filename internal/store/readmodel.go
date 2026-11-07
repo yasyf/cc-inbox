@@ -1706,65 +1706,50 @@ func (m *ReadModel) closersOf(drive string, openers []Record) []Record {
 	return out
 }
 
-// otherNumbered is the record of another origin that #n also names in its
-// drive, nil when none does; false when only the store can say which is first.
-func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelView, bool) {
+// namesOf is names answered from memory, false when a record or target is
+// past what the model holds.
+func (m *ReadModel) namesOf(ctx context.Context, s *Store, records []Record, seqs []int64) (map[string]bool, map[int64]bool, map[int64]string, bool) {
 	if err := m.catchUp(ctx); err != nil {
 		m.failures.Add(1)
-		return nil, false
-	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if m.stale.Load() {
-		return nil, false
-	}
-	own := m.rowOf(n)
-	if own == nil {
-		return nil, true
-	}
-	if m.strs[own.from] != m.source.Self() {
-		return nil, false
-	}
-	var other *modelView
-	for _, index := range m.foreign[n] {
-		row := &m.rows[index]
-		if row.drive != own.drive || row.from == own.from {
-			continue
-		}
-		if other != nil {
-			return nil, false
-		}
-		v := m.view(row)
-		other = &v
-	}
-	return other, true
-}
-
-// namesOf is names answered from memory, false when a target is past what the
-// model holds.
-func (m *ReadModel) namesOf(ctx context.Context, s *Store, seqs []int64) (map[string]bool, map[int64]string, bool) {
-	if err := m.catchUp(ctx); err != nil {
-		m.failures.Add(1)
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.stale.Load() || m.owners == nil {
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	owners := maps.Clone(m.owners)
 	owners[s.Self()] = s.owner
-	out := make(map[int64]string, len(seqs))
+	var targets []Record
 	for _, seq := range seqs {
 		if seq == 0 {
 			continue
 		}
 		if seq > m.head {
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 		if row := m.rowOf(seq); row != nil {
-			out[seq] = s.name(owners, Record{Seq: row.seq, Origin: s.local(m.strs[row.from]), OriginSeq: row.originSeq})
+			targets = append(targets, Record{Seq: row.seq, Origin: s.local(m.strs[row.from]), OriginSeq: row.originSeq})
 		}
 	}
-	return owners, out, true
+	shared := map[int64]bool{}
+	for _, r := range records {
+		if r.Seq > m.head {
+			return nil, nil, nil, false
+		}
+	}
+	for _, n := range append(s.bare(owners, records), s.bare(owners, targets)...) {
+		holders := len(m.foreign[n])
+		if own := m.rowOf(n); own != nil && m.strs[own.from] == m.source.Self() {
+			holders++
+		}
+		if holders > 1 {
+			shared[n] = true
+		}
+	}
+	out := make(map[int64]string, len(targets))
+	for _, r := range targets {
+		out[r.Seq] = s.name(owners, shared, r)
+	}
+	return owners, shared, out, true
 }

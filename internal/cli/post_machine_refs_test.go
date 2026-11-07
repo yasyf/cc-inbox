@@ -64,11 +64,12 @@ func TestPostMachineReferencesKeepInternalTargetsOnNonownerNodes(t *testing.T) {
 	if _, err := st.Apply(t.Context(), []store.Row{{Origin: "bbbbbbbbbbbbbbbb", OriginSeq: 100, Drive: "test-drive", Lane: "root", Kind: kinds.Blocker, At: time.Now(), Text: "remote target", Source: "post"}}, nil); err != nil {
 		t.Fatal(err)
 	}
-	ownerSeq, err := st.Resolve(t.Context(), "#7")
+	ownerRef := "#7@" + owner.Self()[:8]
+	ownerSeq, _, err := st.Resolve(t.Context(), ownerRef, "")
 	if err != nil || ownerSeq == 7 {
 		t.Fatalf("fixture failed to distinguish owner number from local sequence: %d, %v", ownerSeq, err)
 	}
-	remoteSeq, err := st.Resolve(t.Context(), "#100@bbbbbbbb")
+	remoteSeq, _, err := st.Resolve(t.Context(), "#100@bbbbbbbb", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,8 +81,8 @@ func TestPostMachineReferencesKeepInternalTargetsOnNonownerNodes(t *testing.T) {
 		also []int64
 	}{
 		{"machine", []string{"--re-seq", ownerID, "--resolves-seq", remoteID}, [][2]int64{{ownerSeq, remoteSeq}}, nil},
-		{"human unchanged", []string{"--re", "#7", "--resolves", "#100@bbbbbbbb"}, [][2]int64{{ownerSeq, remoteSeq}}, nil},
-		{"human reply machine resolve", []string{"--re", "#7", "--resolves-seq", remoteID}, [][2]int64{{ownerSeq, remoteSeq}}, nil},
+		{"human unchanged", []string{"--re", ownerRef, "--resolves", "#100@bbbbbbbb"}, [][2]int64{{ownerSeq, remoteSeq}}, nil},
+		{"human reply machine resolve", []string{"--re", ownerRef, "--resolves-seq", remoteID}, [][2]int64{{ownerSeq, remoteSeq}}, nil},
 		{"machine reply human resolve", []string{"--re-seq", ownerID, "--resolves", "#100@bbbbbbbb"}, [][2]int64{{ownerSeq, remoteSeq}}, nil},
 		{"multiple replies", []string{"--re-seq", ownerID + ",1", "--resolves-seq", remoteID}, [][2]int64{{ownerSeq, remoteSeq}, {1, remoteSeq}}, nil},
 		{"multiple resolves", []string{"--resolves-seq", ownerID, "--resolves-seq", remoteID + "," + ownerID}, [][2]int64{{0, ownerSeq}}, []int64{remoteSeq}},

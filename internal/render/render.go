@@ -163,7 +163,7 @@ func WithBody(line string, r store.Record) string {
 		panic(fmt.Sprintf("indent body of #%d: %v", r.Seq, err))
 	}
 	if b.Len() > store.MaxText {
-		return fmt.Sprintf("%s\n(body: %d bytes; cci show %d prints it)", line, len(r.Body), r.Seq)
+		return fmt.Sprintf("%s\n(body: %d bytes; cci show %s prints it)", line, len(r.Body), strings.TrimPrefix(r.Name(), "#"))
 	}
 	return line + "\n" + b.String()
 }

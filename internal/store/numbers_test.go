@@ -2,6 +2,7 @@ package store_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +50,7 @@ func TestEveryNodeNamesARecordByItsOriginNumber(t *testing.T) {
 		}
 	}
 
-	onSprite, err := sprite.Resolve(ctx, "#2")
+	onSprite, _, err := sprite.Resolve(ctx, "#2", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,14 +59,14 @@ func TestEveryNodeNamesARecordByItsOriginNumber(t *testing.T) {
 	if err != nil || got.ReNum != "#2" {
 		t.Fatalf("sprite reply answers %q, %v; want the Mac's number #2", got.ReNum, err)
 	}
-	onMac, err := mac.Resolve(ctx, tag)
+	onMac, _, err := mac.Resolve(ctx, tag, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if back, err := mac.Get(ctx, onMac); err != nil || back.Text != note.Text {
 		t.Fatalf("mac resolves %s to %+v, %v; want the sprite's note", tag, back, err)
 	}
-	if seq, err := mac.Resolve(ctx, "#2"); err != nil || seq != ask.Seq {
+	if seq, _, err := mac.Resolve(ctx, "#2", ""); err != nil || seq != ask.Seq {
 		t.Fatalf("mac resolves #2 to %d, %v; want its own #%d", seq, err, ask.Seq)
 	}
 }
@@ -100,7 +101,7 @@ func TestAnOpenHoldALandingNodeReadsCarriesTheNumberTheMacResolvesToTheSameHold(
 	if open[0].Seq == hold.Seq || open[0].Name() != hold.Name() {
 		t.Fatalf("landing names its open hold %s at its own seq %d; want the Mac's %s", open[0].Name(), open[0].Seq, hold.Name())
 	}
-	seq, err := mac.Resolve(ctx, open[0].Name())
+	seq, _, err := mac.Resolve(ctx, open[0].Name(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func TestABareNumberTwoNodesShareInADriveIsRefused(t *testing.T) {
 	sprite, _ := testutil.Store(t)
 	sprite.SetOwner(false)
 	local := testutil.Post(t, mac, store.Record{Lane: "root", Kind: kinds.Decide, Text: "root decide"})
-	testutil.Post(t, sprite, store.Record{Lane: "finder-desk", Kind: kinds.Review, Text: "finder: major"})
+	testutil.Post(t, sprite, store.Record{Lane: "finder-desk", Kind: kinds.Review, To: []string{"cci-seq"}, Text: "finder: major"})
 	rows, err := sprite.Export(ctx, sprite.Self(), 0, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -123,13 +124,31 @@ func TestABareNumberTwoNodesShareInADriveIsRefused(t *testing.T) {
 	if _, err := mac.Apply(ctx, rows, nil); err != nil {
 		t.Fatal(err)
 	}
-	if seq, err := mac.Resolve(ctx, "#1"); err == nil {
-		t.Fatalf("mac resolves a bare #1 to %d; want a refusal naming #1@%s", seq, sprite.Self()[:8])
+	macTag, spriteTag := "#1@"+mac.Self()[:8], "#1@"+sprite.Self()[:8]
+	seq, _, err := mac.Resolve(ctx, "#1", "")
+	if err == nil || !strings.Contains(err.Error(), macTag+" DECIDE from root: root decide") || !strings.Contains(err.Error(), spriteTag+" REVIEW from finder-desk: finder: major") {
+		t.Fatalf("mac resolves a bare #1 to %d, %v; want a refusal listing %s and %s", seq, err, macTag, spriteTag)
 	}
-	if seq, err := mac.Resolve(ctx, "#1@"+mac.Self()[:8]); err != nil || seq != local.Seq {
+	records, err := mac.Query(ctx, store.Filter{Drive: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range records {
+		if r.Num != macTag && r.Num != spriteTag {
+			t.Fatalf("mac numbers %q as %s; want each record of a shared #1 tagged with its node", r.Text, r.Num)
+		}
+	}
+	seq, picked, err := mac.Resolve(ctx, "1", "cci-seq")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mac.Get(ctx, seq); err != nil || got.Text != "finder: major" || !strings.Contains(picked, "picked "+spriteTag+", the one addressed to cci-seq") || !strings.Contains(picked, macTag) {
+		t.Fatalf("bare 1 read by cci-seq resolves to %+v, %v, picked %q; want the review addressed to it, named %s", got, err, picked, spriteTag)
+	}
+	if seq, _, err := mac.Resolve(ctx, "#1@"+mac.Self()[:8], ""); err != nil || seq != local.Seq {
 		t.Fatalf("mac resolves its own tagged #1 to %d, %v; want #%d", seq, err, local.Seq)
 	}
-	remote, err := mac.Resolve(ctx, "#1@"+sprite.Self()[:8])
+	remote, _, err := mac.Resolve(ctx, "#1@"+sprite.Self()[:8], "")
 	if err != nil {
 		t.Fatal(err)
 	}

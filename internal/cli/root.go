@@ -291,7 +291,7 @@ func parseSince(ctx context.Context, st *store.Store, s string) (int64, time.Tim
 	}
 	now := st.Now()
 	if number.MatchString(s) {
-		seq, err := st.Resolve(ctx, s)
+		seq, _, err := st.Resolve(ctx, s, "")
 		return seq, time.Time{}, err
 	}
 	if d, err := time.ParseDuration(s); err == nil {
