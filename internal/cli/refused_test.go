@@ -155,8 +155,8 @@ func TestAPostUnderTheAliasItsSessionHoldsGoesOutAsThatSessionsLane(t *testing.T
 	if out := post("meta-desk", "019a3c3e-desk"); !strings.Contains(out, `"lane":"meta-desk-3"`) || !strings.Contains(out, "err=<nil>") {
 		t.Fatalf("a post under the alias the session holds = %s; want it stored as meta-desk-3", out)
 	}
-	if out := post("meta-desk", "019a3c3e-other"); !strings.Contains(out, "lane meta-desk-3 is held by live thread") {
-		t.Fatalf("another session's post under that alias = %s; want it refused as a second binder of meta-desk-3", out)
+	if out := post("meta-desk", "019a3c3e-other"); !strings.Contains(out, "has no registry row") {
+		t.Fatalf("another session's post under that alias = %s; want it refused", out)
 	}
 }
 

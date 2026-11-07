@@ -33,7 +33,7 @@ func bindsCaller(ctx context.Context, lane string) bool {
 	return inv == nil || !inv.embedder || getenv(ctx, launcherLaneEnv) == lane
 }
 
-func registeredLane(ctx context.Context, st *store.Store, drive, lane string) (string, error) {
+func registeredLane(ctx context.Context, st *store.Store, self store.PeerKey, window store.Window, drive, lane string) (string, error) {
 	if store.RootName(lane) || lane == "owner" || getenv(ctx, launcherLaneEnv) == lane {
 		return lane, nil
 	}
@@ -46,8 +46,19 @@ func registeredLane(ctx context.Context, st *store.Store, drive, lane string) (s
 		return "", err
 	}
 	if reach.Lane != "" && reach.Lane != lane {
-		if registered, err := st.LaneRegistered(ctx, drive, reach.Lane); err != nil || registered {
-			return reach.Lane, err
+		registered, err := st.LaneRegistered(ctx, drive, reach.Lane)
+		if err != nil {
+			return "", err
+		}
+		bound, err := st.LanePeers(ctx, []string{reach.Lane})
+		if err != nil {
+			return "", err
+		}
+		elsewhere := slices.ContainsFunc(bound, func(p store.Peer) bool {
+			return p.Drive == drive && p.Key() != self && (p.PID != window.PID || p.PIDStarted != window.Started)
+		})
+		if registered && !elsewhere {
+			return reach.Lane, nil
 		}
 	}
 	return "", fmt.Errorf("lane %s has no registry row on drive %s, so nothing would supervise it: launch it through its launcher, or have the launcher post cci post --drive %s --lane <launcher> --kind spawn --lane-ref %s --attr brief=<absolute brief path> --attr model=<model> --text 'SPAWNED %s'", lane, drive, drive, lane, lane)

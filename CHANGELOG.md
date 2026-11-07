@@ -52,8 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A thread's `cci post --lane <alias>` under a name with no registry row of its
   own posts as the registered live lane the alias reaches, such as
   `redo-epoch-reopen-1` for `redo-epoch-reopen`, instead of being refused. A
-  name whose family has no registered live lane is still refused, and another
-  live thread's lane is still refused as a second binder.
+  name whose family has no registered live lane is still refused, and so is a
+  post under an alias whose lane a thread in another window has bound.
 - An ask, decide or defect sent to an owned lane no longer copies the owner when
   the owner stood down and no live lane carries its chain. The record still
   reaches every lane in its `--to`. A live owner, or a live successor of the
