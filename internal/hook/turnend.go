@@ -142,16 +142,18 @@ func openWork(b store.Binding, newest store.Record, found bool) string {
 	if found && newest.Kind == kinds.Mechanism {
 		lead = fmt.Sprintf("%s posted MECHANISM #%d and owes the fix: post `%s --kind opened --pr <n> --text 'OPENED #<n> <what it fixes>'`, or `%s --kind blocker --to <who> --text '<what stops the fix>'`.", b.Lane, newest.Seq, post, post)
 	}
-	return strings.Join([]string{
-		lead + " Post the one record that is true, then stop:",
-		post + " --kind done --text '<what it delivered>'   # finished, with no PR of yours open; done retires the lane, so with one open post blocked --pr <n> below",
-		post + " --kind landed --pr <n> --text '<what merged>'   # merged; it ends the turn once no PR, ask or blocker of yours is open",
-		post + " --kind stopped --text '<why>'   # ended on purpose; it gets no successor",
-		post + " --kind blocked --pr <n> | --target <target> | --lane-ref <lane> --text '<what you wait on>'   # the supervisor resumes you when that lands, releases or ends",
-		post + " --kind blocked --attr until=<span such as 45m> --text '<the monitor or lr wait --wake you armed>'   # your own monitor wakes you and no release does; past the span the supervisor pages you as overdue",
-		post + " --kind ask --to <who> --text '<question>'   # the answer resumes you",
+	lines := []string{lead + " Post the one record that is true, then stop:"}
+	if !strings.HasSuffix(store.Stem(b.Lane), "-desk") {
+		lines = append(lines, post+" --kind done --text '<what it delivered>'   # finished, with no PR of yours open; done retires the lane, so with one open post blocked --pr <n> below")
+	}
+	return strings.Join(append(lines,
+		post+" --kind landed --pr <n> --pr <m> --text '<what merged>'   # merged; name every PR you opened, since it ends the turn only once no PR, ask or blocker of yours is open",
+		post+" --kind stopped --text '<why>'   # ended on purpose; it gets no successor",
+		post+" --kind blocked --pr <n> | --target <target> | --lane-ref <lane> --text '<what you wait on>'   # the supervisor resumes you when that lands, releases or ends",
+		post+" --kind blocked --attr until=<span such as 45m> --text '<the monitor or lr wait --wake you armed>'   # your own monitor wakes you and no release does; past the span the supervisor pages you as overdue",
+		post+" --kind ask --to <who> --text '<question>'   # the answer resumes you",
 		"Stop again with nothing new and cci writes the blocker for you.",
-	}, "\n")
+	), "\n")
 }
 
 func unsettledBlocker(ctx context.Context, st *store.Store, p Payload, b store.Binding, newest store.Record) error {

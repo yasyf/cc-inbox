@@ -61,6 +61,18 @@ func blockersToRoot(t *testing.T, st *store.Store) []store.Record {
 	return open
 }
 
+func TestADeskIsNeverOfferedDoneAndLandedAsksForEveryPR(t *testing.T) {
+	st, _ := testutil.Store(t)
+	launch(t, st, "obs-desk-2", "/briefs/obs-desk-2.md")
+	p := bindLane(t, st, "obs-desk-2")
+	testutil.Post(t, st, store.Record{Lane: "obs-desk-2", Kind: kinds.Report, To: []string{"root"}, Text: "#3834 is live"})
+
+	reason := stopReason(t, st, p)
+	if strings.Contains(reason, "--kind done") || !strings.Contains(reason, "name every PR you opened") {
+		t.Fatalf("a desk's refusal %q offers done or lets landed name one PR", reason)
+	}
+}
+
 func TestALaunchedLaneCannotEndItsTurnOnAPromise(t *testing.T) {
 	st, _ := testutil.Store(t)
 	launch(t, st, quietLane, "/briefs/fix-lane-1.md")
