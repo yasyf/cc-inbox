@@ -101,12 +101,24 @@ func (s *Store) Export(ctx context.Context, origin string, since int64, limit in
 	return out, rows.Err()
 }
 
-// VisitDriveExports visits drive's non-digest rows in this store's order, so a
-// reply nearly always follows the record it answers, starting at the first
-// record this store took that was written at or after since. The zero since
-// visits every row; a since past every record visits none.
-func (s *Store) VisitDriveExports(ctx context.Context, drive string, since time.Time, visit func(Row) error) error {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records WHERE drive = ? AND kind != ? AND seq >= (SELECT MIN(seq) FROM records WHERE at >= ?) ORDER BY seq", drive, string(kinds.Digest), since.UnixMilli())
+// VisitDriveExports visits drive's non-digest rows in this store's order from
+// the first record it took written at or after since; the zero since visits
+// every row. A lane adds, at any age, the rows posted by or addressed to it,
+// its stem, or the stem's generations, so a successor holds its predecessors'.
+func (s *Store) VisitDriveExports(ctx context.Context, drive string, since time.Time, lane string, visit func(Row) error) error {
+	from := "seq >= (SELECT MIN(seq) FROM records WHERE at >= ?)"
+	params := []any{drive, string(kinds.Digest), since.UnixMilli()}
+	if lane != "" {
+		family, err := s.lanesAnswering(ctx, drive, slices.Compact([]string{lane, Stem(lane)}))
+		if err != nil {
+			return err
+		}
+		family = slices.Compact(slices.Sorted(slices.Values(family)))
+		marks := placeholders(len(family))
+		from = "seq IN (SELECT seq FROM records WHERE " + from + " UNION ALL SELECT seq FROM records WHERE drive = ? AND lane IN (" + marks + ") UNION ALL SELECT source_seq FROM record_recipients WHERE address IN (" + marks + "))"
+		params = append(append(append(params, drive), toAny(family)...), toAny(family)...)
+	}
+	rows, err := s.db.QueryContext(ctx, "SELECT "+exportColumns+" FROM records WHERE drive = ? AND kind != ? AND "+from+" ORDER BY seq", params...)
 	if err != nil {
 		return fmt.Errorf("export %s: %w", drive, err)
 	}

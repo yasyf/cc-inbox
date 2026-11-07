@@ -465,7 +465,7 @@ func newRelaySyncCmd() *cobra.Command {
 }
 
 func newRelayExportCmd() *cobra.Command {
-	var drive, since string
+	var drive, since, lane string
 	cmd := &cobra.Command{
 		Use:   "export",
 		Short: "Write a drive's records to stdout as gzipped JSON lines, for cci relay seed on a new node",
@@ -478,11 +478,12 @@ func newRelayExportCmd() *cobra.Command {
 			if seq != 0 {
 				return fmt.Errorf("--since %q names a record; export reads a time", since)
 			}
-			return relay.ExportDrive(cmd.Context(), st, drive, from, cmd.OutOrStdout())
+			return relay.ExportDrive(cmd.Context(), st, drive, from, lane, cmd.OutOrStdout())
 		}),
 	}
 	cmd.Flags().StringVar(&drive, "drive", "", "drive to export")
 	cmd.Flags().StringVar(&since, "since", "", "write only what this store took from the first record written at or after this time: a duration (30m), a Pacific clock time (9:00 AM), a date (2026-10-26) or an RFC3339 time")
+	cmd.Flags().StringVar(&lane, "lane", "", "also write, at any age, every record posted by or addressed to this lane, the stem it answers under, or any numbered lane of that stem, so a successor's node holds its predecessors' records")
 	_ = cmd.MarkFlagRequired("drive")
 	return cmd
 }

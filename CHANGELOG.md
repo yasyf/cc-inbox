@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci relay export --lane <lane>` also writes, at any age, every record posted
+  by or addressed to that lane, the stem it answers under, or a numbered lane of
+  that stem. A successor seeded from `--since <its launch> --lane <it>` holds
+  its predecessor's records, so `cci tail --lane <predecessor>` reads them there.
 - An owner gives the workers it delegates the group keys through one ring: each
   epoch's key sealed under a ring key, and the ring key wrapped once for each
   worker. A worker reads every epoch it may hold in two relay reads, a delegation

@@ -942,11 +942,12 @@ func seedPage(decoder *json.Decoder, drive string) ([]store.Row, bool, error) {
 
 // ExportDrive writes a drive's rows as gzipped JSON lines for Seed on another
 // node, from the first record st took that was written at or after since; the
-// zero since writes them all.
-func ExportDrive(ctx context.Context, st *store.Store, drive string, since time.Time, to io.Writer) error {
+// zero since writes them all. A lane adds its family's records at any age, as
+// store.VisitDriveExports reads them.
+func ExportDrive(ctx context.Context, st *store.Store, drive string, since time.Time, lane string, to io.Writer) error {
 	zipped := gzip.NewWriter(to)
 	encoder := json.NewEncoder(zipped)
-	if err := st.VisitDriveExports(ctx, drive, since, func(row store.Row) error { return encoder.Encode(row) }); err != nil {
+	if err := st.VisitDriveExports(ctx, drive, since, lane, func(row store.Row) error { return encoder.Encode(row) }); err != nil {
 		return err
 	}
 	return zipped.Close()
