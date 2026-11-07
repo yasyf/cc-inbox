@@ -217,7 +217,7 @@ func PostToolUse(ctx context.Context, st *store.Store, p Payload, window func() 
 // PostToolUseNoted is PostToolUse with a line for the session ahead of its records.
 func PostToolUseNoted(ctx context.Context, st *store.Store, p Payload, note string, window func() (store.Window, error), w io.Writer) error {
 	if p.ToolName == "TaskStop" {
-		if err := retireStopped(ctx, st, p); err != nil {
+		if err := TaskStop(ctx, st, p); err != nil {
 			return err
 		}
 	}
@@ -241,7 +241,9 @@ func PostToolUseNoted(ctx context.Context, st *store.Store, p Payload, note stri
 	return nil
 }
 
-func retireStopped(ctx context.Context, st *store.Store, p Payload) error {
+// TaskStop retires the subagent or teammate of p's session that p's TaskStop
+// input names, by agent id or name, so it holds no lane once the harness stopped it.
+func TaskStop(ctx context.Context, st *store.Store, p Payload) error {
 	var stop struct {
 		TaskID  string `json:"task_id"`
 		ShellID string `json:"shell_id"`

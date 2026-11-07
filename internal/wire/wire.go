@@ -61,7 +61,7 @@ func Relayed(argv []string) bool {
 	switch argv[1] {
 	case "post", "tail", "grep", "show", "digest", "who", "watch", "channel", "window", "embed":
 	case "hook":
-		if len(argv) < 3 || !slices.Contains([]string{"post-tool-use", "stop", "subagent-stop", "prompt"}, argv[2]) {
+		if len(argv) < 3 || !slices.Contains([]string{"post-tool-use", "stop", "subagent-stop", "task-stop", "prompt"}, argv[2]) {
 			return false
 		}
 	default:

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -44,6 +45,47 @@ func TestASubagentItsSessionStoppedNoLongerHoldsItsLane(t *testing.T) {
 
 	if err := refuseHeldLane(ctx, st, worker, store.Window{}, "d", "queue-92-mitigate-1", st.Now()); err != nil {
 		t.Fatalf("the worker after its session stopped the subagent = %v, want it to bind", err)
+	}
+}
+
+func TestTheRefusalNamesTheOneStepThatFreesALaneFromAStoppedSubagent(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(ctx, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	window, err := windowOf(os.Getpid())
+	if err != nil {
+		t.Fatal(err)
+	}
+	doctor := store.PeerKey{Session: "2fd5df50-root", Agent: "a66d159ec00411596"}
+	if _, err := st.Announce(ctx, store.Peer{Session: doctor.Session, Agent: doctor.Agent, PID: window.PID, PIDStarted: window.Started}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(ctx, doctor, "d", "queue-92-mitigate-1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	worker := store.PeerKey{Session: "01a1b37c-worker"}
+	err = refuseHeldLane(ctx, st, worker, store.Window{}, "d", "queue-92-mitigate-1", st.Now())
+	if err == nil {
+		t.Fatal("the worker beside the stopped subagent bound its lane, want it refused")
+	}
+	release := regexp.MustCompile(`Subagent a66d159ec00411596 of session 2fd5df50-root last ran a tool \S+ ago; .* free the lane in one step: echo '(\{[^']+\})' \| cci hook task-stop$`).FindStringSubmatch(err.Error())
+	if release == nil {
+		t.Fatalf("refusal = %q, want it to name the subagent, its idle time and the task-stop that frees it", err)
+	}
+
+	stop, err := hook.Read(strings.NewReader(release[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := hook.TaskStop(ctx, st, stop); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := refuseHeldLane(ctx, st, worker, store.Window{}, "d", "queue-92-mitigate-1", st.Now()); err != nil {
+		t.Fatalf("the worker after the refusal's release = %v, want it to bind", err)
 	}
 }
 
