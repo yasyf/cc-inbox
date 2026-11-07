@@ -258,7 +258,7 @@ func TestReadModelNamesTargets(t *testing.T) {
 	}
 	sameRecords(t, got, want)
 	for _, r := range want {
-		seq, err := st.Resolve(t.Context(), r.Num)
+		seq, _, err := st.Resolve(t.Context(), r.Num, "")
 		if err != nil || seq != r.Seq {
 			t.Errorf("resolve %s = %d, %v, want %d", r.Num, seq, err, r.Seq)
 		}

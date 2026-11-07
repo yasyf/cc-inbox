@@ -252,12 +252,12 @@ func newPostCmd() *cobra.Command {
 				r.Fields.Attrs[store.OwnedByAttr] = ownedBy
 			}
 			if cmd.Flags().Changed("re") {
-				if reSeqs, err = resolveAll(cmd.Context(), st, r.Drive, re, false, named); err != nil {
+				if reSeqs, err = resolveAll(cmd.Context(), st, r.Drive, r.Lane, re, false, named, cmd.ErrOrStderr()); err != nil {
 					return err
 				}
 			}
 			if cmd.Flags().Changed("resolves") {
-				if resolvesSeqs, err = resolveAll(cmd.Context(), st, r.Drive, resolves, true, named); err != nil {
+				if resolvesSeqs, err = resolveAll(cmd.Context(), st, r.Drive, r.Lane, resolves, true, named, cmd.ErrOrStderr()); err != nil {
 					return err
 				}
 			}
@@ -711,16 +711,21 @@ func perTarget(r store.Record, re, resolves []int64, pairwise bool) ([]store.Rec
 	return out, nil
 }
 
-func resolveAll(ctx context.Context, st *store.Store, drive string, refs []string, resolving bool, named map[int64]string) ([]int64, error) {
+func resolveAll(ctx context.Context, st *store.Store, drive, reader string, refs []string, resolving bool, named map[int64]string, w io.Writer) ([]int64, error) {
 	seqs := make([]int64, len(refs))
 	for i, ref := range refs {
 		if !store.IsNamedRef(ref) {
-			seq, err := st.Resolve(ctx, ref)
+			seq, picked, err := st.Resolve(ctx, ref, reader)
 			if errors.Is(err, store.ErrNoNumber) {
-				seq, err = storeFromHub(ctx, st, drive, ref, err)
+				seq, picked, err = storeFromHub(ctx, st, drive, ref, reader, err)
 			}
 			if err != nil {
 				return nil, err
+			}
+			if picked != "" {
+				if _, err := fmt.Fprintf(w, "cci: %s\n", picked); err != nil {
+					return nil, err
+				}
 			}
 			seqs[i] = seq
 			continue
@@ -737,19 +742,19 @@ func resolveAll(ctx context.Context, st *store.Store, drive string, refs []strin
 	return seqs, nil
 }
 
-func storeFromHub(ctx context.Context, st *store.Store, drive, ref string, missing error) (int64, error) {
+func storeFromHub(ctx context.Context, st *store.Store, drive, ref, reader string, missing error) (int64, string, error) {
 	hub, row, err := findOnHub(ctx, st, drive, ref, missing)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	applied, err := st.Backfill(ctx, []store.Row{row}, nil)
 	if err == nil && applied.Buffered > 0 {
 		_, err = hub.Pull(ctx, 0, nil)
 	}
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
-	return st.Resolve(ctx, ref)
+	return st.Resolve(ctx, ref, reader)
 }
 
 func namedRefPRs(ctx context.Context, st *store.Store, drive, ref string) ([]store.PR, error) {

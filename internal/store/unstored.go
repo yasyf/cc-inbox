@@ -19,7 +19,7 @@ func (s *Store) Unstored(ctx context.Context, rows []Row) ([]Record, error) {
 	for i, row := range rows {
 		seqs[Pointer{Origin: row.Origin, Seq: row.OriginSeq}] = int64(i - len(rows))
 	}
-	name := func(p Pointer) string { return number(owners, p.Origin, p.Seq) }
+	name := func(p Pointer) string { return number(owners, nil, p.Origin, p.Seq) }
 	out := make([]Record, len(rows))
 	for i, row := range rows {
 		refs := row.Refs

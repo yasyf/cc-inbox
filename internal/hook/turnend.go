@@ -137,10 +137,10 @@ func openWork(b store.Binding, newest store.Record, found bool) string {
 	post := fmt.Sprintf("cci post --drive %s --lane %s", b.Drive, b.Lane)
 	lead := fmt.Sprintf("%s has posted no record yet, so nobody would resume this work.", b.Lane)
 	if found {
-		lead = fmt.Sprintf("%s's newest record, #%d %s, does not end a turn, so nobody would resume this work.", b.Lane, newest.Seq, strings.ToUpper(string(newest.Kind)))
+		lead = fmt.Sprintf("%s's newest record, %s %s, does not end a turn, so nobody would resume this work.", b.Lane, newest.Name(), strings.ToUpper(string(newest.Kind)))
 	}
 	if found && newest.Kind == kinds.Mechanism {
-		lead = fmt.Sprintf("%s posted MECHANISM #%d and owes the fix: post `%s --kind opened --pr <n> --text 'OPENED #<n> <what it fixes>'`, or `%s --kind blocker --to <who> --text '<what stops the fix>'`.", b.Lane, newest.Seq, post, post)
+		lead = fmt.Sprintf("%s posted MECHANISM %s and owes the fix: post `%s --kind opened --pr <n> --text 'OPENED #<n> <what it fixes>'`, or `%s --kind blocker --to <who> --text '<what stops the fix>'`.", b.Lane, newest.Name(), post, post)
 	}
 	return strings.Join([]string{
 		lead + " Post the one record that is true, then stop:",

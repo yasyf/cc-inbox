@@ -17,6 +17,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
+	"github.com/yasyf/cc-inbox/internal/node"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/testutil"
 )
@@ -1173,5 +1174,73 @@ func TestAnOwnerPromptLeavesACredentialOutOfItsRecord(t *testing.T) {
 	}
 	if len(got) == 0 || strings.Contains(got[len(got)-1].Text, value) || !strings.Contains(got[len(got)-1].Text, "use the key") {
 		t.Fatalf("records = %+v; want the prompt with the value withheld", got)
+	}
+}
+
+func TestHookLinesNameANumberTwoNodesShareByItsNode(t *testing.T) {
+	ctx := context.Background()
+	sprite, clock := testutil.Store(t)
+	sprite.SetOwner(false)
+	mac, _ := testutil.Store(t)
+	if err := sprite.PutMember(ctx, store.Member{Node: mac.Self(), PublicKey: mac.Node().PublicKey(), Tier: node.TierOwner, Via: "relay", By: "test", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := sprite.BindLane(ctx, store.PeerKey{Session: "s1"}, "d", "cci-seq", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	stop := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := hook.Stop(ctx, sprite, hook.Payload{SessionID: "s1", Event: "Stop"}, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Len() == 0 {
+			return ""
+		}
+		var got struct{ Decision, Reason string }
+		if err := json.Unmarshal(out.Bytes(), &got); err != nil || got.Decision != "block" {
+			t.Fatalf("Stop output %q: %v", out.String(), err)
+		}
+		return got.Reason
+	}
+	if got := stop(); got != "" {
+		t.Fatalf("the first stop blocked: %q", got)
+	}
+	testutil.Post(t, sprite, store.Record{Lane: "finder-desk", Kind: kinds.Note, Text: "sprite note 1"})
+	testutil.Post(t, sprite, store.Record{Lane: "finder-desk", Kind: kinds.Note, Text: "sprite note 2"})
+	testutil.Post(t, mac, store.Record{Lane: "root", Kind: kinds.Note, Text: "mac warm-up"})
+	ask := testutil.Post(t, mac, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"cci-seq"}, Text: "which node wrote this?"})
+	rows, err := mac.Export(ctx, mac.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sprite.Apply(ctx, rows, nil); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%d@%s", ask.Seq, mac.Self()[:8])
+
+	var out bytes.Buffer
+	if err := hook.PostToolUse(ctx, sprite, hook.Payload{SessionID: "s1", Event: "PostToolUse"}, noWindow, &out); err != nil {
+		t.Fatal(err)
+	}
+	got := hookContext(t, &out, "PostToolUse")
+	open, replay, ok := strings.Cut(got, "cci records addressed to cci-seq; act on each:\n")
+	if !ok || !strings.Contains(open, "\n#"+want+" ") || !strings.Contains(replay, want+" ask") {
+		t.Fatalf("hook lists the shared ask as %q; want #%s in the open asks and %s in act on each", got, want, want)
+	}
+	clock.Advance(11 * time.Minute)
+	reason := stop()
+	if !strings.Contains(reason, "cci #"+want+" ASK from root to cci-seq") || !strings.Contains(reason, "--resolves "+want+".") {
+		t.Fatalf("overdue nudge = %q; want it to name #%s", reason, want)
+	}
+	seq, _, err := sprite.Resolve(ctx, want, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r, err := sprite.Get(ctx, seq); err != nil || r.Text != ask.Text {
+		t.Fatalf("the printed %s resolves to %+v, %v; want the Mac's ask", want, r, err)
+	}
+	if _, _, err := sprite.Resolve(ctx, fmt.Sprint(ask.Seq), ""); err == nil {
+		t.Fatalf("a bare %d two nodes share resolved", ask.Seq)
 	}
 }

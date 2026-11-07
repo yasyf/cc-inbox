@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A bare record number that records from more than one node carry is refused
+  by `cci show`, `cci post --re` and `--resolves`, and `--since`, listing each
+  record as `#N@<node>` with its kind, poster and first words. When exactly one
+  of them is addressed to the reading lane, the command takes it and prints on
+  stderr which one it took. Before, a bare number on a non-owner node silently
+  read an owner node's record. Every printed number, in the hook's open asks,
+  its `act on each` list, the stop hook's overdue line and the body hint, is
+  `#N@<node>` whenever another node's record carries N, and the stop line and
+  changed-asks line print a record's origin number, not this node's local seq.
 - `cci post --to <lane>` refuses a lane that stood down, or a stem whose every
   lane stood down, before anything is written, and exits 1 with one line naming
   when it stood down and its live successor, or `root` when it has none. An

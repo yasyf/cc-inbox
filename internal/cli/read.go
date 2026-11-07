@@ -473,9 +473,13 @@ func newShowCmd() *cobra.Command {
 		Short:   "Print records by seq, each once: the full line, then the rest of the text or body file the record names",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+			b, _, err := st.Binding(cmd.Context(), SelfPeer(cmd.Context()))
+			if err != nil {
+				return err
+			}
 			records := make([]store.Record, len(args))
 			for i, arg := range args {
-				r, err := showRecord(cmd.Context(), st, drive, arg)
+				r, err := showRecord(cmd.Context(), st, drive, arg, b.Lane, cmd.ErrOrStderr())
 				if err != nil {
 					return fmt.Errorf("show: %w", err)
 				}
@@ -546,8 +550,8 @@ func tailNotes(ctx context.Context, cmd *cobra.Command, asJSON bool) io.Writer {
 	return cmd.ErrOrStderr()
 }
 
-func showRecord(ctx context.Context, st *store.Store, drive, ref string) (store.Record, error) {
-	seq, err := st.Resolve(ctx, ref)
+func showRecord(ctx context.Context, st *store.Store, drive, ref, reader string, w io.Writer) (store.Record, error) {
+	seq, picked, err := st.Resolve(ctx, ref, reader)
 	if errors.Is(err, store.ErrNoNumber) {
 		_, row, err := findOnHub(ctx, st, drive, ref, err)
 		if err != nil {
@@ -561,6 +565,11 @@ func showRecord(ctx context.Context, st *store.Store, drive, ref string) (store.
 	}
 	if err != nil {
 		return store.Record{}, err
+	}
+	if picked != "" {
+		if _, err := fmt.Fprintf(w, "cci: %s\n", picked); err != nil {
+			return store.Record{}, err
+		}
 	}
 	r, err := st.Get(ctx, seq)
 	if errors.Is(err, sql.ErrNoRows) {
