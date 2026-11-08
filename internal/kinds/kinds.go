@@ -264,7 +264,7 @@ func Broadcasts() []Kind {
 }
 
 func RootAddressed() []Kind {
-	return []Kind{Incident, Mechanism, FixLive, Decide, Ask, Blocker, Blocked, Urgent, Answer, Done, Release, Correction, Defect, Owner}
+	return []Kind{Incident, Mechanism, FixLive, Decide, Ask, Design, Blocker, Blocked, Urgent, Answer, Done, Release, Correction, Defect, Owner}
 }
 
 func Closers() []Kind {

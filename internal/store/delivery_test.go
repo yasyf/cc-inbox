@@ -81,6 +81,7 @@ func TestAddressedKindsNarrowOnlyRecordsAddressedToTheReader(t *testing.T) {
 		{0, store.Record{Lane: "ship-lane", Kind: kinds.Report, To: []string{"main"}, Text: "report to main"}},
 		{0, store.Record{Lane: "ship-lane", Kind: kinds.Ask, To: []string{"main"}, Text: "ask to main"}},
 		{0, store.Record{Lane: "fix-lane", Kind: kinds.Incident, To: []string{"root"}, Text: "incident to root"}},
+		{0, store.Record{Lane: "split-lane", Kind: kinds.Design, To: []string{"root"}, Text: "design to root"}},
 		{0, store.Record{Lane: "ship-lane", Kind: kinds.Head, Text: "head broadcast"}},
 		{0, store.Record{Lane: "ship-lane", Kind: kinds.State, Text: "state broadcast"}},
 		{0, store.Record{Lane: "peer-lane", Kind: kinds.Note, To: []string{"peer:s1"}, Text: "note to peer"}},
@@ -95,17 +96,17 @@ func TestAddressedKindsNarrowOnlyRecordsAddressedToTheReader(t *testing.T) {
 		{
 			name:   "subscription",
 			filter: store.Filter{Drive: "d", Peer: "s1", For: "root", Kinds: []kinds.Kind{kinds.State}, ToKinds: rootKinds},
-			want:   []string{"ask to main", "incident to root", "state broadcast", "answer to peer"},
+			want:   []string{"ask to main", "incident to root", "design to root", "state broadcast", "answer to peer"},
 		},
 		{
 			name:   "hook",
 			filter: store.Filter{Drive: "d", Peer: "s1", To: "root", ToKinds: rootKinds},
-			want:   []string{"ask to main", "incident to root", "answer to peer"},
+			want:   []string{"ask to main", "incident to root", "design to root", "answer to peer"},
 		},
 		{
 			name:   "tail",
 			filter: store.Filter{Drive: "d", Peer: "s1", For: "root", Kinds: []kinds.Kind{kinds.State}},
-			want:   []string{"state to root", "report to main", "ask to main", "incident to root", "state broadcast", "note to peer", "answer to peer"},
+			want:   []string{"state to root", "report to main", "ask to main", "incident to root", "design to root", "state broadcast", "note to peer", "answer to peer"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
