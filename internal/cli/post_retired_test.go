@@ -76,6 +76,42 @@ func TestAPostToARetiredLaneIsRefusedNamingItsHeir(t *testing.T) {
 	}
 }
 
+func TestAnOrHeirPostToARetiredLaneReachesItsHeirAsNeedsLane(t *testing.T) {
+	for _, tt := range []struct {
+		name, to string
+		setup    [][]string
+		want     string
+	}{
+		{"no successor", "w-1", [][]string{
+			{"--lane", "supervisor", "--kind", "stand-down", "--to", "w-1", "--text", "w-1 retired (done)"},
+		}, `"to":["root","x"]`},
+		{"successor", "w-1", [][]string{
+			{"--lane", "supervisor", "--kind", "stand-down", "--to", "w-1", "--successor", "w-2", "--text", "w-1 retired (done)"},
+			{"--lane", "w-2", "--kind", "state", "--text", "w-2 up"},
+		}, `"to":["w","x"]`},
+		{"root already addressed", "root,w-1", [][]string{
+			{"--lane", "supervisor", "--kind", "stand-down", "--to", "w-1", "--text", "w-1 retired (done)"},
+		}, `"to":["root","x"]`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("CCI_HOME", t.TempDir())
+			t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+			for _, name := range peers.IdentityEnv {
+				t.Setenv(name, "")
+			}
+			for _, args := range append([][]string{{"--lane", "w-1", "--kind", "state", "--text", "w-1 up"}, {"--lane", "x", "--kind", "state", "--text", "x up"}}, tt.setup...) {
+				if _, err := run(t, append([]string{"post", "--drive", "d"}, args...)...); err != nil {
+					t.Fatal(err)
+				}
+			}
+			out, err := run(t, "post", "--drive", "d", "--lane", "supervisor", "--kind", "report", "--to", tt.to, "--to", "x", "--or-heir", "--text", "tell the lane", "--json")
+			if err != nil || !strings.Contains(out, tt.want) || !strings.Contains(out, `"text":"NEEDS-LANE w-1 stood down at `) || !strings.Contains(out, ": tell the lane") {
+				t.Fatalf("--or-heir post = %q, %v; want %s with a NEEDS-LANE text", out, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestALanePostingLiveUnderABareNameWinsItOverARetiredHolder(t *testing.T) {
 	for _, desk := range []string{"supervisor", "desk-runner", "owner-relay"} {
 		t.Run(desk, func(t *testing.T) {
