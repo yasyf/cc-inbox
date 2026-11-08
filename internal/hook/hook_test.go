@@ -319,7 +319,7 @@ func TestALaneBoundBeforeTheRelayFilledItsStoreHearsNoOlderBroadcast(t *testing.
 	}
 }
 
-func TestALaneOwesNothingASeedBackfilledAfterItBound(t *testing.T) {
+func TestALaneReadsNoSeedBackfillAsMailButStillOwesTheAsksItBrought(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"lane-x"}, Text: "posted before the lane bound"})
@@ -343,8 +343,8 @@ func TestALaneOwesNothingASeedBackfilledAfterItBound(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := hookContext(t, &out, "PostToolUse")
-	if !strings.Contains(got, "posted since the lane started") || !strings.Contains(got, "posted before the lane bound") || strings.Contains(got, "backfilled") {
-		t.Fatalf("additionalContext = %q; want what was posted to the lane before it bound and since it started, and nothing a relay backfilled after it bound", got)
+	if !strings.Contains(got, "posted since the lane started") || !strings.Contains(got, "posted before the lane bound") || strings.Contains(got, "a backfilled note") {
+		t.Fatalf("additionalContext = %q; want what was posted to the lane before it bound and since it started, and no note a relay backfilled after it bound", got)
 	}
 	owed, err := hook.Owed(ctx, st, "d", "lane-x")
 	if err != nil {
