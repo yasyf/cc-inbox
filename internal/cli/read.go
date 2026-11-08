@@ -179,15 +179,11 @@ func (f *tailFlags) runOpen(ctx context.Context, cmd *cobra.Command, st *store.S
 		}
 		lane = b.Lane
 	}
-	thread := store.PeerKey{}
-	if bound && b.Drive == drive && store.SameLane(b.Lane, lane) {
-		thread = peer
-	}
 	only, err := kinds.ParseAll(f.rf.kinds)
 	if err != nil {
 		return err
 	}
-	open, err := hook.Owed(ctx, st, thread, drive, lane)
+	open, err := hook.Owed(ctx, st, drive, lane)
 	if err != nil {
 		return err
 	}
