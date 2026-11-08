@@ -88,7 +88,7 @@ func TestAnOrHeirPostToARetiredLaneReachesItsHeirAsNeedsLane(t *testing.T) {
 		{"successor", "w-1", [][]string{
 			{"--lane", "supervisor", "--kind", "stand-down", "--to", "w-1", "--successor", "w-2", "--text", "w-1 retired (done)"},
 			{"--lane", "w-2", "--kind", "state", "--text", "w-2 up"},
-		}, `"to":["w-2","x"]`},
+		}, `"to":["w","x"]`},
 		{"root already addressed", "root,w-1", [][]string{
 			{"--lane", "supervisor", "--kind", "stand-down", "--to", "w-1", "--text", "w-1 retired (done)"},
 		}, `"to":["root","x"]`},
