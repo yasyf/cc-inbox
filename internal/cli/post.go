@@ -50,7 +50,7 @@ func newPostCmd() *cobra.Command {
 		successor, ownedBy      string
 		heads                   []store.Head
 		ttl                     time.Duration
-		asJSON, force           bool
+		asJSON, force, orHeir   bool
 		pairwise                bool
 		re, resolves, namedPRs  []string
 		reSeqs, resolvesSeqs    []int64
@@ -226,7 +226,20 @@ func newPostCmd() *cobra.Command {
 					r.Fields.Counts[key] = n
 				}
 			}
-			if r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, r.To, k, force, cmd.ErrOrStderr()); err != nil {
+			to := r.To
+			r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
+			for retired := (*RetiredLane)(nil); orHeir && errors.As(err, &retired); {
+				gone := slices.Index(to, retired.to)
+				to = slices.Clone(to)
+				if slices.Contains(to, retired.heir) {
+					to = slices.Delete(to, gone, gone+1)
+				} else {
+					to[gone] = retired.heir
+				}
+				r.Text = fmt.Sprintf("NEEDS-LANE %s, so this reaches %s to route: %s", retired.down, retired.heir, r.Text)
+				r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
+			}
+			if err != nil {
 				var retired *RetiredLane
 				if errors.As(err, &retired) && (k == kinds.Owner || store.Stem(lane) == ownerRelay) {
 					_, _, raised := st.Post(cmd.Context(), store.Record{Drive: r.Drive, Lane: "cci", Kind: kinds.Blocker, To: []string{ownerRelay}, Text: store.Clip(fmt.Sprintf("%s; the refused %s record from %s read: %s", retired, cmp.Or(string(k), "note"), lane, text)), Source: "post"}, 0)
@@ -410,6 +423,7 @@ func newPostCmd() *cobra.Command {
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space, or the whole text when no other is given; cci replaces no {at} and checks no withdrawal in them, and keeps checking the text's own words")
+	f.BoolVar(&orHeir, "or-heir", false, "readdress each --to lane that stood down to its successor, or to root when it named none, and open the text with NEEDS-LANE naming the stood-down lane, for a sender that takes the lane from a stored row rather than from a person's typing")
 	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		if name, ok := strings.CutPrefix(err.Error(), "unknown flag: --"); ok && slices.Contains(textFlagSlips, name) {

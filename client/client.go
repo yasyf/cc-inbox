@@ -67,6 +67,9 @@ type Draft struct {
 	// Force addresses each To lane as written, for a sender that takes the name
 	// from a registry rather than from a person's typing.
 	Force bool
+	// OrHeir readdresses each To lane that stood down to its successor, or to
+	// root, and opens the text with NEEDS-LANE, for a sender whose lane comes from a stored row.
+	OrHeir bool
 	// Notices receives the lines cci post writes to stderr, such as a --to stem
 	// no lane holds or a stood-down lane whose mail reaches another; nil drops them.
 	Notices io.Writer
@@ -237,6 +240,9 @@ func (d Draft) args() []string {
 	}
 	if d.Force {
 		args = append(args, "--force")
+	}
+	if d.OrHeir {
+		args = append(args, "--or-heir")
 	}
 	return args
 }

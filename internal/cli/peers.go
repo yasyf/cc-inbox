@@ -818,7 +818,7 @@ func routeLane(lane, drive string, reading []string, notices io.Writer) (string,
 
 // RetiredLane refuses a post addressed to a lane that stood down, so no order
 // waits in a mailbox nobody reads.
-type RetiredLane struct{ line string }
+type RetiredLane struct{ line, to, down, heir string }
 
 func (e *RetiredLane) Error() string { return e.line }
 
@@ -834,11 +834,12 @@ func refuseRetired(ctx context.Context, st *store.Store, drive, to string, reach
 	if err != nil {
 		return err
 	}
-	heir := "root"
+	heir, advice := "root", "root"
 	if reach.Lane != "" {
-		heir = "its successor " + reach.Lane + ", or to root"
+		heir, advice = reach.Lane, "its successor "+reach.Lane+", or to root"
 	}
-	return &RetiredLane{fmt.Sprintf("REFUSED: --to %s: %s stood down at %s (#%d); post to %s", to, lane, render.Stamp(down.At, st.Now()), seq, heir)}
+	at := fmt.Sprintf("%s stood down at %s (#%d)", lane, render.Stamp(down.At, st.Now()), seq)
+	return &RetiredLane{line: fmt.Sprintf("REFUSED: --to %s: %s; post to %s", to, at, advice), to: to, down: at, heir: heir}
 }
 
 func noticeReach(w io.Writer, to string, r store.Reach) error {
