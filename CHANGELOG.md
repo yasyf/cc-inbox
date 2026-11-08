@@ -49,6 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The open-ask list the hook prints, `cci tail --open`, and the stop nudge count
+  an ask a relay backfilled after the lane's thread bound. Before, a lane whose
+  node received its asks through a relay seed listed none of them while every
+  other node counted them as open: root's hook showed 1 open ask while the
+  stall watch counted 130. Backfill still never arrives as mail.
 - `cci post --to <lane>` refuses a lane that stood down, or a stem whose every
   lane stood down, before anything is written, and exits 1 with one line naming
   when it stood down and its live successor, or `root` when it has none. An

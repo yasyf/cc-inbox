@@ -346,12 +346,12 @@ func TestALaneOwesNothingASeedBackfilledAfterItBound(t *testing.T) {
 	if !strings.Contains(got, "posted since the lane started") || !strings.Contains(got, "posted before the lane bound") || strings.Contains(got, "backfilled") {
 		t.Fatalf("additionalContext = %q; want what was posted to the lane before it bound and since it started, and nothing a relay backfilled after it bound", got)
 	}
-	owed, err := hook.Owed(ctx, st, k, "d", "lane-x")
+	owed, err := hook.Owed(ctx, st, "d", "lane-x")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(owed) != 1 || owed[0].Text != "posted before the lane bound" {
-		t.Fatalf("owed = %+v; want only the ask posted before the lane bound", owed)
+	if len(owed) != 2 || owed[0].Text != "posted before the lane bound" || owed[1].Text != "a backfilled ask" {
+		t.Fatalf("owed = %+v; want the ask posted before the lane bound and the backfilled ask, which is owed though it is not mail", owed)
 	}
 }
 
@@ -382,7 +382,7 @@ func TestARecordPostedWhileALaneSpawnedReachesItLiveAfterItBound(t *testing.T) {
 	if got := hookContext(t, &out, "PostToolUse"); !strings.Contains(got, "instructions sent while the lane spawned") || strings.Contains(got, "a seeded note") {
 		t.Fatalf("additionalContext = %q; want the record a live delivery brought after the bind, and not the seeded one", got)
 	}
-	owed, err := hook.Owed(ctx, st, k, "d", "lane-x")
+	owed, err := hook.Owed(ctx, st, "d", "lane-x")
 	if err != nil {
 		t.Fatal(err)
 	}
