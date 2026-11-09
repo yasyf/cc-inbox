@@ -231,6 +231,7 @@ func newPostCmd() *cobra.Command {
 			}
 			to := r.To
 			r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
+			var needsLane []string
 			for retired := (*RetiredLane)(nil); orHeir && errors.As(err, &retired); {
 				gone := slices.Index(to, retired.to)
 				to = slices.Clone(to)
@@ -239,7 +240,8 @@ func newPostCmd() *cobra.Command {
 				} else {
 					to[gone] = retired.heir
 				}
-				r.Text = fmt.Sprintf("NEEDS-LANE %s, so this reaches %s to route: %s", retired.down, retired.heir, r.Text)
+				needsLane = append(needsLane, fmt.Sprintf("NEEDS-LANE %s, so this reaches %s to route", retired.down, retired.heir))
+				r.Text = needsLane[len(needsLane)-1] + ": " + r.Text
 				r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
 			}
 			if err != nil {
@@ -249,6 +251,24 @@ func newPostCmd() *cobra.Command {
 					return errors.Join(err, raised)
 				}
 				return err
+			}
+			if utf8.RuneCountInString(r.Text) > store.MaxText {
+				attached := text
+				if r.Refs.Path != "" {
+					body, err := os.ReadFile(r.Refs.Path)
+					if err != nil {
+						return fmt.Errorf("--path: %w", err)
+					}
+					attached = string(body)
+				}
+				path, err := st.Blob(strings.Join(needsLane, "\n") + "\n\n" + attached)
+				if err != nil {
+					return err
+				}
+				r.Text, r.Refs.Path = store.Clip(fmt.Sprintf("NEEDS-LANE %d stood-down lanes, named in the body: %s", len(needsLane), text)), path
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: naming the %d stood-down lanes would put the text over %d characters, so they are named in the body at %s\n", len(needsLane), store.MaxText, path); err != nil {
+					return err
+				}
 			}
 			switch {
 			case k != kinds.StandDown:
@@ -426,7 +446,7 @@ func newPostCmd() *cobra.Command {
 	f.DurationVar(&ttl, "ttl", 0, "expiry override (default: the kind's TTL)")
 	f.BoolVar(&asJSON, "json", false, "print the stored record as JSON")
 	f.StringVar(&quoted, "quoted", "", "words another writer wrote, such as a relayed Slack page, appended to the text after one space, or the whole text when no other is given; cci replaces no {at} and checks no withdrawal in them, and keeps checking the text's own words")
-	f.BoolVar(&orHeir, "or-heir", false, "readdress each --to lane that stood down to its successor, or to root when it named none, and open the text with NEEDS-LANE naming the stood-down lane, for a sender that takes the lane from a stored row rather than from a person's typing")
+	f.BoolVar(&orHeir, "or-heir", false, "readdress each --to lane that stood down to its successor, or to root when it named none, and open the text with NEEDS-LANE naming the stood-down lane, or name them in the body when naming them in the text would put it over 400 characters, for a sender that takes the lane from a stored row rather than from a person's typing")
 	f.BoolVar(&force, "force", false, "address a bare --to lane that looks like a slip for a live lane as typed; any other lane that has not started yet needs no flag")
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error {
 		if name, ok := strings.CutPrefix(err.Error(), "unknown flag: --"); ok && slices.Contains(textFlagSlips, name) {
