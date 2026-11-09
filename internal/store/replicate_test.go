@@ -1,8 +1,10 @@
 package store_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -360,5 +362,53 @@ func TestARecordsBodyFileTravelsWithItIntoTheReceiversBlobs(t *testing.T) {
 	}
 	if held[2].Refs.Path != gone {
 		t.Fatalf("a record whose file is gone names %s, want %s", held[2].Refs.Path, gone)
+	}
+}
+
+func TestAPictureBodyFileReachesTheReceiverByteForByteUnderItsOwnExtension(t *testing.T) {
+	ctx := context.Background()
+	sprite, _ := testutil.Store(t)
+	mac, _ := testutil.Store(t)
+	dir := t.TempDir()
+	picture := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0xff, 0x00, 0xd8, 0x0a}, 30<<10)...)
+	png := filepath.Join(dir, "49907.png")
+	if err := os.WriteFile(png, picture, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	huge := filepath.Join(dir, "huge.png")
+	if err := os.WriteFile(huge, bytes.Repeat([]byte{0xff}, store.MaxFile+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{png, huge} {
+		testutil.Post(t, sprite, store.Record{Lane: "agents-app", Kind: kinds.Report, Text: "show-me " + filepath.Base(path), Refs: store.Refs{Path: path}})
+	}
+	exported, err := sprite.Export(ctx, sprite.Self(), 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := json.Marshal(exported)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []store.Row
+	if err := json.Unmarshal(wire, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := mac.Apply(ctx, rows, nil); err != nil || got.Inserted != 2 {
+		t.Fatalf("Apply() = %+v, %v", got, err)
+	}
+	held, err := mac.Query(ctx, store.Filter{Drive: "d"})
+	if err != nil || len(held) != 2 {
+		t.Fatalf("mac holds %+v, %v", held, err)
+	}
+	if filepath.Ext(held[0].Refs.Path) != ".png" || filepath.Base(filepath.Dir(held[0].Refs.Path)) != "blobs" {
+		t.Fatalf("picture record names %s, want a .png in the receiver's blobs", held[0].Refs.Path)
+	}
+	if got, err := os.ReadFile(held[0].Refs.Path); err != nil || !bytes.Equal(got, picture) {
+		t.Fatalf("picture arrived as %d bytes (%v), want the %d sent", len(got), err, len(picture))
+	}
+	note, err := os.ReadFile(held[1].Refs.Path)
+	if err != nil || !strings.Contains(string(note), "binary file, over the 8 MiB a record carries; the whole file is "+huge) {
+		t.Fatalf("an oversized picture arrived as %q, %v", note, err)
 	}
 }

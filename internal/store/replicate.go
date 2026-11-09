@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"slices"
 	"time"
 	"unicode/utf8"
@@ -26,7 +27,8 @@ type Pointer struct {
 
 // Row is a record as it travels between nodes. Its re, resolves and also_resolves are
 // pointers; Apply rewrites them to the receiving store's seqs. PathBody carries the
-// file its refs.path names, which Apply writes to the receiving node's blobs, since
+// text file its refs.path names, and PathFile and PathExt a binary one such as a
+// PNG, byte for byte; Apply writes either to the receiving node's blobs, since
 // that path exists only on the node that wrote the record.
 type Row struct {
 	Origin       string          `json:"origin"`
@@ -48,6 +50,12 @@ type Row struct {
 	Source       string          `json:"source"`
 	Body         json.RawMessage `json:"body,omitempty"`
 	PathBody     string          `json:"path_body,omitempty"`
+	PathFile     []byte          `json:"path_file,omitempty"`
+	PathExt      string          `json:"path_ext,omitempty"`
+}
+
+func (r Row) carriesBody() bool {
+	return r.PathBody != "" || r.PathFile != nil
 }
 
 // Receipt is the last change a transport channel applied completely from
@@ -149,43 +157,53 @@ func (s *Store) scanExportRow(row scanner) (Row, error) {
 			return Row{}, fmt.Errorf("decode also_resolves_origin of #%d: %w", r.Seq, err)
 		}
 	}
-	body, err := pathBody(r.Refs.Path)
+	body, file, err := pathBody(r.Refs.Path)
 	if err != nil {
 		return Row{}, err
+	}
+	var ext string
+	if file != nil {
+		ext = filepath.Ext(r.Refs.Path)
 	}
 	return Row{
 		Origin: s.origin(r.Origin), OriginSeq: originSeq(r), ID: r.ID,
 		Drive: r.Drive, Lane: r.Lane, Kind: r.Kind, At: r.At, Text: r.Text, Topic: r.Topic, To: r.To,
 		Re: pointer(re), Resolves: pointer(resolves), AlsoResolves: also,
-		Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body, PathBody: body,
+		Refs: r.Refs, Fields: r.Fields, ExpiresAt: r.ExpiresAt, Source: r.Source, Body: r.Body, PathBody: body, PathFile: file, PathExt: ext,
 	}, nil
 }
 
-func pathBody(path string) (string, error) {
+func pathBody(path string) (string, []byte, error) {
 	if path == "" {
-		return "", nil
+		return "", nil, nil
 	}
 	file, err := os.Open(path) //nolint:gosec // G304: the record names its own body file.
 	if errors.Is(err, fs.ErrNotExist) {
-		return "", nil
+		return "", nil, nil
 	}
 	if err != nil {
-		return "", fmt.Errorf("read body file %s: %w", path, err)
+		return "", nil, fmt.Errorf("read body file %s: %w", path, err)
 	}
 	defer func() { _ = file.Close() }()
 	info, err := file.Stat()
 	if err != nil {
-		return "", fmt.Errorf("read body file %s: %w", path, err)
+		return "", nil, fmt.Errorf("read body file %s: %w", path, err)
 	}
 	if info.IsDir() {
-		return "", nil
+		return "", nil, nil
 	}
-	raw, err := io.ReadAll(io.LimitReader(file, MaxBody+1))
+	raw, err := io.ReadAll(io.LimitReader(file, MaxFile+1))
 	if err != nil {
-		return "", fmt.Errorf("read body file %s: %w", path, err)
+		return "", nil, fmt.Errorf("read body file %s: %w", path, err)
+	}
+	if !utf8.Valid(raw) && len(raw) <= MaxFile {
+		return "", raw, nil
+	}
+	if !utf8.Valid(raw) {
+		return fmt.Sprintf("a %d KiB binary file, over the %d MiB a record carries; the whole file is %s on the node that wrote this record\n", info.Size()>>10, MaxFile>>20, path), nil, nil
 	}
 	if len(raw) <= MaxBody {
-		return string(raw), nil
+		return string(raw), nil, nil
 	}
 	cut := raw[:MaxBody]
 	if line := bytes.LastIndexByte(cut, '\n'); line > 0 {
@@ -194,7 +212,7 @@ func pathBody(path string) (string, error) {
 	for !utf8.Valid(cut) {
 		cut = cut[:len(cut)-1]
 	}
-	return fmt.Sprintf("%s… cut at %d KiB of %d KiB; the whole file is %s on the node that wrote this record\n", cut, len(cut)>>10, info.Size()>>10, path), nil
+	return fmt.Sprintf("%s… cut at %d KiB of %d KiB; the whole file is %s on the node that wrote this record\n", cut, len(cut)>>10, info.Size()>>10, path), nil, nil
 }
 
 type exportScanner struct {
@@ -418,19 +436,19 @@ func (s *Store) backfillRows(ctx context.Context, tx *sql.Tx, rows []Row) (Appli
 }
 
 func (s *Store) blobbed(rows []Row) ([]Row, error) {
-	if !slices.ContainsFunc(rows, func(row Row) bool { return row.PathBody != "" }) {
+	if !slices.ContainsFunc(rows, Row.carriesBody) {
 		return rows, nil
 	}
 	out := slices.Clone(rows)
 	for i, row := range out {
-		if row.PathBody == "" {
+		if !row.carriesBody() {
 			continue
 		}
-		path, err := s.Blob(row.PathBody)
+		path, err := s.rowBlob(row)
 		if err != nil {
 			return nil, fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
 		}
-		out[i].Refs.Path, out[i].PathBody = path, ""
+		out[i].Refs.Path, out[i].PathBody, out[i].PathFile, out[i].PathExt = path, "", nil, ""
 	}
 	return out, nil
 }
@@ -500,8 +518,8 @@ func (s *Store) apply(ctx context.Context, tx *sql.Tx, row Row, a *Applied, rele
 		return nil
 	}
 	refs := row.Refs
-	if row.PathBody != "" {
-		path, err := s.Blob(row.PathBody)
+	if row.carriesBody() {
+		path, err := s.rowBlob(row)
 		if err != nil {
 			return fmt.Errorf("apply %s/%d: %w", row.Origin, row.OriginSeq, err)
 		}
