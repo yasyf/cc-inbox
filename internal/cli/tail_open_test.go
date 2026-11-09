@@ -75,7 +75,7 @@ func TestTailOpenListsTheAsksTheBoundLaneOwes(t *testing.T) {
 	}
 }
 
-func TestALanesWaitAndOpenAsksSkipWhatASeedBackfilledAfterItBound(t *testing.T) {
+func TestALanesWaitSkipsWhatASeedBackfilledAfterItBoundButItsOpenAsksCountIt(t *testing.T) {
 	ctx := context.Background()
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
@@ -108,7 +108,7 @@ func TestALanesWaitAndOpenAsksSkipWhatASeedBackfilledAfterItBound(t *testing.T) 
 	if err != nil || !strings.Contains(out, "asked since the lane started") || !strings.Contains(out, "asked while the lane spawned") || strings.Contains(out, "backfilled") {
 		t.Fatalf("the lane's wait = %q, %v; want both asks and nothing a seed backfilled after the lane bound", out, err)
 	}
-	if out, err := run(t, "tail", "--open"); err != nil || !strings.Contains(out, "asked since the lane started") || !strings.Contains(out, "asked while the lane spawned") || strings.Contains(out, "backfilled") {
-		t.Fatalf("tail --open = %q, %v; want both asks and no ask a seed backfilled after the lane bound", out, err)
+	if out, err := run(t, "tail", "--open"); err != nil || !strings.Contains(out, "asked since the lane started") || !strings.Contains(out, "asked while the lane spawned") || !strings.Contains(out, "a backfilled ask") || strings.Contains(out, "a backfilled go") {
+		t.Fatalf("tail --open = %q, %v; want all three asks, the backfilled one included, and no go", out, err)
 	}
 }
