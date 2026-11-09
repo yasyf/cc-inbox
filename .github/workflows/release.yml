@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@41f8de6765b3b833ef333b0b98f5683f0e46685b
+    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@70a51686c17207f3afa808a65b034828bad5177b
     secrets: inherit
 
   descriptor:
@@ -27,7 +27,7 @@ jobs:
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false
       - name: Download release archives
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,7 +43,13 @@ jobs:
           jq --arg v "$version" '.version = $v' plugin/.claude-plugin/plugin.json > plugin/.claude-plugin/plugin.json.tmp
           mv plugin/.claude-plugin/plugin.json.tmp plugin/.claude-plugin/plugin.json
       - name: Validate descriptor
-        run: go run github.com/yasyf/binrun/cmd/binrun@v0.1.1 -- parse plugin/bin/cci.binrun
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download v0.9.0 --repo yasyf/binrun --pattern binrun_0.9.0_linux_amd64.tar.gz --dir "$RUNNER_TEMP"
+          echo "fa1991af7943c1465429de7792f88bdfe35174c6bfea5a13d91980cdab914870  $RUNNER_TEMP/binrun_0.9.0_linux_amd64.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/binrun_0.9.0_linux_amd64.tar.gz" -C "$RUNNER_TEMP" binrun
+          "$RUNNER_TEMP/binrun" -- parse plugin/bin/cci.binrun
       - name: Build the release version comparator
         run: go build -o "$RUNNER_TEMP/release-version" ./scripts/release-version
       - name: Move the tag onto the synced descriptor and land it on main
