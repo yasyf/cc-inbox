@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   release:
-    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@70a51686c17207f3afa808a65b034828bad5177b
+    uses: yasyf/homebrew-tap/.github/workflows/release-go.yml@154dfcdd78e6c70b31d97779c047b16f8186cb69
     secrets: inherit
 
   descriptor:
