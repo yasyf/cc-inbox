@@ -123,7 +123,6 @@ func TestAnOrHeirPostNamingManyStoodDownLanesKeepsTheWritersWordsInTheText(t *te
 	for _, name := range peers.IdentityEnv {
 		t.Setenv(name, "")
 	}
-	post := []string{"post", "--drive", "d", "--lane", "supervisor", "--kind", "report", "--or-heir", "--json"}
 	lanes := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india"}
 	for i, lane := range lanes {
 		if _, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", lane+" up"); err != nil {
@@ -134,7 +133,6 @@ func TestAnOrHeirPostNamingManyStoodDownLanesKeepsTheWritersWordsInTheText(t *te
 				t.Fatal(err)
 			}
 		}
-		post = append(post, "--to", lane)
 	}
 	first := strings.TrimSpace(strings.Repeat("relay the upload link ", 9))
 	report := first + "\n\nthe rest of the report\n"
@@ -142,7 +140,7 @@ func TestAnOrHeirPostNamingManyStoodDownLanesKeepsTheWritersWordsInTheText(t *te
 	if err := os.WriteFile(path, []byte(report), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := run(t, append(post, "--path", path)...)
+	out, err := run(t, "post", "--drive", "d", "--lane", "supervisor", "--kind", "report", "--or-heir", "--json", "--to", strings.Join(lanes, ","), "--path", path)
 	if err != nil {
 		t.Fatalf("--or-heir --path post naming five stood-down lanes = %q, %v; want it stored", out, err)
 	}
