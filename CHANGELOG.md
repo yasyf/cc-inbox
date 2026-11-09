@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci post --or-heir` stores a record whose NEEDS-LANE lines would put the text
+  over 400 characters. Before, it refused the record and pointed at `--path`,
+  which could not help because cci writes those lines itself. Now the text reads
+  `NEEDS-LANE <n> stood-down lanes, named in the body:` followed by the writer's
+  own words, and the body carries one NEEDS-LANE line per stood-down lane above
+  the `--path` file or the full text.
 - The open-ask list the hook prints, `cci tail --open`, and the stop nudge count
   an ask a relay backfilled after the lane's thread bound. Before, a lane whose
   node received its asks through a relay seed listed none of them while every

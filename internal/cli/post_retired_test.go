@@ -1,10 +1,15 @@
 package cli_test
 
 import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 func TestAPostToARetiredLaneIsRefusedNamingItsHeir(t *testing.T) {
@@ -109,6 +114,55 @@ func TestAnOrHeirPostToARetiredLaneReachesItsHeirAsNeedsLane(t *testing.T) {
 				t.Fatalf("--or-heir post = %q, %v; want %s with a NEEDS-LANE text", out, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestAnOrHeirPostNamingManyStoodDownLanesKeepsTheWritersWordsInTheText(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	lanes := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india"}
+	for i, lane := range lanes {
+		if _, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", lane+" up"); err != nil {
+			t.Fatal(err)
+		}
+		if i < 5 {
+			if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", lane, "--text", lane+" retired (done)"); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	first := strings.TrimSpace(strings.Repeat("relay the upload link ", 9))
+	report := first + "\n\nthe rest of the report\n"
+	path := filepath.Join(t.TempDir(), "report.md")
+	if err := os.WriteFile(path, []byte(report), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "post", "--drive", "d", "--lane", "supervisor", "--kind", "report", "--or-heir", "--json", "--to", strings.Join(lanes, ","), "--path", path)
+	if err != nil {
+		t.Fatalf("--or-heir --path post naming five stood-down lanes = %q, %v; want it stored", out, err)
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var got store.Record
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &got); err != nil {
+		t.Fatalf("post --json = %q: %v", out, err)
+	}
+	if want := "NEEDS-LANE 5 stood-down lanes, named in the body: " + first; got.Text != want {
+		t.Errorf("text = %q, want %q", got.Text, want)
+	}
+	if want := []string{"foxtrot", "golf", "hotel", "india", "root"}; !slices.Equal(slices.Sorted(slices.Values(got.To)), want) {
+		t.Errorf("to = %v, want %v", got.To, want)
+	}
+	body, err := os.ReadFile(got.Refs.Path)
+	if err != nil || !strings.HasSuffix(string(body), "\n\n"+report) {
+		t.Fatalf("body %q = %q, %v; want the stood-down lanes then the --path file", got.Refs.Path, body, err)
+	}
+	for _, lane := range lanes[:5] {
+		if !strings.Contains(string(body), "NEEDS-LANE "+lane+" stood down at ") {
+			t.Errorf("body = %q, want it to name %s", body, lane)
+		}
 	}
 }
 
