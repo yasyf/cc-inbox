@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -125,12 +124,12 @@ func TestAnOrHeirPostNamingManyStoodDownLanesKeepsTheWritersWordsInTheText(t *te
 		t.Setenv(name, "")
 	}
 	post := []string{"post", "--drive", "d", "--lane", "supervisor", "--kind", "report", "--or-heir", "--json"}
-	for i := 1; i <= 9; i++ {
-		lane := fmt.Sprintf("w-%d", i)
+	lanes := []string{"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india"}
+	for i, lane := range lanes {
 		if _, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", lane+" up"); err != nil {
 			t.Fatal(err)
 		}
-		if i <= 5 {
+		if i < 5 {
 			if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", lane, "--text", lane+" retired (done)"); err != nil {
 				t.Fatal(err)
 			}
@@ -155,16 +154,16 @@ func TestAnOrHeirPostNamingManyStoodDownLanesKeepsTheWritersWordsInTheText(t *te
 	if want := "NEEDS-LANE 5 stood-down lanes, named in the body: " + first; got.Text != want {
 		t.Errorf("text = %q, want %q", got.Text, want)
 	}
-	if !slices.Contains(got.To, "root") || !slices.Contains(got.To, "w-9") || slices.Contains(got.To, "w-1") {
-		t.Errorf("to = %v, want root and the live lanes", got.To)
+	if want := []string{"foxtrot", "golf", "hotel", "india", "root"}; !slices.Equal(slices.Sorted(slices.Values(got.To)), want) {
+		t.Errorf("to = %v, want %v", got.To, want)
 	}
 	body, err := os.ReadFile(got.Refs.Path)
 	if err != nil || !strings.HasSuffix(string(body), "\n\n"+report) {
 		t.Fatalf("body %q = %q, %v; want the stood-down lanes then the --path file", got.Refs.Path, body, err)
 	}
-	for i := 1; i <= 5; i++ {
-		if !strings.Contains(string(body), fmt.Sprintf("NEEDS-LANE w-%d stood down at ", i)) {
-			t.Errorf("body = %q, want it to name w-%d", body, i)
+	for _, lane := range lanes[:5] {
+		if !strings.Contains(string(body), "NEEDS-LANE "+lane+" stood down at ") {
+			t.Errorf("body = %q, want it to name %s", body, lane)
 		}
 	}
 }
