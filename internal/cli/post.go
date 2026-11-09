@@ -141,6 +141,9 @@ func newPostCmd() *cobra.Command {
 				if err != nil {
 					return fmt.Errorf("--path: %w", err)
 				}
+				if !utf8.Valid(body) {
+					return fmt.Errorf("--path %s is a binary file, so it cannot be the text; say what it shows with --text", r.Refs.Path)
+				}
 				text, fromPath = firstLine(string(body)), true
 			}
 			k := parsedKind

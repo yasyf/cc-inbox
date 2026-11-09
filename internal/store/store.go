@@ -29,6 +29,7 @@ import (
 const (
 	MaxText     = 400
 	MaxBody     = 64 << 10
+	MaxFile     = 8 << 20
 	DedupWindow = 10 * time.Minute
 	wordSlack   = 40
 	DBFile      = "inbox.db"
@@ -1333,6 +1334,22 @@ func Excerpt(text string) string {
 		}
 	}
 	return string(cut) + "…"
+}
+
+func (s *Store) rowBlob(row Row) (string, error) {
+	if row.PathFile == nil {
+		return s.Blob(row.PathBody)
+	}
+	sum := sha256.Sum256(row.PathFile)
+	dir := filepath.Join(s.home, "blobs")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("create blob dir: %w", err)
+	}
+	path := filepath.Join(dir, hex.EncodeToString(sum[:8])+row.PathExt)
+	if err := os.WriteFile(path, row.PathFile, 0o600); err != nil {
+		return "", fmt.Errorf("write blob: %w", err)
+	}
+	return path, nil
 }
 
 func (s *Store) Blob(body string) (string, error) {

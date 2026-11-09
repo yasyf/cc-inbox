@@ -23,8 +23,8 @@ func (s *Store) Unstored(ctx context.Context, rows []Row) ([]Record, error) {
 	out := make([]Record, len(rows))
 	for i, row := range rows {
 		refs := row.Refs
-		if row.PathBody != "" {
-			if refs.Path, err = s.Blob(row.PathBody); err != nil {
+		if row.carriesBody() {
+			if refs.Path, err = s.rowBlob(row); err != nil {
 				return nil, fmt.Errorf("unstored %s/%d: %w", row.Origin, row.OriginSeq, err)
 			}
 		}
