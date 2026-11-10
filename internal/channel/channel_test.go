@@ -457,6 +457,32 @@ func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T
 	}
 }
 
+func TestARecordAddressedToTheReaderAtItsDriveArrivesOnceOutsideTheBatch(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
+	ctx := context.Background()
+	sub, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", ToKinds: store.DefaultToKinds("root"), Batch: store.DefaultBatch("root"), Cursor: "root-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ask := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Ask, To: []string{"communicator"}, Text: "which layout?"})
+	done := testutil.Post(t, st, store.Record{Lane: "builder", Kind: kinds.Done, To: []string{"root@d"}, Text: "journal PR merged"})
+	answer := testutil.Post(t, st, store.Record{Lane: "communicator", Kind: kinds.Answer, Re: ask.Seq, To: []string{"root@d"}, Text: "his pick: two databases"})
+	owner := testutil.Post(t, st, store.Record{Lane: "communicator", Kind: kinds.Owner, To: []string{"root@d"}, Text: "his ruling: next tree only"})
+	tags, stop := following(t, st, sub)
+	defer stop()
+	batch := nextTag(t, tags)
+	if batch.meta["kind"] != batchKind || !strings.Contains(batch.content, done.Text) || strings.Contains(batch.content, answer.Text) || strings.Contains(batch.content, owner.Text) {
+		t.Fatalf("batch = %q, want the done alone", batch.content)
+	}
+	for _, want := range []store.Record{answer, owner} {
+		if tag := nextTag(t, tags); tag.meta["seq"] != fmt.Sprint(want.Seq) || tag.meta["kind"] != string(want.Kind) {
+			t.Fatalf("tag %+v, want #%d as its own tag", tag.meta, want.Seq)
+		}
+	}
+	noTag(t, tags, 50*time.Millisecond)
+}
+
 func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 	st, _ := testutil.Store(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
