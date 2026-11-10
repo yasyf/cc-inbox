@@ -46,3 +46,23 @@ func TestASenderFromAnotherDriveCarriesItsDrive(t *testing.T) {
 		t.Errorf("Compact of a record in its own drive = %q\nwant      %q", got, want)
 	}
 }
+
+func TestEveryLineOfARecordCarriesItsAttrsButTheBinder(t *testing.T) {
+	at := time.Date(2026, 11, 10, 12, 57, 0, 0, pacific.Zone)
+	r := store.Record{
+		Seq: 659409, Drive: "durable-agents", Lane: "root", Kind: "report", At: at, To: []string{"communicator@durable-agents"},
+		Text:   "Release 14194 took 8 hours 28 minutes.",
+		Fields: store.Fields{Attrs: map[string]string{store.BinderAttr: "d8677ab9", "thread": "1794341624.882209", "order": "o202", "job": "j502"}},
+	}
+	want := "659409 report root>communicator [job=j502 order=o202 thread=1794341624.882209] Release 14194 took 8 hours 28 minutes."
+	if got := render.Compact(r, 0); got != want {
+		t.Errorf("Compact = %q\nwant      %q", got, want)
+	}
+	if got := render.Line(r, at); !strings.Contains(got, " [job=j502 order=o202 thread=1794341624.882209] Release 14194") || strings.Contains(got, "binder") {
+		t.Errorf("Line = %q, want its attrs and no binder", got)
+	}
+	r.Fields.Attrs = map[string]string{store.BinderAttr: "d8677ab9"}
+	if got := render.Compact(r, 0); strings.Contains(got, "[") {
+		t.Errorf("Compact of a record with only a binder = %q, want no attrs", got)
+	}
+}
