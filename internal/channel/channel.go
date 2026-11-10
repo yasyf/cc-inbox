@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -28,6 +30,7 @@ const (
 	Source       = "plugin:cc-inbox:" + Server
 	notifyMethod = "notifications/claude/channel"
 	batchKind    = "batch"
+	skippedKind  = "skipped"
 	releaseTicks = 12
 )
 
@@ -60,7 +63,7 @@ func (u upgrade) Error() string {
 	return "cci " + u.Version + " is installed at " + u.Path
 }
 
-const instructions = `This MCP server is cci's channel. It carries coordination records from a long-running drive. After this session runs ` + "`cci subscribe`" + `, every new record for the subscription's reader arrives as a <channel source="` + Source + `" seq="..." kind="..." lane="..."> tag. The tag's body is the record line without the seq, kind and lane the tag already carries: ` + "`<time> <text> [path]`" + `; ` + "`cci show <seq>`" + `, or this server's read tool, prints the whole record, its recipients included. A tag of kind ` + "`" + batchKind + "`" + ` carries the subscription's batch kinds together, one record a line as ` + "`<seq> <kind> <lane> <text>`" + `, at most every few minutes and at once ahead of any other record. Its tools post, read, inbox, find, close, who and digest do in one call what cci does in Bash, with no shell quoting.
+const instructions = `This MCP server is cci's channel. It carries coordination records from a long-running drive. After this session runs ` + "`cci subscribe`" + `, every new record for the subscription's reader arrives as a <channel source="` + Source + `" seq="..." kind="..." lane="..."> tag. The tag's body is the record line without the seq, kind and lane the tag already carries: ` + "`<time> <text> [path]`" + `; ` + "`cci show <seq>`" + `, or this server's read tool, prints the whole record, its recipients included. A tag of kind ` + "`" + batchKind + "`" + ` carries the subscription's batch kinds together, one record a line as ` + "`<seq> <kind> <lane> <text>`" + `, at most every few minutes and at once ahead of any other record. A channel Claude Code just started begins at the store's head instead of replaying what it missed: one tag of kind ` + "`" + skippedKind + "`" + ` counts the records addressed to the reader it passed over, and the inbox tool reads them. Its tools post, read, inbox, find, close, who and digest do in one call what cci does in Bash, with no shell quoting.
 
 Every tag already passed the subscription's filter, so act on each one as you would a line from ` + "`cci tail`" + `. A record addressed to the reader arrives when its kind is one of the subscription's addressed kinds, by default every kind except for the reader ` + "`root`" + `, which hears only the kinds a root acts on; ` + "`cci tail`" + ` reads the rest. A record addressed to ` + "`main`" + ` is addressed to the reader ` + "`root`" + `: the drive's root answers to both names. Other lanes' broadcasts arrive only for the subscribed kinds. A record addressed to ` + "`peer:<this session>`" + ` or ` + "`<reader>@<drive>`" + ` arrives from any drive; reply to its lane with ` + "`cci post --lane <reader> --to peer:<its session prefix>`" + `, which ` + "`cci who`" + ` lists. Every post names its writer with ` + "`--lane <reader>`" + `: answer with ` + "`cci post --lane <reader> --re <seq>`" + `, close an ask, decide, hold or blocker with ` + "`cci post --lane <reader> --resolves <seq>`" + `, and read a record's full body from the path it names. The ` + "`post`" + ` tool posts without a Bash call: its args are the arguments ` + "`cci post`" + ` takes, and it posts as this window's thread, as a Bash ` + "`cci post`" + ` here does. A record this channel delivers is not delivered again by the PostToolUse hook, nor one the hook delivered first by this channel. Delivery is at-least-once, so skip any seq you have already handled.
 
@@ -68,11 +71,6 @@ The channel never speaks unsolicited: outside a ` + "`cci subscribe`" + `d sessi
 
 var errStale = errors.New("subscription replaced")
 
-// Serve answers the MCP session on in and out and streams the window's
-// subscription once Claude Code reports the session initialized, or at once
-// when resumed. When a newer cci is installed, the server re-executes it on
-// the same stdio, resumed, so a long-lived window never keeps filtering with
-// the release it started on.
 type hostedKey struct{}
 
 // Hosted marks ctx as a channel the daemon runs for a client: the daemon's own
@@ -85,7 +83,20 @@ func hosted(ctx context.Context) bool {
 	return ctx.Value(hostedKey{}) != nil
 }
 
+// Serve answers the MCP session on in and out and streams the window's
+// subscription once Claude Code reports the session initialized, or at once
+// when resumed. When a newer cci is installed, the server re-executes it on
+// the same stdio, resumed, so a long-lived window never keeps filtering with
+// the release it started on.
 func Serve(ctx context.Context, st *store.Store, window store.Window, channeled, resumed bool, in io.Reader, out io.Writer, tools ...mcp.Tool) error {
+	var started *int64
+	if !resumed {
+		head, err := st.MaxSeq(ctx)
+		if err != nil {
+			return err
+		}
+		started = &head
+	}
 	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions, Resumed: resumed}, tools)
 	initialized := make(chan struct{})
 	watch := initialized
@@ -106,7 +117,7 @@ func Serve(ctx context.Context, st *store.Store, window store.Window, channeled,
 				defer close(beating)
 				beat(streamCtx, st, window)
 			}()
-			Stream(streamCtx, st, window, channeled, srv.Notify)
+			Stream(streamCtx, st, window, channeled, started, srv.Notify)
 			<-beating
 		case <-streamCtx.Done():
 		}
@@ -146,10 +157,19 @@ func beat(ctx context.Context, st *store.Store, window store.Window) {
 	}
 }
 
-func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, notify func(method string, params any) error) {
+// Stream delivers window's subscription through notify until ctx ends. A
+// channel Claude Code just started passes the head it started at as started,
+// and its first follow begins live; a resumed one passes nil and keeps the
+// position the channel it replaced reached.
+func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, started *int64, notify func(method string, params any) error) {
 	for tick := 1; ctx.Err() == nil; tick++ {
 		sub, ok, err := st.Subscription(ctx, window)
 		switch {
+		case err == nil && ok && started != nil:
+			if err = startLive(ctx, st, sub, channeled, *started, notify); err == nil {
+				started = nil
+				err = follow(ctx, st, sub, channeled, notify)
+			}
 		case err == nil && ok:
 			err = follow(ctx, st, sub, channeled, notify)
 		case err == nil && tick%releaseTicks == 0 && !hosted(ctx):
@@ -164,6 +184,43 @@ func Stream(ctx context.Context, st *store.Store, window store.Window, channeled
 		}
 		sleep(ctx, idle)
 	}
+}
+
+func startLive(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, started int64, notify func(string, any) error) error {
+	from, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive)
+	if err != nil {
+		return err
+	}
+	head := max(started, sub.Head)
+	n, err := st.Count(ctx, store.Filter{Drive: sub.Drive, Addressed: sub.Reader, Peer: sub.Session, Mute: slices.Concat(sub.Mute, sub.Batch), After: from, Before: head + 1})
+	if err != nil {
+		return err
+	}
+	since := from
+	moves := []store.CursorMove{{Name: sub.Cursor, Drive: sub.Drive, Seq: head}}
+	if len(sub.Batch) > 0 {
+		held := sub.BatchFilter()
+		if held.After, _, err = st.Cursor(ctx, sub.BatchCursor(), sub.Drive); err != nil {
+			return err
+		}
+		held.Before = head + 1
+		pending, err := st.Count(ctx, held)
+		if err != nil {
+			return err
+		}
+		n, since = n+pending, min(since, held.After)
+		moves = append(moves, store.CursorMove{Name: sub.BatchCursor(), Drive: sub.Drive, Seq: head})
+	}
+	if n > 0 {
+		text := fmt.Sprintf("%d records addressed to %s, #%d through #%d, came before this channel started and were not replayed; the inbox tool reads them, as does cci tail --reader %s --since %d", n, sub.Reader, since+1, head, sub.Reader, since)
+		if err := notify(notifyMethod, map[string]any{"content": text, "meta": map[string]string{"seq": strconv.FormatInt(head, 10), "kind": skippedKind}}); err != nil {
+			return err
+		}
+	}
+	if channeled {
+		moves = append(moves, store.CursorMove{Name: sub.FloorCursor(), Drive: sub.Drive, Seq: max(from, head), Exact: true})
+	}
+	return st.MoveCursors(ctx, moves)
 }
 
 type batch struct {

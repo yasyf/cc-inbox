@@ -44,6 +44,7 @@ type TailOptions struct {
 	Compact bool
 	Reader  string
 	Older   []store.Record
+	Carried *store.Filter
 }
 
 // TailResult reports what a Tail printed. Ack holds the cursor moves a
@@ -152,6 +153,11 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 	all, rendered, folded = append(all, later...), append(rendered, laterLines...), append(folded, laterFolded...)
 	maps.Copy(skipped, ahead.delivered)
 	maps.Copy(skipped, direct.delivered)
+	carried, err := carriedOf(ctx, st, opts.Carried, all)
+	if err != nil {
+		return TailResult{}, err
+	}
+	maps.Copy(skipped, carried)
 	index := make(map[int64]int, len(all))
 	for i, r := range all {
 		index[r.Seq] = i
@@ -169,6 +175,10 @@ func Tail(ctx context.Context, st *store.Store, opts TailOptions, w io.Writer) (
 		t := tailRun{res: TailResult{Last: f.After}, printed: map[int64]bool{}}
 		fits := true
 		for _, r := range first {
+			if carried[r.Seq] {
+				t.sent = r.Seq
+				continue
+			}
 			if fits = b.Line(line(r)); !fits {
 				break
 			}
@@ -910,6 +920,28 @@ func BodyAfterText(body []byte, text string) []byte {
 		return append([]byte("…"), rest...)
 	}
 	return bytes.TrimPrefix(rest, []byte("\n"))
+}
+
+func carriedOf(ctx context.Context, st *store.Store, carried *store.Filter, records []store.Record) (map[int64]bool, error) {
+	if carried == nil || len(records) == 0 {
+		return nil, nil
+	}
+	f := *carried
+	lo := slices.MinFunc(records, func(a, b store.Record) int { return cmp.Compare(a.Seq, b.Seq) }).Seq
+	hi := slices.MaxFunc(records, func(a, b store.Record) int { return cmp.Compare(a.Seq, b.Seq) }).Seq
+	f.After, f.Before = max(f.After, lo-1), min(f.Before, hi+1)
+	if f.After+1 >= f.Before {
+		return nil, nil
+	}
+	found, err := st.Query(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[int64]bool, len(found))
+	for _, r := range found {
+		out[r.Seq] = true
+	}
+	return out, nil
 }
 
 func skippedOf(ctx context.Context, st *store.Store, records []store.Record, open bool) (map[int64]bool, error) {

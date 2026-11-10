@@ -34,6 +34,7 @@ type Subscription struct {
 	TopicKinds []kinds.Kind `json:"topic_kinds,omitempty"`
 	Batch      []kinds.Kind `json:"batch,omitempty"`
 	Cursor     string       `json:"cursor"`
+	Head       int64        `json:"head"`
 	At         time.Time    `json:"at"`
 }
 
@@ -66,32 +67,69 @@ func (s Subscription) BatchCursor() string {
 	return s.Cursor + "-batch"
 }
 
+// FloorCursor names where the channel Claude Code started for s's window began
+// following s.Cursor: that channel delivered every record s selects after it.
+func (s Subscription) FloorCursor() string {
+	return fmt.Sprintf("%s-floor-%d-%d", s.Cursor, s.Window.PID, s.Window.Started)
+}
+
 // WindowMail is what the hook delivers to the thread k bound as b: its lane's
 // mail, less what its window's subscription keeps off that thread.
 func (s *Store) WindowMail(ctx context.Context, k PeerKey, b Binding) (Filter, error) {
 	f := LaneMail(k, b)
-	if k.Agent != "" {
-		return f, nil
-	}
-	sub, ok, err := s.SessionSubscription(ctx, k.Session)
-	if err != nil || !ok || sub.Drive != b.Drive || !SameLane(sub.Reader, b.Lane) {
+	sub, ok, err := s.windowSubscription(ctx, k, b)
+	if err != nil || !ok {
 		return f, err
 	}
 	f.Mute, f.ToKinds = sub.held(), sub.ToKinds
 	return f, nil
 }
 
+// ChannelCarried selects what the channel of the window k's thread runs in
+// already delivered: the records its subscription selects after where it
+// started following and through its cursor. ok is false when no channel
+// started following for that window.
+func (s *Store) ChannelCarried(ctx context.Context, k PeerKey, b Binding) (Filter, bool, error) {
+	sub, ok, err := s.windowSubscription(ctx, k, b)
+	if err != nil || !ok {
+		return Filter{}, false, err
+	}
+	floor, ok, err := s.Cursor(ctx, sub.FloorCursor(), b.Drive)
+	if err != nil || !ok {
+		return Filter{}, false, err
+	}
+	through, _, err := s.Cursor(ctx, sub.Cursor, b.Drive)
+	if err != nil {
+		return Filter{}, false, err
+	}
+	f := sub.Filter()
+	f.After, f.Before = floor, through+1
+	return f, true, nil
+}
+
+func (s *Store) windowSubscription(ctx context.Context, k PeerKey, b Binding) (Subscription, bool, error) {
+	if k.Agent != "" {
+		return Subscription{}, false, nil
+	}
+	sub, ok, err := s.SessionSubscription(ctx, k.Session)
+	if err != nil || !ok || sub.Drive != b.Drive || !SameLane(sub.Reader, b.Lane) {
+		return Subscription{}, false, err
+	}
+	return sub, true, nil
+}
+
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {
 	sub.At = s.Now().UTC()
+	head, err := s.MaxSeq(ctx)
+	if err != nil {
+		return Subscription{}, err
+	}
+	sub.Head = head
 	_, ok, err := s.Cursor(ctx, sub.Cursor, sub.Drive)
 	if err != nil {
 		return Subscription{}, err
 	}
 	if !ok {
-		head, err := s.MaxSeq(ctx)
-		if err != nil {
-			return Subscription{}, err
-		}
 		if err := s.SetCursor(ctx, sub.Cursor, sub.Drive, head); err != nil {
 			return Subscription{}, err
 		}

@@ -192,7 +192,10 @@ its time on. In a window launched with the channel, the `PostToolUse` hook
 skips records the channel delivered, and the channel skips records the hook
 delivered first, so each record addressed to the root arrives once. The subscription's cursor
 starts at the head when you subscribe, and the channel advances it past each
-delivered record. It defaults to `channel-<session>`; give each subscription
+delivered record. A channel Claude Code starts, as on a resume or a reconnect,
+begins at the head instead of replaying what the cursor missed: one `skipped`
+tag counts the records addressed to the reader it passed over, and the `inbox`
+tool or `cci tail --since` reads them. It defaults to `channel-<session>`; give each subscription
 its own cursor. When a Monitor watched the same records, stop it after
 subscribing; records in the overlap arrive twice. A subscription belongs to the
 Claude Code window: compaction and `/clear` keep it, and the `SessionStart`
