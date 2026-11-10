@@ -26,11 +26,13 @@ cci drive use release-demo --root
 ## Post one event
 
 When the cci channel's tools (`mcp__plugin_cc-inbox_cci__*`) are in your tools,
-use them rather than Bash. Each takes `lane`, defaults to the session's drive,
-and returns compact lines: `<seq> <kind> <lane>><to> [^re] [x<closed>] [#pr]
-[+] <text>`, under an `@<clock>` line when the minute changes; `+` means a body
-waits for `read`. The `post` tool takes every `cci post` flag as a field, a dash
-becoming an underscore (`owned_by`), with `attrs` for `--attr`. In a shell,
+use them rather than Bash. Each defaults to the session's drive, `post` and
+`close` default `lane` to this window's, and each returns compact lines:
+`<seq> <kind> <lane>><to> [^re] [x<closed>] [#pr] [+] <text>`, under an
+`@<clock>` line when the minute changes; `+` means a body waits for `read`. The
+`post` tool takes the `cci post` flags lanes pass most as fields, a dash
+becoming an underscore (`lane_ref`), with `attrs` for `--attr`; a post that
+needs another flag, such as `--owned-by` or `--or-heir`, runs in Bash. In a shell,
 `cci post --batch file.json` posts a JSON list of those same objects, so no text
 meets shell quoting; every record is tried and a refusal exits 1 naming its place.
 
@@ -43,14 +45,16 @@ with `--strict-mcp-config` and have no server by design: the CLI is their route.
 
 - `post`: one record from `kind`, `text`, `to`, `re`, `resolves`, `pr`,
   `topic`, `attrs`, and `body` or an absolute `path`; `records` posts several
-  in one call. No shell quoting. Returns the new seqs.
+  in one call, each from `kind`, `text`, `to`, `re`, `resolves`, `pr`, `topic`
+  and `body`. No shell quoting. Returns the new seqs.
 - `read`: `seqs` each once, line then the rest of the body, within `budget`.
 - `inbox`: records new since your last inbox call; addressed ones whole,
   subscribed broadcasts cut to 160 characters.
 - `find`: newest matches for `pattern`, `kinds`, `lanes`, `to`, `since`; `prs`
   answers several pull requests in one call.
 - `close`: one record closing every seq in `seqs`, addressed to their writers.
-- `who` and `digest`: as the commands.
+- `who`: the live sessions on the session's drive, or on `drive`.
+- `digest`: as the command.
 
 Write one record per event. Text over 400 characters spills to a file: the record
 carries its first 400 characters, cut at a word and ended with `…`, then the

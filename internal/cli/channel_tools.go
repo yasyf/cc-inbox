@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -13,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/spf13/pflag"
 	mcp "github.com/yasyf/cc-interact/channel"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
@@ -25,6 +25,7 @@ const (
 	readBudget      = 6000
 	inboxBudget     = 4000
 	digestBudget    = 3000
+	findBudget      = 4000
 	findLimit       = 20
 	findWidth       = 240
 	broadcastWidth  = 160
@@ -68,7 +69,10 @@ func (r toolRecord) args(lane, drive string) ([]string, string, error) {
 	if raw, ok := r["body"]; ok {
 		body = word(raw)
 	}
-	args := []string{"post", "--lane=" + cmp.Or(r.text("lane"), lane), "--kind=" + r.text("kind")}
+	args := []string{"post", "--kind=" + r.text("kind")}
+	if l := cmp.Or(r.text("lane"), lane); l != "" {
+		args = append(args, "--lane="+l)
+	}
 	if d := cmp.Or(r.text("drive"), drive); d != "" {
 		args = append(args, "--drive="+d)
 	}
@@ -106,13 +110,6 @@ func flagOf(key string) string {
 		return "attr"
 	}
 	return strings.ReplaceAll(key, "_", "-")
-}
-
-func fieldOf(flag string) string {
-	if flag == "attr" {
-		return "attrs"
-	}
-	return strings.ReplaceAll(flag, "-", "_")
 }
 
 func flagValues(name string, raw json.RawMessage) ([]string, error) {
@@ -182,55 +179,49 @@ func list(desc string) map[string]any {
 }
 
 var (
-	laneProp  = prop("string", "your lane")
-	driveProp = prop("string", "drive (default: this session's)")
+	laneProp      = prop("string", "your lane")
+	boundLaneProp = prop("string", "your lane (default: this window's)")
+	driveProp     = prop("string", "drive (default: this session's)")
 )
 
-func recordProps() map[string]any {
+func postTool() mcp.Tool {
+	text := map[string]any{"type": "string"}
+	seqs := map[string]any{"type": "array", "items": map[string]any{"type": []string{"string", "integer"}}}
+	items := map[string]any{"kind": text, "text": text, "body": text, "topic": text, "to": seqs, "re": map[string]any{"type": []string{"string", "integer"}}, "resolves": seqs, "pr": seqs}
 	props := map[string]any{
-		"lane":     laneProp,
+		"lane":     boundLaneProp,
+		"drive":    driveProp,
 		"kind":     prop("string", "record kind, any case"),
 		"text":     prop("string", "the record line; over 400 chars the rest moves to the body"),
 		"body":     prop("string", "full body of any length, read back with read"),
 		"path":     prop("string", "absolute path of a file to attach as the body"),
 		"to":       list("addressed lanes"),
-		"re":       map[string]any{"type": []string{"string", "integer"}, "description": "seq this answers, or an alias: t:<topic>, ccn:<id or text prefix>, card:<id>, pr#N, last:<kind>[:<lane>]"},
+		"re":       map[string]any{"type": []string{"string", "integer"}, "description": "seq this answers, or an alias: t:<topic>, ccn:<id>, card:<id>, pr#N, last:<kind>[:<lane>]"},
 		"resolves": list("seqs or aliases this closes"),
-		"pr":       list("pull requests: N, pr#N, owner/repo#N or URL, or an alias whose record's pull requests this carries"),
+		"pr":       list("pull requests: N, owner/repo#N or URL"),
 		"topic":    prop("string", "pairing key"),
 		"attrs":    map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}},
+		"id":       prop("string", "idempotency key; a repost returns the stored record"),
+		"ccn":      prop("string", "cc-notes id"),
+		"build":    list("build URLs or ids"),
+		"lane_ref": list("lanes this record is about"),
+		"url":      prop("string", "any other URL"),
+		"outcome":  prop("string", "passed, failed, pending, cancelled"),
+		"commit":   prop("string", "full commit sha"),
+		"head":     list("on a head record, <pr>=<sha> or <pr>=<was>..<sha>"),
+		"records":  map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": items}, "description": "several records in one call, each of kind, text, to, re, resolves, pr, topic and body as above; each inherits lane and drive"},
 	}
-	newPostCmd().Flags().VisitAll(func(f *pflag.Flag) {
-		field := fieldOf(f.Name)
-		if _, named := props[field]; named || f.Name == "help" || f.Name == "json" || f.Name == batchFlag {
-			return
-		}
-		switch f.Value.Type() {
-		case "bool":
-			props[field] = prop("boolean", f.Usage)
-		case "stringToString":
-			props[field] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}, "description": f.Usage}
-		case "stringSlice":
-			props[field] = list(f.Usage)
-		default:
-			props[field] = prop("string", f.Usage)
-		}
-	})
-	return props
-}
-
-func postTool() mcp.Tool {
-	props := recordProps()
-	props["drive"] = driveProp
-	props["records"] = map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": recordProps()}, "description": "several records in one call; each inherits lane"}
 	return mcp.Tool{
 		Name:        "post",
 		Description: "Post one record, or several with records. cci stamps the time; no shell quoting. Returns the new seqs.",
-		InputSchema: schema([]string{"lane"}, props),
+		InputSchema: schema(nil, props),
 		Handler: func(ctx context.Context, raw json.RawMessage, _ func(string)) (string, bool) {
 			in, msg, ok := decode[toolRecord](raw)
 			if !ok {
 				return msg, true
+			}
+			if err := unadvertised(in, props); err != nil {
+				return err.Error(), true
 			}
 			var records []toolRecord
 			if in["kind"] != nil {
@@ -240,6 +231,11 @@ func postTool() mcp.Tool {
 				var more []toolRecord
 				if err := json.Unmarshal(listed, &more); err != nil {
 					return "decode records: " + err.Error(), true
+				}
+				for i, r := range more {
+					if err := unadvertised(r, items); err != nil {
+						return fmt.Sprintf("records[%d]: %s", i, err), true
+					}
 				}
 				records = append(records, more...)
 			}
@@ -262,6 +258,15 @@ func postTool() mcp.Tool {
 			return strings.Join(seqs, " "), false
 		},
 	}
+}
+
+func unadvertised(r toolRecord, fields map[string]any) error {
+	for _, key := range slices.Sorted(maps.Keys(r)) {
+		if _, ok := fields[key]; !ok {
+			return fmt.Errorf("post: no field %s", key)
+		}
+	}
+	return nil
 }
 
 func readTool() mcp.Tool {
@@ -384,6 +389,7 @@ func findTool() mcp.Tool {
 			"since":   prop("string", "seq, duration, clock time or date"),
 			"limit":   prop("integer", "matches per query (default 20)"),
 			"width":   prop("integer", "chars per line (default 240)"),
+			"budget":  prop("integer", "bytes per query (default 4000)"),
 			"drive":   driveProp,
 		}),
 		Handler: func(ctx context.Context, raw json.RawMessage, _ func(string)) (string, bool) {
@@ -396,12 +402,13 @@ func findTool() mcp.Tool {
 				Since   string `json:"since"`
 				Limit   int    `json:"limit"`
 				Width   int    `json:"width"`
+				Budget  int    `json:"budget"`
 				Drive   string `json:"drive"`
 			}](raw)
 			if !ok {
 				return msg, true
 			}
-			args := []string{"grep", cmp.Or(in.Pattern, "."), "--json", "--budget=1048576", "-n", strconv.Itoa(cmp.Or(in.Limit, findLimit))}
+			args := []string{"grep", cmp.Or(in.Pattern, "."), "--json", "--budget=" + strconv.Itoa(jsonPerLineByte*cmp.Or(in.Budget, findBudget)), "-n", strconv.Itoa(cmp.Or(in.Limit, findLimit))}
 			args = appendDrive(args, in.Drive)
 			args = appendEach(args, "--kind", in.Kinds)
 			args = appendEach(args, "--lane", in.Lanes)
@@ -433,8 +440,8 @@ func closeTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        "close",
 		Description: "One record that closes every seq given, addressed to their writers unless to says otherwise.",
-		InputSchema: schema([]string{"lane", "seqs", "how", "text"}, map[string]any{
-			"lane":  laneProp,
+		InputSchema: schema([]string{"seqs", "how", "text"}, map[string]any{
+			"lane":  boundLaneProp,
 			"seqs":  list("seqs to close"),
 			"how":   map[string]any{"type": "string", "enum": []string{"answer", "withdraw", "lift", "go", "unblock", "fix-live"}},
 			"text":  prop("string", "the closing line"),
@@ -453,6 +460,18 @@ func closeTool() mcp.Tool {
 			if !ok {
 				return msg, true
 			}
+			lane := in.Lane
+			if lane == "" {
+				st, release, err := hookStore(ctx)
+				if err != nil {
+					return err.Error(), true
+				}
+				lane, err = threadLane(ctx, st)
+				release()
+				if err != nil {
+					return err.Error(), true
+				}
+			}
 			to := in.To
 			if len(to) == 0 {
 				out, errOut, err := runCCI(ctx, "", append([]string{"show", "--json"}, in.Seqs...)...)
@@ -464,12 +483,12 @@ func closeTool() mcp.Tool {
 					return err.Error(), true
 				}
 				for _, r := range records {
-					if r.Lane != in.Lane && !slices.Contains(to, r.Lane) {
+					if r.Lane != lane && !slices.Contains(to, r.Lane) {
 						to = append(to, r.Lane)
 					}
 				}
 			}
-			args := []string{"post", "--lane=" + in.Lane, "--kind=" + in.How, "--resolves=" + strings.Join(in.Seqs, ",")}
+			args := []string{"post", "--lane=" + lane, "--kind=" + in.How, "--resolves=" + strings.Join(in.Seqs, ",")}
 			if in.Drive != "" {
 				args = append(args, "--drive="+in.Drive)
 			}
@@ -491,7 +510,7 @@ func closeTool() mcp.Tool {
 func whoTool() mcp.Tool {
 	return mcp.Tool{
 		Name:        "who",
-		Description: "Live sessions and lanes, one line each, narrowed by lane or pull request.",
+		Description: "Live sessions and lanes of this window's drive, one line each, narrowed by lane or pull request.",
 		InputSchema: schema(nil, map[string]any{
 			"lane":  prop("string", "sessions bound as this lane"),
 			"pr":    prop("string", "sessions with a claim on this pull request"),
@@ -506,7 +525,19 @@ func whoTool() mcp.Tool {
 			if !ok {
 				return msg, true
 			}
-			args := appendDrive([]string{"who"}, in.Drive)
+			drive := in.Drive
+			if drive == "" {
+				st, release, err := hookStore(ctx)
+				if err != nil {
+					return err.Error(), true
+				}
+				drive, err = resolveDrive(ctx, st, "")
+				release()
+				if err != nil && !errors.Is(err, store.ErrNoDrive) {
+					return err.Error(), true
+				}
+			}
+			args := appendDrive([]string{"who"}, drive)
 			if in.Lane != "" {
 				args = append(args, "--lane="+in.Lane)
 			}
