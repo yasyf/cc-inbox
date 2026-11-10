@@ -45,6 +45,10 @@ hook's overdue-ask nudge.
 A record addressed to --reader of a --batch-kinds kind wakes nobody on arrival:
 the channel carries those together in one tag, at most every five minutes and
 at once ahead of any other record, and the PostToolUse hook leaves them to it.
+A tag keeps the newest record per lane and topic, and per pull request for
+head, within about 3 KB, and counts the rest in a last line naming the cci tail
+that reads them. For reader root (or main) in a window launched with channels,
+--batch-kinds defaults to done.
 
 A record of a --topic-kinds kind arrives whoever it is addressed to when its
 topic is one a record addressed to --reader has carried: being addressed on a
@@ -79,8 +83,12 @@ arrives; it claims, holds and reassigns nothing.`,
 			if sub.TopicKinds, err = kinds.ParseAll(topicF); err != nil {
 				return err
 			}
-			if len(sub.Batch) > 0 && !channelsOn(window.PID) {
+			channeled := channelsOn(window.PID)
+			if len(sub.Batch) > 0 && !channeled {
 				return errors.New("--batch-kinds needs this window launched with --channels plugin:cc-inbox@cc-inbox: only the channel delivers those kinds")
+			}
+			if len(sub.Batch) == 0 && channeled {
+				sub.Batch = store.DefaultBatch(reader)
 			}
 			for _, spec := range follow {
 				other, list, ok := strings.Cut(spec, "=")
@@ -128,7 +136,7 @@ arrives; it claims, holds and reassigns nothing.`,
 	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
 	cmd.Flags().StringSliceVar(&muteF, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
 	cmd.Flags().StringSliceVar(&toF, "to-kind", nil, "deliver records addressed to --reader only of these kinds; cci tail still reads the rest (repeatable; default for root: "+kindList(kinds.RootAddressed())+", otherwise every kind)")
-	cmd.Flags().StringSliceVar(&batchF, "batch-kinds", nil, "deliver records addressed to --reader of these kinds together, one tag at most every five minutes, never on arrival (repeatable)")
+	cmd.Flags().StringSliceVar(&batchF, "batch-kinds", nil, "deliver records addressed to --reader of these kinds together, one tag at most every five minutes, never on arrival (repeatable; default for root: "+kindList(store.DefaultBatch("root"))+", otherwise none)")
 	cmd.Flags().StringSliceVar(&topicF, "topic-kinds", nil, "also deliver records of these kinds, whoever they are addressed to, on any topic a record addressed to --reader has carried (repeatable)")
 	cmd.Flags().StringArrayVar(&follow, "follow", nil, "also deliver another drive's broadcasts of these kinds, as <drive>=<kind>[,<kind>...], e.g. oncall=incident (repeatable)")
 	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")

@@ -91,14 +91,13 @@ func Annotate(ctx context.Context, st openerReader, records []store.Record) erro
 }
 
 type view struct {
-	JSON     bool
-	Compact  bool
-	Reader   string
-	Width    int
-	Fold     int
-	Untagged bool
-	Now      time.Time
-	Unnamed  bool
+	JSON    bool
+	Compact bool
+	Reader  string
+	Width   int
+	Fold    int
+	Now     time.Time
+	Unnamed bool
 }
 
 func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
@@ -141,12 +140,6 @@ func lines(ctx context.Context, st *store.Store, records []store.Record, v view)
 func textLines(records []store.Record, replies map[int64][]store.Record, v view, now time.Time) ([]string, []bool) {
 	out := make([]string, len(records))
 	folded := make([]bool, len(records))
-	line := func(r store.Record, width int) string {
-		if v.Untagged {
-			return render.Untagged(r, now, width)
-		}
-		return render.Brief(r, now, width)
-	}
 	for i, r := range records {
 		shown := r
 		if v.Unnamed || v.Compact && v.Reader != "" {
@@ -163,9 +156,9 @@ func textLines(records []store.Record, replies map[int64][]store.Record, v view,
 			out[i] = text + marks(r.Seq, replies[r.Seq])
 			continue
 		}
-		text := line(shown, v.Width)
+		text := render.Brief(shown, now, v.Width)
 		if v.Fold > 0 && resolved(r.Seq, replies[r.Seq]) && utf8.RuneCountInString(text) > v.Fold {
-			text, folded[i] = line(shown, v.Fold), true
+			text, folded[i] = render.Brief(shown, now, v.Fold), true
 		}
 		out[i] = text + marks(r.Seq, replies[r.Seq])
 	}

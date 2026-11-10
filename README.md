@@ -154,7 +154,7 @@ cci subscribe --drive release-demo --reader root --kind incident,decide,ask --mu
 ```
 
 ```text
-window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,blocker,blocked,urgent,answer,done,release,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, batched done, topic kinds none, followed none, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
 ```
 
 What arrives:
@@ -163,8 +163,11 @@ What arrives:
   `--to-kind`;
 - other lanes' broadcasts of each `--kind`.
 
-`--to-kind` defaults to `incident,mechanism,fix-live,decide,ask,blocker,blocked,urgent,answer,done,release,correction,defect,owner`
+`--to-kind` defaults to `incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner`
 for `root`, the kinds a root acts on, and to every kind for any other reader.
+In a window launched with `--channels`, `--batch-kinds` defaults to `done` for
+`root`, so a lane's `done` arrives in the next batch while `answer` and `owner`
+arrive at once.
 
 What never arrives:
 
@@ -173,8 +176,10 @@ What never arrives:
   `cci digest` still read them;
 - records of a `--batch-kinds` kind addressed to the reader, on arrival: the
   channel carries them together in one tag, at most every five minutes and at
-  once ahead of any other record, and the hook leaves them to it. A window not
-  launched with `--channels` cannot use this flag;
+  once ahead of any other record, and the hook leaves them to it. A tag keeps
+  the newest record per lane and topic, and per pull request for `head`, within
+  about 3 KB, and ends in a `+N more` line naming the `cci tail` that reads the
+  rest. A window not launched with `--channels` cannot use this flag;
 - records of a `--mute-kinds` kind, even addressed to `root`; neither the
   channel nor the `PostToolUse` hook delivers them, and `cci tail` still reads
   them;
@@ -187,8 +192,12 @@ What never arrives:
 that a subscription took is `cci me`.
 
 Each record arrives as one tag whose `seq`, `kind`, and `lane` attributes
-carry the record's header and whose body is the rest of its record line, from
-its time on. In a window launched with the channel, the `PostToolUse` hook
+carry the record's header and whose body is its compact line under an
+`@<clock>` line, the form a batch tag and text `tail` use. A text the store cut
+at 400 characters, or a record with a body, shows `+` before its text; the
+`read` tool or `cci show <seq>` prints the whole record.
+
+In a window launched with the channel, the `PostToolUse` hook
 skips records the channel delivered, and the channel skips records the hook
 delivered first, so each record addressed to the root arrives once. The subscription's cursor
 starts at the head when you subscribe, and the channel advances it past each
@@ -456,7 +465,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci announce` | Register this session in the machine-wide peer registry with its role, worktree, branch, `origin` slug, description and tags. The `SessionStart` hook and `drive use` call it with an inferred role. `--lane <lane>` binds the thread to that lane over any lane its posts gave it, so its hooks deliver and block for that lane alone. |
 | `cci me` | Print this session's registry line, ending with the `uds:` address `SendMessage` accepts. |
 | `cci node` | Print this machine's node id, key fingerprint, and Secure Enclave endorsement; `--json` adds the public key. `cci node endorse` signs the node key with the authkit Secure Enclave key, one Touch ID tap. |
-| `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Subagents and teammates list as their own peers, and sessions replicated from other nodes list too, live while seen in the last 15 minutes and addressed as `peer:<node>/<session>`. Narrow with `--session <id or prefix>`, `--agent <id or name>`, `--origin <node prefix>`, where `-` selects this machine, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. `--all` includes ended sessions; `--json` emits one object per peer. |
+| `cci who` | List live peer sessions, joined with the Claude Code session registry under `~/.claude/sessions`. Subagents and teammates list as their own peers, and sessions replicated from other nodes list too, live while seen in the last 15 minutes and addressed as `peer:<node>/<session>`. Narrow with `--session <id or prefix>`, `--agent <id or name>`, `--origin <node prefix>`, where `-` selects this machine, `--name`, `--role`, `--drive`, `--lane`, `--tag`, `--repo`, `--worktree`, `--branch`, or `-q`, or by claim with `--pr`, `--build`, `--ref <kind>:<key>` and `--rel`; a match by claim lists the claims that selected it. Unnarrowed, or narrowed by `--drive` alone, it folds subagents and workflow agents that hold no lane, and sessions idle over an hour, into one closing `+N more` count line. `--all` includes ended sessions and lists every row; `--json` emits one object per peer. |
 | `cci pair` | Join an owner's mesh as a read-only node. Prints a one-time code and this node's fingerprint, then waits up to `--wait` (default 10 minutes) for an owner to accept. `--url` names the relay, `--mesh` the mesh (default `default`). On acceptance it pins the owners from the accepting owner's signed roster and prints that owner's fingerprint to compare with `cci node` there. |
 | `cci pair accept CODE` | Owner side. Shows the joining node's fingerprint, then asks for Touch ID through `synckitd consent request`, which prompts here or on another attended owner host. The sheet shows the code and the full fingerprint. `--tier service --allow '<drives>\|<kinds>' --label <name>` admits a scoped writer instead of a reader. |
 | `cci unpair NODE` | Owner side. Revokes a node, named by id or fingerprint prefix, through the relay, drops its pin here, and rotates the mesh's group key so it cannot read records written afterward. |
@@ -511,7 +520,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--oldest` | `tail` | When the budget cuts a text `--since` window, keep its oldest records and end with a resume trailer, as `--json` reads always do so a pager can follow the trailer. By default the window keeps its newest records and ends with `... CUT <n> older records before #<seq>; --oldest reads them first`. |
 | `--open` | `tail` | Print every open ask, blocker and question-ending decide whose first addressee is `--to`, or the lane this thread is bound as, and that another lane wrote, newest first at any age, under one `open asks addressed to <lane> (<n>, newest first):` line. These are the asks the `PostToolUse` hook lists. Reads no cursor; takes only `--to`, `--kind`, `--drive`, `--budget` and `--width`. |
 | `-n`, `--limit <count>` | `tail`, `grep` | Print only the newest `count` matching records, oldest first for `tail` and newest first for `grep`, as `tail -n` does. `tail` advances its cursor to the newest record printed. |
-| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 32,000 for `digest`, and honors any larger value. When stdout is a pipe or a file, a text `tail` or `grep` that the budget or `-n` cuts also prints its `... more` or `... CUT` trailer on stderr, so `cci tail \| grep ASK` still shows the cut. |
+| `--budget <bytes>` | `tail`, `grep`, `state`, text `digest` | Bound output to whole lines; defaults to 6,144 bytes, or 4,000 for `digest`, and honors any larger value. When stdout is a pipe or a file, a text `tail` or `grep` that the budget or `-n` cuts also prints its `... more` or `... CUT` trailer on stderr, so `cci tail \| grep ASK` still shows the cut. |
 | `--width <characters>` | `tail`, `watch`, text `digest` | Clip each rendered record line to this width. Records print whole by default. JSON ignores it. |
 
 Broadcasts have an empty `to` list or one that names `all`. With `--reader`, kind,
@@ -834,7 +843,7 @@ sessions write to the same SQLite store without a daemon.
 | Posted text | 400 characters, counted after `{at}` and a leading stamp take the record's time. Longer text spills to a file under `blobs/` as stamped. The record carries its first 400 characters with whitespace collapsed, cut at a word and ended with `…`; `refs.path` names the file, and `cci post` prints the path on stderr. `--path <file>` posts a file you wrote; its first line becomes the text as written. |
 | Imported text and owner prompts | Truncated to 400 characters, with the original body saved under `blobs/` and referenced by path. |
 | `tail`, `grep`, and `state` | Default 6,144-byte budget; `--budget` sets any other size. Output stops at a whole line. |
-| Text `digest` | Default 32,000-byte budget, enough for every section at its record limit with whole records; `--budget` sets any other size. Output stops at a whole line. |
+| Text `digest` | Default 4,000-byte budget, one screen; `--budget` sets any other size. Output stops at a whole line and says so. |
 | Text record lines in `tail`, `watch`, and digest sections | Print whole records by default. `--width N` clips to N characters, including a final `…`. The limit excludes digest indentation and appended reply marks. |
 | Text record lines in `grep` and `state` | Print whole records within the byte budget. |
 | `tail` | At most 500 records per call. Repeat the same cursor read to continue. |

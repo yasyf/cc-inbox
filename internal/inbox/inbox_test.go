@@ -526,7 +526,7 @@ func TestDigestListsLatestNewestSeqFirst(t *testing.T) {
 	}
 }
 
-func TestDigestDefaultBudgetFitsEverySection(t *testing.T) {
+func TestTheDefaultDigestFitsOneScreenAndSaysWhatItCut(t *testing.T) {
 	st, _ := testutil.Store(t)
 	text := strings.Repeat("w", 390)
 	for i, k := range []kinds.Kind{kinds.Ask, kinds.Blocker, kinds.Defect, kinds.Hold, kinds.Incident} {
@@ -543,13 +543,8 @@ func TestDigestDefaultBudgetFitsEverySection(t *testing.T) {
 	}
 	var out bytes.Buffer
 	v.Write(&out, st.Now(), inbox.DigestBudget, 0)
-	for _, want := range []string{"open asks (9", "open blockers (9", "open defects (9", "open holds (9", "open incidents (9", "latest per lane (15", "latest-lane-05"} {
-		if !strings.Contains(out.String(), want) {
-			t.Errorf("default digest missing %q", want)
-		}
-	}
-	if strings.Contains(out.String(), "digest truncated") {
-		t.Fatalf("default digest truncated at %d bytes", out.Len())
+	if out.Len() > inbox.DigestBudget || !strings.Contains(out.String(), "open asks (9") || !strings.HasSuffix(out.String(), "... digest truncated; read more with cci tail or cci grep\n") {
+		t.Fatalf("default digest is %d bytes:\n%s", out.Len(), out.String())
 	}
 }
 

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -405,7 +404,7 @@ func watermark(ctx context.Context, st *store.Store, cursor, drive string) error
 }
 
 func openAsksCursor(k store.PeerKey) string {
-	return "open-asks-" + k.String()
+	return "open-asks-seen-" + k.String()
 }
 
 func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKey, b store.Binding, open []store.Record, relist bool) ([]store.CursorMove, error) {
@@ -417,29 +416,19 @@ func writeOpen(ctx context.Context, st *store.Store, w io.Writer, k store.PeerKe
 	if relist {
 		shown = -1
 	}
-	sum := fnv.New64a()
-	for _, r := range open {
-		_, _ = fmt.Fprintf(sum, "%d,", r.Seq)
-	}
-	listed := int64(sum.Sum64() >> 1)
-	if len(open) == 0 {
-		listed = 0
-	}
-	if listed == shown {
+	if len(open) == 0 || open[len(open)-1].Seq <= shown {
 		return nil, nil
 	}
-	ack := []store.CursorMove{{Name: name, Drive: b.Drive, Seq: listed, Exact: true}}
-	if len(open) == 0 {
-		return ack, nil
-	}
+	ack := []store.CursorMove{{Name: name, Drive: b.Drive, Seq: open[len(open)-1].Seq, Exact: true}}
 	now := st.Now()
 	if listedBefore && shown >= 0 {
-		newest := open[max(0, len(open)-openShown):]
+		unseen := open[slices.IndexFunc(open, func(r store.Record) bool { return r.Seq > shown }):]
+		newest := unseen[max(0, len(unseen)-openShown):]
 		ids := make([]string, len(newest))
 		for i, r := range newest {
 			ids[len(newest)-1-i] = fmt.Sprintf("#%d %s %dm", r.Seq, r.Lane, int(now.Sub(r.At).Minutes()))
 		}
-		_, _ = fmt.Fprintf(w, "%d open asks addressed to %s, changed since the last list; newest: %s; cci show <seq> prints one, cci tail --open lists them\n", len(open), b.Lane, strings.Join(ids, ", "))
+		_, _ = fmt.Fprintf(w, "%d new open asks addressed to %s (%d open); newest: %s; cci show <seq> prints one, cci tail --open lists them\n", len(unseen), b.Lane, len(open), strings.Join(ids, ", "))
 		return ack, nil
 	}
 	_, _ = fmt.Fprintf(w, "open asks addressed to %s, newest first; answer with cci post --re <seq> --kind answer, or close with cci post --resolves <seq>:\n", b.Lane)
