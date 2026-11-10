@@ -519,8 +519,7 @@ func (m *ReadModel) ingest(rows *sql.Rows) error {
 	row.addressees = m.internAddressees(recipient)
 	addressees := m.addrs[row.addressees]
 	refs := parsedModelRefs(text.refs)
-	_, undecodable := text.decode(0)
-	row.wrong = addressees.wrong || undecodable != nil
+	row.wrong = addressees.wrong || text.refs != "{}" && json.Unmarshal([]byte(text.refs), new(Refs)) != nil
 	if refs != nil {
 		row.wrong = row.wrong || refs.wrong || !fitsRefPool(refs)
 		if !row.wrong {

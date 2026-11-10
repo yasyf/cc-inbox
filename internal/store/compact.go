@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -273,7 +274,11 @@ func (s *Store) servedClosureRows(ctx context.Context, drive string, ks []kinds.
 }
 
 func (s *Store) closureRows(ctx context.Context, drive string, ks []kinds.Kind) ([]Record, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+closureColumns+" FROM records WHERE drive = ? AND kind IN ("+placeholders(len(ks))+") ORDER BY seq", append([]any{drive}, kindArgs(ks)...)...)
+	return s.closureRowsBefore(ctx, drive, ks, math.MaxInt64)
+}
+
+func (s *Store) closureRowsBefore(ctx context.Context, drive string, ks []kinds.Kind, before int64) ([]Record, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+closureColumns+" FROM records WHERE drive = ? AND seq < ? AND kind IN ("+placeholders(len(ks))+") ORDER BY seq", append([]any{drive, before}, kindArgs(ks)...)...)
 	if err != nil {
 		return nil, fmt.Errorf("read closure rows: %w", err)
 	}

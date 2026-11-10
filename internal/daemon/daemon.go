@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -245,7 +246,13 @@ const (
 	readModelRetry    = 5 * time.Minute
 	readModelSessions = time.Second
 	readModelProcs    = 1
+	readModelBuildGC  = 25
 )
+
+func buildReadModel(ctx context.Context, st *store.Store, pace func(context.Context) error) (*store.ReadModel, error) {
+	defer debug.SetGCPercent(debug.SetGCPercent(readModelBuildGC))
+	return st.BuildReadModel(ctx, pace)
+}
 
 func keepReadModel(ctx context.Context, st *store.Store, home string) {
 	var model *store.ReadModel
@@ -287,7 +294,7 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 		}
 		switch {
 		case on && model == nil && time.Now().After(buildAfter):
-			built, err := st.BuildReadModel(ctx, pace)
+			built, err := buildReadModel(ctx, st, pace)
 			if err != nil {
 				if ctx.Err() == nil {
 					slog.Warn("cci daemon cannot build the read model; reads stay on the store", "err", err)
@@ -298,7 +305,7 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 			model = built
 			st.ServeReadModel(model)
 		case model != nil && model.Full() && time.Now().After(buildAfter):
-			built, err := st.BuildReadModel(ctx, pace)
+			built, err := buildReadModel(ctx, st, pace)
 			if err != nil {
 				if ctx.Err() == nil {
 					slog.Warn("cci daemon cannot rebuild the full read model on a newer window; the full one keeps serving", "err", err)
