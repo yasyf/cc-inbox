@@ -504,6 +504,11 @@ func (s *Store) initialize(ctx context.Context) error {
 	if _, current, err := s.current(ctx); err != nil || current {
 		return err
 	}
+	// Darwin keeps a shared flock that fails a nonblocking upgrade, so
+	// concurrent cold openers would each hold one and wait on the others.
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
+		return fmt.Errorf("release init lock: %w", err)
+	}
 	if err := flock(ctx, lock, syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("take migration lock: %w", err)
 	}
