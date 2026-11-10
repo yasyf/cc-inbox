@@ -36,6 +36,14 @@ func (s *Store) unclosedAmong(ctx context.Context, drive string, openers []Recor
 			return open, nil
 		}
 	}
+	open, err := s.unclosedInStore(ctx, drive, openers)
+	if err != nil {
+		return nil, err
+	}
+	return s.heardAsks(ctx, s.db, drive, open)
+}
+
+func (s *Store) unclosedInStore(ctx context.Context, drive string, openers []Record) ([]Record, error) {
 	openers, err := s.withoutIncidentUpdates(ctx, drive, openers)
 	if err != nil || len(openers) == 0 {
 		return nil, err
@@ -62,7 +70,7 @@ func (s *Store) unclosedAmong(ctx context.Context, drive string, openers []Recor
 			open = append(open, o)
 		}
 	}
-	return s.heardAsks(ctx, s.db, drive, open)
+	return open, nil
 }
 
 func (s *Store) closersAmong(ctx context.Context, drive string, openers []Record) ([]Record, error) {

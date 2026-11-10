@@ -301,10 +301,10 @@ func TestReadModelKeepsItsCapWithEveryTextInItsFile(t *testing.T) {
 	if stats.Bytes == 0 || stats.Bytes > limit {
 		t.Errorf("bytes = %d, want some and at most %d", stats.Bytes, limit)
 	}
-	if stats.TextBytes <= limit {
-		t.Errorf("text bytes = %d, want them past the cap of %d", stats.TextBytes, limit)
+	if stats.TextBytes == 0 || stats.Floor <= first.Seq {
+		t.Errorf("text bytes = %d, floor = %d; want text held and a window starting above the first record %d", stats.TextBytes, stats.Floor, first.Seq)
 	}
-	f := store.Filter{Drive: "d"}
+	f := store.Filter{Drive: "d", After: stats.Floor - 1}
 	got, answered, err := model.Answer(t.Context(), st, f)
 	if err != nil || !answered {
 		t.Fatalf("answered = %t, err = %v", answered, err)

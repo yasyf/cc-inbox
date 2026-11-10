@@ -79,7 +79,7 @@ func newWindowModelCmd(home func(*cobra.Command) (string, error)) *cobra.Command
 				return err
 			}
 			s := inv.st.ServedReadModel().Stats()
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "switch on=%t rows=%d search_floor=%d text_bytes=%d head=%d bytes=%d cap=%d hits=%d misses=%d failures=%d\n", store.ReadModelOn(at), s.Rows, s.SearchFloor, s.TextBytes, s.Head, s.Bytes, int64(store.ReadModelBytes), s.Hits, s.Misses, s.Failures)
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "switch on=%t rows=%d floor=%d search_floor=%d text_bytes=%d head=%d bytes=%d cap=%d hits=%d misses=%d failures=%d\n", store.ReadModelOn(at), s.Rows, s.Floor, s.SearchFloor, s.TextBytes, s.Head, s.Bytes, int64(store.ReadModelBytes), s.Hits, s.Misses, s.Failures)
 			return err
 		}},
 	)

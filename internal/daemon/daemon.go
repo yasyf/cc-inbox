@@ -263,6 +263,14 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 	tick := time.NewTicker(readModelFollow)
 	defer tick.Stop()
 	var buildAfter time.Time
+	pace := func(ctx context.Context) error {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(readModelPace):
+			return nil
+		}
+	}
 	for {
 		on := store.ReadModelOn(home)
 		if on {
@@ -279,14 +287,7 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 		}
 		switch {
 		case on && model == nil && time.Now().After(buildAfter):
-			built, err := st.BuildReadModel(ctx, func(ctx context.Context) error {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(readModelPace):
-					return nil
-				}
-			})
+			built, err := st.BuildReadModel(ctx, pace)
 			if err != nil {
 				if ctx.Err() == nil {
 					slog.Warn("cci daemon cannot build the read model; reads stay on the store", "err", err)
@@ -296,6 +297,21 @@ func keepReadModel(ctx context.Context, st *store.Store, home string) {
 			}
 			model = built
 			st.ServeReadModel(model)
+		case model != nil && model.Full() && time.Now().After(buildAfter):
+			built, err := st.BuildReadModel(ctx, pace)
+			if err != nil {
+				if ctx.Err() == nil {
+					slog.Warn("cci daemon cannot rebuild the full read model on a newer window; the full one keeps serving", "err", err)
+				}
+				buildAfter = time.Now().Add(readModelRetry)
+				break
+			}
+			full := model
+			model = built
+			st.ServeReadModel(model)
+			if err := full.Close(); err != nil && ctx.Err() == nil {
+				slog.Warn("cci daemon cannot close the full read model", "err", err)
+			}
 		case model != nil:
 			if err := model.CatchUp(ctx); err != nil && !model.Stale() && ctx.Err() == nil {
 				slog.Warn("cci daemon cannot catch the read model up", "err", err)
