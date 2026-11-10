@@ -233,7 +233,17 @@ func newWhoCmd() *cobra.Command {
 				_, err := fmt.Fprintln(cmd.OutOrStdout(), "no matching peers; cci who --all includes sessions that have ended")
 				return err
 			}
+			unnarrowed := f == peers.Filter{Drive: f.Drive}
+			var agents, idle int
 			for _, v := range views {
+				switch {
+				case unnarrowed && v.Lane == "" && (v.Role == peers.RoleAgent || v.Role == peers.RoleWorkflow):
+					agents++
+					continue
+				case unnarrowed && st.Now().Sub(v.LastSeen()) > time.Hour:
+					idle++
+					continue
+				}
 				if _, err := fmt.Fprintln(cmd.OutOrStdout(), v.Line(st.Now())); err != nil {
 					return err
 				}
@@ -243,7 +253,11 @@ func newWhoCmd() *cobra.Command {
 					}
 				}
 			}
-			return nil
+			if agents+idle == 0 {
+				return nil
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "+%d more: %d subagents or workflow agents holding no lane, %d idle over an hour; --role agent, --role workflow or --all lists them\n", agents+idle, agents, idle)
+			return err
 		}),
 	}
 	fl := cmd.Flags()

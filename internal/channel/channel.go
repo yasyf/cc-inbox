@@ -20,6 +20,7 @@ import (
 	mcp "github.com/yasyf/cc-interact/channel"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 	"github.com/yasyf/cc-inbox/internal/version"
@@ -32,6 +33,7 @@ const (
 	batchKind    = "batch"
 	skippedKind  = "skipped"
 	releaseTicks = 12
+	batchBudget  = 3072
 )
 
 // Resumed is the channel flag a re-executed channel server runs with: Claude
@@ -63,7 +65,7 @@ func (u upgrade) Error() string {
 	return "cci " + u.Version + " is installed at " + u.Path
 }
 
-const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is ` + "`<time> <text> [path]`" + `; act on it as on a ` + "`cci tail`" + ` line. A line cut at 400 characters names the file holding the rest, and the read tool prints it whole. A ` + "`" + batchKind + "`" + ` tag carries several records, one a line as ` + "`<seq> <kind> <lane> <text>`" + `. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A tag repeats when its cursor write fails after delivery, so skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
+const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A tag repeats when its cursor write fails after delivery, so skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
 
 var errStale = errors.New("subscription replaced")
 
@@ -260,19 +262,65 @@ func (b *batch) flush(ctx context.Context) error {
 	if err != nil || len(records) == 0 {
 		return err
 	}
+	kept := newest(records)
 	wire := render.Wire{Now: b.st.Now()}
-	lines := make([]string, len(records))
-	for i, r := range records {
+	var content strings.Builder
+	budget := render.NewBudget(&content, batchBudget)
+	for i, r := range kept {
 		line := r
 		line.To = nil
-		lines[i] = render.WithBody(wire.Line(line, 0), r)
+		if !budget.Line(render.WithBody(wire.Line(line, 0), r)) {
+			names := make([]string, len(f.Kinds))
+			for j, k := range f.Kinds {
+				names[j] = string(k)
+			}
+			budget.Trailer(fmt.Sprintf("+%d more; cci tail --to %s --kind %s --since %d reads them", len(kept)-i, f.Addressed, strings.Join(names, ","), kept[i].Seq-1))
+			break
+		}
 	}
 	last := records[len(records)-1].Seq
-	if err := b.notify(notifyMethod, map[string]any{"content": strings.Join(lines, "\n"), "meta": map[string]string{"seq": strconv.FormatInt(last, 10), "kind": batchKind}}); err != nil {
+	if err := b.notify(notifyMethod, map[string]any{"content": strings.TrimSuffix(content.String(), "\n"), "meta": map[string]string{"seq": strconv.FormatInt(last, 10), "kind": batchKind}}); err != nil {
 		return err
 	}
 	b.tick.Reset(batchWindow)
 	return b.st.SetCursor(context.WithoutCancel(ctx), b.cursor, f.Drive, last)
+}
+
+func newest(records []store.Record) []store.Record {
+	seen := map[supersede]bool{}
+	var kept []store.Record
+	for _, r := range slices.Backward(records) {
+		keys := supersedes(r)
+		if len(keys) > 0 && !slices.ContainsFunc(keys, func(k supersede) bool { return !seen[k] }) {
+			continue
+		}
+		for _, k := range keys {
+			seen[k] = true
+		}
+		kept = append(kept, r)
+	}
+	slices.Reverse(kept)
+	return kept
+}
+
+type supersede struct {
+	kind        kinds.Kind
+	lane, topic string
+	pr          store.PR
+}
+
+func supersedes(r store.Record) []supersede {
+	if r.Kind == kinds.Head && len(r.Refs.PRs) > 0 {
+		keys := make([]supersede, len(r.Refs.PRs))
+		for i, pr := range r.Refs.PRs {
+			keys[i] = supersede{kind: r.Kind, pr: pr}
+		}
+		return keys
+	}
+	if r.Topic == "" {
+		return nil
+	}
+	return []supersede{{kind: r.Kind, lane: r.Lane, topic: r.Topic}}
 }
 
 func follow(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, notify func(string, any) error) error {
@@ -288,7 +336,7 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 	defer held.tick.Stop()
 	batched := make(chan error, 1)
 	go func() { batched <- held.run(watchCtx, stop) }()
-	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: sub.Filter(), Cursor: sub.Cursor, Interval: interval, Untagged: true}, func(r store.Record, line string) error {
+	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: sub.Filter(), Cursor: sub.Cursor, Interval: interval, Compact: true}, func(r store.Record, line string) error {
 		now, ok, err := st.Subscription(watchCtx, sub.Window)
 		if err != nil {
 			return err
@@ -325,7 +373,8 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 		if r.ID != "" {
 			meta["id"] = r.ID
 		}
-		if err := notify(notifyMethod, map[string]any{"content": render.WithBody(line, r), "meta": meta}); err != nil {
+		wire := render.Wire{Now: st.Now()}
+		if err := notify(notifyMethod, map[string]any{"content": render.WithBody(wire.Headed(r.At, line), r), "meta": meta}); err != nil {
 			return err
 		}
 		if shared && seen >= mail.start {

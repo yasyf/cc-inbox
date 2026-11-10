@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -132,7 +134,7 @@ func (s *session) record(want store.Record) {
 	f := s.next()
 	seq := fmt.Sprint(want.Seq)
 	if f.Method != notifyMethod || f.Params.Meta["seq"] != seq || f.Params.Meta["kind"] != string(want.Kind) || f.Params.Meta["lane"] != want.Lane ||
-		!strings.HasPrefix(f.Params.Content, render.Stamp(want.At, want.At)+" ") || !strings.Contains(f.Params.Content, want.Text) {
+		!strings.HasPrefix(f.Params.Content, "@"+render.Stamp(want.At, want.At)+"\n"+seq+" "+string(want.Kind)+" ") || !strings.Contains(f.Params.Content, want.Text) {
 		s.t.Fatalf("frame = %+v, want record #%d %q", f, want.Seq, want.Text)
 	}
 }
@@ -463,7 +465,7 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 	if err := st.BindLane(ctx, store.PeerKey{Session: root.SessionID}, "d", "root", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	sub, err := st.Subscribe(ctx, store.Subscription{Session: root.SessionID, Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Decide}, ToKinds: store.DefaultToKinds("root"), Cursor: "root-channel"})
+	sub, err := st.Subscribe(ctx, store.Subscription{Session: root.SessionID, Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Decide}, ToKinds: store.DefaultToKinds("root"), Batch: store.DefaultBatch("root"), Cursor: "root-channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,15 +478,23 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 	if got := out.String(); strings.Contains(got, state.Text) || strings.Contains(got, report.Text) {
 		t.Fatalf("hook delivered %q", got)
 	}
+	done := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Done, To: []string{"main"}, Text: "first PR merged"})
 	ask := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Ask, To: []string{"main"}, Text: "merge go 1?"})
+	answer := testutil.Post(t, st, store.Record{Lane: "design-lane", Kind: kinds.Answer, Re: ask.Seq, To: []string{"root"}, Text: "schema b"})
+	owner := testutil.Post(t, st, store.Record{Lane: "owner", Kind: kinds.Owner, To: []string{"main"}, Text: "ship it"})
 	release := testutil.Post(t, st, store.Record{Lane: "release-lane", Kind: kinds.Release, To: []string{"root"}, Text: "11665 LIVE"})
-	done := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Done, To: []string{"main"}, Text: "PR merged"})
+	again := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Done, To: []string{"main"}, Text: "second PR merged"})
 	blocked := testutil.Post(t, st, store.Record{Lane: "mq-lane", Kind: kinds.Blocked, To: []string{"root"}, Text: "waits on the owner's pick"})
 	decide := testutil.Post(t, st, store.Record{Lane: "design-lane", Kind: kinds.Decide, Text: "pick a schema?"})
-	want := []string{fmt.Sprint(ask.Seq), fmt.Sprint(release.Seq), fmt.Sprint(done.Seq), fmt.Sprint(blocked.Seq), fmt.Sprint(decide.Seq)}
-	var got []string
+	want := []string{batchKind + fmt.Sprint(again.Seq), "ask" + fmt.Sprint(ask.Seq), "answer" + fmt.Sprint(answer.Seq), "owner" + fmt.Sprint(owner.Seq), "release" + fmt.Sprint(release.Seq), "blocked" + fmt.Sprint(blocked.Seq), "decide" + fmt.Sprint(decide.Seq)}
+	var got, batches []string
 	if err := follow(ctx, st, sub, true, func(_ string, params any) error {
-		got = append(got, params.(map[string]any)["meta"].(map[string]string)["seq"])
+		p := params.(map[string]any)
+		meta := p["meta"].(map[string]string)
+		got = append(got, meta["kind"]+meta["seq"])
+		if meta["kind"] == batchKind {
+			batches = append(batches, p["content"].(string))
+		}
 		if len(got) == len(want) {
 			return errStale
 		}
@@ -494,6 +504,16 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("channel delivered %v, want %v", got, want)
+	}
+	if len(batches) != 1 || !strings.Contains(batches[0], done.Text) || !strings.Contains(batches[0], again.Text) {
+		t.Fatalf("batches = %q, want one carrying both done records", batches)
+	}
+	out.Reset()
+	if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {
+		t.Fatal(err)
+	}
+	if got := out.String(); strings.Contains(got, done.Text) || strings.Contains(got, again.Text) {
+		t.Fatalf("hook delivered a batched done: %q", got)
 	}
 }
 
@@ -609,8 +629,8 @@ func noTag(t *testing.T, tags <-chan delivered, d time.Duration) {
 	}
 }
 
-func TestABatchIsOneTagWhateverItCarries(t *testing.T) {
-	for _, n := range []int{1, 1000} {
+func TestABatchIsOneTag(t *testing.T) {
+	for _, n := range []int{1, 20} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
 			st, _ := testutil.Store(t)
 			idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 200*time.Millisecond
@@ -636,6 +656,73 @@ func TestABatchIsOneTagWhateverItCarries(t *testing.T) {
 			}
 			noTag(t, tags, 3*batchWindow)
 		})
+	}
+}
+
+func TestABatchKeepsTheNewestHeadPerPRWithinItsBudgetAndCountsTheRest(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 50*time.Millisecond
+	sub := batched(t, st, kinds.Head, kinds.Note)
+	const prs, pushes, notes = 100, 4, 100
+	for push := range pushes {
+		for pr := range prs {
+			testutil.Post(t, st, store.Record{Lane: "ship-1", Kind: kinds.Head, To: []string{"owner-relay"}, Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 1000 + pr}}}, Text: fmt.Sprintf("#%d at push-%d-of-%d", 1000+pr, push, 1000+pr)})
+		}
+	}
+	for i := range notes {
+		testutil.Post(t, st, store.Record{Lane: "signal", Kind: kinds.Note, To: []string{"owner-relay"}, Text: fmt.Sprintf("look at %d; %s", i, strings.Repeat("detail ", 20))})
+	}
+	tags, stop := following(t, st, sub)
+	defer stop()
+	tag := nextTag(t, tags)
+	last, err := st.MaxSeq(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag.meta["kind"] != batchKind || tag.meta["seq"] != fmt.Sprint(last) || len(tag.content) > batchBudget {
+		t.Fatalf("tag %+v of %d bytes, want one batch through #%d within %d bytes", tag.meta, len(tag.content), last, batchBudget)
+	}
+	for pr := range prs {
+		for push := range pushes - 1 {
+			if strings.Contains(tag.content, fmt.Sprintf("push-%d-of-%d", push, 1000+pr)) {
+				t.Fatalf("batch carries a superseded head of #%d: %q", 1000+pr, tag.content)
+			}
+		}
+	}
+	lines := strings.Split(tag.content, "\n")
+	more := regexp.MustCompile(`^\+(\d+) more; cci tail --to owner-relay --kind head,note --since (\d+) reads them$`).FindStringSubmatch(lines[len(lines)-1])
+	if more == nil {
+		t.Fatalf("batch ends in %q, want a +N more line", lines[len(lines)-1])
+	}
+	shown := 0
+	for _, line := range lines {
+		if strings.Contains(line, " head ship-1 ") || strings.Contains(line, " note signal ") {
+			shown++
+		}
+	}
+	if counted, _ := strconv.Atoi(more[1]); shown == 0 || shown+counted != prs+notes {
+		t.Fatalf("batch shows %d and counts %s more, want %d in all", shown, more[1], prs+notes)
+	}
+	noTag(t, tags, 3*batchWindow)
+}
+
+func TestACutSingleTagPointsAtTheReadToolInsteadOfAPath(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+	text, path, err := st.Fit(strings.Repeat("long report ", 100))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := st.Subscribe(context.Background(), store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Cursor: "root-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tags, stop := following(t, st, sub)
+	defer stop()
+	cut := testutil.Post(t, st, store.Record{Lane: "fix-1", Kind: kinds.Ask, To: []string{"root"}, Text: text, Refs: store.Refs{Path: path}})
+	tag := nextTag(t, tags)
+	if tag.meta["seq"] != fmt.Sprint(cut.Seq) || strings.Contains(tag.content, path) || strings.Contains(tag.content, "/") || !strings.Contains(tag.content, fmt.Sprintf("%d ask fix-1 + long report", cut.Seq)) {
+		t.Fatalf("tag = %q, want the compact line with its + marker and no path", tag.content)
 	}
 }
 

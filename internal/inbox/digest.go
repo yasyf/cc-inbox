@@ -17,7 +17,7 @@ import (
 
 const (
 	latestLanes  = 15
-	DigestBudget = 32000
+	DigestBudget = 4000
 )
 
 type DigestView struct {

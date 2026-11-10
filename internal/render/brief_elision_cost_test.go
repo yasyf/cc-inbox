@@ -49,7 +49,6 @@ func TestBriefElisionImmutableOutput(t *testing.T) {
 			for _, width := range []int{0, 1, 40, 700} {
 				name := fmt.Sprintf("text%d/metadata%d/width%d", textIndex, metadata, width)
 				outputs[name+"/Brief"] = []byte(render.Brief(r, at, width))
-				outputs[name+"/Untagged"] = []byte(render.Untagged(r, at, width))
 			}
 		}
 	}

@@ -48,9 +48,6 @@ func TestRenderedTextWhitespace(t *testing.T) {
 			if got := render.Brief(r, at, 0); got != want {
 				t.Fatalf("Brief = %q, want %q", got, want)
 			}
-			if got, want := render.Untagged(r, at, 0), stamp+" "+tt.want; got != want {
-				t.Fatalf("Untagged = %q, want %q", got, want)
-			}
 		})
 	}
 	path := strings.Repeat("p/", 64) + "path"
@@ -68,9 +65,6 @@ func TestRenderedTextWhitespace(t *testing.T) {
 			}
 			if got := render.Brief(r, at, 0); got != want {
 				t.Fatalf("Brief = %q, want %q", got, want)
-			}
-			if got, want := render.Untagged(r, at, 0), stamp+rest; got != want {
-				t.Fatalf("Untagged = %q, want %q", got, want)
 			}
 		})
 	}

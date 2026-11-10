@@ -52,9 +52,6 @@ func TestBriefDropsOnlyWhatTheTextAlreadyNames(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			stamp := render.Stamp(at, at)
-			if got := render.Untagged(tt.r, at, 0); got != stamp+tt.brief {
-				t.Fatalf("Untagged() = %q, want %q", got, stamp+tt.brief)
-			}
 			if got, header := render.Brief(tt.r, at, 0), "#7 "+stamp+" REPORT desk"; got != header+tt.brief {
 				t.Fatalf("Brief() = %q, want %q", got, header+tt.brief)
 			}
@@ -74,10 +71,8 @@ func TestBriefDropsOnlyWhatTheTextAlreadyNames(t *testing.T) {
 func TestBriefKeepsTheFieldsAClipWouldHideInTheText(t *testing.T) {
 	at := time.Date(2026, 10, 27, 9, 0, 0, 0, time.UTC)
 	r := store.Record{Seq: 7, At: at, Lane: "desk", Kind: kinds.Report, Topic: "rollout", Text: strings.Repeat("filler ", 10) + "rollout"}
-	for _, got := range []string{render.Brief(r, at, 40), render.Untagged(r, at, 40)} {
-		if !strings.Contains(got, "[rollout]") {
-			t.Fatalf("clipped line %q hides the topic", got)
-		}
+	if got := render.Brief(r, at, 40); !strings.Contains(got, "[rollout]") {
+		t.Fatalf("clipped line %q hides the topic", got)
 	}
 	if got := render.Brief(r, at, 0); strings.Contains(got, "[rollout]") {
 		t.Fatalf("unclipped line %q repeats the topic its text names", got)
@@ -92,7 +87,7 @@ func TestBriefCountsTheRecipientsOfABroadcast(t *testing.T) {
 	}
 	r := store.Record{Seq: 7, At: at, Lane: "root", Kind: kinds.Decision, To: to, Text: "register extended rule/3f34533 " + strings.Repeat("why ", 80)}
 	const shown = " -> 50 lanes register extended rule/3f34533 "
-	for _, got := range []string{render.Brief(r, at, 0), render.Untagged(r, at, 0), render.Brief(r, at, 200), render.Untagged(r, at, 200)} {
+	for _, got := range []string{render.Brief(r, at, 0), render.Brief(r, at, 200)} {
 		if !strings.Contains(got, shown) {
 			t.Fatalf("broadcast line %q, want it to contain %q", got, shown)
 		}

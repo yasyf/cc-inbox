@@ -123,7 +123,7 @@ SELECT n+1,?,'noise','ask',?,'ignored','post','changed-watch-'||n,'["other"]',?,
 		ctx, cancel := context.WithCancel(t.Context())
 		done := make(chan error, 1)
 		go func() {
-			done <- inbox.Watch(ctx, st, inbox.WatchOptions{Filter: filter, Cursor: "changed-root-channel", Interval: time.Second, Untagged: true}, func(record store.Record, line string) error {
+			done <- inbox.Watch(ctx, st, inbox.WatchOptions{Filter: filter, Cursor: "changed-root-channel", Interval: time.Second, Compact: true}, func(record store.Record, line string) error {
 				observed.records = append(observed.records, record)
 				observed.lines = append(observed.lines, line)
 				return nil

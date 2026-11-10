@@ -36,14 +36,7 @@ func Line(r store.Record, now time.Time) string {
 }
 
 func Brief(r store.Record, now time.Time, width int) string {
-	return fit(header(r, now), r, width)
-}
-
-func Untagged(r store.Record, now time.Time, width int) string {
-	return fit(Stamp(r.At, now), r, width)
-}
-
-func fit(head string, r store.Record, width int) string {
+	head := header(r, now)
 	if s := head + rest(r, true, true); width <= 0 || utf8.RuneCountInString(s) <= width {
 		return s
 	}

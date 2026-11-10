@@ -298,9 +298,9 @@ next tool call, including records posted since the window started. A
 `head`, `review`, `state`, `claim` or `matrix` record arrives only
 when the lane is its first addressee; read the ones it is copied on with
 `cci tail --reader <lane>`, which also moves the hook past what it printed. The open asks the lane owes lead that
-context only when the set changed since the last list; otherwise one line
-counts them and names `cci tail --open`, which prints every one, newest first
-at any age; `--kind ask` narrows it and `--to <lane>` reads another lane's. The
+context once each: an ask the hook has not printed before brings one line
+counting the new ones and naming `cci tail --open`, which prints every one,
+newest first at any age; `--kind ask` narrows it and `--to <lane>` reads another lane's. The
 first delivery after a session
 start or compaction lists them in full. A `stopped`, `hold`, or `owner` record
 addressed to you lands mid-task; act on it before your next edit.
@@ -346,7 +346,7 @@ matches the pattern literally. `-n N` (`--limit N`) on `tail` or `grep` prints
 only the newest N matching records, as `tail -n` does. It searches all matching records newest first, including expired
 records. A text grep with no match prints `no records on <drive> match; store
 head #<seq>`. Tail, grep, and state default to 6,144 bytes, and text digest
-to 32,000 bytes so every section prints whole; `--budget` sets any other size.
+to 4,000 bytes, one screen; `--budget` sets any other size.
 When the budget cuts a text `tail --since` window, the newest records print and a
 `... CUT <n> older records before #<seq>; --oldest reads them first` trailer
 names what it dropped.
@@ -385,7 +385,9 @@ the name `ListAgents` prints, which changes when a session resumes.
 slug, or the git common dir. Pass the trailing `uds:` address to `SendMessage`; subagents
 can run `cci who` even though they lack `ListAgents`. Without `--all`, a
 session whose process has ended is hidden; with it, the line reads
-`gone, last seen <time>`.
+`gone, last seen <time>`. Unnarrowed, or with `--drive` alone, `cci who` folds
+subagents and workflow agents that hold no lane, and sessions idle over an
+hour, into one `+N more` line; any other flag turns the fold off.
 
 Announce what this session is doing so the lines above carry it:
 
@@ -587,15 +589,18 @@ subscribing; records in the overlap arrive twice.
 
 A record addressed to the reader arrives only when its kind is a
 `--to-kind`. For `--reader root` (or `main`) that defaults to
-`incident,mechanism,fix-live,decide,ask,blocker,blocked,urgent,answer,done,release,correction,defect,owner`, the kinds a root
-acts on; the state, head, red, report, review, note and evidence records lanes
+`incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner`, the kinds a root
+acts on, and `--batch-kinds` defaults to `done` in a window launched with
+`--channels`; the state, head, red, report, review, note and evidence records lanes
 copy to root stay in `cci tail` and `cci digest`, and the root's `PostToolUse`
 hook holds them back too. Other readers get every addressed kind unless they
 name `--to-kind`. `cci watch --reader root` applies the same default.
 
 `--batch-kinds report,note` holds those addressed kinds off a window until one
 tag carries them together, at most every five minutes and at once ahead of any
-other record, so they never wake it alone. `cci tail --to <lane> --mail`, from
+other record, so they never wake it alone. The tag keeps the newest record per
+lane and topic, and per pull request for `head`, within about 3 KB, and ends in
+a `+N more` line naming the `cci tail` that reads the rest. `cci tail --to <lane> --mail`, from
 the thread bound as that lane, reads its mail through the hook's cursor, so a
 wait and the hook deliver a record once. `--to <stem> --mail` from a numbered
 lane that holds the stem reads the same mail through the same cursor. A delivered line names no recipients;

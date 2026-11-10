@@ -49,6 +49,15 @@ func DefaultToKinds(reader string) []kinds.Kind {
 	return nil
 }
 
+// DefaultBatch is the kinds a channel subscription for reader carries together
+// when it names none: done, for a root.
+func DefaultBatch(reader string) []kinds.Kind {
+	if RootName(reader) {
+		return []kinds.Kind{kinds.Done}
+	}
+	return nil
+}
+
 func (s Subscription) Filter() Filter {
 	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.held(), ToKinds: s.ToKinds, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
 }

@@ -813,7 +813,7 @@ func TestPostToolUseLeadsWithTheOpenAsksBehindABacklog(t *testing.T) {
 	}
 }
 
-func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
+func TestTheOpenAskHeaderPrintsOncePerAsk(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := context.Background()
 	p := bindRoot(t, st)
@@ -831,7 +831,7 @@ func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
 		}
 		return hookContext(t, &out, event)
 	}
-	const listed, unchanged, changed = "open asks addressed to root, newest first", "cci records addressed to root; act on each:", " open asks addressed to root, changed since the last list; newest: #"
+	const listed, unchanged = "open asks addressed to root, newest first", "cci records addressed to root; act on each:"
 	asks := map[string]int64{}
 	for _, tt := range []struct {
 		event   string
@@ -844,10 +844,11 @@ func TestOpenAsksAreListedOnlyWhenTheyChange(t *testing.T) {
 		{"PostToolUse", "", "", "a note changes no ask", unchanged},
 		{"SessionStart", "", "", "after a compaction", listed},
 		{"PostToolUse", "", "", "still the one ask", unchanged},
-		{"PostToolUse", "which env?", "", "a second ask", "2" + changed},
-		{"PostToolUse", "", "which branch?", "one answered", "1" + changed},
+		{"PostToolUse", "which env?", "", "a second ask", "1 new open asks addressed to root (2 open); newest: #"},
+		{"PostToolUse", "", "", "both asks printed", unchanged},
+		{"PostToolUse", "", "which branch?", "one answered", unchanged},
 		{"PostToolUse", "", "which env?", "every ask answered", unchanged},
-		{"PostToolUse", "which region?", "", "an ask after an empty list", "1" + changed},
+		{"PostToolUse", "which region?", "", "an ask after an empty list", "1 new open asks addressed to root (1 open); newest: #"},
 	} {
 		if tt.ask != "" {
 			asks[tt.ask] = testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: tt.ask}).Seq
@@ -995,7 +996,7 @@ func TestDeliveryRedeliversWhatTheHookNeverAcknowledged(t *testing.T) {
 			cursors := func() map[string]int64 {
 				t.Helper()
 				got := map[string]int64{}
-				for _, name := range []string{store.LaneCursor(p.Key()), store.LaneCursor(p.Key()) + "#addressed", "open-asks-" + p.Key().String(), p.Key().String()} {
+				for _, name := range []string{store.LaneCursor(p.Key()), store.LaneCursor(p.Key()) + "#addressed", "open-asks-seen-" + p.Key().String(), p.Key().String()} {
 					seq, _, err := st.Cursor(context.Background(), name, "d")
 					if err != nil {
 						t.Fatal(err)
