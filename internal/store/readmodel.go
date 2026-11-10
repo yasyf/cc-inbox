@@ -151,6 +151,7 @@ type ReadModel struct {
 	source   *Store
 	observer *ChangeVersion
 	walIndex []byte
+	walMu    sync.RWMutex
 	limit    int64
 	text     *os.File
 	textEnd  int64
@@ -323,19 +324,20 @@ func mapWALIndex(ctx context.Context, s *Store) ([]byte, error) {
 	return mapped, nil
 }
 
-// committed moves whenever a commit reaches the store, from any process, and
-// costs no system call. It reads what PRAGMA data_version reads, directly.
-// mark is committed for a caller outside the model's lock: false once the
-// model is closed, when its WAL index is gone.
+// mark is committed for a caller inside the model's lock or outside it: false
+// once the model is closed, when its WAL index is gone. It takes only walMu, so
+// a reader already holding mu never queues behind a waiting writer.
 func (m *ReadModel) mark() (uint64, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.walMu.RLock()
+	defer m.walMu.RUnlock()
 	if m.walIndex == nil {
 		return 0, false
 	}
 	return m.committed(), true
 }
 
+// committed moves whenever a commit reaches the store, from any process, and
+// costs no system call. It reads what PRAGMA data_version reads, directly.
 func (m *ReadModel) committed() uint64 {
 	change := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walChangeOffset]))) //nolint:gosec // G103: the header's fields are aligned, shared memory.
 	frame := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walFrameOffset])))   //nolint:gosec // G103: the header's fields are aligned, shared memory.
@@ -363,10 +365,12 @@ func (m *ReadModel) Close() error {
 	}
 	m.chunks = nil
 	failed = errors.Join(failed, m.text.Close())
+	m.walMu.Lock()
 	if m.walIndex != nil {
 		failed = errors.Join(failed, syscall.Munmap(m.walIndex))
 		m.walIndex = nil
 	}
+	m.walMu.Unlock()
 	return errors.Join(failed, m.observer.Close())
 }
 
