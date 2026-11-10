@@ -33,7 +33,7 @@ func (q *incidentKqueue) Add(key incidentWatchKey) error {
 }
 
 func (q *incidentKqueue) addWithRegistration(key incidentWatchKey, register func(unix.Kevent_t) error) error {
-	flags := unix.O_EVTONLY | unix.O_CLOEXEC
+	flags := unix.O_EVTONLY | unix.O_CLOEXEC | unix.O_NONBLOCK
 	if !key.Follow {
 		flags |= unix.O_SYMLINK
 	}
