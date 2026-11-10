@@ -57,12 +57,12 @@ A launched lane's turn ends only on a typed record: `done`, `stopped`, `stand-do
 
 | Read | When |
 | --- | --- |
-| [references/posting.md](references/posting.md) | Using CLI-only flags (`--owned-by`, `--stack`, `--target`, `--census`, `--count`, `--ttl`), or a post is refused or deduplicated. |
-| [references/lanes.md](references/lanes.md) | Starting, replacing, or renaming a lane, or exit 76. |
-| [references/kinds.md](references/kinds.md) | Choosing an unlisted kind, or a close is refused. |
-| [references/stacks.md](references/stacks.md) | Deploy stacks, or importing a markdown inbox. |
-| [references/reading.md](references/reading.md) | Reading history, filtering by PR, stack, or lane, or truncated output. |
-| [references/channel.md](references/channel.md) | Subscribing windows, tuning root wake rules, or watching without a channel. |
-| [references/peers.md](references/peers.md) | Finding or reaching another session or drive. |
+| [reference/posting.md](reference/posting.md) | Using CLI-only flags (`--owned-by`, `--stack`, `--target`, `--census`, `--count`, `--ttl`), or a post is refused or deduplicated. |
+| [reference/lanes.md](reference/lanes.md) | Starting, replacing, or renaming a lane, or exit 76. |
+| [reference/kinds.md](reference/kinds.md) | Choosing an unlisted kind, or a close is refused. |
+| [reference/stacks.md](reference/stacks.md) | Deploy stacks, or importing a markdown inbox. |
+| [reference/reading.md](reference/reading.md) | Reading history, filtering by PR, stack, or lane, or truncated output. |
+| [reference/channel.md](reference/channel.md) | Subscribing windows, tuning root wake rules, or watching without a channel. |
+| [reference/peers.md](reference/peers.md) | Finding or reaching another session or drive. |
 
 After a `cc-inbox` release workflow finishes, run `cci upgrade` once; the daemon hands off within 30 seconds, so never hand-run `cci serve`.
