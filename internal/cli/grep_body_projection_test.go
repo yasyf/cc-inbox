@@ -91,6 +91,7 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 		code    int
 		skips   bool
 		replies bool
+		attrs   [2]string
 	}{
 		{name: "text large body", pattern: "pure port"},
 		{name: "JSON large body", pattern: "pure port", args: []string{"--json"}},
@@ -102,7 +103,7 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 		{name: "nonmatching malformed also", updates: []string{"UPDATE records SET also_resolves='[' WHERE seq=2"}, pattern: "pure port", code: 1, replies: true},
 		{name: "nonmatching malformed timestamp", updates: []string{"UPDATE records SET at=X'FF' WHERE seq=2"}, pattern: "pure port", code: 1, skips: true},
 		{name: "out of order timestamps", updates: []string{"UPDATE records SET at=at-90000000 WHERE seq=32", "UPDATE records SET text='pure port selected older' WHERE seq=2"}, pattern: "pure port"},
-		{name: "fields suppress PR rendering", updates: []string{`UPDATE records SET refs='{"prs":[7]}', fields='{"attrs":{"head:7":"abc"}}' WHERE seq=1`}, pattern: "pure port"},
+		{name: "fields suppress PR rendering", updates: []string{`UPDATE records SET refs='{"prs":[7]}', fields='{"attrs":{"head:7":"abc"}}' WHERE seq=1`}, pattern: "pure port", attrs: [2]string{"#7 pure", "#7 [head:7=abc] pure"}},
 		{name: "fixed case options", pattern: "PURE PORT", args: []string{"-F", "--ignore-case=false"}},
 		{name: "regex identity", updates: []string{"UPDATE records SET origin='feedfacefeedface', origin_seq=900 WHERE seq=1"}, pattern: "#900@feedface"},
 	} {
@@ -149,6 +150,9 @@ func TestGrepTextBodyProjectionPublicParity(t *testing.T) {
 				return
 			}
 			wantOut, wantErr, wantCode := invoke(parity)
+			if test.attrs[0] != "" {
+				wantOut = bytes.Replace(wantOut, []byte(test.attrs[0]), []byte(test.attrs[1]), 1)
+			}
 			if !bytes.Equal(gotOut, wantOut) || !pipedStderrMatches(gotOut, gotErr, wantErr) || gotCode != wantCode {
 				t.Fatalf("CLI parity code=%d/%d stdout=%q/%q stderr=%q/%q", gotCode, wantCode, gotOut, wantOut, gotErr, wantErr)
 			}
