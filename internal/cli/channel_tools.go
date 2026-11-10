@@ -184,13 +184,8 @@ var (
 	driveProp     = prop("string", "drive (default: this session's)")
 )
 
-func postTool() mcp.Tool {
-	text := map[string]any{"type": "string"}
-	seqs := map[string]any{"type": "array", "items": map[string]any{"type": []string{"string", "integer"}}}
-	items := map[string]any{"kind": text, "text": text, "body": text, "topic": text, "to": seqs, "re": map[string]any{"type": []string{"string", "integer"}}, "resolves": seqs, "pr": seqs}
-	props := map[string]any{
-		"lane":     boundLaneProp,
-		"drive":    driveProp,
+func recordProps() map[string]any {
+	return map[string]any{
 		"kind":     prop("string", "record kind, any case"),
 		"text":     prop("string", "the record line; over 400 chars the rest moves to the body"),
 		"body":     prop("string", "full body of any length, read back with read"),
@@ -209,8 +204,18 @@ func postTool() mcp.Tool {
 		"outcome":  prop("string", "passed, failed, pending, cancelled"),
 		"commit":   prop("string", "full commit sha"),
 		"head":     list("on a head record, <pr>=<sha> or <pr>=<was>..<sha>"),
-		"records":  map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": items}, "description": "several records in one call, each of kind, text, to, re, resolves, pr, topic and body as above; each inherits lane and drive"},
 	}
+}
+
+func postTool() mcp.Tool {
+	items := recordProps()
+	for _, field := range items {
+		delete(field.(map[string]any), "description")
+	}
+	props := recordProps()
+	props["lane"] = boundLaneProp
+	props["drive"] = driveProp
+	props["records"] = map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": items}, "description": "several records in one call, each taking any field above but lane and drive, which it inherits"}
 	return mcp.Tool{
 		Name:        "post",
 		Description: "Post one record, or several with records. cci stamps the time; no shell quoting. Returns the new seqs.",

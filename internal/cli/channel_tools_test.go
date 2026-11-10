@@ -62,6 +62,38 @@ func TestThePostToolPostsStructuredRecordsInOneCall(t *testing.T) {
 	}
 }
 
+func TestThePostToolKeepsEachBatchedRecordsOwnAttrs(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	got := mustTool(t, "post", map[string]any{
+		"drive": "d", "lane": "desk",
+		"records": []map[string]any{
+			{"kind": "report", "text": "first", "attrs": map[string]string{"job": "j1", "order": "o1"}},
+			{"kind": "report", "text": "second", "attrs": map[string]string{"job": "j2", "thread": "t2"}},
+		},
+	})
+	if got != "1 2" {
+		t.Fatalf("post records = %q, want both seqs", got)
+	}
+	out, err := run(t, "show", "--json", "1", "2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	attrs := map[int64]map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
+		var r store.Record
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatalf("show --json line %q: %v", line, err)
+		}
+		attrs[r.Seq] = r.Fields.Attrs
+	}
+	if want := map[int64]map[string]string{1: {"job": "j1", "order": "o1"}, 2: {"job": "j2", "thread": "t2"}}; !maps.EqualFunc(attrs, want, maps.Equal) {
+		t.Errorf("stored attrs = %v, want %v", attrs, want)
+	}
+}
+
 func TestThePostToolStampsALeadingLabel(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	stale := time.Now().Add(-2 * time.Hour).Format("3:04 PM")
@@ -138,8 +170,9 @@ func TestThePostToolAdvertisesOnlyTheFieldsLanesPass(t *testing.T) {
 	records, _ := props["records"].(map[string]any)
 	items, _ := records["items"].(map[string]any)
 	fields, _ := items["properties"].(map[string]any)
-	if got, want := slices.Sorted(maps.Keys(fields)), []string{"body", "kind", "pr", "re", "resolves", "text", "to", "topic"}; !slices.Equal(got, want) {
-		t.Errorf("records item fields = %v, want %v", got, want)
+	single := slices.DeleteFunc(slices.Sorted(maps.Keys(props)), func(name string) bool { return name == "lane" || name == "drive" || name == "records" })
+	if got := slices.Sorted(maps.Keys(fields)); !slices.Equal(got, single) {
+		t.Errorf("records item fields = %v, want every field of a single post but lane and drive, %v", got, single)
 	}
 	for _, name := range []string{"post", "close"} {
 		if required, _ := inputSchema(t, name)["required"].([]string); slices.Contains(required, "lane") {
@@ -149,7 +182,7 @@ func TestThePostToolAdvertisesOnlyTheFieldsLanesPass(t *testing.T) {
 }
 
 func TestTheToolListStaysUnderItsCeiling(t *testing.T) {
-	const ceiling = 6300
+	const ceiling = 6600
 	var out bytes.Buffer
 	if err := mcp.NewServer(mcp.ServerInfo{Name: "cci"}, cli.ChannelTools()).Serve(t.Context(), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`+"\n"), &out); err != nil {
 		t.Fatal(err)
@@ -184,7 +217,7 @@ func TestThePostToolPassesTheFieldsItAdvertises(t *testing.T) {
 	}{
 		{"unknown", map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "x", "bogus": "y"}, "post: no field bogus"},
 		{"bash only", map[string]any{"drive": "d", "lane": "desk", "kind": "decide", "text": "x", "owned_by": "desk"}, "post: no field owned_by"},
-		{"top level only", map[string]any{"drive": "d", "lane": "desk", "records": []map[string]any{{"kind": "note", "text": "x", "attrs": map[string]string{"a": "b"}}}}, "records[0]: post: no field attrs"},
+		{"inherited", map[string]any{"drive": "d", "lane": "desk", "records": []map[string]any{{"kind": "note", "text": "x", "drive": "e"}}}, "records[0]: post: no field drive"},
 	} {
 		if text, isErr := callTool(t, "post", tt.args); !isErr || text != tt.want {
 			t.Errorf("%s: post = %q, %v; want %q", tt.name, text, isErr, tt.want)
