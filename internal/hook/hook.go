@@ -329,7 +329,15 @@ func deliver(ctx context.Context, st *store.Store, k store.PeerKey, b store.Bind
 	if err != nil {
 		return err
 	}
-	res, err := inbox.Tail(ctx, st, inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Compact: true, Reader: b.Lane, Resume: "the next tool call", Open: true, Defer: true}, &tail)
+	opts := inbox.TailOptions{Filter: f, Cursor: store.LaneCursor(k), Budget: tailBudget, Compact: true, Reader: b.Lane, Resume: "the next tool call", Open: true, Defer: true}
+	carried, ok, err := st.ChannelCarried(ctx, k, b)
+	if err != nil {
+		return err
+	}
+	if ok {
+		opts.Carried = &carried
+	}
+	res, err := inbox.Tail(ctx, st, opts, &tail)
 	if err != nil {
 		return err
 	}

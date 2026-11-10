@@ -575,7 +575,10 @@ the `SessionStart` hook carries it into a resumed session. Re-running
 thread subscribes: both commands refuse to run in a subagent or teammate,
 whose lane records reach it through the `PostToolUse` hook instead.
 The cursor starts at the head when you subscribe and defaults to
-`channel-<session>`. Stop any Monitor that watched the same records after
+`channel-<session>`. A channel Claude Code starts, as on a resume or a
+reconnect, begins at the head instead of replaying what the cursor missed: one
+`skipped` tag counts the records addressed to the reader it passed over, and
+the `inbox` tool or `cci tail --since` reads them. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
 A record addressed to the reader arrives only when its kind is a

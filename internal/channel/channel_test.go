@@ -137,7 +137,15 @@ func (s *session) record(want store.Record) {
 	}
 }
 
-func TestChannelDeliversTheSubscriptionAndResumesFromItsCursor(t *testing.T) {
+func (s *session) skipped(n int, through int64) {
+	s.t.Helper()
+	f := s.next()
+	if f.Method != notifyMethod || f.Params.Meta["kind"] != skippedKind || f.Params.Meta["seq"] != fmt.Sprint(through) || !strings.HasPrefix(f.Params.Content, fmt.Sprintf("%d records addressed to ", n)) || !strings.Contains(f.Params.Content, "inbox tool") {
+		s.t.Fatalf("frame = %+v, want one tag counting %d skipped records through #%d", f, n, through)
+	}
+}
+
+func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before anyone subscribed", To: []string{"root"}})
@@ -159,7 +167,7 @@ func TestChannelDeliversTheSubscriptionAndResumesFromItsCursor(t *testing.T) {
 	resumed := open(t, st)
 	resumed.quiet(50 * time.Millisecond)
 	resumed.initialized()
-	resumed.record(missed)
+	resumed.skipped(1, missed.Seq)
 	clock.Advance(time.Second)
 	subscribe(t, st, kinds.Note)
 	time.Sleep(50 * time.Millisecond)
@@ -218,11 +226,50 @@ func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 func TestRecordsPostedRightAfterSubscribingArrive(t *testing.T) {
 	st, _ := testutil.Store(t)
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the subscription", To: []string{"root"}})
-	subscribe(t, st)
-	after := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the channel's first poll", To: []string{"root"}})
 	s := open(t, st)
 	s.initialized()
+	subscribe(t, st)
+	after := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the channel's first poll", To: []string{"root"}})
 	s.record(after)
+	s.quiet(50 * time.Millisecond)
+	s.close()
+}
+
+func TestANewChannelStartsLiveWhateverItsCursorMissed(t *testing.T) {
+	for _, n := range []int{1, 1000} {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			st, _ := testutil.Store(t)
+			subscribe(t, st)
+			var last store.Record
+			for i := range n {
+				last = testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: fmt.Sprintf("missed %d;", i)})
+			}
+			s := open(t, st)
+			s.initialized()
+			s.skipped(n, last.Seq)
+			s.quiet(50 * time.Millisecond)
+			attached := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "posted after it attached"})
+			s.record(attached)
+			s.quiet(50 * time.Millisecond)
+			s.close()
+		})
+	}
+}
+
+func TestARefollowInsideOneChannelReplaysNothingAndSkipsNothing(t *testing.T) {
+	st, clock := testutil.Store(t)
+	subscribe(t, st, kinds.Incident)
+	missed := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "missed"})
+	s := open(t, st)
+	s.initialized()
+	s.skipped(1, missed.Seq)
+	ask := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "delivered once"})
+	s.record(ask)
+	note := testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Note, Text: "selected only by the new subscription"})
+	s.quiet(50 * time.Millisecond)
+	clock.Advance(time.Second)
+	subscribe(t, st, kinds.Incident, kinds.Note)
+	s.record(note)
 	s.quiet(50 * time.Millisecond)
 	s.close()
 }
@@ -316,19 +363,28 @@ func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T
 		}
 		return out.String()
 	}
-	owed := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "posted before the channel started"})
-	subscribe(t, st)
+	owed := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Report, To: []string{"root"}, Text: "posted before the channel started"})
+	subscribe(t, st, kinds.Incident)
+	started, err := st.MaxSeq(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	seqs := make(chan string, 8)
 	streamCtx, stop := context.WithCancel(ctx)
 	streamed := make(chan struct{})
 	go func() {
 		defer close(streamed)
-		Stream(streamCtx, st, window, true, func(_ string, params any) error {
+		Stream(streamCtx, st, window, true, &started, func(_ string, params any) error {
 			seqs <- params.(map[string]any)["meta"].(map[string]string)["seq"]
 			return nil
 		})
 	}()
-	carried := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "the channel delivers this"})
+	t.Cleanup(func() {
+		stop()
+		<-streamed
+	})
+	hookOnly := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Correction, To: []string{"all"}, Text: "a broadcast the channel does not select"})
+	carried := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Report, To: []string{"root"}, Text: "the channel delivers this"})
 	select {
 	case got := <-seqs:
 		if got != fmt.Sprint(carried.Seq) {
@@ -349,8 +405,8 @@ func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T
 			t.Fatalf("channel never moved its cursor past #%d", carried.Seq)
 		}
 	}
-	if got := hookReads(); !strings.Contains(got, owed.Text) || strings.Contains(got, carried.Text) {
-		t.Fatalf("hook delivered %q, want only the record the channel never carried", got)
+	if got := hookReads(); !strings.Contains(got, owed.Text) || !strings.Contains(got, hookOnly.Text) || strings.Contains(got, carried.Text) {
+		t.Fatalf("hook delivered %q, want only the records the channel never carried", got)
 	}
 	if got := hookReads(); got != "" {
 		t.Fatalf("hook redelivered %q", got)
@@ -484,12 +540,13 @@ func TestAChannelReexecutesANewerInstallResumedOnItsStdio(t *testing.T) {
 
 func TestAResumedChannelAnnouncesItsToolsThenStreamsWithoutAnotherHandshake(t *testing.T) {
 	st, _ := testutil.Store(t)
+	subscribe(t, st)
+	handedOff := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "posted while the channel re-executed", To: []string{"root"}})
 	s := start(t, st, true)
 	if f := s.next(); f.Method != "notifications/tools/list_changed" || len(f.ID) != 0 {
 		t.Fatalf("first frame = %+v, want notifications/tools/list_changed so Claude Code lists the newer build's tools", f)
 	}
-	subscribe(t, st)
-	time.Sleep(50 * time.Millisecond)
+	s.record(handedOff)
 
 	ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "after the hand-off", To: []string{"root"}})
 
@@ -617,6 +674,25 @@ func TestABatchHeldAcrossARestartArrivesOnce(t *testing.T) {
 	tags, stop = following(t, st, sub)
 	defer stop()
 	noTag(t, tags, 100*time.Millisecond)
+}
+
+func TestANewChannelCountsTheBatchItWasHolding(t *testing.T) {
+	st, _ := testutil.Store(t)
+	batchWindow = time.Hour
+	batched(t, st, kinds.Note)
+	held := testutil.Post(t, st, store.Record{Lane: "signal", Kind: kinds.Note, To: []string{"owner-relay"}, Text: "held for the batch"})
+	tap := testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"owner-relay"}, Text: "he tapped Land"})
+	if err := st.SetCursor(context.Background(), "relay-channel", "d", tap.Seq); err != nil {
+		t.Fatal(err)
+	}
+	s := open(t, st)
+	s.initialized()
+	s.skipped(1, tap.Seq)
+	again := testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"owner-relay"}, Text: "he tapped Land again"})
+	if f := s.next(); f.Params.Meta["seq"] != fmt.Sprint(again.Seq) || strings.Contains(f.Params.Content, held.Text) {
+		t.Fatalf("frame = %+v, want #%d with no batch replaying the held note ahead of it", f, again.Seq)
+	}
+	s.close()
 }
 
 func TestTheHookLeavesBatchKindsToTheChannelAndLosesNothing(t *testing.T) {
