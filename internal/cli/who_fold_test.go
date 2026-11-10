@@ -20,13 +20,17 @@ func TestWhoFoldsAgentAndIdleRowsIntoACount(t *testing.T) {
 	for _, name := range peers.IdentityEnv {
 		t.Setenv(name, "")
 	}
-	self, err := process.NewProcess(int32(os.Getpid())) //nolint:gosec // G115: OS pids fit in int32.
-	if err != nil {
-		t.Fatal(err)
-	}
-	started, err := self.CreateTime()
-	if err != nil {
-		t.Fatal(err)
+	window := func(pid int) (int, int64) {
+		t.Helper()
+		p, err := process.NewProcess(int32(pid)) //nolint:gosec // G115: OS pids fit in int32.
+		if err != nil {
+			t.Fatal(err)
+		}
+		started, err := p.CreateTime()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return pid, started
 	}
 	ctx := context.Background()
 	st, err := store.Open(ctx, home)
@@ -43,13 +47,15 @@ func TestWhoFoldsAgentAndIdleRowsIntoACount(t *testing.T) {
 		{Session: "aaaa1111-root", Agent: "ahelper-1", Role: peers.RoleAgent},
 		{Session: "aaaa1111-root", Agent: "aflow-1", AgentName: "apply:api", Role: peers.RoleWorkflow},
 	} {
-		p.PID, p.PIDStarted = os.Getpid(), started
+		p.PID, p.PIDStarted = window(os.Getpid())
 		if _, err := st.Announce(ctx, p); err != nil {
 			t.Fatal(err)
 		}
 	}
 	st.Now = func() time.Time { return time.Now().Add(-2 * time.Hour) }
-	if _, err := st.Announce(ctx, store.Peer{Session: "bbbb2222-idle", Role: peers.RoleSession, PID: os.Getpid(), PIDStarted: started}); err != nil {
+	idle := store.Peer{Session: "bbbb2222-idle", Role: peers.RoleSession}
+	idle.PID, idle.PIDStarted = window(os.Getppid())
+	if _, err := st.Announce(ctx, idle); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Close(); err != nil {

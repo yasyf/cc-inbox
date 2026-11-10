@@ -719,9 +719,9 @@ func TestACutSingleTagPointsAtTheReadToolInsteadOfAPath(t *testing.T) {
 	}
 	tags, stop := following(t, st, sub)
 	defer stop()
-	cut := testutil.Post(t, st, store.Record{Lane: "fix-1", Kind: kinds.Ask, To: []string{"root"}, Text: text, Refs: store.Refs{Path: path}})
+	cut := testutil.Post(t, st, store.Record{Lane: "fixer", Kind: kinds.Ask, To: []string{"root"}, Text: text, Refs: store.Refs{Path: path}})
 	tag := nextTag(t, tags)
-	if tag.meta["seq"] != fmt.Sprint(cut.Seq) || strings.Contains(tag.content, path) || strings.Contains(tag.content, "/") || !strings.Contains(tag.content, fmt.Sprintf("%d ask fix-1 + long report", cut.Seq)) {
+	if tag.meta["seq"] != fmt.Sprint(cut.Seq) || strings.Contains(tag.content, path) || strings.Contains(tag.content, "/") || !strings.Contains(tag.content, fmt.Sprintf("%d ask fixer + long report", cut.Seq)) {
 		t.Fatalf("tag = %q, want the compact line with its + marker and no path", tag.content)
 	}
 }
