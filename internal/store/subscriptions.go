@@ -67,9 +67,10 @@ func (s Subscription) held() []kinds.Kind {
 }
 
 // BatchFilter selects what the channel delivers together, never on arrival:
-// the records addressed to the reader of a batch kind.
+// the records addressed to the reader of a batch kind, whether addressed as
+// the lane or as <reader>@<drive>.
 func (s Subscription) BatchFilter() Filter {
-	return Filter{Drive: s.Drive, Addressed: s.Reader, Kinds: s.Batch, Mute: s.Mute}
+	return Filter{Drive: s.Drive, Addressed: s.Reader, Kinds: s.Batch, ToKinds: s.Batch, Mute: s.Mute}
 }
 
 func (s Subscription) BatchCursor() string {
