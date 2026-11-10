@@ -62,11 +62,11 @@ func (s *Store) readModelWindow(ctx context.Context, rows int64) (modelWindow, e
 		return modelWindow{}, err
 	}
 	for _, drive := range drives {
-		openers, err := s.closureRows(ctx, drive, kinds.Openers())
+		openers, err := s.closureRowsBefore(ctx, drive, kinds.Openers(), w.floor)
 		if err != nil {
 			return modelWindow{}, err
 		}
-		open, err := s.unclosedInStore(ctx, drive, slices.DeleteFunc(openers, func(o Record) bool { return o.Seq >= w.floor }))
+		open, err := s.unclosedInStore(ctx, drive, openers)
 		if err != nil {
 			return modelWindow{}, err
 		}
