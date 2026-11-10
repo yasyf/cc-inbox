@@ -300,6 +300,68 @@ func TestAChannelAndTheHookDeliverEachRecordOnce(t *testing.T) {
 	}
 }
 
+func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T) {
+	st, _ := testutil.Store(t)
+	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+	ctx := context.Background()
+	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
+	if err := st.BindLane(ctx, store.PeerKey{Session: root.SessionID}, "d", "root", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	hookReads := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	owed := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "posted before the channel started"})
+	subscribe(t, st)
+	seqs := make(chan string, 8)
+	streamCtx, stop := context.WithCancel(ctx)
+	streamed := make(chan struct{})
+	go func() {
+		defer close(streamed)
+		Stream(streamCtx, st, window, true, func(_ string, params any) error {
+			seqs <- params.(map[string]any)["meta"].(map[string]string)["seq"]
+			return nil
+		})
+	}()
+	carried := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "the channel delivers this"})
+	select {
+	case got := <-seqs:
+		if got != fmt.Sprint(carried.Seq) {
+			t.Fatalf("channel delivered #%s, want #%d", got, carried.Seq)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("channel never delivered #%d", carried.Seq)
+	}
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
+		seq, _, err := st.Cursor(ctx, "root-channel", "d")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seq >= carried.Seq {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("channel never moved its cursor past #%d", carried.Seq)
+		}
+	}
+	if got := hookReads(); !strings.Contains(got, owed.Text) || strings.Contains(got, carried.Text) {
+		t.Fatalf("hook delivered %q, want only the record the channel never carried", got)
+	}
+	if got := hookReads(); got != "" {
+		t.Fatalf("hook redelivered %q", got)
+	}
+	stop()
+	<-streamed
+	if len(seqs) != 0 {
+		t.Fatalf("channel delivered #%s again", <-seqs)
+	}
+}
+
 func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T) {
 	st, _ := testutil.Store(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
