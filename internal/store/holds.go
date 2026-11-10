@@ -342,13 +342,15 @@ func readAliasChanges(ctx context.Context, q querier) ([2]int64, error) {
 
 func (s *Store) aliasChanges(ctx context.Context) ([2]int64, bool, error) {
 	memo := &s.reads.aliases
-	var mark uint64
-	model := s.reads.model.Load()
-	if model != nil {
-		mark = model.committed()
+	var (
+		mark uint64
+		live bool
+	)
+	if model := s.reads.model.Load(); model != nil {
+		mark, live = model.mark()
 	}
 	memo.mu.Lock()
-	exact, held, known := memo.exact, memo.changes, memo.exact && model != nil && memo.mark == mark
+	exact, held, known := memo.exact, memo.changes, memo.exact && live && memo.mark == mark
 	memo.mu.Unlock()
 	if known {
 		return held, true, nil
@@ -691,7 +693,11 @@ func (s *Store) unheardNow(ctx context.Context, q rowsQuerier, drive string, lan
 	if model == nil || q != rowsQuerier(s.db) {
 		return unheard(ctx, q, drive, lanes)
 	}
-	memo, key, mark := &s.reads.aliases, drive+"\x00"+strings.Join(lanes, "\x00"), model.committed()
+	mark, live := model.mark()
+	if !live {
+		return unheard(ctx, q, drive, lanes)
+	}
+	memo, key := &s.reads.aliases, drive+"\x00"+strings.Join(lanes, "\x00")
 	memo.mu.Lock()
 	if memo.heardAt != mark {
 		clear(memo.unheard)

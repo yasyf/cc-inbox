@@ -156,6 +156,9 @@ type ReadModel struct {
 	textEnd  int64
 	textUsed int64
 
+	window      modelWindow
+	builtBytes  int64
+	unnamed     []int64
 	mu          sync.RWMutex
 	head        int64
 	mutations   int64
@@ -185,6 +188,7 @@ type ReadModel struct {
 	metas       [readModelMetaSlots]atomic.Pointer[modelMeta]
 
 	stale       atomic.Bool
+	full        atomic.Bool
 	seen        atomic.Uint64
 	searchFloor atomic.Int64
 	searchSince atomic.Int64
@@ -197,6 +201,7 @@ type ReadModel struct {
 // ReadModelStats is what a read model holds and how often it has answered.
 type ReadModelStats struct {
 	Rows        int
+	Floor       int64
 	SearchFloor int64
 	TextBytes   int64
 	Head        int64
@@ -214,12 +219,20 @@ func (s *Store) BuildReadModel(ctx context.Context, pace func(context.Context) e
 
 // BuildReadModelUnder is BuildReadModel with its own cap on the bytes it holds.
 func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Context) error, limit int64) (*ReadModel, error) {
+	return s.buildReadModel(ctx, pace, limit, readModelWindowRows(limit))
+}
+
+func (s *Store) buildReadModel(ctx context.Context, pace func(context.Context) error, limit, windowRows int64) (*ReadModel, error) {
 	tip, err := s.RecordTip(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if !tip.Exact {
 		return nil, errors.New("read model: the store does not count changes to its records yet")
+	}
+	window, err := s.readModelWindow(ctx, windowRows)
+	if err != nil {
+		return nil, err
 	}
 	observer, err := s.OpenChangeVersion(ctx)
 	if err != nil {
@@ -234,13 +247,14 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 		return nil, errors.Join(err, syscall.Munmap(walIndex), observer.Close())
 	}
 	m := &ReadModel{
-		source: s, observer: observer, walIndex: walIndex, text: textFile, limit: limit, mutations: tip.Mutations,
+		source: s, observer: observer, walIndex: walIndex, text: textFile, limit: limit, mutations: tip.Mutations, window: window, head: max(window.floor-1, 0),
 		byDrive: map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
 		closerHead: map[modelCloserKey]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
 		ids: map[string]int32{}, addrIDs: map[string]int32{},
 	}
 	m.keepMetas = limit >= readModelMetaFloor
 	m.bytes = int64(unsafe.Sizeof(m.metas))
+	m.bytes += window.bytes()
 	if m.keepMetas {
 		m.bytes += readModelMetaBytes
 	}
@@ -264,6 +278,9 @@ func (s *Store) BuildReadModelUnder(ctx context.Context, pace func(context.Conte
 	if err := m.catchUp(ctx); err != nil {
 		return nil, errors.Join(err, m.Close())
 	}
+	m.mu.Lock()
+	m.builtBytes = m.bytes
+	m.mu.Unlock()
 	return m, nil
 }
 
@@ -308,6 +325,17 @@ func mapWALIndex(ctx context.Context, s *Store) ([]byte, error) {
 
 // committed moves whenever a commit reaches the store, from any process, and
 // costs no system call. It reads what PRAGMA data_version reads, directly.
+// mark is committed for a caller outside the model's lock: false once the
+// model is closed, when its WAL index is gone.
+func (m *ReadModel) mark() (uint64, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.walIndex == nil {
+		return 0, false
+	}
+	return m.committed(), true
+}
+
 func (m *ReadModel) committed() uint64 {
 	change := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walChangeOffset]))) //nolint:gosec // G103: the header's fields are aligned, shared memory.
 	frame := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walFrameOffset])))   //nolint:gosec // G103: the header's fields are aligned, shared memory.
@@ -342,6 +370,12 @@ func (m *ReadModel) Close() error {
 	return errors.Join(failed, m.observer.Close())
 }
 
+// Full reports that the model has grown past its refill mark, so a model
+// rebuilt on a newer window should replace it.
+func (m *ReadModel) Full() bool {
+	return m.full.Load()
+}
+
 // Stale reports that a stored record changed under the model, which must be rebuilt.
 func (m *ReadModel) Stale() bool {
 	return m.stale.Load()
@@ -351,7 +385,7 @@ func (m *ReadModel) Stale() bool {
 func (m *ReadModel) Stats() ReadModelStats {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return ReadModelStats{Rows: len(m.rows), SearchFloor: m.searchFloor.Load(), TextBytes: m.textUsed, Head: m.head, Bytes: m.held.Load(), Hits: m.hits.Load(), Misses: m.misses.Load(), Failures: m.failures.Load()}
+	return ReadModelStats{Rows: len(m.rows), Floor: m.window.floor, SearchFloor: m.searchFloor.Load(), TextBytes: m.textUsed, Head: m.head, Bytes: m.held.Load(), Hits: m.hits.Load(), Misses: m.misses.Load(), Failures: m.failures.Load()}
 }
 
 // Bounds is the model's search floor and its newest seq.
@@ -434,6 +468,9 @@ func (m *ReadModel) catchUpBatch(ctx context.Context) (bool, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return false, fmt.Errorf("read records for the read model: %w", err)
+	}
+	if err := m.nameReplyTargets(ctx, snapshot); err != nil {
+		return false, err
 	}
 	return copied == readModelBatch, nil
 }
@@ -530,6 +567,11 @@ func (m *ReadModel) ingest(rows *sql.Rows) error {
 	}
 	if row.wrong {
 		m.wrong = append(m.wrong, index)
+	}
+	if row.re != 0 && row.re < m.window.floor {
+		if _, held := m.window.replyLanes[row.re]; !held {
+			m.unnamed = append(m.unnamed, row.re)
+		}
 	}
 	m.indexClosure(&row, kind, refs, also, index)
 	m.held.Store(m.bytes)
@@ -827,17 +869,20 @@ func (m *ReadModel) textOf(r *modelRow) modelText {
 }
 
 func (m *ReadModel) moveSearchFloor() {
-	first, _ := slices.BinarySearch(m.atHigh, m.source.Now().Add(-readModelSpan).UnixMilli())
-	if first == 0 {
-		return
+	floor, since := m.window.floor, m.window.floorAt
+	if first, _ := slices.BinarySearch(m.atHigh, m.source.Now().Add(-readModelSpan).UnixMilli()); first > 0 {
+		floor, since = max(floor, m.rows[first-1].seq+1), max(since, m.atHigh[first-1])
 	}
-	m.searchFloor.Store(m.rows[first-1].seq + 1)
-	m.searchSince.Store(m.atHigh[first-1])
+	m.searchFloor.Store(floor)
+	m.searchSince.Store(since)
 }
 
 func (m *ReadModel) withinCap() error {
 	m.moveSearchFloor()
 	m.held.Store(m.bytes)
+	if m.bytes-m.builtBytes > m.limit*(readModelRefillShare-readModelWindowShare)/100 {
+		m.full.Store(true)
+	}
 	if m.bytes > m.limit {
 		return fmt.Errorf("read model: %d rows hold %d bytes, over its cap of %d", len(m.rows), m.bytes, m.limit)
 	}
@@ -973,7 +1018,7 @@ func (m *ReadModel) first(ctx context.Context, s *Store, f Filter, now time.Time
 func (m *ReadModel) firstSince(at int64) sql.NullInt64 {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.stale.Load() {
+	if m.stale.Load() || m.window.floor > 0 && at <= m.window.floorAt {
 		return sql.NullInt64{}
 	}
 	first, _ := slices.BinarySearch(m.atHigh, at)
@@ -1127,6 +1172,10 @@ func (sel *modelSelection) walk(visit func(*modelRow) bool) bool {
 		at, _ := slices.BinarySearchFunc(m.rows, f.Before, func(r modelRow, seq int64) int { return cmp.Compare(r.seq, seq) })
 		to = at
 	}
+	complete := m.window.holdsFrom(f, sel.since)
+	if !complete && !f.Descending {
+		return false
+	}
 	lists := sel.candidates()
 	low := make([]int, len(lists))
 	high := make([]int, len(lists))
@@ -1153,7 +1202,7 @@ func (sel *modelSelection) walk(visit func(*modelRow) bool) bool {
 			}
 		}
 		if best < 0 {
-			return true
+			return complete
 		}
 		for i, list := range lists {
 			if low[i] >= high[i] {
@@ -1212,8 +1261,13 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 		refs, held := sel.m.refsOf(r)
 		return false, v.kind != string(kinds.Review) || held && len(refs.ints)+len(refs.texts) == 0
 	}
-	if f.RepeatWindow > 0 && r.kind == sel.urgent && v.topic != "" && sel.repeats(r) {
-		return false, true
+	if f.RepeatWindow > 0 && r.kind == sel.urgent && v.topic != "" {
+		if sel.m.window.floor > 0 && r.at-f.RepeatWindow.Milliseconds() <= sel.m.window.floorAt {
+			return false, false
+		}
+		if sel.repeats(r) {
+			return false, true
+		}
 	}
 	if sel.laneBound && r.seq > sel.laneHead && r.at < sel.laneStart {
 		if r.seq > f.backfillsAsOf {
@@ -1270,7 +1324,11 @@ func (sel *modelSelection) addressedTo(v *modelView, names []string) bool {
 		return false
 	}
 	own := sel.m.rowOf(v.row.re)
-	return own != nil && slices.Contains(names, sel.m.strs[own.lane]) && v.row.lane != own.lane
+	if own == nil {
+		lane, held := sel.m.window.replyLanes[v.row.re]
+		return held && slices.Contains(names, lane) && v.lane != lane
+	}
+	return slices.Contains(names, sel.m.strs[own.lane]) && v.row.lane != own.lane
 }
 
 func (sel *modelSelection) fresh(v *modelView) bool {
@@ -1577,13 +1635,19 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.stale.Load() || len(m.wrong) > 0 {
+	if m.stale.Load() || len(m.wrong) > 0 || m.window.wrong {
 		m.misses.Add(1)
 		return nil, false
 	}
 	seqs = slices.Compact(slices.Sorted(slices.Values(seqs)))
 	openers := make([]Record, 0, len(seqs))
 	for _, seq := range seqs {
+		if seq < m.window.floor {
+			if opener, held := m.window.pinned[seq]; held && m.window.pinnedDrive[seq] == drive && opener.Tracked() {
+				openers = append(openers, opener)
+			}
+			continue
+		}
 		if row := m.rowOf(seq); row != nil && m.strs[row.drive] == drive && modelOpeners[m.strs[row.kind]] {
 			if opener := m.closure(row); opener.Tracked() {
 				openers = append(openers, opener)
@@ -1591,6 +1655,10 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 		}
 	}
 	open, err := m.unclosedLocked(ctx, s, drive, openers)
+	if errors.Is(err, errReadModelBelow) {
+		m.misses.Add(1)
+		return nil, false
+	}
 	if err != nil {
 		m.failures.Add(1)
 		return nil, false
@@ -1604,8 +1672,15 @@ func (m *ReadModel) openAmong(ctx context.Context, s *Store, drive string, seqs 
 }
 
 func (m *ReadModel) unclosedLocked(ctx context.Context, s *Store, drive string, openers []Record) ([]Record, error) {
+	openers, err := m.window.heldOpeners(drive, openers)
+	if err != nil {
+		return nil, err
+	}
 	openers = slices.DeleteFunc(openers, func(o Record) bool {
 		return o.Kind == kinds.Incident && slices.ContainsFunc(incidentTargets(o), func(seq int64) bool {
+			if seq < m.window.floor {
+				return m.window.incidents[seq] == drive
+			}
 			row := m.rowOf(seq)
 			return row != nil && m.strs[row.drive] == drive && m.strs[row.kind] == string(kinds.Incident)
 		})
@@ -1635,11 +1710,15 @@ func (m *ReadModel) unclosed(ctx context.Context, s *Store, drive string, opener
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.stale.Load() || len(m.wrong) > 0 {
+	if m.stale.Load() || len(m.wrong) > 0 || m.window.wrong {
 		m.misses.Add(1)
 		return nil, false
 	}
 	open, err := m.unclosedLocked(ctx, s, drive, openers)
+	if errors.Is(err, errReadModelBelow) {
+		m.misses.Add(1)
+		return nil, false
+	}
 	if err != nil {
 		m.failures.Add(1)
 		return nil, false
@@ -1657,7 +1736,7 @@ func (m *ReadModel) closureRows(ctx context.Context, drive string, ks []kinds.Ki
 	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if m.stale.Load() || len(m.wrong) > 0 {
+	if m.stale.Load() || len(m.wrong) > 0 || m.window.wrong || m.window.floor > 0 && !m.window.sameOpeners(ks) {
 		m.misses.Add(1)
 		return nil, false
 	}
@@ -1667,9 +1746,9 @@ func (m *ReadModel) closureRows(ctx context.Context, drive string, ks []kinds.Ki
 		indexes = append(indexes, m.byKind[pairKey(held, m.idOf(string(k)))]...)
 	}
 	slices.Sort(indexes)
-	out := make([]Record, len(indexes))
-	for i, index := range indexes {
-		out[i] = m.closure(&m.rows[index])
+	out := m.window.pinnedIn(drive)
+	for _, index := range indexes {
+		out = append(out, m.closure(&m.rows[index]))
 	}
 	m.hits.Add(1)
 	return out, true
@@ -1718,6 +1797,9 @@ func (m *ReadModel) otherNumbered(ctx context.Context, n int64) (*modelView, boo
 	if m.stale.Load() {
 		return nil, false
 	}
+	if m.window.floor > 0 && (n < m.window.floor || m.window.foreignNumbers[n]) {
+		return nil, false
+	}
 	own := m.rowOf(n)
 	if own == nil {
 		return nil, true
@@ -1759,7 +1841,7 @@ func (m *ReadModel) namesOf(ctx context.Context, s *Store, seqs []int64) (map[st
 		if seq == 0 {
 			continue
 		}
-		if seq > m.head {
+		if seq > m.head || seq < m.window.floor {
 			return nil, nil, false
 		}
 		if row := m.rowOf(seq); row != nil {
