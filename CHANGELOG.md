@@ -355,6 +355,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The cci channel's MCP tool list, which every Claude Code session with the
+  plugin loads, drops from about 13.7 KB to 6 KB, and its instructions from
+  2.4 KB to under 1 KB. The `post` tool advertises the 21 fields lanes pass and
+  no hidden flag; `records` items take `kind`, `text`, `to`, `re`, `resolves`,
+  `pr`, `topic` and `body`, and a field the tool does not advertise is refused.
+  A post that needs another flag, such as `--owned-by`, runs `cci post` in Bash.
+  `post` and `close` default `lane` to the window's bound lane, `who` lists the
+  window's drive, and `find` returns about 4 KB per query unless given `budget`.
+
 - The daemon's write queue takes the paged writes of `cci import`, `cci
   compact` and relay sync: a page of imported lines, a reparse page, a
   compaction fold, a page of relayed rows, a backfill page and a settle page,

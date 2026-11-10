@@ -1,12 +1,20 @@
 package cli_test
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	mcp "github.com/yasyf/cc-interact/channel"
+
 	"github.com/yasyf/cc-inbox/internal/cli"
+	"github.com/yasyf/cc-inbox/internal/peers"
+	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 func callTool(t *testing.T, name string, args map[string]any) (string, bool) {
@@ -110,23 +118,58 @@ func TestTheFindToolAnswersSeveralPullRequestsInOneCall(t *testing.T) {
 	}
 }
 
-func TestThePostToolTakesEveryPostFlag(t *testing.T) {
-	var props map[string]any
+func inputSchema(t *testing.T, name string) map[string]any {
+	t.Helper()
 	for _, tool := range cli.ChannelTools() {
-		if tool.Name == "post" {
-			props, _ = tool.InputSchema["properties"].(map[string]any)
+		if tool.Name == name {
+			return tool.InputSchema
 		}
 	}
-	for _, field := range []string{"id", "target", "stack", "env", "head", "commit", "ttl", "force", "owned_by", "lane_ref", "count", "attrs"} {
-		if _, ok := props[field]; !ok {
-			t.Errorf("post tool has no field %s, which cci post takes", field)
+	t.Fatalf("no tool %s", name)
+	return nil
+}
+
+func TestThePostToolAdvertisesOnlyTheFieldsLanesPass(t *testing.T) {
+	post := inputSchema(t, "post")
+	props, _ := post["properties"].(map[string]any)
+	if got, want := slices.Sorted(maps.Keys(props)), []string{"attrs", "body", "build", "ccn", "commit", "drive", "head", "id", "kind", "lane", "lane_ref", "outcome", "path", "pr", "re", "records", "resolves", "text", "to", "topic", "url"}; !slices.Equal(got, want) {
+		t.Errorf("post fields = %v, want %v: no hidden flag and no field a lane passes only in Bash", got, want)
+	}
+	records, _ := props["records"].(map[string]any)
+	items, _ := records["items"].(map[string]any)
+	fields, _ := items["properties"].(map[string]any)
+	if got, want := slices.Sorted(maps.Keys(fields)), []string{"body", "kind", "pr", "re", "resolves", "text", "to", "topic"}; !slices.Equal(got, want) {
+		t.Errorf("records item fields = %v, want %v", got, want)
+	}
+	for _, name := range []string{"post", "close"} {
+		if required, _ := inputSchema(t, name)["required"].([]string); slices.Contains(required, "lane") {
+			t.Errorf("%s requires lane, which defaults to the window's", name)
 		}
 	}
 }
 
-func TestThePostToolPassesFlagsTheCLITakes(t *testing.T) {
+func TestTheToolListStaysUnderItsCeiling(t *testing.T) {
+	const ceiling = 6300
+	var out bytes.Buffer
+	if err := mcp.NewServer(mcp.ServerInfo{Name: "cci"}, cli.ChannelTools()).Serve(t.Context(), strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`+"\n"), &out); err != nil {
+		t.Fatal(err)
+	}
+	var reply struct {
+		Result struct {
+			Tools json.RawMessage `json:"tools"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &reply); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(reply.Result.Tools); n == 0 || n > ceiling {
+		t.Errorf("tools/list carries %d bytes of tools, over the %d ceiling: every Claude Code session loads this list, so trim a field or description before raising it", n, ceiling)
+	}
+}
+
+func TestThePostToolPassesTheFieldsItAdvertises(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
-	args := map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "once", "id": "k1", "target": []string{"plat"}, "attrs": map[string]string{"step": "one"}}
+	args := map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "once", "id": "k1", "lane_ref": []string{"web"}, "attrs": map[string]string{"step": "one"}}
 	first := mustTool(t, "post", args)
 	if second := mustTool(t, "post", args); second != first+" (duplicate)" {
 		t.Errorf("a repost with the same id = %q, want the first record %q marked a duplicate", second, first)
@@ -134,7 +177,75 @@ func TestThePostToolPassesFlagsTheCLITakes(t *testing.T) {
 	if out := mustTool(t, "read", map[string]any{"seqs": []any{first}}); !strings.Contains(out, "once") {
 		t.Errorf("read %s = %q", first, out)
 	}
-	if text, isErr := callTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "x", "bogus": "y"}); !isErr || !strings.Contains(text, "bogus") {
-		t.Errorf("post with a field cci post lacks = %q, %v; want it refused", text, isErr)
+	for _, tt := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"unknown", map[string]any{"drive": "d", "lane": "desk", "kind": "report", "text": "x", "bogus": "y"}, "post: no field bogus"},
+		{"bash only", map[string]any{"drive": "d", "lane": "desk", "kind": "decide", "text": "x", "owned_by": "desk"}, "post: no field owned_by"},
+		{"top level only", map[string]any{"drive": "d", "lane": "desk", "records": []map[string]any{{"kind": "note", "text": "x", "attrs": map[string]string{"a": "b"}}}}, "records[0]: post: no field attrs"},
+	} {
+		if text, isErr := callTool(t, "post", tt.args); !isErr || text != tt.want {
+			t.Errorf("%s: post = %q, %v; want %q", tt.name, text, isErr, tt.want)
+		}
+	}
+}
+
+func TestPostAndCloseDefaultTheLaneToTheWindowsBinding(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CCI_AGENT_ID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	ask := mustTool(t, "post", map[string]any{"drive": "d", "lane": "api", "kind": "ask", "text": "which branch?", "to": []string{"desk"}})
+	st, err := store.Open(context.Background(), home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.BindLane(context.Background(), store.PeerKey{Session: "desk-session"}, "d", "desk", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "desk-session")
+	note := mustTool(t, "post", map[string]any{"kind": "note", "text": "from the window"})
+	answer := mustTool(t, "close", map[string]any{"seqs": []any{ask}, "how": "answer", "text": "main"})
+	out := mustTool(t, "find", map[string]any{"drive": "d"})
+	if !strings.Contains(out, note+" note desk from the window") || !strings.Contains(out, answer+" answer desk>api x"+ask+" main") {
+		t.Errorf("find = %q, want the note and the close both posted as desk", out)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "stray-session")
+	for name, args := range map[string]map[string]any{
+		"post":  {"drive": "d", "kind": "note", "text": "from nowhere"},
+		"close": {"drive": "d", "seqs": []any{ask}, "how": "answer", "text": "main"},
+	} {
+		if text, isErr := callTool(t, name, args); !isErr || !strings.Contains(text, "post needs --lane") {
+			t.Errorf("%s in an unbound window = %q, %v; want the refusal naming the lane", name, text, isErr)
+		}
+	}
+}
+
+func TestTheWhoToolListsOnlyTheWindowsDrive(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CCI_AGENT_ID", "")
+	for _, w := range []struct{ session, drive string }{{"aaaa1111-other", "other"}, {"bbbb2222-mine", "d"}} {
+		t.Setenv("CLAUDE_CODE_SESSION_ID", w.session)
+		if _, err := run(t, "drive", "use", w.drive, "--root"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := run(t, "announce"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out := mustTool(t, "who", map[string]any{}); !strings.Contains(out, "session=bbbb2222") || strings.Contains(out, "session=aaaa1111") {
+		t.Errorf("who = %q, want only the session on this window's drive d", out)
+	}
+	if out := mustTool(t, "who", map[string]any{"drive": "other"}); !strings.Contains(out, "session=aaaa1111") {
+		t.Errorf("who drive other = %q, want the session on other", out)
 	}
 }
