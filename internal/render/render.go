@@ -82,6 +82,7 @@ func rest(r store.Record, brief, elide bool) string {
 	if r.Topic != "" && !slices.Contains(words, r.Topic) {
 		fmt.Fprintf(&b, " [%s]", r.Topic)
 	}
+	b.WriteString(Attrs(r))
 	b.WriteString(" ")
 	text := strings.TrimSpace(r.Text)
 	hasSpace := strings.Contains(text, " ")
@@ -142,6 +143,22 @@ func rest(r store.Record, brief, elide bool) string {
 		fmt.Fprintf(&b, " %s", r.Refs.Path)
 	}
 	return b.String()
+}
+
+// Attrs is a record's attrs as " [key=value ...]" sorted by key, the binder
+// aside, so every reader of a record's line sees what its writer attached.
+func Attrs(r store.Record) string {
+	pairs := make([]string, 0, len(r.Fields.Attrs))
+	for key, value := range r.Fields.Attrs {
+		if key != store.BinderAttr {
+			pairs = append(pairs, key+"="+value)
+		}
+	}
+	if len(pairs) == 0 {
+		return ""
+	}
+	slices.Sort(pairs)
+	return " [" + strings.Join(pairs, " ") + "]"
 }
 
 // WithBody appends the record's JSON body, indented, on the lines after line,

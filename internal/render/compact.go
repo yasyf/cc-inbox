@@ -50,6 +50,7 @@ func Compact(r store.Record, width int) string {
 	if r.Refs.CCN != "" {
 		b.WriteString(" ccn:" + r.Refs.CCN)
 	}
+	b.WriteString(Attrs(r))
 	if r.Refs.URL != "" {
 		b.WriteString(" " + r.Refs.URL)
 	}

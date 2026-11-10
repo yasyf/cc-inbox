@@ -49,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A record's attrs now print on its line, as `[key=value ...]` sorted by key
+  with the binder left out, in `cci show`, the MCP `read` and `inbox` tools,
+  channel tags and every other line view. Before, they showed only in `--json`,
+  so a session sent `--attr thread=<ts> --attr job=<j>` never saw either: on
+  Nov 10 two drive handlers found no thread on a report that carried one and
+  posted at the DM root, then again in the right thread.
+
 - The MCP `post` tool's `records` items take `attrs`, `path`, `url`, `id`,
   `ccn`, `build`, `lane_ref`, `outcome`, `commit` and `head` again, so a batch
   whose records each carry their own `attrs` posts in one call. Since 0.54.17 an
