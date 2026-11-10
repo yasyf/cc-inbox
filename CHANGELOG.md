@@ -361,6 +361,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The `using-cci` skill loads a 6 KB core instead of 41 KB: records and tags,
+  reading mail, posting, answering and closing, and the kinds a lane posts
+  daily. Everything else moved to seven files under `references/` that the core
+  names with a trigger each. Its description no longer asks a session to load
+  it after compaction.
 - The cci channel's MCP tool list, which every Claude Code session with the
   plugin loads, drops from about 13.7 KB to 6.5 KB, and its instructions from
   2.4 KB to under 1 KB. The `post` tool advertises the 21 fields lanes pass and
