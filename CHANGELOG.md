@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The MCP `post` tool's `records` items take `attrs`, `path`, `url`, `id`,
+  `ccn`, `build`, `lane_ref`, `outcome`, `commit` and `head` again, so a batch
+  whose records each carry their own `attrs` posts in one call. Since 0.54.17 an
+  item took only `kind`, `text`, `to`, `re`, `resolves`, `pr`, `topic` and
+  `body`, and refused the rest with `no field attrs`.
+
 - `cci post --or-heir` stores a record whose NEEDS-LANE lines would put the text
   over 400 characters. Before, it refused the record and pointed at `--path`,
   which could not help because cci writes those lines itself. Now the text reads
@@ -356,10 +362,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The cci channel's MCP tool list, which every Claude Code session with the
-  plugin loads, drops from about 13.7 KB to 6 KB, and its instructions from
+  plugin loads, drops from about 13.7 KB to 6.5 KB, and its instructions from
   2.4 KB to under 1 KB. The `post` tool advertises the 21 fields lanes pass and
-  no hidden flag; `records` items take `kind`, `text`, `to`, `re`, `resolves`,
-  `pr`, `topic` and `body`, and a field the tool does not advertise is refused.
+  no hidden flag; a `records` item takes every one of them but `lane`, `drive`
+  and `records`, and a field the tool does not advertise is refused.
   A post that needs another flag, such as `--owned-by`, runs `cci post` in Bash.
   `post` and `close` default `lane` to the window's bound lane, `who` lists the
   window's drive, and `find` returns about 4 KB per query unless given `budget`.
