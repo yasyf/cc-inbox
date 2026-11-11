@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -137,6 +138,21 @@ func TestDaemonStreamsAWatchForAnyRelease(t *testing.T) {
 	watch := relayCommand(t, socket, wire.Request{Version: "0.0.0-other", Argv: []string{"cci", "watch", "--drive", "d", "--since", "1h", "--for", "1s", "--interval", "10ms"}, Cwd: t.TempDir(), PID: os.Getpid()}, "")
 	if !watch.ran || watch.code != 0 || !strings.Contains(watch.stdout, "seen by the watch") {
 		t.Fatalf("watch = %+v", watch)
+	}
+}
+
+func TestDaemonEchoesAGrepCutOnStderrOnlyWhenItIsAnotherFile(t *testing.T) {
+	st, _ := testutil.Store(t)
+	socket := commandSocket(t, st)
+	for i := range 3 {
+		testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: fmt.Sprintf("step %d", i)})
+	}
+	const trailer = "... more matches; narrow with --kind, --lane or --since\n"
+	for shared, stderr := range map[bool]string{false: trailer, true: ""} {
+		grep := relayCommand(t, socket, wire.Request{Argv: []string{"cci", "grep", "--drive", "d", "-n", "1", "step"}, Cwd: t.TempDir(), PID: os.Getpid(), StderrIsStdout: shared}, "")
+		if grep.code != 0 || strings.Count(grep.stdout, trailer) != 1 || grep.stderr != stderr {
+			t.Errorf("grep for a client whose stderr is its stdout = %t: %+v, want stderr %q", shared, grep, stderr)
+		}
 	}
 }
 

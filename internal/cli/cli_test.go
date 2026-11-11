@@ -2113,6 +2113,45 @@ func TestAPipedReadStillShowsWhatItsBudgetCutOnStderr(t *testing.T) {
 	}
 }
 
+func TestAReadWhoseStderrIsItsStdoutShowsItsCutOnce(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	if _, err := run(t, "drive", "use", "merged", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 40 {
+		if _, err := run(t, "post", "--lane", "api", "--kind", "state", "--text", fmt.Sprintf("ASK step %02d %s", i, strings.Repeat("x", 120))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	merged := func(args ...string) string {
+		t.Helper()
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		root := cli.NewRootCmd()
+		root.SetOut(w)
+		root.SetErr(w)
+		root.SetArgs(args)
+		runErr := root.Execute()
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		out, err := io.ReadAll(r)
+		if err != nil || runErr != nil {
+			t.Fatal(err, runErr)
+		}
+		return string(out)
+	}
+	if out := merged("tail", "--drive", "merged", "--since-seq", "0", "--oldest", "--budget", "1000"); strings.Count(out, "more; resume with --since") != 1 {
+		t.Fatalf("a tail cut by its budget into one file for stdout and stderr printed:\n%s", out)
+	}
+	if out := merged("grep", "--drive", "merged", "-n", "1", "ASK step"); strings.Count(out, "... more matches; narrow with --kind, --lane or --since") != 1 {
+		t.Fatalf("a grep cut by its limit into one file for stdout and stderr printed:\n%s", out)
+	}
+}
+
 func TestASecondThreadCannotBindALiveLane(t *testing.T) {
 	if lane := os.Getenv("CCI_TEST_SECOND_BINDER"); lane != "" {
 		out, err := run(t, "post", "--drive", "d", "--lane", lane, "--kind", "state", "--text", lane+" up")

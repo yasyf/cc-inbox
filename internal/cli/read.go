@@ -26,6 +26,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/wire"
 )
 
 func newTailCmd() *cobra.Command {
@@ -526,7 +527,7 @@ func tailNotes(ctx context.Context, cmd *cobra.Command, asJSON bool) io.Writer {
 		return cmd.ErrOrStderr()
 	}
 	if inv := invoked(ctx); inv != nil {
-		if inv.stdoutChar {
+		if inv.stdoutChar || inv.stderrIsStdout {
 			return nil
 		}
 		return cmd.ErrOrStderr()
@@ -535,8 +536,9 @@ func tailNotes(ctx context.Context, cmd *cobra.Command, asJSON bool) io.Writer {
 	if !ok {
 		return nil
 	}
-	info, err := out.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice != 0 {
+	errOut, _ := cmd.ErrOrStderr().(*os.File)
+	terminal, shared, err := wire.Outputs(out, errOut)
+	if err != nil || terminal || shared {
 		return nil
 	}
 	return cmd.ErrOrStderr()
