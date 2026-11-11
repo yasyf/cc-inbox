@@ -13,7 +13,8 @@ cci subscribe --drive release-demo --reader root --kind incident,decide,ask
 Each tag's `seq`, `kind`, and `lane` attributes carry the record's header,
 and its body is the record's compact line, the line `cci tail` prints, under
 an `@<clock>` line. A `+` marks text or a body the line leaves out;
-`cci show <seq>` or the `read` tool prints the whole record. In a window launched with the
+`cci show <seq>` or the `read` tool prints the whole record. A record addressed to a root reader
+carries that rest under its line when it fits 2,000 bytes, so the root needs no read for it. In a window launched with the
 channel, a record addressed to the root's lane arrives once: the
 `PostToolUse` hook skips what the channel delivered, and the channel skips
 what the hook delivered first. Delivery is at-least-once, so skip a seq you
