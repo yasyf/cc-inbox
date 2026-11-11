@@ -301,6 +301,12 @@ func TestReadModelKeepsItsCapWithEveryTextInItsFile(t *testing.T) {
 	if stats.Bytes == 0 || stats.Bytes > limit {
 		t.Errorf("bytes = %d, want some and at most %d", stats.Bytes, limit)
 	}
+	if stats.Bytes <= limit/4 {
+		t.Fatalf("fixture holds %d bytes, want more than the refill growth allowance %d", stats.Bytes, limit/4)
+	}
+	if model.Full() {
+		t.Fatal("a freshly built model requests another rebuild")
+	}
 	if stats.TextBytes == 0 || stats.Floor <= first.Seq {
 		t.Errorf("text bytes = %d, floor = %d; want text held and a window starting above the first record %d", stats.TextBytes, stats.Floor, first.Seq)
 	}
@@ -319,6 +325,15 @@ func TestReadModelKeepsItsCapWithEveryTextInItsFile(t *testing.T) {
 	}
 	if _, answered, err := model.Answer(t.Context(), st, store.Filter{Drive: "d", Contains: []string{"first"}, IncludeExpired: true}); err != nil || answered {
 		t.Errorf("a search below the floor answered = %t, err = %v; want it left to the store", answered, err)
+	}
+	for i := 0; i < 2000 && !model.Full(); i++ {
+		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: fmt.Sprint("appended ", i, text)})
+		if err := model.CatchUp(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !model.Full() {
+		t.Fatal("appended growth never requests a rebuild")
 	}
 }
 

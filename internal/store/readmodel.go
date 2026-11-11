@@ -281,6 +281,7 @@ func (s *Store) buildReadModel(ctx context.Context, pace func(context.Context) e
 	}
 	m.mu.Lock()
 	m.builtBytes = m.bytes
+	m.full.Store(false)
 	m.mu.Unlock()
 	return m, nil
 }
