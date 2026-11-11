@@ -801,7 +801,7 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 		if asJSON {
 			continue
 		}
-		body, err := shownBody(records[i])
+		body, err := ShownBody(records[i])
 		if err != nil {
 			return fmt.Errorf("show %s: %w", records[i].Name(), err)
 		}
@@ -859,7 +859,7 @@ func onDrive(records []store.Record, drive string) error {
 }
 
 func WholeText(r store.Record) ([]byte, error) {
-	rest, err := shownBody(r)
+	rest, err := ShownBody(r)
 	if err != nil {
 		return nil, err
 	}
@@ -872,7 +872,7 @@ func WholeText(r store.Record) ([]byte, error) {
 	return append([]byte(r.Text+"\n"), rest...), nil
 }
 
-func shownBody(r store.Record) ([]byte, error) {
+func ShownBody(r store.Record) ([]byte, error) {
 	path := r.Refs.Path
 	if path == "" {
 		return bodyWords(r), nil

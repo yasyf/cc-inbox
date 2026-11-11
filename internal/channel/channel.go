@@ -34,6 +34,7 @@ const (
 	skippedKind  = "skipped"
 	releaseTicks = 12
 	batchBudget  = 3072
+	rootWhole    = 2000
 )
 
 // Resumed is the channel flag a re-executed channel server runs with: Claude
@@ -65,7 +66,7 @@ func (u upgrade) Error() string {
 	return "cci " + u.Version + " is installed at " + u.Path
 }
 
-const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A tag repeats when its cursor write fails after delivery, so skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
+const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to a root reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A tag repeats when its cursor write fails after delivery, so skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
 
 var errStale = errors.New("subscription replaced")
 
@@ -374,7 +375,11 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 			meta["id"] = r.ID
 		}
 		wire := render.Wire{Now: st.Now()}
-		if err := notify(notifyMethod, map[string]any{"content": render.WithBody(wire.Headed(r.At, line), r), "meta": meta}); err != nil {
+		content, err := tagContent(wire.Headed(r.At, line), r, sub.Reader)
+		if err != nil {
+			return err
+		}
+		if err := notify(notifyMethod, map[string]any{"content": content, "meta": meta}); err != nil {
 			return err
 		}
 		if shared && seen >= mail.start {
@@ -387,6 +392,21 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 		err = nil
 	}
 	return errors.Join(err, <-changed, <-batched)
+}
+
+func tagContent(line string, r store.Record, reader string) (string, error) {
+	addressed := slices.ContainsFunc(r.To, func(to string) bool {
+		name, drive, _ := strings.Cut(to, "@")
+		return (drive == "" || drive == r.Drive) && store.SameLane(name, reader)
+	})
+	if !store.RootName(reader) || !addressed {
+		return render.WithBody(line, r), nil
+	}
+	rest, err := inbox.ShownBody(r)
+	if err != nil || len(rest) == 0 || len(rest) > rootWhole {
+		return render.WithBody(line, r), err
+	}
+	return line + "\n" + strings.TrimRight(string(rest), "\n"), nil
 }
 
 type laneMail struct {
