@@ -150,6 +150,23 @@ func TestTheFindToolAnswersSeveralPullRequestsInOneCall(t *testing.T) {
 	}
 }
 
+func TestTheFindToolReadsAPatternOpeningWithDashesAsThePattern(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	mustTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "note", "text": "orca send refused --from term-1", "pr": []any{"owner/repo#7"}})
+	mustTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "note", "text": "ran orca orchestration check"})
+	mustTool(t, "post", map[string]any{"drive": "d", "lane": "desk", "kind": "note", "text": "unrelated -n line"})
+	out := mustTool(t, "find", map[string]any{"drive": "d", "pattern": "--from|orchestration check"})
+	if !strings.Contains(out, "refused --from term-1") || !strings.Contains(out, "ran orca orchestration check") || strings.Contains(out, "unrelated") {
+		t.Errorf("find --from|orchestration check = %q, want both matching records and no other", out)
+	}
+	if out := mustTool(t, "find", map[string]any{"drive": "d", "pattern": "--from", "prs": []any{"owner/repo#7"}}); !strings.Contains(out, "refused --from term-1") {
+		t.Errorf("find --from on repo#7 = %q, want its record", out)
+	}
+	if out := mustTool(t, "find", map[string]any{"drive": "d", "pattern": "-n"}); !strings.Contains(out, "unrelated -n line") || strings.Contains(out, "orchestration") {
+		t.Errorf("find -n = %q, want only the record holding -n", out)
+	}
+}
+
 func inputSchema(t *testing.T, name string) map[string]any {
 	t.Helper()
 	for _, tool := range cli.ChannelTools() {
