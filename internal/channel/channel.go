@@ -68,7 +68,10 @@ func (u upgrade) Error() string {
 
 const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to a root reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A tag repeats when its cursor write fails after delivery, so skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
 
-var errStale = errors.New("subscription replaced")
+var (
+	errStale    = errors.New("subscription replaced")
+	errReplaced = errors.New("a newer channel server owns the window")
+)
 
 type hostedKey struct{}
 
@@ -86,8 +89,12 @@ func hosted(ctx context.Context) bool {
 // subscription once Claude Code reports the session initialized, or at once
 // when resumed. When a newer cci is installed, the server re-executes it on
 // the same stdio, resumed, so a long-lived window never keeps filtering with
-// the release it started on.
-func Serve(ctx context.Context, st *store.Store, window store.Window, channeled, resumed bool, in io.Reader, out io.Writer, tools ...mcp.Tool) error {
+// the release it started on. It returns once a server started after proc
+// claims the window.
+func Serve(ctx context.Context, st *store.Store, window, proc store.Window, channeled, resumed bool, in io.Reader, out io.Writer, tools ...mcp.Tool) error {
+	if owner, err := st.ClaimChannel(window, proc); err != nil || owner != proc {
+		return err
+	}
 	var started *int64
 	if !resumed {
 		head, err := st.MaxSeq(ctx)
@@ -106,6 +113,22 @@ func Serve(ctx context.Context, st *store.Store, window store.Window, channeled,
 	requests, relay := io.Pipe()
 	go func() { _ = relay.CloseWithError(untilInitialized(in, relay, watch)) }()
 	streamCtx, stop := context.WithCancel(ctx)
+	owns := func() error {
+		owner, err := st.ClaimChannel(window, proc)
+		if err != nil || owner == proc {
+			return err
+		}
+		slog.Info("cci channel: a newer channel server owns the window", "pid", window.PID, "owner", owner.PID)
+		stop()
+		_ = relay.Close()
+		return errReplaced
+	}
+	notify := func(method string, params any) error {
+		if err := owns(); err != nil {
+			return err
+		}
+		return srv.Notify(method, params)
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -114,9 +137,9 @@ func Serve(ctx context.Context, st *store.Store, window store.Window, channeled,
 			beating := make(chan struct{})
 			go func() {
 				defer close(beating)
-				beat(streamCtx, st, window)
+				beat(streamCtx, st, window, owns)
 			}()
-			Stream(streamCtx, st, window, channeled, started, srv.Notify)
+			Stream(streamCtx, st, window, channeled, started, notify)
 			<-beating
 		case <-streamCtx.Done():
 		}
@@ -147,9 +170,13 @@ func untilInitialized(in io.Reader, out io.Writer, initialized chan<- struct{}) 
 	return sc.Err()
 }
 
-func beat(ctx context.Context, st *store.Store, window store.Window) {
+func beat(ctx context.Context, st *store.Store, window store.Window, owns func() error) {
 	for ctx.Err() == nil {
-		if err := st.BeatChannel(window); err != nil {
+		err := owns()
+		if err == nil {
+			err = st.BeatChannel(window)
+		}
+		if err != nil && ctx.Err() == nil {
 			slog.Warn("cci channel: beat", "pid", window.PID, "err", err)
 		}
 		sleep(ctx, beatEvery)

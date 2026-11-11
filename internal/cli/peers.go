@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -434,11 +433,7 @@ func peerIdentity(ctx context.Context) (store.PeerKey, store.Window, error) {
 	if !errors.Is(err, errNoSession) {
 		return self, window, err
 	}
-	pid := os.Getpid()
-	if inv := invoked(ctx); inv != nil {
-		pid = inv.pid
-	}
-	if pid := procs.FindAncestor(pid, isCodex); pid != 0 {
+	if pid := procs.FindAncestor(callerPID(ctx), isCodex); pid != 0 {
 		window, err = windowOf(pid)
 		return self, window, err
 	}

@@ -23,7 +23,10 @@ import (
 	"github.com/yasyf/cc-inbox/internal/version"
 )
 
-var window = store.Window{PID: 4242, Started: 1791277810598}
+var (
+	window = store.Window{PID: 4242, Started: 1791277810598}
+	proc   = store.Window{PID: 4343, Started: 1791277810612}
+)
 
 type frame struct {
 	ID     json.RawMessage `json:"id"`
@@ -46,9 +49,9 @@ type session struct {
 	cancel context.CancelFunc
 }
 
-func open(t *testing.T, st *store.Store) *session {
+func open(t *testing.T, st *store.Store, p store.Window) *session {
 	t.Helper()
-	s := start(t, st, false)
+	s := start(t, st, p, false)
 	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	init := s.next()
 	if _, ok := init.Result.Capabilities["experimental"].(map[string]any)["claude/channel"]; !ok || !strings.Contains(init.Result.Instructions, Source) || !strings.Contains(init.Result.Instructions, "--resolves <seq>") {
@@ -57,7 +60,7 @@ func open(t *testing.T, st *store.Store) *session {
 	return s
 }
 
-func start(t *testing.T, st *store.Store, resumed bool) *session {
+func start(t *testing.T, st *store.Store, p store.Window, resumed bool) *session {
 	t.Helper()
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
@@ -65,7 +68,7 @@ func start(t *testing.T, st *store.Store, resumed bool) *session {
 	outR, outW := io.Pipe()
 	s := &session{t: t, in: inW, frames: make(chan frame, 64), done: make(chan error, 1), cancel: cancel}
 	go func() {
-		s.done <- Serve(ctx, st, window, false, resumed, inR, outW)
+		s.done <- Serve(ctx, st, window, p, false, resumed, inR, outW)
 		_ = outW.Close()
 	}()
 	go func() {
@@ -151,7 +154,7 @@ func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *tes
 	st, clock := testutil.Store(t)
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before anyone subscribed", To: []string{"root"}})
-	s := open(t, st)
+	s := open(t, st, proc)
 	s.initialized()
 	s.quiet(50 * time.Millisecond)
 	subscribe(t, st, kinds.Incident)
@@ -166,7 +169,7 @@ func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *tes
 	s.close()
 
 	missed := testutil.Post(t, st, store.Record{Kind: kinds.Decide, Text: "posted while no channel ran", To: []string{"root"}})
-	resumed := open(t, st)
+	resumed := open(t, st, proc)
 	resumed.quiet(50 * time.Millisecond)
 	resumed.initialized()
 	resumed.skipped(1, missed.Seq)
@@ -228,7 +231,7 @@ func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 func TestRecordsPostedRightAfterSubscribingArrive(t *testing.T) {
 	st, _ := testutil.Store(t)
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the subscription", To: []string{"root"}})
-	s := open(t, st)
+	s := open(t, st, proc)
 	s.initialized()
 	subscribe(t, st)
 	after := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the channel's first poll", To: []string{"root"}})
@@ -246,7 +249,7 @@ func TestANewChannelStartsLiveWhateverItsCursorMissed(t *testing.T) {
 			for i := range n {
 				last = testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: fmt.Sprintf("missed %d;", i)})
 			}
-			s := open(t, st)
+			s := open(t, st, proc)
 			s.initialized()
 			s.skipped(n, last.Seq)
 			s.quiet(50 * time.Millisecond)
@@ -262,7 +265,7 @@ func TestARefollowInsideOneChannelReplaysNothingAndSkipsNothing(t *testing.T) {
 	st, clock := testutil.Store(t)
 	subscribe(t, st, kinds.Incident)
 	missed := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "missed"})
-	s := open(t, st)
+	s := open(t, st, proc)
 	s.initialized()
 	s.skipped(1, missed.Seq)
 	ask := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "delivered once"})
@@ -562,7 +565,7 @@ func TestAChannelReexecutesANewerInstallResumedOnItsStdio(t *testing.T) {
 				return nil
 			}
 			t.Cleanup(func() { newerInstall, execve = defaultNewerInstall, syscall.Exec })
-			s := open(t, st)
+			s := open(t, st, proc)
 			s.initialized()
 			if subscribed {
 				subscribe(t, st)
@@ -588,7 +591,7 @@ func TestAResumedChannelAnnouncesItsToolsThenStreamsWithoutAnotherHandshake(t *t
 	st, _ := testutil.Store(t)
 	subscribe(t, st)
 	handedOff := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "posted while the channel re-executed", To: []string{"root"}})
-	s := start(t, st, true)
+	s := start(t, st, proc, true)
 	if f := s.next(); f.Method != "notifications/tools/list_changed" || len(f.ID) != 0 {
 		t.Fatalf("first frame = %+v, want notifications/tools/list_changed so Claude Code lists the newer build's tools", f)
 	}
@@ -825,7 +828,7 @@ func TestANewChannelCountsTheBatchItWasHolding(t *testing.T) {
 	if err := st.SetCursor(context.Background(), "relay-channel", "d", tap.Seq); err != nil {
 		t.Fatal(err)
 	}
-	s := open(t, st)
+	s := open(t, st, proc)
 	s.initialized()
 	s.skipped(1, tap.Seq)
 	again := testutil.Post(t, st, store.Record{Lane: "board-watch", Kind: kinds.Owner, To: []string{"owner-relay"}, Text: "he tapped Land again"})
@@ -901,7 +904,7 @@ func TestARecipientListNeverReachesARecipientAndOwnRepliesNeverEcho(t *testing.T
 
 func TestARunningChannelStampsItsWindow(t *testing.T) {
 	st, _ := testutil.Store(t)
-	s := start(t, st, true)
+	s := start(t, st, proc, true)
 	defer s.close()
 	if f := s.next(); f.Method != "notifications/tools/list_changed" {
 		t.Fatalf("first frame = %+v", f)
@@ -914,4 +917,58 @@ func TestARunningChannelStampsItsWindow(t *testing.T) {
 		}
 	}
 	t.Fatal("the channel never stamped its window")
+}
+
+func (s *session) exited() {
+	s.t.Helper()
+	_ = s.in.Close()
+	select {
+	case err := <-s.done:
+		if err != nil {
+			s.t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		s.t.Fatal("the channel never exited")
+	}
+	for f := range s.frames {
+		s.t.Fatalf("a replaced channel sent %+v", f)
+	}
+	s.cancel()
+}
+
+func TestOnlyTheNewestChannelOfAReconnectedWindowDeliversABurst(t *testing.T) {
+	st, _ := testutil.Store(t)
+	subscribe(t, st)
+	older := open(t, st, store.Window{PID: 2753, Started: proc.Started - time.Minute.Milliseconds()})
+	older.initialized()
+	time.Sleep(50 * time.Millisecond)
+	newer := open(t, st, proc)
+	newer.initialized()
+	time.Sleep(50 * time.Millisecond)
+
+	burst := make([]store.Record, 0, 4)
+	for i := range 4 {
+		burst = append(burst, testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: fmt.Sprintf("ask %d of 4 sent together", i+1), To: []string{"root"}}))
+	}
+
+	for _, r := range burst {
+		newer.record(r)
+	}
+	older.exited()
+	newer.close()
+}
+
+func TestAnOlderChannelExitsOnceANewerOneStartsAndNeverTakesTheWindowBack(t *testing.T) {
+	beatEvery = 10 * time.Millisecond
+	t.Cleanup(func() { beatEvery = 15 * time.Second })
+	st, _ := testutil.Store(t)
+	older := store.Window{PID: 2753, Started: proc.Started - time.Minute.Milliseconds()}
+	stale := open(t, st, older)
+	stale.initialized()
+	newer := open(t, st, proc)
+	newer.initialized()
+
+	stale.exited()
+	start(t, st, older, true).exited()
+	newer.close()
 }

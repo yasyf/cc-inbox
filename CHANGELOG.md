@@ -49,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A Claude Code window that reconnected the cci channel gets every record
+  addressed to it. Claude Code leaves a reconnected window's older `cci channel`
+  servers running and reads only the newest, and every server advanced the
+  same cursors: an older one delivered the second of four asks sent together
+  to a lane, moved the lane cursor past it, and the newest skipped it as
+  already delivered. Each server now claims its window by its process start
+  time in `channels/<pid>-<started>.owner` under the cci home; the newest owns
+  it, and an older one delivers nothing, moves no cursor, and exits at its next
+  record or channel beat, within 15 seconds.
+
 - The MCP `find` tool searches for a `pattern` that opens with a dash, such as
   `--from|orchestration check`, where it refused with
   `cci: unknown flag: --from|orchestration check`. It handed the pattern to

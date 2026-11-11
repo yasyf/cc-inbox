@@ -334,6 +334,13 @@ func isClaudeProcess(argv []string) bool {
 	return false
 }
 
+func callerPID(ctx context.Context) int {
+	if inv := invoked(ctx); inv != nil {
+		return inv.pid
+	}
+	return os.Getpid()
+}
+
 func claudePID(ctx context.Context) int {
 	if inv := invoked(ctx); inv != nil {
 		return procs.FindAncestor(inv.pid, isClaudeProcess)
