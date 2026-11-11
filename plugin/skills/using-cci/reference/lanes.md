@@ -7,7 +7,11 @@ Code session. Keep its existing `CLAUDE_CODE_SESSION_ID`; subagents share their
 parent's value and add `CCI_AGENT_ID` to it, so each subagent or teammate binds,
 claims and reads as its own thread. A Codex lane has no `CLAUDE_CODE_SESSION_ID`;
 its `CODEX_THREAD_ID` is the session, so `cci drive use` binds it and later
-`post`, `tail` and `watch` calls resolve the drive without `--drive`. Each `cci drive use` sets the session's cursor to the selected
+`post`, `tail` and `watch` calls resolve the drive without `--drive`. A
+session another session starts to post for it, such as a drive handler's own
+`claude --bg` session, carries `CCI_PARENT_SESSION` set to the starting
+session's id: its posts bind no lane, so it posts as the lanes its parent holds
+without being refused as their second binder. Each `cci drive use` sets the session's cursor to the selected
 drive's latest record, including when rebinding the same drive. An empty drive
 starts at sequence 0. A root binding also enables owner-prompt capture through
 the plugin:

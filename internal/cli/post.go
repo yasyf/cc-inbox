@@ -201,7 +201,7 @@ func newPostCmd() *cobra.Command {
 				return err
 			}
 			self, window, identityErr := peerIdentity(cmd.Context())
-			binds := getenv(cmd.Context(), unsentEnv) == "" && identityErr == nil && window.PID != 0 && bindsCaller(cmd.Context(), lane)
+			binds := getenv(cmd.Context(), unsentEnv) == "" && getenv(cmd.Context(), parentSessionEnv) == "" && identityErr == nil && window.PID != 0 && bindsCaller(cmd.Context(), lane)
 			if binds {
 				if lane, err = registeredLane(cmd.Context(), st, self, window, r.Drive, lane); err != nil {
 					return err

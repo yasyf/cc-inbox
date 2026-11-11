@@ -26,11 +26,12 @@ import (
 )
 
 const (
-	sessionEnv      = "CLAUDE_CODE_SESSION_ID"
-	codexSessionEnv = "CODEX_THREAD_ID"
-	agentEnv        = "CCI_AGENT_ID"
-	driveEnv        = "CLAUDE_LONG_RUNNING_DRIVE"
-	homeEnv         = "CCI_HOME"
+	sessionEnv       = "CLAUDE_CODE_SESSION_ID"
+	codexSessionEnv  = "CODEX_THREAD_ID"
+	agentEnv         = "CCI_AGENT_ID"
+	parentSessionEnv = "CCI_PARENT_SESSION"
+	driveEnv         = "CLAUDE_LONG_RUNNING_DRIVE"
+	homeEnv          = "CCI_HOME"
 )
 
 var errNoPeerSession = errors.New("run this from a Claude Code or Codex session: neither " + sessionEnv + " nor " + codexSessionEnv + " is set")
