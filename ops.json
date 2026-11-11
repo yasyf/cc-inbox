@@ -1,1 +1,1 @@
-{"v":1,"lamport":3,"ops":[{"kind":"set_branch","branch":"perf/cci-filesystem-nov10"}]}
+{"v":1,"lamport":4,"ops":[{"kind":"add_comment","body":"Confirmed bounded bug: withinCap sets full during construction using builtBytes=0. PR544 merged as57732b95c7b8478faed96fa82e62c78ea42ffa6f. Release v0.54.24 tagged. Hosted regression checks running; no local load tests. Pending release, supported daemon activation and natural CPU verification."}]}
