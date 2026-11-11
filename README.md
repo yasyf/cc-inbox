@@ -204,7 +204,9 @@ starts at the head when you subscribe, and the channel advances it past each
 delivered record. A channel Claude Code starts, as on a resume or a reconnect,
 begins at the head instead of replaying what the cursor missed: one `skipped`
 tag counts the records addressed to the reader it passed over, and the `inbox`
-tool or `cci tail --since` reads them. It defaults to `channel-<session>`; give each subscription
+tool or `cci tail --since` reads them. Claude Code reads only a window's newest
+channel server and leaves the older ones running, so the newest to start owns
+the window: an older one delivers nothing, moves no cursor, and exits. It defaults to `channel-<session>`; give each subscription
 its own cursor. When a Monitor watched the same records, stop it after
 subscribing; records in the overlap arrive twice. A subscription belongs to the
 Claude Code window: compaction and `/clear` keep it, and the `SessionStart`

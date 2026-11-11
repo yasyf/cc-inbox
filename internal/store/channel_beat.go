@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -40,6 +42,47 @@ func (s *Store) BeatChannel(w Window) error {
 		return fmt.Errorf("write channel beat: %w", err)
 	}
 	return os.Chtimes(path, now, now)
+}
+
+// ClaimChannel makes proc, a cci channel server's process, the owner of w's
+// channel unless one started later owns it, and returns the owner: Claude Code
+// reads only a window's newest channel server and leaves the older ones running.
+func (s *Store) ClaimChannel(w, proc Window) (Window, error) {
+	path := s.channelBeatPath(w) + ".owner"
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return Window{}, fmt.Errorf("make channel beat dir: %w", err)
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: the path is under the cci home.
+	if err != nil {
+		return Window{}, fmt.Errorf("open channel owner: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+		return Window{}, fmt.Errorf("lock channel owner: %w", err)
+	}
+	raw, err := io.ReadAll(f)
+	if err != nil {
+		return Window{}, fmt.Errorf("read channel owner: %w", err)
+	}
+	var owner Window
+	if len(raw) > 0 {
+		if err := json.Unmarshal(raw, &owner); err != nil {
+			return Window{}, fmt.Errorf("decode channel owner: %w", err)
+		}
+	}
+	if owner.Started >= proc.Started {
+		return owner, nil
+	}
+	if raw, err = json.Marshal(proc); err != nil {
+		return Window{}, err
+	}
+	if err := f.Truncate(0); err != nil {
+		return Window{}, fmt.Errorf("write channel owner: %w", err)
+	}
+	if _, err := f.WriteAt(raw, 0); err != nil {
+		return Window{}, fmt.Errorf("write channel owner: %w", err)
+	}
+	return proc, nil
 }
 
 // ChannelBeat returns when w's channel server last ran; ok is false when none
