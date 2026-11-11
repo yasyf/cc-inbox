@@ -293,7 +293,7 @@ func readTool() mcp.Tool {
 			if len(in.Seqs) == 0 {
 				return "read: give seqs", true
 			}
-			out, errOut, err := runCCI(ctx, "", append([]string{"show", "--json"}, in.Seqs...)...)
+			out, errOut, err := runCCI(ctx, "", withOperands([]string{"show", "--json"}, in.Seqs...)...)
 			if err != nil {
 				return failed(out, errOut, err)
 			}
@@ -413,7 +413,7 @@ func findTool() mcp.Tool {
 			if !ok {
 				return msg, true
 			}
-			args := []string{"grep", cmp.Or(in.Pattern, "."), "--json", "--budget=" + strconv.Itoa(jsonPerLineByte*cmp.Or(in.Budget, findBudget)), "-n", strconv.Itoa(cmp.Or(in.Limit, findLimit))}
+			args := []string{"grep", "--json", "--budget=" + strconv.Itoa(jsonPerLineByte*cmp.Or(in.Budget, findBudget)), "--limit=" + strconv.Itoa(cmp.Or(in.Limit, findLimit))}
 			args = appendDrive(args, in.Drive)
 			args = appendEach(args, "--kind", in.Kinds)
 			args = appendEach(args, "--lane", in.Lanes)
@@ -423,14 +423,15 @@ func findTool() mcp.Tool {
 			if in.Since != "" {
 				args = append(args, "--since="+in.Since)
 			}
+			pattern := cmp.Or(in.Pattern, ".")
 			width := cmp.Or(in.Width, findWidth)
 			if len(in.PRs) == 0 {
-				text, _, isErr := renderWire(ctx, "", width, args)
+				text, _, isErr := renderWire(ctx, "", width, withOperands(args, pattern))
 				return text, isErr
 			}
 			var b strings.Builder
 			for _, pr := range in.PRs {
-				text, _, isErr := renderWire(ctx, "", width, append(slices.Clone(args), "--pr="+pr))
+				text, _, isErr := renderWire(ctx, "", width, withOperands(append(slices.Clone(args), "--pr="+pr), pattern))
 				if isErr {
 					return text, true
 				}
@@ -479,7 +480,7 @@ func closeTool() mcp.Tool {
 			}
 			to := in.To
 			if len(to) == 0 {
-				out, errOut, err := runCCI(ctx, "", append([]string{"show", "--json"}, in.Seqs...)...)
+				out, errOut, err := runCCI(ctx, "", withOperands([]string{"show", "--json"}, in.Seqs...)...)
 				if err != nil {
 					return failed(out, errOut, err)
 				}
@@ -593,6 +594,10 @@ func appendEach(args []string, flag string, values []string) []string {
 		args = append(args, flag+"="+v)
 	}
 	return args
+}
+
+func withOperands(args []string, operands ...string) []string {
+	return append(append(args, "--"), operands...)
 }
 
 func passthrough(ctx context.Context, args []string) (string, bool) {

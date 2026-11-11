@@ -49,6 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The MCP `find` tool searches for a `pattern` that opens with a dash, such as
+  `--from|orchestration check`, where it refused with
+  `cci: unknown flag: --from|orchestration check`. It handed the pattern to
+  `cci grep` ahead of its flags, so the flag parser read it as one; the `find`,
+  `read` and `close` tools now pass the pattern and seqs after `--`.
+
 - `cci grep` and `cci tail` print the line that says what they cut, such as
   `... more matches; narrow with --kind, --lane or --since`, once when stdout
   and stderr are one file, as `2>&1` and the Claude Code Bash tool make them.
