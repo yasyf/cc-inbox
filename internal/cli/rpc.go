@@ -38,12 +38,13 @@ type invocationKey struct{}
 // invocation is who a command runs for when the daemon runs it: a client's
 // environment, directory and process, in place of the daemon's own.
 type invocation struct {
-	env        map[string]string
-	cwd        string
-	pid        int
-	stdoutChar bool
-	embedder   bool
-	st         *store.Store
+	env            map[string]string
+	cwd            string
+	pid            int
+	stdoutChar     bool
+	stderrIsStdout bool
+	embedder       bool
+	st             *store.Store
 }
 
 // WithStore has a command run with ctx use st, in this process's environment, in
@@ -53,12 +54,12 @@ func WithStore(ctx context.Context, st *store.Store) (context.Context, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve cwd: %w", err)
 	}
-	info, err := os.Stdout.Stat()
+	terminal, shared, err := wire.Outputs(os.Stdout, os.Stderr)
 	if err != nil {
 		return nil, fmt.Errorf("stat stdout: %w", err)
 	}
 	return context.WithValue(ctx, invocationKey{}, &invocation{
-		env: requestEnv(os.Environ()), cwd: cwd, pid: os.Getpid(), stdoutChar: info.Mode()&os.ModeCharDevice != 0, embedder: true, st: st,
+		env: requestEnv(os.Environ()), cwd: cwd, pid: os.Getpid(), stdoutChar: terminal, stderrIsStdout: shared, embedder: true, st: st,
 	}), nil
 }
 
@@ -170,7 +171,7 @@ func serveCommand(parent context.Context, conn net.Conn, st *store.Store, home s
 	root.SetIn(&inputStream{replies: replies})
 	env := requestEnv(request.Env)
 	err = root.ExecuteContext(channel.Hosted(context.WithValue(harness.WithConfigDir(ctx, env["CLAUDE_CONFIG_DIR"]), invocationKey{}, &invocation{
-		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, embedder: request.Embedder, st: &view,
+		env: env, cwd: request.Cwd, pid: request.PID, stdoutChar: request.StdoutChar, stderrIsStdout: request.StderrIsStdout, embedder: request.Embedder, st: &view,
 	})))
 	if parent.Err() != nil && wire.Stream(request.Argv) && request.Argv[1] != "channel" {
 		return parent.Err()

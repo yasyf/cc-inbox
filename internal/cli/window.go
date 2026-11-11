@@ -87,16 +87,17 @@ func newWindowModelCmd(home func(*cobra.Command) (string, error)) *cobra.Command
 }
 
 type capturedRequest struct {
-	At         int64             `json:"at"`
-	Argv       []string          `json:"argv,omitempty"`
-	Env        map[string]string `json:"env,omitempty"`
-	Cwd        string            `json:"cwd,omitempty"`
-	PID        int               `json:"pid,omitempty"`
-	StdoutChar bool              `json:"stdout_char,omitempty"`
-	Embedder   bool              `json:"embedder,omitempty"`
-	Hook       string            `json:"hook,omitempty"`
-	Payload    []byte            `json:"payload,omitempty"`
-	Stdin      []byte            `json:"stdin,omitempty"`
+	At             int64             `json:"at"`
+	Argv           []string          `json:"argv,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Cwd            string            `json:"cwd,omitempty"`
+	PID            int               `json:"pid,omitempty"`
+	StdoutChar     bool              `json:"stdout_char,omitempty"`
+	StderrIsStdout bool              `json:"stderr_is_stdout,omitempty"`
+	Embedder       bool              `json:"embedder,omitempty"`
+	Hook           string            `json:"hook,omitempty"`
+	Payload        []byte            `json:"payload,omitempty"`
+	Stdin          []byte            `json:"stdin,omitempty"`
 }
 
 func capture(home string, entry capturedRequest) {
@@ -134,7 +135,7 @@ func captureCommand(home string, request wire.Request) {
 	if len(request.Argv) > 1 && request.Argv[1] == "embed" {
 		return
 	}
-	capture(home, capturedRequest{Argv: request.Argv, Env: capturedEnvOf(requestEnv(request.Env)), Cwd: request.Cwd, PID: request.PID, StdoutChar: request.StdoutChar, Embedder: request.Embedder})
+	capture(home, capturedRequest{Argv: request.Argv, Env: capturedEnvOf(requestEnv(request.Env)), Cwd: request.Cwd, PID: request.PID, StdoutChar: request.StdoutChar, StderrIsStdout: request.StderrIsStdout, Embedder: request.Embedder})
 }
 
 func captureEmbedded(ctx context.Context, home, op string, c EmbedCall) {
@@ -175,7 +176,7 @@ func replay(ctx context.Context, st *store.Store, home string, entry capturedReq
 	}
 	var stdout, stderr bytes.Buffer
 	var run error
-	inv := &invocation{env: entry.Env, cwd: entry.Cwd, pid: entry.PID, stdoutChar: entry.StdoutChar, embedder: entry.Embedder, st: &view}
+	inv := &invocation{env: entry.Env, cwd: entry.Cwd, pid: entry.PID, stdoutChar: entry.StdoutChar, stderrIsStdout: entry.StderrIsStdout, embedder: entry.Embedder, st: &view}
 	hosted := channel.Hosted(context.WithValue(ctx, invocationKey{}, inv))
 	if entry.Hook != "" {
 		p, err := hook.Read(bytes.NewReader(entry.Payload))

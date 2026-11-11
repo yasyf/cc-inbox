@@ -43,13 +43,25 @@ const (
 
 // Request is one command the daemon runs for a client.
 type Request struct {
-	Version    string   `json:"version"`
-	Argv       []string `json:"argv"`
-	Env        []string `json:"env"`
-	Cwd        string   `json:"cwd"`
-	PID        int      `json:"pid"`
-	StdoutChar bool     `json:"stdout_char"`
-	Embedder   bool     `json:"embedder,omitempty"`
+	Version        string   `json:"version"`
+	Argv           []string `json:"argv"`
+	Env            []string `json:"env"`
+	Cwd            string   `json:"cwd"`
+	PID            int      `json:"pid"`
+	StdoutChar     bool     `json:"stdout_char"`
+	StderrIsStdout bool     `json:"stderr_is_stdout,omitempty"`
+	Embedder       bool     `json:"embedder,omitempty"`
+}
+
+// Outputs reports whether stdout is a terminal and whether stderr writes to the
+// same file as stdout, as a shell's 2>&1 and the Claude Code Bash tool make it.
+func Outputs(stdout, stderr *os.File) (terminal, shared bool, err error) {
+	out, err := stdout.Stat()
+	if err != nil {
+		return false, false, err
+	}
+	errOut, errErr := stderr.Stat()
+	return out.Mode()&os.ModeCharDevice != 0, errErr == nil && os.SameFile(out, errOut), nil
 }
 
 // Relayed reports whether argv is a command the daemon runs: a read or a post
@@ -163,13 +175,13 @@ func Relay(version string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
-	info, err := os.Stdout.Stat()
+	terminal, shared, err := Outputs(os.Stdout, os.Stderr)
 	if err != nil {
 		return 0, false
 	}
 	request := Request{
 		Version: version, Argv: resumable(os.Args), Env: os.Environ(), Cwd: cwd, PID: os.Getpid(),
-		StdoutChar: info.Mode()&os.ModeCharDevice != 0,
+		StdoutChar: terminal, StderrIsStdout: shared,
 	}
 	pump := &stdinPump{in: os.Stdin, needs: make(chan struct{}, 1)}
 	go pump.run()

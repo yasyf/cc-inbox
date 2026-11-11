@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci grep` and `cci tail` print the line that says what they cut, such as
+  `... more matches; narrow with --kind, --lane or --since`, once when stdout
+  and stderr are one file, as `2>&1` and the Claude Code Bash tool make them.
+  Since 0.49.17 a read whose stdout was not a terminal also echoed that line on
+  stderr, so a filter such as `| grep ASK` could not drop it; with both streams
+  on one file the line printed twice, the stderr copy above the records. The
+  echo now goes out only when stderr is a different file from stdout.
+
 - `cci post` from an agent whose session holds the posting lane, addressed only
   to that lane, as an agent of a `communicator` session posting
   `--lane communicator --to communicator@<drive>`, is refused telling the agent
