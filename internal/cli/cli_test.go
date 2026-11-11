@@ -2176,20 +2176,24 @@ func TestASecondThreadCannotBindALiveLane(t *testing.T) {
 	if err := st.Close(); err != nil {
 		t.Fatal(err)
 	}
-	second := func(lane, thread string) string {
+	second := func(lane, thread string, env ...string) string {
 		t.Helper()
 		cmd := exec.Command(os.Args[0], "-test.run=^TestASecondThreadCannotBindALiveLane$", "codex")
-		cmd.Env = append(os.Environ(), "CCI_TEST_SECOND_BINDER="+lane, "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+config, "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CODEX_THREAD_ID="+thread)
+		cmd.Env = append(os.Environ(), "CCI_TEST_SECOND_BINDER="+lane, "CCI_HOME="+home, "CLAUDE_CONFIG_DIR="+config, "CLAUDE_CODE_SESSION_ID=", "CCI_AGENT_ID=", "CCI_PARENT_SESSION=", "CODEX_THREAD_ID="+thread)
 		for _, name := range peers.IdentityEnv {
 			if name != "CODEX_THREAD_ID" {
 				cmd.Env = append(cmd.Env, name+"=")
 			}
 		}
+		cmd.Env = append(cmd.Env, env...)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s: %v\n%s", thread, err, out)
 		}
 		return string(out)
+	}
+	if out := second("p8a-step7", "019a3c3e-handler", "CCI_PARENT_SESSION="+holder.Session); !strings.Contains(out, "err=<nil>") {
+		t.Fatalf("a thread its holder's session started posting as p8a-step7 = %s; want it posted with no binding", out)
 	}
 	if out := second("p8a-step7", "019a3c3e-duplicate"); !strings.Contains(out, "lane p8a-step7 is held by live thread p8a-step7 48c3b7bf-holder/ap8a-step7") || !strings.Contains(out, `posted=""`) {
 		t.Fatalf("a second thread binding p8a-step7 = %s; want it refused", out)
@@ -2241,8 +2245,8 @@ func TestASecondThreadCannotBindALiveLane(t *testing.T) {
 	if out, err := run(t, "who", "--all", "--lane", "p8a-step7"); err != nil || !strings.Contains(out, " stood-down successor=p8a-step7-2 ") {
 		t.Fatalf("who --lane p8a-step7 = %s, %v; want it stood down for p8a-step7-2", out, err)
 	}
-	if out, err := run(t, "who", "--all", "--lane", "p8a-step7", "--json"); err != nil || strings.Contains(out, "019a3c3e-duplicate") {
-		t.Fatalf("who --lane p8a-step7 = %s, %v; want the refused thread unbound", out, err)
+	if out, err := run(t, "who", "--all", "--lane", "p8a-step7", "--json"); err != nil || strings.Contains(out, "019a3c3e-duplicate") || strings.Contains(out, "019a3c3e-handler") {
+		t.Fatalf("who --lane p8a-step7 = %s, %v; want the refused thread and the parent's child unbound", out, err)
 	}
 	if _, err := run(t, "post", "--drive", "d", "--lane", "root", "--kind", "stand-down", "--to", "p8a-step7", "--text", "p8a-step7 stands down"); err != nil {
 		t.Fatal(err)
