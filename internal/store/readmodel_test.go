@@ -327,7 +327,7 @@ func TestReadModelKeepsItsCapWithEveryTextInItsFile(t *testing.T) {
 		t.Errorf("a search below the floor answered = %t, err = %v; want it left to the store", answered, err)
 	}
 	for i := 0; i < 2000 && !model.Full(); i++ {
-		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: fmt.Sprint("appended ", i, text)})
+		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: fmt.Sprint("appended ", i, text[:385])})
 		if err := model.CatchUp(t.Context()); err != nil {
 			t.Fatal(err)
 		}
