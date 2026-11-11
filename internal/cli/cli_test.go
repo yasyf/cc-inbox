@@ -19,6 +19,7 @@ import (
 
 	"github.com/yasyf/cc-inbox/internal/cli"
 	"github.com/yasyf/cc-inbox/internal/hook"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/pacific"
 	"github.com/yasyf/cc-inbox/internal/peers"
 	"github.com/yasyf/cc-inbox/internal/store"
@@ -300,6 +301,46 @@ func TestGrepSinceTakesAClockTime(t *testing.T) {
 	}
 	if _, err := run(t, "grep", "--drive", "release-v3", "--since", "9 o'clock", "ship"); err == nil || !strings.Contains(err.Error(), "clock time") {
 		t.Errorf("grep --since 9 o'clock: %v", err)
+	}
+}
+
+func TestGrepSinceTakesDaysAndWeeks(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ages := []string{"ten", "six", "four"}
+	for i, age := range []int{10, 6, 4} {
+		if _, _, err := st.PostAt(ctx, store.Record{Drive: "release-v3", Lane: "root", Kind: kinds.Defect, Text: ages[i] + " days old"}, 0, time.Now().AddDate(0, 0, -age)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		since string
+		want  []string
+	}{
+		{"5d", []string{"four"}},
+		{"1w", []string{"four", "six"}},
+		{"2w", ages},
+	} {
+		out, err := run(t, "grep", "--drive", "release-v3", "--since", tt.since, "days old")
+		if err != nil {
+			t.Fatalf("grep --since %s: %v", tt.since, err)
+		}
+		for _, age := range ages {
+			if got := strings.Contains(out, age+" days old"); got != slices.Contains(tt.want, age) {
+				t.Errorf("grep --since %s = %q; want only %v", tt.since, out, tt.want)
+			}
+		}
+	}
+	if _, err := run(t, "grep", "--drive", "release-v3", "--since", "5x", "days old"); err == nil || !strings.Contains(err.Error(), "5d, 1w") {
+		t.Errorf("grep --since 5x: %v; want a refusal naming the day and week forms", err)
 	}
 }
 

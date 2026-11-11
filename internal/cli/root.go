@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -87,6 +88,8 @@ func rootCommand() *cobra.Command {
 }
 
 var number = regexp.MustCompile(`^#?[0-9]+(@[0-9a-f]+)?$`)
+
+var daysBack = regexp.MustCompile(`^([0-9]+)([dw])$`)
 
 // OpenStore opens the store CCI_HOME names the way every cci command does.
 func OpenStore(ctx context.Context) (*store.Store, error) {
@@ -221,7 +224,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().Var((*prFlag)(&f.pr), "pr", "only records about this pull request: a number, owner/repo#N, or URL")
 		cmd.Flags().StringVar(&f.origin, "origin", "", "only records written on this node (cci node prints its id)")
 	}
-	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h), a Pacific clock time (9:00 AM, 21:30, 12:0x), a date (2026-10-26), or an RFC3339 time")
+	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h, 5d, 1w), a Pacific clock time (9:00 AM, 21:30, 12:0x), a date (2026-10-26), or an RFC3339 time")
 	cmd.Flags().Int64Var(&f.sinceSeq, "since-seq", 0, "read after this internal store sequence")
 	f.sinceSeqFlag = cmd.Flags().Lookup("since-seq")
 	_ = cmd.Flags().MarkHidden("since-seq")
@@ -294,6 +297,16 @@ func parseSince(ctx context.Context, st *store.Store, s string) (int64, time.Tim
 		seq, err := st.Resolve(ctx, s)
 		return seq, time.Time{}, err
 	}
+	if m := daysBack.FindStringSubmatch(s); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return 0, time.Time{}, fmt.Errorf("--since %q: %w", s, err)
+		}
+		if m[2] == "w" {
+			n *= 7
+		}
+		return 0, now.AddDate(0, 0, -n), nil
+	}
 	if d, err := time.ParseDuration(s); err == nil {
 		return 0, now.Add(-d), nil
 	}
@@ -306,7 +319,7 @@ func parseSince(ctx context.Context, st *store.Store, s string) (int64, time.Tim
 	if t, err := time.ParseInLocation(time.DateOnly, s, pacific.Zone); err == nil {
 		return 0, t, nil
 	}
-	return 0, time.Time{}, fmt.Errorf("--since %q is not a seq, a duration, a clock time (9:00 AM, 21:30), a date (2026-10-26), or an RFC3339 time", s)
+	return 0, time.Time{}, fmt.Errorf("--since %q is not a seq, a duration (90m, 2h, 5d, 1w), a clock time (9:00 AM, 21:30), a date (2026-10-26), or an RFC3339 time", s)
 }
 
 // SelfPeer is the peer address of the Claude Code or Codex session running this process.

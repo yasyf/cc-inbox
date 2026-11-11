@@ -22,8 +22,9 @@ tail starts with records posted after the bind; rebinding resets that cursor
 to the drive's latest record. Named lane cursors are unchanged, and one with
 no saved position reads the past hour. Reads advance cursors only through
 printed records. If capped, repeat with the same drive, cursor, and filters.
-Explicit `--since` accepts a sequence number, duration, local clock time such
-as `09:00` or `9:00 AM` (the latest one at or before now), or RFC 3339 time, and
+Explicit `--since` accepts a sequence number, a duration such as `90m`, `36h`,
+`5d` or `2w`, a local clock time such as `09:00` or `9:00 AM` (the latest one at
+or before now), a date such as `2026-10-26`, or an RFC 3339 time, and
 leaves the cursor untouched, even with `--cursor`; use `--since 0` to replay.
 
 `SessionStart` shares the root's cursor and injects the digest plus unseen

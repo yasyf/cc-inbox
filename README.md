@@ -105,9 +105,9 @@ survives conversation compaction. Reads advance it only through printed records;
 rebinding resets it to the drive's latest record. Named lane cursors are
 unchanged, and one with no saved position reads the past hour.
 
-An explicit `--since` accepts a sequence number, duration, local clock time
-such as `09:00` or `9:00 AM` (the latest one at or before now), or RFC 3339
-time, and leaves the cursor untouched, even when `--cursor` is also set. Use
+An explicit `--since` accepts a sequence number, a duration such as `90m`,
+`36h`, `5d` or `2w`, a local clock time such as `09:00` or `9:00 AM` (the latest
+one at or before now), a date such as `2026-10-26`, or an RFC 3339 time, and leaves the cursor untouched, even when `--cursor` is also set. Use
 `--since 0` to replay older records. `--kind` accepts repeated flags or
 comma-separated kinds, such as `--kind hold,defect`.
 
@@ -516,7 +516,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `--origin <node>` | `tail`, `watch`, `grep`, `state` | Keep only records written on that node; `cci node` prints this machine's id. |
 | `--to <lane>` | `tail`, `watch`, `grep`, `state` | Keep only records whose `to` list contains the lane, or contains `all` and another lane wrote them. |
 | `--reader <lane>` | `tail`, `watch`, `grep`, `state` | Deliver records addressed to the reader regardless of kind, lane, or topic filters, plus other lanes' broadcasts that match those filters. Exclude the reader's own broadcasts, including the root's own prompts for `root` and `main`. |
-| `--since <point>` | `tail` | Read from a sequence number, duration, local clock time such as `9:00 AM`, or RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
+| `--since <point>` | `tail` | Read from a sequence number, a duration such as `2h` or `5d`, a local clock time such as `9:00 AM`, a date, or an RFC 3339 time without reading or advancing the cursor. A sequence number selects records after that number. |
 | `--oldest` | `tail` | When the budget cuts a text `--since` window, keep its oldest records and end with a resume trailer, as `--json` reads always do so a pager can follow the trailer. By default the window keeps its newest records and ends with `... CUT <n> older records before #<seq>; --oldest reads them first`. |
 | `--open` | `tail` | Print every open ask, blocker and question-ending decide whose first addressee is `--to`, or the lane this thread is bound as, and that another lane wrote, newest first at any age, under one `open asks addressed to <lane> (<n>, newest first):` line. These are the asks the `PostToolUse` hook lists. Reads no cursor; takes only `--to`, `--kind`, `--drive`, `--budget` and `--width`. |
 | `-n`, `--limit <count>` | `tail`, `grep` | Print only the newest `count` matching records, oldest first for `tail` and newest first for `grep`, as `tail -n` does. `tail` advances its cursor to the newest record printed. |

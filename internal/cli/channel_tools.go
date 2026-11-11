@@ -391,7 +391,7 @@ func findTool() mcp.Tool {
 			"lanes":   list("only these writers"),
 			"to":      prop("string", "only records addressed to this lane"),
 			"prs":     list("only records about these pull requests, each answered apart"),
-			"since":   prop("string", "seq, duration, clock time or date"),
+			"since":   prop("string", "seq, duration (2h, 5d, 1w), clock time or date"),
 			"limit":   prop("integer", "matches per query (default 20)"),
 			"width":   prop("integer", "chars per line (default 240)"),
 			"budget":  prop("integer", "bytes per query (default 4000)"),
@@ -559,7 +559,7 @@ func digestTool() mcp.Tool {
 		Name:        "digest",
 		Description: "One screen of the drive: counts, open asks, blockers, holds, incidents, the latest line per lane.",
 		InputSchema: schema(nil, map[string]any{
-			"since":  prop("string", "seq, duration, clock time or date (default 24h)"),
+			"since":  prop("string", "seq, duration (2h, 5d, 1w), clock time or date (default 24h)"),
 			"budget": prop("integer", "bytes (default 3000)"),
 			"drive":  driveProp,
 		}),
