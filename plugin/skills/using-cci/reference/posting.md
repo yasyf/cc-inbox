@@ -54,6 +54,11 @@ A post that exits 75 was not stored: the bus is down. With `--lane` and
 `--drive` it is kept, and the next `cci post` that reaches the store stores it;
 without them, repost it once the bus answers. Never treat exit 75 as sent.
 
+A record whose every `--to` is the posting lane is refused, since that lane
+reads its own records as ones it wrote. An agent shares its session's lane, so
+an agent writing to its own session posts as its own lane, such as
+`--lane handler` or `--lane builder`, and keeps `--to <session's lane>@<drive>`.
+
 ## Never type a clock time
 
 Never type a clock time into a record. Every reader prints the record's own
