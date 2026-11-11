@@ -199,7 +199,7 @@ func newWhoCmd() *cobra.Command {
 					return err
 				}
 				if seq != 0 || at.IsZero() {
-					return fmt.Errorf("--since %q: name a duration, a clock time or an RFC3339 time, since sessions have no seq", since)
+					return fmt.Errorf("--since %q: name a duration (24h, 5d), a clock time, a date or an RFC3339 time, since sessions have no seq", since)
 				}
 				f.All, f.Since = true, at
 			}
@@ -278,7 +278,7 @@ func newWhoCmd() *cobra.Command {
 	fl.StringVar(&ref, "ref", "", "sessions with a claim on this <kind>:<key>, e.g. branch:yasyf/eng-1062 or thread:C0822AHFY3G/1759")
 	fl.StringVar(&f.Rel, "rel", "", "only claims with this relation, e.g. opened, watches, started")
 	fl.BoolVar(&f.All, "all", false, "include sessions whose process has ended")
-	fl.StringVar(&since, "since", "", "include sessions whose process has ended that were last seen since this time: a duration back (24h), a Pacific clock time (9:00 AM) or an RFC3339 time")
+	fl.StringVar(&since, "since", "", "include sessions whose process has ended that were last seen since this time: a duration back (24h, 5d), a Pacific clock time (9:00 AM), a date (2026-10-26) or an RFC3339 time")
 	fl.StringSliceVar(&fields, "fields", nil, "with --json, only these keys of each peer, e.g. lane,live,seen_at; env prints only when named")
 	fl.StringVar(&successor, "successor-of", "", "print the lane that now stands in for this lane on --drive (default: this session's drive), following every stand-down that named a successor, or nothing when it never stood down with one; with --json, one object naming the drive, the lane, whether it stood down, its successor and the chain")
 	fl.BoolVar(&asJSON, "json", false, "one JSON object per peer")

@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Nov 10 two drive handlers found no thread on a report that carried one and
   posted at the DM root, then again in the right thread.
 
+- `--since` takes days and weeks, such as `5d` or `2w`, on every command and MCP
+  tool that reads it: `tail`, `watch`, `digest`, `grep`, `state`, `who`,
+  `relay export`, and the `find` and `digest` tools. Before, `--since 5d` was
+  refused with an error that listed "a duration" among the forms it takes,
+  because it parsed only Go's units, `ns` through `h`. The refusal and each
+  `--since` help line now show the duration forms by example.
 - The MCP `post` tool's `records` items take `attrs`, `path`, `url`, `id`,
   `ccn`, `build`, `lane_ref`, `outcome`, `commit` and `head` again, so a batch
   whose records each carry their own `attrs` posts in one call. Since 0.54.17 an
