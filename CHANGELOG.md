@@ -49,6 +49,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci post` from an agent whose session holds the posting lane, addressed only
+  to that lane, as an agent of a `communicator` session posting
+  `--lane communicator --to communicator@<drive>`, is refused telling the agent
+  to post as its own lane, such as `--lane handler` or `--lane builder`, keeping
+  its `--to`. The refusal used to say to name another lane to read it, which
+  sent the agent's record away from the session it was for.
+
 - A record's attrs now print on its line, as `[key=value ...]` sorted by key
   with the binder left out, in `cci show`, the MCP `read` and `inbox` tools,
   channel tags and every other line view. Before, they showed only in `--json`,
