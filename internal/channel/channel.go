@@ -19,11 +19,13 @@ import (
 
 	mcp "github.com/yasyf/cc-interact/channel"
 
+	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/supervisor"
 	"github.com/yasyf/cc-inbox/internal/version"
 )
 
@@ -52,6 +54,8 @@ var (
 	idle      = 5 * time.Second
 	beatEvery = 15 * time.Second
 	interval  = time.Second
+
+	exitSettle = 5 * time.Second
 
 	batchWindow = 5 * time.Minute
 
@@ -176,32 +180,95 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 	if stopping(ctx) || owns() != nil {
 		return err
 	}
-	return errors.Join(err, disconnected(context.WithoutCancel(ctx), st, window))
+	return errors.Join(err, disconnected(context.WithoutCancel(ctx), st, window, owns))
 }
 
-func disconnected(ctx context.Context, st *store.Store, window store.Window) error {
+func disconnected(ctx context.Context, st *store.Store, window store.Window, owns func() error) error {
 	sub, ok, err := st.Subscription(ctx, window)
 	if err != nil || !ok {
 		return err
 	}
-	_, _, err = st.Post(ctx, store.Record{
-		Drive: sub.Drive, Lane: sub.Reader, Kind: kinds.Disconnect, To: []string{disconnectTo},
-		Text: fmt.Sprintf("%s's cci channel disconnected: Claude Code closed it in window %d (session %s), so records to %s reach it only through its PostToolUse hook until it reconnects with %s", sub.Reader, window.PID, sub.Session, sub.Reader, hook.ReconnectCommand),
-	}, 0)
-	return err
+	r, registered, err := registration(ctx, st, sub)
+	if err != nil {
+		return err
+	}
+	lost := fmt.Sprintf("%s's cci channel disconnected: Claude Code closed it in window %d (session %s)", sub.Reader, window.PID, sub.Session)
+	text := lost + fmt.Sprintf(", so records to %s reach it only through its PostToolUse hook until it reconnects with %s", sub.Reader, hook.ReconnectCommand)
+	var repaired error
+	if registered {
+		if text, repaired = supervise(ctx, st, sub, r, window, owns, lost, text); text == "" {
+			return repaired
+		}
+	}
+	_, _, err = st.Post(ctx, store.Record{Drive: sub.Drive, Lane: sub.Reader, Kind: kinds.Disconnect, To: notified(r), Text: text}, 0)
+	return errors.Join(repaired, err)
+}
+
+func supervise(ctx context.Context, st *store.Store, sub store.Subscription, r store.Registration, window store.Window, owns func() error, lost, unrepaired string) (string, error) {
+	if exited(window) {
+		_, err := supervisor.Launch(ctx, r)
+		return fmt.Sprintf("%s's Claude Code exited in window %d (session %s); cci session run starts it again in tmux session %s", sub.Reader, window.PID, sub.Session, r.Alias), err
+	}
+	if owns() != nil {
+		return "", nil
+	}
+	up, err := supervisor.Up(ctx, r)
+	if err != nil || !up {
+		return unrepaired, err
+	}
+	earlier, open, err := openDisconnect(ctx, st, sub)
+	if err != nil || open {
+		return fmt.Sprintf("%s again; cci typed %s into tmux session %s for disconnect #%d, still open", lost, hook.ReconnectCommand, r.Alias, earlier), err
+	}
+	if err := supervisor.Type(ctx, r, hook.ReconnectCommand); err != nil {
+		return unrepaired, err
+	}
+	return fmt.Sprintf("%s while it runs on, so cci typed %s into tmux session %s", lost, hook.ReconnectCommand, r.Alias), nil
+}
+
+func exited(w store.Window) bool {
+	for settled := time.Now().Add(exitSettle); (harness.Procs{}).Alive(w.PID, w.Started); time.Sleep(interval) {
+		if time.Now().After(settled) {
+			return false
+		}
+	}
+	return true
+}
+
+func registration(ctx context.Context, st *store.Store, sub store.Subscription) (store.Registration, bool, error) {
+	if sub.Alias == "" {
+		return store.Registration{}, false, nil
+	}
+	return st.Registration(ctx, sub.Alias)
+}
+
+func notified(r store.Registration) []string {
+	if len(r.Notify) > 0 {
+		return r.Notify
+	}
+	return []string{disconnectTo}
+}
+
+func openDisconnect(ctx context.Context, st *store.Store, sub store.Subscription) (int64, bool, error) {
+	last, err := st.Query(ctx, store.Filter{Drive: sub.Drive, Kinds: []kinds.Kind{kinds.Disconnect}, Lanes: []string{sub.Reader}, Descending: true, Limit: 1})
+	if err != nil || len(last) == 0 {
+		return 0, false, err
+	}
+	open, err := st.OpenAmong(ctx, sub.Drive, []int64{last[0].Seq})
+	return last[0].Seq, len(open) > 0, err
 }
 
 func reconnected(ctx context.Context, st *store.Store, sub store.Subscription) error {
-	last, err := st.Query(ctx, store.Filter{Drive: sub.Drive, Kinds: []kinds.Kind{kinds.Disconnect}, Lanes: []string{sub.Reader}, Descending: true, Limit: 1})
-	if err != nil || len(last) == 0 {
+	last, open, err := openDisconnect(ctx, st, sub)
+	if err != nil || !open {
 		return err
 	}
-	open, err := st.OpenAmong(ctx, sub.Drive, []int64{last[0].Seq})
-	if err != nil || len(open) == 0 {
+	r, _, err := registration(ctx, st, sub)
+	if err != nil {
 		return err
 	}
 	_, _, err = st.Post(ctx, store.Record{
-		Drive: sub.Drive, Lane: sub.Reader, Kind: kinds.Recovered, To: []string{disconnectTo}, Resolves: last[0].Seq,
+		Drive: sub.Drive, Lane: sub.Reader, Kind: kinds.Recovered, To: notified(r), Resolves: last,
 		Text: fmt.Sprintf("%s's cci channel is connected again in window %d (session %s)", sub.Reader, sub.Window.PID, sub.Session),
 	}, 0)
 	return err

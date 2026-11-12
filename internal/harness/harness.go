@@ -85,6 +85,44 @@ func Dir(ctx context.Context) (string, error) {
 	return filepath.Join(home, ".claude", "sessions"), nil
 }
 
+// ErrNoTranscript is Transcript's error for a session Claude Code has written
+// no transcript of yet.
+var ErrNoTranscript = errors.New("no transcript")
+
+// Transcript is the path of session's transcript under the config dir's
+// projects.
+func Transcript(ctx context.Context, session string) (string, error) {
+	sessions, err := Dir(ctx)
+	if err != nil {
+		return "", err
+	}
+	found, err := filepath.Glob(filepath.Join(filepath.Dir(sessions), "projects", "*", session+".jsonl"))
+	if err != nil {
+		return "", err
+	}
+	if len(found) == 0 {
+		return "", fmt.Errorf("%w of session %s under %s yet", ErrNoTranscript, session, filepath.Dir(sessions))
+	}
+	return found[0], nil
+}
+
+// Running finds the window session runs in, when its process still runs.
+func Running(ctx context.Context, session string) (Session, bool, error) {
+	dir, err := Dir(ctx)
+	if err != nil {
+		return Session{}, false, err
+	}
+	all, err := CurrentSessions(dir)
+	if err != nil {
+		return Session{}, false, err
+	}
+	s, ok := all[session]
+	if !ok || !s.Alive(Procs{}) {
+		return Session{}, false, nil
+	}
+	return s, true, nil
+}
+
 // Sessions reads every registry file in dir, keyed by session id. A missing
 // dir is an empty registry, and a file that does not decode, such as one its
 // writer is still writing, is skipped with a warning.

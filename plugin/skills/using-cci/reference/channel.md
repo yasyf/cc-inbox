@@ -42,6 +42,28 @@ from the reader's lane to `communicator`; the next channel to stream that
 reader posts `recovered`, closing it. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
+A long-lived session, such as a drive's coordinator, communicator or meta
+session, registers instead, so cci keeps it alive and its subscription belongs
+to an alias rather than to one Claude Code process:
+
+```bash
+cci session register release-demo-coordinator --new --cwd ~/work/release-demo --command "claude --channels plugin:cc-inbox@cc-inbox" --resume-prompt "Resume as the coordinator" --drive release-demo --reader root --cursor coordinator
+```
+
+It takes the flags `cci subscribe` takes, plus `--command`, `--cwd`,
+`--resume-prompt`, `--notify`, and `--session` (this session by default) or
+`--new`. cci runs the session in the tmux session named by the alias, where
+`cci session run` starts the command and starts it again with `--resume` and
+the resume prompt each time Claude Code exits; `cci session attach <alias>`
+shows it in a terminal such as Orca's. Each window the session runs in hears
+the alias's subscription, and the session never runs `cci subscribe`, which
+refuses it, as `cci unsubscribe` does. When its channel disconnects while
+Claude Code runs on, cci types `/mcp reconnect plugin:cc-inbox:channel` into
+its tmux session, and the `disconnect` record goes to each `--notify` lane,
+`communicator` by default. Register the alias again to change what it
+delivers; its cursor stays. `cci session list` names each alias, its session,
+where it runs and its cursor, and `cci session rm <alias>` ends it.
+
 A record addressed to the reader arrives only when its kind is a
 `--to-kind`. For `--reader root` (or `main`) that defaults to
 `incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner`, the kinds a root

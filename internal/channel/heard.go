@@ -10,7 +10,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -21,26 +20,11 @@ import (
 )
 
 var (
-	transcriptOf = sessionTranscript
+	transcriptOf = harness.Transcript
 	tagOpening   = regexp.MustCompile(`^<channel source="` + regexp.QuoteMeta(Plugin) + `[^"]*"([^>]*)>`)
 	tagAttribute = regexp.MustCompile(`([a-z]+)="([^"]*)"`)
 	tagMarker    = []byte(`<channel source=\"` + Plugin)
 )
-
-func sessionTranscript(ctx context.Context, session string) (string, error) {
-	sessions, err := harness.Dir(ctx)
-	if err != nil {
-		return "", err
-	}
-	found, err := filepath.Glob(filepath.Join(filepath.Dir(sessions), "projects", "*", session+".jsonl"))
-	if err != nil {
-		return "", err
-	}
-	if len(found) == 0 {
-		return "", fmt.Errorf("no transcript of session %s under %s yet", session, filepath.Dir(sessions))
-	}
-	return found[0], nil
-}
 
 type tag struct {
 	kind string

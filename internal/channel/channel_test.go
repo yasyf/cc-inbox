@@ -17,8 +17,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shirou/gopsutil/v4/process"
 	mcp "github.com/yasyf/cc-interact/channel"
 
+	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -47,7 +49,7 @@ func newStore(t *testing.T) (*store.Store, *testutil.Clock) {
 		}
 		return path, f.Close()
 	}
-	t.Cleanup(func() { transcriptOf = sessionTranscript })
+	t.Cleanup(func() { transcriptOf = harness.Transcript })
 	return testutil.Store(t)
 }
 
@@ -288,6 +290,36 @@ func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *tes
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "after unsubscribe", To: []string{"root"}})
 	resumed.quiet(50 * time.Millisecond)
 	resumed.close()
+}
+
+func TestChannelDeliversARegisteredSessionsSubscription(t *testing.T) {
+	st, clock := newStore(t)
+	ctx := context.Background()
+	s := open(t, st, proc)
+	s.initialized()
+	s.quiet(50 * time.Millisecond)
+	coordinator := store.Registration{Subscription: store.Subscription{Alias: "release-demo-coordinator", Session: "s1", Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Incident}, Cursor: "coordinator"}}
+	if _, err := st.Register(ctx, coordinator); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	incident := testutil.Post(t, st, store.Record{Lane: "alerts", Kind: kinds.Incident, Topic: "api-5xx", Text: "api 5xx above 2%"})
+	s.record(incident)
+	clock.Advance(time.Second)
+	coordinator.Kinds = []kinds.Kind{kinds.Note}
+	if _, err := st.Register(ctx, coordinator); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	note := testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Note, Text: "LAUNCHED R1185 cci-interact"})
+	s.record(note)
+	if _, ok, err := st.Unregister(ctx, coordinator.Alias); err != nil || !ok {
+		t.Fatalf("Unregister = %v, %v", ok, err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "after the alias was removed", To: []string{"root"}})
+	s.quiet(50 * time.Millisecond)
+	s.close()
 }
 
 func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
@@ -1262,5 +1294,88 @@ func TestAReplacedChannelOrOneItsDaemonStopsPostsNoDisconnect(t *testing.T) {
 	newer.exited()
 	if posted := disconnects(t, st); len(posted) != 0 {
 		t.Fatalf("disconnects = %+v, want none from a replaced channel or a daemon's stop", posted)
+	}
+}
+
+func fakeTmux(t *testing.T, up bool) (string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\necho \"$*\" >> " + calls + "\ncase \"$1\" in\nhas-session) [ -f " + calls + ".up ] ;;\nnew-session) touch " + calls + ".up ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte(script), 0o700); err != nil { //nolint:gosec // G306: the fake tmux runs as a program.
+		t.Fatal(err)
+	}
+	if up {
+		if err := os.WriteFile(calls+".up", nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return filepath.Join(dir, "tmux"), calls
+}
+
+func tmuxCalls(t *testing.T, calls string) string {
+	t.Helper()
+	got, err := os.ReadFile(calls) //nolint:gosec // G304: the fake tmux's log under the test's temp dir.
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(got)
+}
+
+func register(t *testing.T, st *store.Store, w store.Window, tmux string, notify ...string) store.Registration {
+	t.Helper()
+	r, err := st.Register(context.Background(), store.Registration{
+		Subscription: store.Subscription{Alias: "release-demo-coordinator", Session: "s1", Window: w, Drive: "d", Reader: "root", Cursor: "coordinator"},
+		Cwd:          t.TempDir(), Command: "claude", Shell: "/bin/sh", Tmux: tmux, Notify: notify,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestARegisteredSessionWhoseClaudeCodeExitedStartsAgainInTmux(t *testing.T) {
+	st, _ := newStore(t)
+	tmux, calls := fakeTmux(t, false)
+	r := register(t, st, window, tmux, "meta")
+	s := open(t, st, proc)
+	s.initialized()
+	s.close()
+	posted := disconnects(t, st)
+	if len(posted) != 1 || !slices.Equal(posted[0].To, []string{"meta"}) || posted[0].Text != "root's Claude Code exited in window 4242 (session s1); cci session run starts it again in tmux session release-demo-coordinator" {
+		t.Fatalf("disconnects = %+v, want one to meta saying tmux starts it again", posted)
+	}
+	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\nnew-session -d -s release-demo-coordinator -c "+r.Cwd+" -- /bin/sh -l -c exec cci session run release-demo-coordinator\n"; got != want {
+		t.Fatalf("tmux was called with %q, want %q", got, want)
+	}
+}
+
+func TestARegisteredSessionStillRunningHasItsReconnectTyped(t *testing.T) {
+	defer func(settle time.Duration) { exitSettle = settle }(exitSettle)
+	exitSettle = 20 * time.Millisecond
+	p, err := process.NewProcess(int32(os.Getpid())) //nolint:gosec // G115: OS pids fit in int32.
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := p.CreateTime()
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := store.Window{PID: os.Getpid(), Started: created}
+	st, _ := newStore(t)
+	tmux, calls := fakeTmux(t, true)
+	register(t, st, live, tmux)
+	s := start(t, st, live, proc, false)
+	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	s.next()
+	s.initialized()
+	s.close()
+	posted := disconnects(t, st)
+	want := fmt.Sprintf("root's cci channel disconnected: Claude Code closed it in window %d (session s1) while it runs on, so cci typed %s into tmux session release-demo-coordinator", live.PID, hook.ReconnectCommand)
+	if len(posted) != 1 || !slices.Equal(posted[0].To, []string{"communicator"}) || posted[0].Text != want {
+		t.Fatalf("disconnects = %+v, want one to communicator saying %q", posted, want)
+	}
+	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\nsend-keys -t =release-demo-coordinator: -l "+hook.ReconnectCommand+"\nsend-keys -t =release-demo-coordinator: Enter\n"; got != want {
+		t.Fatalf("tmux was called with %q, want %q", got, want)
 	}
 }

@@ -178,6 +178,49 @@ func TestSessionStartSaysTheSubscriptionCameBack(t *testing.T) {
 	}
 }
 
+func TestSessionStartKeepsARegisteredSessionsSubscription(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	launched := store.Window{PID: 100, Started: 1}
+	resumed := store.Window{PID: 200, Started: 2}
+	recycled := store.Window{PID: 200, Started: 3}
+	relaunched := store.Window{PID: 300, Started: 4}
+	if _, err := st.Register(ctx, store.Registration{Subscription: store.Subscription{Alias: "release-demo-meta", Session: "s1", Drive: "d", Reader: "meta", Cursor: "meta"}}); err != nil {
+		t.Fatal(err)
+	}
+	steps := []struct {
+		name    string
+		session string
+		window  store.Window
+		want    string
+		kept    string
+	}{
+		{"registered while not running, then started", "s1", launched, "s1", "s1"},
+		{"resumed in a new process", "s1", resumed, "s1", "s1"},
+		{"cleared in the same process", "s2", resumed, "s2", "s2"},
+		{"an unrelated session reuses the pid", "s3", recycled, "", "s2"},
+		{"the cleared session started again", "s2", relaunched, "s2", "s2"},
+	}
+	for _, step := range steps {
+		if err := hook.SessionStart(ctx, st, hook.Payload{SessionID: step.session}, step.window, &bytes.Buffer{}); err != nil {
+			t.Fatal(err)
+		}
+		sub, ok, err := st.Subscription(ctx, step.window)
+		if err != nil || ok != (step.want != "") || ok && (sub.Session != step.want || sub.Alias != "release-demo-meta" || sub.Reader != "meta") {
+			t.Fatalf("%s: subscription = %+v %v %v", step.name, sub, ok, err)
+		}
+		r, ok, err := st.SessionRegistration(ctx, step.kept)
+		if err != nil || !ok || r.Alias != "release-demo-meta" {
+			t.Fatalf("%s: the alias keeps %+v %v %v, want session %s", step.name, r, ok, err, step.kept)
+		}
+	}
+	for _, w := range []store.Window{launched, resumed} {
+		if _, ok, _ := st.Subscription(ctx, w); ok {
+			t.Fatalf("window %+v still holds a subscription", w)
+		}
+	}
+}
+
 func hookContext(t *testing.T, out *bytes.Buffer, event string) string {
 	t.Helper()
 	if out.Len() == 0 {
