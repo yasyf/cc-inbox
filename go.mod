@@ -8,7 +8,7 @@ require (
 	github.com/shirou/gopsutil/v4 v4.26.5
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.10
-	github.com/yasyf/cc-interact v0.42.2-0.20261112050635-d02dcf5d7d6c
+	github.com/yasyf/cc-interact v0.42.2
 	github.com/yasyf/daemonkit v0.36.0
 	github.com/yasyf/synckit v0.51.2
 	golang.org/x/mod v0.41.0
