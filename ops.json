@@ -1,1 +1,1 @@
-{"v":1,"lamport":2,"ops":[{"kind":"set_criterion_status","id":"2c43a7659452e2d788c97eb0d4fd75cb","status":"met","note":"Another landed update pins go1.26.11 in go.mod. Main CI43150501070 at6f6dd135 succeeds, including vuln. Fixed toolchain already in installed0.54.31 before this repair."}]}
+{"v":1,"lamport":3,"ops":[{"kind":"set_status","status":"done"},{"kind":"link_commit","sha":"6f6dd1358a2f4f970af065e10cde4cc09e50a45b"}]}
