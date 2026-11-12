@@ -101,11 +101,22 @@ func stopping(ctx context.Context) bool {
 // Serve answers the MCP session on in and out and streams the window's
 // subscription once Claude Code reports it initialized, or at once when
 // resumed; a newer install re-executes on the same stdio. It returns once a
-// server started after proc claims the window. A subscribed channel ending any
-// other way than a daemon's stop posts a disconnect to the communicator.
+// server that outranks it claims the window, and one serving tools that starts
+// while a toolless server owns the window serves only its tools. A subscribed
+// channel ending any other way than a daemon's stop posts a disconnect to the
+// communicator.
 func Serve(ctx context.Context, st *store.Store, window, proc store.Window, channeled, resumed bool, in io.Reader, out io.Writer, tools ...mcp.Tool) error {
-	if owner, err := st.ClaimChannel(window, proc); err != nil || owner != proc {
+	toolless := len(tools) == 0
+	owner, err := st.ClaimChannel(window, proc, toolless)
+	if err != nil {
 		return err
+	}
+	srv := mcp.NewServer(mcp.ServerInfo{Name: "cci", Version: version.String(), Instructions: instructions, Resumed: resumed}, tools)
+	if owner != proc {
+		if toolless {
+			return nil
+		}
+		return srv.Serve(ctx, in, out)
 	}
 	var started *int64
 	if !resumed {
@@ -115,7 +126,6 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 		}
 		started = &head
 	}
-	srv := mcp.NewServer(mcp.ServerInfo{Name: "cci", Version: version.String(), Instructions: instructions, Resumed: resumed}, tools)
 	initialized := make(chan struct{})
 	watch := initialized
 	if resumed {
@@ -126,11 +136,11 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 	go func() { _ = relay.CloseWithError(untilInitialized(in, relay, watch)) }()
 	streamCtx, stop := context.WithCancel(ctx)
 	owns := func() error {
-		owner, err := st.ClaimChannel(window, proc)
+		owner, err := st.ClaimChannel(window, proc, toolless)
 		if err != nil || owner == proc {
 			return err
 		}
-		slog.Info("cci channel: a newer channel server owns the window", "pid", window.PID, "owner", owner.PID)
+		slog.Info("cci channel: a channel server that outranks this one owns the window", "pid", window.PID, "owner", owner.PID)
 		stop()
 		_ = relay.Close()
 		return errReplaced
@@ -142,7 +152,7 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 		return srv.Notify(method, params)
 	}
 	again := []string{"channel", "--" + Resumed}
-	if len(tools) == 0 {
+	if toolless {
 		again = append(again, "--"+NoTools)
 	}
 	done := make(chan struct{})
@@ -160,7 +170,7 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 		case <-streamCtx.Done():
 		}
 	}()
-	err := srv.Serve(ctx, requests, out)
+	err = srv.Serve(ctx, requests, out)
 	stop()
 	<-done
 	if stopping(ctx) || owns() != nil {
