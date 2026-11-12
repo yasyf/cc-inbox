@@ -11,7 +11,9 @@ use them rather than Bash. Each defaults to the session's drive, `post` and
 becoming an underscore (`lane_ref`), with `attrs` for `--attr`; a post that
 needs another flag, such as `--owned-by` or `--or-heir`, runs in Bash. In a shell,
 `cci post --batch file.json` posts a JSON list of those same objects, so no text
-meets shell quoting; every record is tried and a refusal exits 1 naming its place.
+meets shell quoting. Every record is checked before any is stored, and the list
+stores in one step, so a refusal stores none of it; cci names each refused
+record's place and exits 1.
 
 A session launched with the server whose server stops gets a blocker from its
 lane to `meta-desk` on its next tool call, and inside Orca
@@ -23,7 +25,10 @@ with `--strict-mcp-config` and have no server by design: the CLI is their route.
 - `post`: one record from the fields in the following table, with `body` or an
   absolute `path` for a long body; `records` posts several in one call, each
   item taking every field except `lane`, `drive` and `records`, which come
-  from the call. No shell quoting. Returns the new seqs.
+  from the call. A field beside `records` fills in each item that lacks it,
+  `attrs` key by key and `id` as `<id>#<place>`, and the list stores whole or
+  not at all, so one refused item stores none and is named. No shell quoting.
+  Returns the new seqs.
 - `read`: `seqs` each once, line then the rest of the body, within `budget`.
 - `inbox`: records new since your last inbox call; addressed ones whole,
   subscribed broadcasts cut to 160 characters.

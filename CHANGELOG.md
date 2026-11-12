@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The MCP `post` tool posts every record of a `records` list. A `kind` beside
+  the list made the call a record of its own with no text, and its refusal
+  stopped the list before any listed record posted; a `to` or `attrs` beside
+  the list reached no record. Each field beside the list now fills in every
+  listed record that lacks it, `attrs` key by key and `id` as `<id>#<place>`,
+  and the list stores in one commit, so one refused record stores none of it
+  and is named. `cci post --batch`, which the tool now runs, stores its list the
+  same way, all or none, where it used to post the records around a refusal.
+
 - A Claude Code window that reconnected the cci channel gets every record
   addressed to it. Claude Code leaves a reconnected window's older `cci channel`
   servers running and reads only the newest, and every server advanced the
