@@ -318,22 +318,6 @@ func (s *inputStream) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func isClaudeProcess(argv []string) bool {
-	if len(argv) == 0 {
-		return false
-	}
-	switch filepath.Base(argv[0]) {
-	case "claude":
-		return true
-	case "node", "bun":
-		if len(argv) > 1 {
-			script := filepath.Base(argv[1])
-			return script == "claude" || script == "claude.js"
-		}
-	}
-	return false
-}
-
 func callerPID(ctx context.Context) int {
 	if inv := invoked(ctx); inv != nil {
 		return inv.pid
@@ -343,7 +327,7 @@ func callerPID(ctx context.Context) int {
 
 func claudePID(ctx context.Context) int {
 	if inv := invoked(ctx); inv != nil {
-		return procs.FindAncestor(inv.pid, isClaudeProcess)
+		return procs.FindAncestor(inv.pid, procs.IsClaude)
 	}
 	return procs.ClaudePID()
 }
