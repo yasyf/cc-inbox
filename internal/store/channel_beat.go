@@ -44,10 +44,18 @@ func (s *Store) BeatChannel(w Window) error {
 	return os.Chtimes(path, now, now)
 }
 
+type channelOwner struct {
+	Window
+	Toolless bool `json:"toolless"`
+}
+
 // ClaimChannel makes proc, a cci channel server's process, the owner of w's
-// channel unless one started later owns it, and returns the owner: Claude Code
-// reads only a window's newest channel server and leaves the older ones running.
-func (s *Store) ClaimChannel(w, proc Window) (Window, error) {
+// channel unless one that outranks it owns it, and returns the owner. A
+// toolless server outranks one serving tools, which is the server a plugin
+// config from before the toolless channel starts for a subagent's tool call;
+// among servers of one kind the newest owns, since Claude Code reads only a
+// window's newest channel server and leaves the older ones running.
+func (s *Store) ClaimChannel(w, proc Window, toolless bool) (Window, error) {
 	path := s.channelBeatPath(w) + ".owner"
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return Window{}, fmt.Errorf("make channel beat dir: %w", err)
@@ -64,16 +72,16 @@ func (s *Store) ClaimChannel(w, proc Window) (Window, error) {
 	if err != nil {
 		return Window{}, fmt.Errorf("read channel owner: %w", err)
 	}
-	var owner Window
+	var owner channelOwner
 	if len(raw) > 0 {
 		if err := json.Unmarshal(raw, &owner); err != nil {
 			return Window{}, fmt.Errorf("decode channel owner: %w", err)
 		}
 	}
-	if owner.Started >= proc.Started {
-		return owner, nil
+	if owner.Toolless && !toolless || owner.Toolless == toolless && owner.Started >= proc.Started {
+		return owner.Window, nil
 	}
-	if raw, err = json.Marshal(proc); err != nil {
+	if raw, err = json.Marshal(channelOwner{Window: proc, Toolless: toolless}); err != nil {
 		return Window{}, err
 	}
 	if err := f.Truncate(0); err != nil {

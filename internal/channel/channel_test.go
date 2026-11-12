@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	mcp "github.com/yasyf/cc-interact/channel"
+
 	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -134,6 +136,9 @@ type frame struct {
 	Result struct {
 		Capabilities map[string]any `json:"capabilities"`
 		Instructions string         `json:"instructions"`
+		Content      []struct {
+			Text string `json:"text"`
+		} `json:"content"`
 	} `json:"result"`
 }
 
@@ -156,14 +161,14 @@ func open(t *testing.T, st *store.Store, p store.Window) *session {
 	return s
 }
 
-func start(t *testing.T, st *store.Store, w, p store.Window, resumed bool) *session {
+func start(t *testing.T, st *store.Store, w, p store.Window, resumed bool, tools ...mcp.Tool) *session {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	s := &session{t: t, in: inW, frames: make(chan frame, 64), done: make(chan error, 1), cancel: cancel}
 	go func() {
-		s.done <- Serve(ctx, st, w, p, false, resumed, inR, outW)
+		s.done <- Serve(ctx, st, w, p, false, resumed, inR, outW, tools...)
 		_ = outW.Close()
 	}()
 	go func() {
@@ -1051,6 +1056,33 @@ func TestAnOlderChannelExitsOnceANewerOneStartsAndNeverTakesTheWindowBack(t *tes
 	stale.exited()
 	start(t, st, window, older, true).exited()
 	newer.close()
+}
+
+func TestAServerWithToolsAnOlderPluginConfigStartsForASubagentLeavesTheWindowToTheToollessOne(t *testing.T) {
+	st, _ := newStore(t)
+	subscribe(t, st)
+	toolless := open(t, st, store.Window{PID: 2753, Started: proc.Started - time.Minute.Milliseconds()})
+	toolless.initialized()
+	time.Sleep(50 * time.Millisecond)
+	digest := mcp.Tool{Name: "digest", InputSchema: map[string]any{"type": "object"}, Handler: func(context.Context, json.RawMessage, func(string)) (string, bool) {
+		return "cci digest d", false
+	}}
+	subagent := start(t, st, window, proc, false, digest)
+	subagent.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
+	subagent.next()
+	subagent.initialized()
+	subagent.send(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"digest","arguments":{}}}`)
+	if f := subagent.next(); string(f.ID) != "2" || len(f.Result.Content) != 1 || f.Result.Content[0].Text != "cci digest d" {
+		t.Fatalf("tools/call digest = %+v, want the tool's answer", f)
+	}
+	ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "posted after the subagent's tool call", To: []string{"root"}})
+	toolless.record(ask)
+	subagent.quiet(50 * time.Millisecond)
+	subagent.close()
+	toolless.close()
+	if posted := disconnects(t, st); len(posted) != 1 {
+		t.Fatalf("disconnects = %+v, want only the toolless channel's own close", posted)
+	}
 }
 
 func TestTwoWindowsKeepBothChannelServersPastTwoBeats(t *testing.T) {
