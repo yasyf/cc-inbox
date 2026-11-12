@@ -28,6 +28,10 @@ var (
 	proc   = store.Window{PID: 4343, Started: 1791277810612}
 )
 
+func init() {
+	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+}
+
 type frame struct {
 	ID     json.RawMessage `json:"id"`
 	Method string          `json:"method"`
@@ -62,7 +66,6 @@ func open(t *testing.T, st *store.Store, p store.Window) *session {
 
 func start(t *testing.T, st *store.Store, p store.Window, resumed bool) *session {
 	t.Helper()
-	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
@@ -189,6 +192,7 @@ func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *tes
 
 func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 	st, clock := testutil.Store(t)
+	defer func(fast time.Duration) { idle = fast }(idle)
 	idle = time.Hour
 	ctx := context.Background()
 	if err := st.SetCursor(ctx, "root-channel", "d", 0); err != nil {
