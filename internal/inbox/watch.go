@@ -18,18 +18,21 @@ const feedRetry = 10 * time.Second
 var errWatchStopped = errors.New("watch stopped")
 
 type WatchOptions struct {
-	Filter   store.Filter
-	Cursor   string
-	Interval time.Duration
-	For      time.Duration
-	Width    int
-	JSON     bool
-	Compact  bool
+	Filter     store.Filter
+	Positioned bool
+	Cursor     string
+	Interval   time.Duration
+	For        time.Duration
+	Width      int
+	JSON       bool
+	Compact    bool
 }
 
 // Watch emits each record opts.Filter passes as it commits. With a feed on st
 // it reads the store only when the feed says a record passes; without one, or
-// while the feed is away, it looks for commits itself every opts.Interval.
+// while the feed is away, it looks for commits itself every opts.Interval. It
+// starts past opts.Filter.After, at the store's head when no cursor, After or
+// Since names a start, unless opts.Positioned says After of 0 is the start.
 func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(store.Record, string) error) error {
 	f := opts.Filter
 	var resumed int64
@@ -47,7 +50,7 @@ func Watch(ctx context.Context, st *store.Store, opts WatchOptions, emit func(st
 	switch {
 	case found:
 		f.After = max(f.After, resumed)
-	case f.After == 0 && f.Since.IsZero():
+	case f.After == 0 && f.Since.IsZero() && !opts.Positioned:
 		head, err := st.MaxSeq(ctx)
 		if ctx.Err() != nil {
 			return nil
