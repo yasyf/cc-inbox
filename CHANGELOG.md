@@ -49,6 +49,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A plugin update no longer restarts the `cci` channel server of every running
+  session. Claude Code hashes a plugin MCP server's resolved config, `command`,
+  `args` and `env` included, and on `/reload-plugins` stops and restarts each
+  server whose hash changed. It sets `env.CLAUDE_PLUGIN_ROOT` to the versioned
+  install directory, such as `~/.claude/plugins/cache/cc-inbox/cc-inbox/0.54.33`,
+  and the command was `${CLAUDE_PLUGIN_ROOT}/bin/cci`, so every release changed
+  both. The server now starts as `cci channel` from `PATH`, and the plugin's
+  own `env` replaces Claude Code's `CLAUDE_PLUGIN_ROOT` with an empty string,
+  so its config is the same in every version and Claude Code keeps the running
+  server and its channel across an update. The channel needs a `cci` on
+  `PATH`, such as the Homebrew cask or `~/.local/bin/cci`.
 - Each `claude --bg` session under one Claude Code daemon keeps its own cci
   channel server. Claude Code titles a `--bg` session's process
   `claude bg-spare`, and the daemon's `cci channel` named a window by the

@@ -962,6 +962,8 @@ jobs:
           jq -e '.hooks | length == 7' plugin/hooks/hooks.json
           test -L plugin/bin/cci
           tail -n +2 plugin/descriptor/cci.binrun.tmpl | sed -E 's/__SIZE_[A-Z0-9_]+__/1/g' | jq -e '.platforms | length == 4'
+      - name: The cci channel server's config is the same in every plugin version, so /reload-plugins keeps it running
+        run: jq -e '.mcpServers.cci | (tostring | contains("CLAUDE_PLUGIN_ROOT}") | not) and .env.CLAUDE_PLUGIN_ROOT == ""' plugin/.claude-plugin/plugin.json
 
   provisioning-candidate:
     name: Prepublication Darwin arm64 provisioning candidate
