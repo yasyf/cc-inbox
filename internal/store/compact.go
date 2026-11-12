@@ -22,10 +22,10 @@ func (s *Store) OpenItems(ctx context.Context, drive string) ([]Record, error) {
 }
 
 // OpenTo returns, in seq order, the tracked openers of ks addressed to reader
-// that no closer or resolver has closed, however they reached this node: an
+// newer than after that no closer or resolver has closed, however they reached this node: an
 // ask a relay backfilled after the reader's thread bound is still owed.
-func (s *Store) OpenTo(ctx context.Context, drive, reader string, ks []kinds.Kind) ([]Record, error) {
-	openers, err := s.Query(ctx, Filter{Drive: drive, To: reader, Kinds: ks, IncludeExpired: true})
+func (s *Store) OpenTo(ctx context.Context, drive, reader string, ks []kinds.Kind, after int64) ([]Record, error) {
+	openers, err := s.Query(ctx, Filter{Drive: drive, To: reader, Kinds: ks, After: after, IncludeExpired: true})
 	if err != nil {
 		return nil, err
 	}

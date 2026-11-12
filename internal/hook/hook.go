@@ -380,7 +380,11 @@ func acknowledge(ctx context.Context, st *store.Store, w io.Writer, event, text 
 // backfilled after the reader's thread bound is owed like any other, so the
 // list counts what a node that holds the ask from its post counts.
 func Owed(ctx context.Context, st *store.Store, drive, reader string) ([]store.Record, error) {
-	open, err := st.OpenTo(ctx, drive, reader, askKinds)
+	return owedAfter(ctx, st, drive, reader, 0)
+}
+
+func owedAfter(ctx context.Context, st *store.Store, drive, reader string, after int64) ([]store.Record, error) {
+	open, err := st.OpenTo(ctx, drive, reader, askKinds, after)
 	if err != nil {
 		return nil, err
 	}
@@ -481,12 +485,12 @@ func nudgeOverdue(ctx context.Context, st *store.Store, p Payload, b store.Bindi
 	if !ok {
 		return false, watermark(ctx, st, cursor, b.Drive)
 	}
-	open, err := Owed(ctx, st, b.Drive, b.Lane)
+	open, err := owedAfter(ctx, st, b.Drive, b.Lane, nudged)
 	if err != nil {
 		return false, err
 	}
 	now := st.Now()
-	late := slices.DeleteFunc(open, func(r store.Record) bool { return r.Seq <= nudged || now.Sub(r.At) < overdue })
+	late := slices.DeleteFunc(open, func(r store.Record) bool { return now.Sub(r.At) < overdue })
 	if len(late) == 0 {
 		return false, nil
 	}

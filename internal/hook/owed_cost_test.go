@@ -21,6 +21,49 @@ import (
 
 var owedCounterID atomic.Uint64
 
+func TestStopDoesNotDecodeAsksBeforeItsCursor(t *testing.T) {
+	ctx := t.Context()
+	home := t.TempDir()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	now := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
+	st.Now = func() time.Time { return now }
+	p := hook.Payload{SessionID: "bounded-stop", Event: "Stop"}
+	if err := st.BindLane(ctx, p.Key(), "d", "api", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	old, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "root", Kind: kinds.Ask, To: []string{"api"}, Text: "already considered"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetCursor(ctx, "stop-"+p.Key().String(), "d", old.Seq); err != nil {
+		t.Fatal(err)
+	}
+	newest, _, err := st.Post(ctx, store.Record{Drive: "d", Lane: "root", Kind: kinds.Ask, To: []string{"api"}, Text: "new question"}, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", filepath.Join(home, store.DBFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	if _, err := db.ExecContext(ctx, "UPDATE records SET fields='[' WHERE seq=?", old.Seq); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(11 * time.Minute)
+	var out bytes.Buffer
+	if err := hook.Stop(ctx, st, p, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), fmt.Sprintf("--resolves %d", newest.Seq)) {
+		t.Fatalf("the old ask prevented the current nudge: %s", out.String())
+	}
+}
+
 func TestHookOwedDoesNotDecodeUnrelatedCloserHistory(t *testing.T) {
 	for _, history := range []int{32, 10000} {
 		for _, resolved := range []bool{false, true} {
