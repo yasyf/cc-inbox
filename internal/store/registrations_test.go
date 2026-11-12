@@ -64,6 +64,12 @@ func TestRegistrationOwnsTheSessionsSubscription(t *testing.T) {
 	if err != nil || len(all) != 1 || all[0].Alias != coordinator.Alias || all[0].Command != coordinator.Command || !slices.Equal(all[0].Notify, coordinator.Notify) || all[0].Window != (store.Window{}) {
 		t.Fatalf("Registrations = %+v %v, want the one alias, holding no window", all, err)
 	}
+	if got, ok, err := st.Registration(ctx, coordinator.Alias); err != nil || !ok || got.Session != "s1" || got.Command != coordinator.Command {
+		t.Fatalf("Registration = %+v %v %v, want what the alias holds", got, ok, err)
+	}
+	if _, ok, err := st.Registration(ctx, "release-demo-meta"); err != nil || ok {
+		t.Fatalf("Registration of an alias nobody registered = %v %v", ok, err)
+	}
 	removed, ok, err := st.Unregister(ctx, coordinator.Alias)
 	if err != nil || !ok || removed.Session != "s1" {
 		t.Fatalf("Unregister = %+v %v %v", removed, ok, err)

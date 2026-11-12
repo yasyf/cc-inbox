@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -1431,25 +1432,56 @@ func TestSubagentCannotReplaceTheWindowSubscription(t *testing.T) {
 	}
 }
 
-func TestSessionRegisterListAndRm(t *testing.T) {
+func fakeTmux(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	script := "#!/bin/sh\necho \"$*\" >> " + calls + "\ncase \"$1\" in\nhas-session) [ -f \"" + calls + ".${3#=}\" ] ;;\nnew-session) touch \"" + calls + ".$4\" ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "tmux"), []byte(script), 0o700); err != nil { //nolint:gosec // G306: the fake tmux runs as a program.
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("SHELL", "/bin/sh")
+	return calls
+}
+
+func TestSessionRegisterListTypeAndRm(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
 	t.Setenv("CCI_AGENT_ID", "")
+	calls := fakeTmux(t)
+	if out, err := run(t, "session", "register", "release-demo-coordinator", "--session", "c0ffee01", "--drive", "d", "--reader", "root"); err == nil || !strings.Contains(err.Error(), `"command" not set`) {
+		t.Fatalf("session register with no --command = %q, %v", out, err)
+	}
 	out, err := run(t, "session", "register", "release-demo-coordinator", "--session", "c0ffee01", "--drive", "d", "--reader", "root", "--cursor", "coordinator",
 		"--cwd", "/work/release-demo", "--command", "claude -n release-demo-coordinator", "--resume-prompt", "resume as the coordinator", "--notify", "communicator")
-	if err != nil || !strings.HasPrefix(out, "release-demo-coordinator registered: session c0ffee01 not running: the next window it starts in hears it; drive d as root,") || !strings.HasSuffix(out, "cursor coordinator at #0\n") {
+	if err != nil || !strings.HasPrefix(out, "release-demo-coordinator registered: session c0ffee01 started in tmux session release-demo-coordinator, which cci session attach release-demo-coordinator shows; drive d as root,") || !strings.HasSuffix(out, "cursor coordinator at #0\n") {
 		t.Fatalf("session register = %q, %v", out, err)
 	}
-	if out, err := run(t, "session", "register", "second", "--session", "c0ffee01", "--drive", "d", "--reader", "root"); err == nil || !strings.Contains(err.Error(), "session c0ffee01 is registered as release-demo-coordinator") {
+	called := func(want string) {
+		t.Helper()
+		got, err := os.ReadFile(calls) //nolint:gosec // G304: the fake tmux's log under the test's temp dir.
+		if err != nil || string(got) != want {
+			t.Fatalf("tmux was called with %q, %v; want %q", got, err, want)
+		}
+	}
+	launched := "has-session -t =release-demo-coordinator\nnew-session -d -s release-demo-coordinator -c /work/release-demo -- /bin/sh -l -c exec cci session run release-demo-coordinator\n"
+	called(launched)
+	if out, err := run(t, "session", "register", "second", "--session", "c0ffee01", "--drive", "d", "--reader", "root", "--command", "claude"); err == nil || !strings.Contains(err.Error(), "session c0ffee01 is registered as release-demo-coordinator") {
 		t.Fatalf("a second alias for the session = %q, %v", out, err)
 	}
-	const listed = "release-demo-coordinator: session c0ffee01 not running, drive d as root, cursor coordinator at #0, notify communicator\n" +
+	const listed = "release-demo-coordinator: session c0ffee01 not running, tmux session release-demo-coordinator, drive d as root, cursor coordinator at #0, notify communicator\n" +
 		"  cwd /work/release-demo\n  command claude -n release-demo-coordinator\n  resume prompt resume as the coordinator\n"
 	if out, err := run(t, "session", "list"); err != nil || out != listed {
 		t.Fatalf("session list = %q, %v; want %q", out, err, listed)
 	}
-	if out, err := run(t, "session", "rm", "release-demo-coordinator"); err != nil || out != "release-demo-coordinator removed: session c0ffee01 keeps no channel subscription until cci subscribe or cci session register gives it one\n" {
+	if out, err := run(t, "session", "type", "release-demo-coordinator", hook.ReconnectCommand); err != nil || out != "typed into tmux session release-demo-coordinator: "+hook.ReconnectCommand+"\n" {
+		t.Fatalf("session type = %q, %v", out, err)
+	}
+	launched += "has-session -t =release-demo-coordinator\nsend-keys -t =release-demo-coordinator: -l " + hook.ReconnectCommand + "\nsend-keys -t =release-demo-coordinator: Enter\n"
+	called(launched)
+	if out, err := run(t, "session", "rm", "release-demo-coordinator"); err != nil || out != "release-demo-coordinator removed: session c0ffee01 keeps no channel subscription, and once Claude Code exits nothing starts it again and tmux session release-demo-coordinator ends\n" {
 		t.Fatalf("session rm = %q, %v", out, err)
 	}
 	if out, err := run(t, "session", "list"); err != nil || out != "no session is registered; cci session register <alias> keeps one\n" {
@@ -1457,6 +1489,9 @@ func TestSessionRegisterListAndRm(t *testing.T) {
 	}
 	if out, err := run(t, "session", "rm", "release-demo-coordinator"); err == nil || !strings.Contains(err.Error(), "no session is registered as release-demo-coordinator") {
 		t.Fatalf("session rm twice = %q, %v", out, err)
+	}
+	if out, err := run(t, "session", "register", "release-demo-meta", "--new", "--drive", "d", "--reader", "meta", "--cwd", "/work/release-demo", "--command", "claude -n release-demo-meta"); err != nil || !regexp.MustCompile(`^release-demo-meta registered: session [0-9a-f-]{36} started in tmux session release-demo-meta,`).MatchString(out) {
+		t.Fatalf("session register --new = %q, %v", out, err)
 	}
 }
 

@@ -30,6 +30,7 @@ import (
 	"github.com/yasyf/cc-inbox/internal/relay"
 	"github.com/yasyf/cc-inbox/internal/server"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/supervisor"
 	"github.com/yasyf/cc-inbox/internal/version"
 	"github.com/yasyf/cc-inbox/internal/wire"
 )
@@ -191,6 +192,11 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	loops.Go(func() { collect(syncCtx, st) })
 	loops.Go(func() { indexTrigrams(syncCtx, st) })
 	loops.Go(func() { keepReadModel(syncCtx, st, r.home) })
+	loops.Go(func() {
+		if err := supervisor.Keep(syncCtx, st); err != nil && syncCtx.Err() == nil {
+			slog.Warn("cci daemon could not start every registered session's tmux session", "err", err)
+		}
+	})
 	if r.commands != nil {
 		loops.Go(func() {
 			if err := r.serveCommands(syncCtx, st); err != nil && syncCtx.Err() == nil {

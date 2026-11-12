@@ -11,17 +11,19 @@ import (
 	"strings"
 )
 
-// Registration keeps a session under its alias. The alias owns the session's
-// channel subscription: each window the session runs in gets a copy, which
-// follows a resume into a new window and a /clear into a new session, so the
-// session hears with no cci subscribe. Cwd, Command and ResumePrompt run the
-// session again, and Notify names the lanes told when it stops hearing.
+// Registration keeps a session under its alias, which owns its channel
+// subscription in every window it runs in, so it hears with no cci subscribe.
+// It runs in the Tmux session named by its alias, where cci session run starts
+// Command in Shell from Cwd, and again with --resume and ResumePrompt each time
+// it exits; Notify names the lanes told when it stops hearing.
 type Registration struct {
 	Subscription
 	Cwd          string   `json:"cwd,omitempty"`
 	Command      string   `json:"command,omitempty"`
 	ResumePrompt string   `json:"resume_prompt,omitempty"`
 	Notify       []string `json:"notify,omitempty"`
+	Shell        string   `json:"shell,omitempty"`
+	Tmux         string   `json:"tmux,omitempty"`
 }
 
 var aliasName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -74,6 +76,11 @@ func (s *Store) Register(ctx context.Context, r Registration) (Registration, err
 // Registrations lists every registered session, by alias.
 func (s *Store) Registrations(_ context.Context) ([]Registration, error) {
 	return s.registrations()
+}
+
+// Registration reads what alias holds.
+func (s *Store) Registration(_ context.Context, alias string) (Registration, bool, error) {
+	return readJSON[Registration](s.registrationPath(alias))
 }
 
 // SessionRegistration finds the registration that keeps session.
