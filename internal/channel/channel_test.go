@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -27,6 +28,11 @@ var (
 	window = store.Window{PID: 4242, Started: 1791277810598}
 	proc   = store.Window{PID: 4343, Started: 1791277810612}
 )
+
+func TestMain(m *testing.M) {
+	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+	os.Exit(m.Run())
+}
 
 type frame struct {
 	ID     json.RawMessage `json:"id"`
@@ -62,7 +68,6 @@ func open(t *testing.T, st *store.Store, p store.Window) *session {
 
 func start(t *testing.T, st *store.Store, p store.Window, resumed bool) *session {
 	t.Helper()
-	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx, cancel := context.WithCancel(context.Background())
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
@@ -189,7 +194,9 @@ func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *tes
 
 func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 	st, clock := testutil.Store(t)
+	was := idle
 	idle = time.Hour
+	t.Cleanup(func() { idle = was })
 	ctx := context.Background()
 	if err := st.SetCursor(ctx, "root-channel", "d", 0); err != nil {
 		t.Fatal(err)
