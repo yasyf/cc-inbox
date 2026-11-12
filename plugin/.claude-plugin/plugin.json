@@ -9,10 +9,13 @@
   "homepage": "https://github.com/yasyf/cc-inbox",
   "mcpServers": {
     "cci": {
-      "command": "${CLAUDE_PLUGIN_ROOT}/bin/cci",
+      "command": "cci",
       "args": [
         "channel"
       ],
+      "env": {
+        "CLAUDE_PLUGIN_ROOT": ""
+      },
       "alwaysLoad": true
     }
   },

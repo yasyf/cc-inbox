@@ -4,7 +4,9 @@
 
 A session launched with `--channels plugin:cc-inbox@cc-inbox` can take its
 records as pushed `<channel source="plugin:cc-inbox:cci">` tags instead of a
-Monitor. Subscribe once:
+Monitor. The channel server is the `cci` on `PATH`, started with the same
+config in every plugin version, so a plugin update and `/reload-plugins` leave
+it running. Subscribe once:
 
 ```bash
 cci subscribe --drive release-demo --reader root --kind incident,decide,ask

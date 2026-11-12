@@ -143,7 +143,9 @@ an explicit time window starts at the current head.
 A Monitor holds a process open for the whole session, and a record posted
 while it is down waits until it restarts. The plugin's `cci` channel removes the
 Monitor. Each new record is pushed into the session as soon as it is posted.
-Launch the session with the channel enabled, then subscribe once:
+The channel server is the `cci` on `PATH`, started with the same config in
+every plugin version, so a plugin update and `/reload-plugins` leave it
+running. Launch the session with the channel enabled, then subscribe once:
 
 ```bash
 claude --channels plugin:cc-inbox@cc-inbox
