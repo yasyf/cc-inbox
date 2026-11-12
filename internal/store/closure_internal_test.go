@@ -356,7 +356,7 @@ func TestOpenQueriesReturnWhatTheOracleComputes(t *testing.T) {
 		seconds: 30,
 	}
 	vocabulary := slices.Concat(kinds.Openers(), kinds.Closers(), []kinds.Kind{kinds.Note})
-	items := make([]Ingestion, n)
+	items := make([]Ingestion, n, n+len(g.lanes))
 	for i := range items {
 		r := g.record(pick(g.r, vocabulary), 0)
 		r.Drive, r.Text = "d", fmt.Sprintf("record %d", i)
@@ -371,8 +371,12 @@ func TestOpenQueriesReturnWhatTheOracleComputes(t *testing.T) {
 		}
 		items[i] = Ingestion{Record: r, LineHash: r.Text}
 	}
-	if got, err := st.IngestAll(ctx, items); err != nil || got != n {
-		t.Fatalf("IngestAll() = %d, %v; want %d", got, err, n)
+	for _, lane := range g.lanes {
+		text := lane + " still talking"
+		items = append(items, Ingestion{Record: Record{Drive: "d", Lane: lane, Kind: kinds.Note, At: closureAt.Add(time.Minute), Text: text}, LineHash: text})
+	}
+	if got, err := st.IngestAll(ctx, items); err != nil || got != len(items) {
+		t.Fatalf("IngestAll() = %d, %v; want %d", got, err, len(items))
 	}
 	openers, err := st.Query(ctx, Filter{Drive: "d", Kinds: kinds.Openers(), IncludeExpired: true})
 	if err != nil {
