@@ -71,7 +71,7 @@ func Relayed(argv []string) bool {
 		return false
 	}
 	switch argv[1] {
-	case "post", "tail", "grep", "show", "digest", "who", "watch", "channel", "window", "embed":
+	case "post", "tail", "grep", "show", "digest", "who", "watch", "channel", "mcp", "window", "embed":
 	case "hook":
 		if len(argv) < 3 || !slices.Contains([]string{"post-tool-use", "stop", "subagent-stop", "task-stop", "prompt"}, argv[2]) {
 			return false
@@ -132,7 +132,7 @@ func dial(path string) (*os.File, error) {
 // Stream reports whether argv runs until its client leaves, so any release's
 // client may ask for it.
 func Stream(argv []string) bool {
-	return len(argv) > 2 && argv[1] == "embed" && argv[2] == "follow" || len(argv) > 1 && (argv[1] == "watch" || argv[1] == "channel")
+	return len(argv) > 2 && argv[1] == "embed" && argv[2] == "follow" || len(argv) > 1 && argv[1] == "watch" || Server(argv)
 }
 
 func forWhatIsLeft(argv []string, started time.Time) []string {
@@ -205,7 +205,7 @@ func relay(conn io.ReadWriteCloser, request Request, pump *stdinPump, redial fun
 	for {
 		code, ok, lost := exchange(conn, request, pump, stdout, stderr)
 		_ = conn.Close()
-		if channel(request.Argv) && ok && !lost && !pump.closed() {
+		if Server(request.Argv) && ok && !lost && !pump.closed() {
 			if pump.fed() {
 				return 0, false, resumed(first)
 			}
@@ -221,8 +221,10 @@ func relay(conn io.ReadWriteCloser, request Request, pump *stdinPump, redial fun
 	}
 }
 
-func channel(argv []string) bool {
-	return len(argv) > 1 && argv[1] == "channel"
+// Server reports whether argv runs one of cci's MCP servers, which belong to
+// Claude Code until it closes their stdin.
+func Server(argv []string) bool {
+	return len(argv) > 1 && (argv[1] == "channel" || argv[1] == "mcp")
 }
 
 func resumable(argv []string) []string {
@@ -233,7 +235,7 @@ func resumable(argv []string) []string {
 }
 
 func resumed(argv []string) []string {
-	if !channel(argv) || slices.Contains(argv, "--resumed") {
+	if !Server(argv) || slices.Contains(argv, "--resumed") {
 		return argv
 	}
 	return append(slices.Clone(argv), "--resumed")

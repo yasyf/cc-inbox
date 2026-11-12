@@ -4,7 +4,7 @@
 
 Give related events a stable `--topic`. Replies use that topic or `--re <seq>`.
 `--resolves <seq>` must name an existing record in the same drive. Only a later
-record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`.
+record closes an `ask`, `decide`, `blocker`, `blocked`, `defect`, `disconnect`, `hold`, or `incident`.
 `go`, `opened`, `landed`, and `fix-live` can all carry `--resolves`.
 `answer`, `withdraw`, and `unblock` require `--re`, `--topic`, or `--resolves`.
 A `lift` needs `--re` or `--resolves` naming an open hold; one that names none
@@ -59,7 +59,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `decision` | None | A call already made; not open. Imported `DECISION` uses it. |
 | `blocker` | None | Open until `withdraw`, `answer`, or `done`. |
 | `blocked` / `unblock` | None | A deploy block stays open until unblock or a resolver. |
-| `answer`, `withdraw` | None | Close asks, decision requests, or blockers; require a link. |
+| `answer`, `withdraw` | None | Close asks, decision requests, or blockers, and withdraw also a disconnect; require a link. |
 | `go` | None | Closes a matching ask or decision request. |
 | `hold` / `lift` | None | Lift closes the open hold its `--re` or `--resolves` names. A hold holds exactly its `--pr` PRs; a hold naming `#<number>` with no `--pr` is refused. |
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
@@ -69,6 +69,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `github` | 14 days | A GitHub pull request, review or check change, or a push to the default branch, with the action or conclusion in `--outcome` and the commit in `--commit`. A commit status or a push names no pull request. |
 | `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict. |
+| `disconnect` | None | A subscribed session's channel server posts it to `communicator` when its channel stops. Open until `withdraw` or a resolver, such as the `recovered` record the next channel to stream that reader posts with `--resolves`. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
 | `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |

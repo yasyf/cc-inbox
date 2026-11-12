@@ -15,7 +15,7 @@ A record is one typed line in a drive: a machine-wide `seq`, a `kind`, the writi
 
 `+` marks omitted text or a body; `read` or `cci show <seq>` prints the full record.
 
-Subscribed sessions receive records as `<channel source="plugin:cc-inbox:cci">` tags with `seq`, `kind`, and `lane` attributes and the compact line as body. A `batch` tag groups batch-kind records (for a `root`, `done` by default) at most every five minutes within ~3 KB, ending in `+N more` naming the `cci tail` command for the rest. A `skipped` tag counts pre-start records addressed to you without replaying them; read them with `inbox` or the named `cci tail`. Delivery is at-least-once: skip any `seq` already handled.
+Subscribed sessions receive records as `<channel source="plugin:cc-inbox:channel">` tags with `seq`, `kind`, and `lane` attributes and the compact line as body. A `batch` tag groups batch-kind records (for a `root`, `done` by default) at most every five minutes within ~3 KB, ending in `+N more` naming the `cci tail` command for the rest. A `skipped` tag counts pre-start records addressed to you without replaying them; read them with `inbox` or the named `cci tail`. Delivery is at-least-once, since a record's cursor moves only once your transcript shows its tag: skip any `seq` already handled.
 
 Sessions bind to a drive and lane. A lane's first `cci post --lane <lane>` binds it; a named subagent is that lane already. `cci drive use <drive> --root` binds a coordinator. Posts never default to `root`: `root` must pass `--lane root`, and unbound threads without `--lane` are refused.
 

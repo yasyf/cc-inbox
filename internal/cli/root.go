@@ -66,6 +66,7 @@ func NewRootCmd() *cobra.Command {
 		newSubscribeCmd(),
 		newUnsubscribeCmd(),
 		newChannelCmd(),
+		newMCPCmd(),
 		newNodeCmd(),
 		newCursorCmd(),
 		newRelayCmd(),

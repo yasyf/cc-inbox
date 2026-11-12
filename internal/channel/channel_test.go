@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -30,6 +32,96 @@ var (
 
 func init() {
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+}
+
+func newStore(t *testing.T) (*store.Store, *testutil.Clock) {
+	t.Helper()
+	dir := t.TempDir()
+	transcriptOf = func(_ context.Context, session string) (string, error) {
+		path := filepath.Join(dir, session+".jsonl")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY, 0o600) //nolint:gosec // G304: the path is under the test's temp dir.
+		if err != nil {
+			return "", err
+		}
+		return path, f.Close()
+	}
+	t.Cleanup(func() { transcriptOf = sessionTranscript })
+	return testutil.Store(t)
+}
+
+func jsonLine(event map[string]any) string {
+	var line strings.Builder
+	enc := json.NewEncoder(&line)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(event); err != nil {
+		panic(err)
+	}
+	return strings.TrimSuffix(line.String(), "\n")
+}
+
+func userLine(content any, sidechain bool) string {
+	return jsonLine(map[string]any{"type": "user", "isSidechain": sidechain, "message": map[string]any{"role": "user", "content": content}})
+}
+
+func queuedLine(prompt any) string {
+	return jsonLine(map[string]any{"type": "attachment", "isSidechain": false, "attachment": map[string]any{"type": "queued_command", "prompt": prompt, "commandMode": "prompt"}})
+}
+
+func tagText(source string, meta map[string]string) string {
+	return fmt.Sprintf(`<channel source="%s" seq="%s" kind="%s" lane="%s">`+"\n@now\n%s %s\n</channel>", source, meta["seq"], meta["kind"], meta["lane"], meta["seq"], meta["kind"])
+}
+
+func transcribe(lines ...string) error {
+	path, err := transcriptOf(context.Background(), "s1")
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0) //nolint:gosec // G304: the path is under the test's temp dir.
+	if err != nil {
+		return err
+	}
+	for _, line := range lines {
+		if _, err := f.WriteString(line + "\n"); err != nil {
+			_ = f.Close()
+			return err
+		}
+	}
+	return f.Close()
+}
+
+func hears(params any) error {
+	return transcribe(userLine(tagText(Source, params.(map[string]any)["meta"].(map[string]string)), false))
+}
+
+func followHeard(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, notify func(string, any) error) error {
+	l, err := newLedger(ctx, st, sub.Session)
+	if err != nil {
+		return err
+	}
+	return l.listen(ctx, func(ctx context.Context) error {
+		return follow(ctx, st, sub, channeled, l, func(method string, params any) error {
+			if err := hears(params); err != nil {
+				return err
+			}
+			return notify(method, params)
+		})
+	})
+}
+
+func cursorReaches(t *testing.T, st *store.Store, name string, want int64) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
+		seq, _, err := st.Cursor(context.Background(), name, "d")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if seq >= want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("cursor %s stands at #%d, never reaching #%d", name, seq, want)
+		}
+	}
 }
 
 type frame struct {
@@ -81,6 +173,9 @@ func start(t *testing.T, st *store.Store, w, p store.Window, resumed bool) *sess
 			if err := json.Unmarshal(sc.Bytes(), &f); err != nil {
 				t.Errorf("frame %q: %v", sc.Text(), err)
 				continue
+			}
+			if f.Method == notifyMethod {
+				_ = transcribe(userLine(tagText(Source, f.Params.Meta), false))
 			}
 			s.frames <- f
 		}
@@ -154,7 +249,7 @@ func (s *session) skipped(n int, through int64) {
 }
 
 func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *testing.T) {
-	st, clock := testutil.Store(t)
+	st, clock := newStore(t)
 	ctx := context.Background()
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before anyone subscribed", To: []string{"root"}})
 	s := open(t, st, proc)
@@ -191,7 +286,7 @@ func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *tes
 }
 
 func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
-	st, clock := testutil.Store(t)
+	st, clock := newStore(t)
 	defer func(fast time.Duration) { idle = fast }(idle)
 	idle = time.Hour
 	ctx := context.Background()
@@ -209,7 +304,7 @@ func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 	}
 	note := testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Note, Text: "LAUNCHED R1185"})
 	testutil.Post(t, st, store.Record{Lane: "alerts", Kind: kinds.Incident, Topic: "api-5xx", Text: "api 5xx above 2%"})
-	if err := follow(ctx, st, old, false, func(string, any) error {
+	if err := followHeard(ctx, st, old, false, func(string, any) error {
 		t.Fatal("the replaced subscription delivered a record")
 		return nil
 	}); err != nil {
@@ -220,7 +315,7 @@ func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 	}
 	followCtx, stop := context.WithCancel(ctx)
 	var got []string
-	if err := follow(followCtx, st, current, false, func(_ string, params any) error {
+	if err := followHeard(followCtx, st, current, false, func(_ string, params any) error {
 		got = append(got, params.(map[string]any)["meta"].(map[string]string)["seq"])
 		stop()
 		return nil
@@ -233,7 +328,7 @@ func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 }
 
 func TestRecordsPostedRightAfterSubscribingArrive(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "before the subscription", To: []string{"root"}})
 	s := open(t, st, proc)
 	s.initialized()
@@ -247,7 +342,7 @@ func TestRecordsPostedRightAfterSubscribingArrive(t *testing.T) {
 func TestANewChannelStartsLiveWhateverItsCursorMissed(t *testing.T) {
 	for _, n := range []int{1, 1000} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
-			st, _ := testutil.Store(t)
+			st, _ := newStore(t)
 			subscribe(t, st)
 			var last store.Record
 			for i := range n {
@@ -266,7 +361,7 @@ func TestANewChannelStartsLiveWhateverItsCursorMissed(t *testing.T) {
 }
 
 func TestARefollowInsideOneChannelReplaysNothingAndSkipsNothing(t *testing.T) {
-	st, clock := testutil.Store(t)
+	st, clock := newStore(t)
 	subscribe(t, st, kinds.Incident)
 	missed := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "missed"})
 	s := open(t, st, proc)
@@ -284,7 +379,7 @@ func TestARefollowInsideOneChannelReplaysNothingAndSkipsNothing(t *testing.T) {
 }
 
 func TestAChannelAndTheHookDeliverEachRecordOnce(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx := context.Background()
 	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
@@ -316,7 +411,7 @@ func TestAChannelAndTheHookDeliverEachRecordOnce(t *testing.T) {
 	followCtx, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() {
-		done <- follow(followCtx, st, sub, true, func(_ string, params any) error {
+		done <- followHeard(followCtx, st, sub, true, func(_ string, params any) error {
 			seqs <- params.(map[string]any)["meta"].(map[string]string)["seq"]
 			return nil
 		})
@@ -332,18 +427,7 @@ func TestAChannelAndTheHookDeliverEachRecordOnce(t *testing.T) {
 			t.Fatalf("channel never delivered #%d", want.Seq)
 		}
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
-		seen, _, err := st.Cursor(ctx, store.LaneCursor(store.PeerKey{Session: root.SessionID}), "d")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if seen >= later.Seq {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("channel never moved the hook's cursor past #%d", later.Seq)
-		}
-	}
+	cursorReaches(t, st, store.LaneCursor(store.PeerKey{Session: root.SessionID}), later.Seq)
 	if got := hookReads(); got != "" {
 		t.Fatalf("hook redelivered what the channel carried: %q", got)
 	}
@@ -357,7 +441,7 @@ func TestAChannelAndTheHookDeliverEachRecordOnce(t *testing.T) {
 }
 
 func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx := context.Background()
 	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
@@ -383,7 +467,10 @@ func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T
 	streamed := make(chan struct{})
 	go func() {
 		defer close(streamed)
-		Stream(streamCtx, st, window, true, &started, func(_ string, params any) error {
+		Stream(streamCtx, st, window, true, &started, nil, func(_ string, params any) error {
+			if err := hears(params); err != nil {
+				return err
+			}
 			seqs <- params.(map[string]any)["meta"].(map[string]string)["seq"]
 			return nil
 		})
@@ -402,18 +489,7 @@ func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T
 	case <-time.After(5 * time.Second):
 		t.Fatalf("channel never delivered #%d", carried.Seq)
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
-		seq, _, err := st.Cursor(ctx, "root-channel", "d")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if seq >= carried.Seq {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("channel never moved its cursor past #%d", carried.Seq)
-		}
-	}
+	cursorReaches(t, st, "root-channel", carried.Seq)
 	if got := hookReads(); !strings.Contains(got, owed.Text) || !strings.Contains(got, hookOnly.Text) || strings.Contains(got, carried.Text) {
 		t.Fatalf("hook delivered %q, want only the records the channel never carried", got)
 	}
@@ -428,7 +504,7 @@ func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T
 }
 
 func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx := context.Background()
 	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
@@ -454,7 +530,7 @@ func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T
 	}
 	stall(30)
 	ask := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "merge go 1?"})
-	if err := follow(ctx, st, sub, true, func(_ string, params any) error {
+	if err := followHeard(ctx, st, sub, true, func(_ string, params any) error {
 		if got := params.(map[string]any)["meta"].(map[string]string)["seq"]; got != fmt.Sprint(ask.Seq) {
 			t.Fatalf("channel delivered #%s, want only #%d", got, ask.Seq)
 		}
@@ -465,7 +541,7 @@ func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T
 }
 
 func TestARecordAddressedToTheReaderAtItsDriveArrivesOnceOutsideTheBatch(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
 	ctx := context.Background()
 	sub, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", ToKinds: store.DefaultToKinds("root"), Batch: store.DefaultBatch("root"), Cursor: "root-channel"})
@@ -491,7 +567,7 @@ func TestARecordAddressedToTheReaderAtItsDriveArrivesOnceOutsideTheBatch(t *test
 }
 
 func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx := context.Background()
 	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
@@ -521,7 +597,7 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 	decide := testutil.Post(t, st, store.Record{Lane: "design-lane", Kind: kinds.Decide, Text: "pick a schema?"})
 	want := []string{batchKind + fmt.Sprint(again.Seq), "ask" + fmt.Sprint(ask.Seq), "answer" + fmt.Sprint(answer.Seq), "owner" + fmt.Sprint(owner.Seq), "release" + fmt.Sprint(release.Seq), "blocked" + fmt.Sprint(blocked.Seq), "decide" + fmt.Sprint(decide.Seq)}
 	var got, batches []string
-	if err := follow(ctx, st, sub, true, func(_ string, params any) error {
+	if err := followHeard(ctx, st, sub, true, func(_ string, params any) error {
 		p := params.(map[string]any)
 		meta := p["meta"].(map[string]string)
 		got = append(got, meta["kind"]+meta["seq"])
@@ -553,7 +629,7 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 func TestAChannelReexecutesANewerInstallResumedOnItsStdio(t *testing.T) {
 	for _, subscribed := range []bool{true, false} {
 		t.Run(fmt.Sprintf("subscribed=%v", subscribed), func(t *testing.T) {
-			st, _ := testutil.Store(t)
+			st, _ := newStore(t)
 			installed := make(chan version.Install, 1)
 			argvs := make(chan []string, 8)
 			newerInstall = func() (version.Install, bool, error) {
@@ -580,7 +656,7 @@ func TestAChannelReexecutesANewerInstallResumedOnItsStdio(t *testing.T) {
 
 			select {
 			case argv := <-argvs:
-				if want := []string{"/opt/cci/0.46.0/cci", "channel", "--resumed"}; !slices.Equal(argv, want) {
+				if want := []string{"/opt/cci/0.46.0/cci", "channel", "--resumed", "--no-tools"}; !slices.Equal(argv, want) {
 					t.Fatalf("exec argv = %q, want %q", argv, want)
 				}
 			case <-time.After(5 * time.Second):
@@ -592,7 +668,7 @@ func TestAChannelReexecutesANewerInstallResumedOnItsStdio(t *testing.T) {
 }
 
 func TestAResumedChannelAnnouncesItsToolsThenStreamsWithoutAnotherHandshake(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	subscribe(t, st)
 	handedOff := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "posted while the channel re-executed", To: []string{"root"}})
 	s := start(t, st, window, proc, true)
@@ -627,7 +703,7 @@ func following(t *testing.T, st *store.Store, sub store.Subscription) (<-chan de
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- follow(ctx, st, sub, false, func(_ string, params any) error {
+		done <- followHeard(ctx, st, sub, false, func(_ string, params any) error {
 			p := params.(map[string]any)
 			tags <- delivered{content: p["content"].(string), meta: p["meta"].(map[string]string)}
 			return nil
@@ -665,7 +741,7 @@ func noTag(t *testing.T, tags <-chan delivered, d time.Duration) {
 func TestABatchIsOneTag(t *testing.T) {
 	for _, n := range []int{1, 20} {
 		t.Run(fmt.Sprint(n), func(t *testing.T) {
-			st, _ := testutil.Store(t)
+			st, _ := newStore(t)
 			idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 200*time.Millisecond
 			sub := batched(t, st, kinds.Report, kinds.Note)
 			for i := range n {
@@ -693,7 +769,7 @@ func TestABatchIsOneTag(t *testing.T) {
 }
 
 func TestABatchKeepsTheNewestHeadPerPRWithinItsBudgetAndCountsTheRest(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 50*time.Millisecond
 	sub := batched(t, st, kinds.Head, kinds.Note)
 	const prs, pushes, notes = 100, 4, 100
@@ -740,7 +816,7 @@ func TestABatchKeepsTheNewestHeadPerPRWithinItsBudgetAndCountsTheRest(t *testing
 }
 
 func TestACutSingleTagPointsAtTheReadToolInsteadOfAPath(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	text, path, err := st.Fit(strings.Repeat("long report ", 100))
 	if err != nil {
@@ -760,7 +836,7 @@ func TestACutSingleTagPointsAtTheReadToolInsteadOfAPath(t *testing.T) {
 }
 
 func TestARootGetsARecordAddressedToItWholeWhenItsRestFits(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	fits, fitsPath, err := st.Fit(strings.Repeat("fits ", 200) + "end-of-fit")
 	if err != nil {
@@ -787,7 +863,7 @@ func TestARootGetsARecordAddressedToItWholeWhenItsRestFits(t *testing.T) {
 }
 
 func TestAnOwnerRecordArrivesAtOnceWithTheBatchAheadOfIt(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
 	sub := batched(t, st, kinds.Report, kinds.Note)
 	tags, stop := following(t, st, sub)
@@ -805,7 +881,7 @@ func TestAnOwnerRecordArrivesAtOnceWithTheBatchAheadOfIt(t *testing.T) {
 }
 
 func TestABatchHeldAcrossARestartArrivesOnce(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
 	sub := batched(t, st, kinds.Note)
 	_, stop := following(t, st, sub)
@@ -824,7 +900,7 @@ func TestABatchHeldAcrossARestartArrivesOnce(t *testing.T) {
 }
 
 func TestANewChannelCountsTheBatchItWasHolding(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	batchWindow = time.Hour
 	batched(t, st, kinds.Note)
 	held := testutil.Post(t, st, store.Record{Lane: "signal", Kind: kinds.Note, To: []string{"owner-relay"}, Text: "held for the batch"})
@@ -843,7 +919,7 @@ func TestANewChannelCountsTheBatchItWasHolding(t *testing.T) {
 }
 
 func TestTheHookLeavesBatchKindsToTheChannelAndLosesNothing(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond
 	ctx := context.Background()
 	relay := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
@@ -868,7 +944,7 @@ func TestTheHookLeavesBatchKindsToTheChannelAndLosesNothing(t *testing.T) {
 }
 
 func TestARecipientListNeverReachesARecipientAndOwnRepliesNeverEcho(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
 	ctx := context.Background()
 	relay := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
@@ -907,7 +983,7 @@ func TestARecipientListNeverReachesARecipientAndOwnRepliesNeverEcho(t *testing.T
 }
 
 func TestARunningChannelStampsItsWindow(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	s := start(t, st, window, proc, true)
 	defer s.close()
 	if f := s.next(); f.Method != "notifications/tools/list_changed" {
@@ -941,7 +1017,7 @@ func (s *session) exited() {
 }
 
 func TestOnlyTheNewestChannelOfAReconnectedWindowDeliversABurst(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	subscribe(t, st)
 	older := open(t, st, store.Window{PID: 2753, Started: proc.Started - time.Minute.Milliseconds()})
 	older.initialized()
@@ -965,7 +1041,7 @@ func TestOnlyTheNewestChannelOfAReconnectedWindowDeliversABurst(t *testing.T) {
 func TestAnOlderChannelExitsOnceANewerOneStartsAndNeverTakesTheWindowBack(t *testing.T) {
 	beatEvery = 10 * time.Millisecond
 	t.Cleanup(func() { beatEvery = 15 * time.Second })
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	older := store.Window{PID: 2753, Started: proc.Started - time.Minute.Milliseconds()}
 	stale := open(t, st, older)
 	stale.initialized()
@@ -980,7 +1056,7 @@ func TestAnOlderChannelExitsOnceANewerOneStartsAndNeverTakesTheWindowBack(t *tes
 func TestTwoWindowsKeepBothChannelServersPastTwoBeats(t *testing.T) {
 	beatEvery = 10 * time.Millisecond
 	t.Cleanup(func() { beatEvery = 15 * time.Second })
-	st, _ := testutil.Store(t)
+	st, _ := newStore(t)
 	first := start(t, st, window, proc, true)
 	second := start(t, st, store.Window{PID: 4244, Started: window.Started}, store.Window{PID: 4345, Started: proc.Started + 1}, true)
 	time.Sleep(3 * beatEvery)
@@ -992,5 +1068,167 @@ func TestTwoWindowsKeepBothChannelServersPastTwoBeats(t *testing.T) {
 		default:
 		}
 		s.close()
+	}
+}
+
+func TestHeardTagReadsOnlyTagsClaudeCodeGaveTheMainThread(t *testing.T) {
+	meta := map[string]string{"seq": "671504", "kind": "owner", "lane": "communicator"}
+	want := tag{kind: "owner", seq: 671504}
+	for _, tt := range []struct {
+		name  string
+		line  string
+		heard bool
+	}{
+		{"a tag Claude Code delivered at an idle prompt", userLine(tagText(Source, meta), false), true},
+		{"a tag queued mid-turn", queuedLine(tagText(Source, meta)), true},
+		{"a tag queued mid-turn as text blocks", queuedLine([]map[string]string{{"type": "text", "text": tagText(Source, meta)}}), true},
+		{"a tag from the one-server layout", userLine(tagText(Plugin+"cci", meta), false), true},
+		{"a subagent's copy", userLine(tagText(Source, meta), true), false},
+		{"a tool result quoting a tag", userLine([]map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": tagText(Source, meta)}}, false), false},
+		{"another plugin's channel", userLine(tagText("plugin:cc-slack:cc-slack", meta), false), false},
+		{"a prompt quoting a tag mid-sentence", userLine("did "+tagText(Source, meta)+" arrive?", false), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := heardTag([]byte(tt.line + "\n"))
+			if ok != tt.heard || (ok && got != want) {
+				t.Fatalf("heardTag = %+v, %v; want %+v, %v", got, ok, want, tt.heard)
+			}
+		})
+	}
+}
+
+func TestACursorMovesOnlyOnceTheSessionsTranscriptShowsItsTag(t *testing.T) {
+	st, _ := newStore(t)
+	ctx := context.Background()
+	sub, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Cursor: "root-channel"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := newLedger(ctx, st, sub.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sent := make(chan map[string]string, 8)
+	followCtx, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- l.listen(followCtx, func(ctx context.Context) error {
+			return follow(ctx, st, sub, false, l, func(_ string, params any) error {
+				sent <- params.(map[string]any)["meta"].(map[string]string)
+				return nil
+			})
+		})
+	}()
+	t.Cleanup(func() {
+		stop()
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	})
+	first := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "first"})
+	second := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Report, To: []string{"root"}, Text: "second"})
+	tags := make([]map[string]string, 0, 2)
+	for _, want := range []store.Record{first, second} {
+		select {
+		case meta := <-sent:
+			if meta["seq"] != fmt.Sprint(want.Seq) {
+				t.Fatalf("channel sent #%s, want #%d", meta["seq"], want.Seq)
+			}
+			tags = append(tags, meta)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("channel never sent #%d", want.Seq)
+		}
+	}
+	unmoved := func(why string) {
+		t.Helper()
+		time.Sleep(10 * interval)
+		if seq, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive); err != nil || seq != before {
+			t.Fatalf("cursor at #%d, %v after %s; want it unmoved at #%d", seq, err, why, before)
+		}
+	}
+	unmoved("sending into a session that never showed the tags")
+	if err := transcribe(userLine(tagText(Source, tags[0]), true), userLine([]map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": tagText(Source, tags[0])}}, false)); err != nil {
+		t.Fatal(err)
+	}
+	unmoved("a subagent's copy and a tool result")
+	if err := transcribe(userLine(tagText(Source, tags[1]), false)); err != nil {
+		t.Fatal(err)
+	}
+	unmoved("hearing the second tag ahead of the first")
+	if err := transcribe(queuedLine([]map[string]string{{"type": "text", "text": tagText(Source, tags[0])}})); err != nil {
+		t.Fatal(err)
+	}
+	cursorReaches(t, st, sub.Cursor, second.Seq)
+}
+
+func disconnects(t *testing.T, st *store.Store) []store.Record {
+	t.Helper()
+	records, err := st.Query(context.Background(), store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Disconnect}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return records
+}
+
+func TestAChannelClaudeCodeClosesPostsADisconnectTheNextOneResolves(t *testing.T) {
+	st, _ := newStore(t)
+	ctx := context.Background()
+	subscribe(t, st)
+	s := open(t, st, proc)
+	s.initialized()
+	s.close()
+	posted := disconnects(t, st)
+	if len(posted) != 1 || !slices.Equal(posted[0].To, []string{"communicator"}) || posted[0].Lane != "root" || !strings.Contains(posted[0].Text, hook.ReconnectCommand) {
+		t.Fatalf("disconnects = %+v, want one from root to communicator naming %s", posted, hook.ReconnectCommand)
+	}
+	again := open(t, st, proc)
+	again.initialized()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
+		still, err := st.OpenAmong(ctx, "d", []int64{posted[0].Seq})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(still) == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the reconnected channel never resolved disconnect #%d", posted[0].Seq)
+		}
+	}
+	recovered, err := st.Query(ctx, store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Recovered}})
+	if err != nil || len(recovered) != 1 || recovered[0].Resolves != posted[0].Seq || !slices.Equal(recovered[0].To, []string{"communicator"}) {
+		t.Fatalf("recovered = %+v, %v; want one to communicator resolving #%d", recovered, err, posted[0].Seq)
+	}
+	again.close()
+}
+
+func TestAReplacedChannelOrOneItsDaemonStopsPostsNoDisconnect(t *testing.T) {
+	st, _ := newStore(t)
+	subscribe(t, st)
+	older := open(t, st, store.Window{PID: 2753, Started: proc.Started - time.Minute.Milliseconds()})
+	older.initialized()
+	newer := open(t, st, proc)
+	newer.initialized()
+	older.exited()
+
+	daemon, stopDaemon := context.WithCancel(context.Background())
+	inR, inW := io.Pipe()
+	served := make(chan error, 1)
+	go func() {
+		served <- Serve(Hosted(context.Background(), daemon), st, window, store.Window{PID: 4444, Started: proc.Started + 1}, false, true, inR, io.Discard)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	stopDaemon()
+	_ = inW.Close()
+	if err := <-served; err != nil {
+		t.Fatal(err)
+	}
+	newer.exited()
+	if posted := disconnects(t, st); len(posted) != 0 {
+		t.Fatalf("disconnects = %+v, want none from a replaced channel or a daemon's stop", posted)
 	}
 }

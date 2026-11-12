@@ -2,7 +2,7 @@
 
 ## Use the MCP tools or the CLI
 
-When the cci channel's tools (`mcp__plugin_cc-inbox_cci__*`) are in your tools,
+When the cci server's tools (`mcp__plugin_cc-inbox_cci__*`) are in your tools,
 use them rather than Bash. Each defaults to the session's drive, `post` and
 `close` default `lane` to this window's, and each returns compact lines:
 `<seq> <kind> <lane>><to> [^re] [x<closed>] [#pr] [+] <text>`, under an
@@ -15,9 +15,9 @@ meets shell quoting. Every record is checked before any is stored, and the list
 stores in one step, so a refusal stores none of it; cci names each refused
 record's place and exits 1.
 
-A session launched with the server whose server stops gets a blocker from its
-lane to `meta-desk` on its next tool call, and inside Orca
-`/mcp reconnect plugin:cc-inbox:cci` is typed at its next idle prompt; outside
+A session launched with the channel whose channel server stops gets a blocker
+from its lane to `meta-desk` on its next tool call, and inside Orca
+`/mcp reconnect plugin:cc-inbox:channel` is typed at its next idle prompt; outside
 Orca, ask the human to type it. Keep working through the CLI meanwhile, never
 silently: the blocker closes itself when the server is back. Orca lanes launch
 with `--strict-mcp-config` and have no server by design: the CLI is their route.

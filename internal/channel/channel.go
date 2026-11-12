@@ -19,6 +19,7 @@ import (
 
 	mcp "github.com/yasyf/cc-interact/channel"
 
+	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/inbox"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
@@ -27,9 +28,11 @@ import (
 )
 
 const (
-	Server       = "cci"
-	Source       = "plugin:cc-inbox:" + Server
+	Plugin       = "plugin:cc-inbox:"
+	Server       = "channel"
+	Source       = Plugin + Server
 	notifyMethod = "notifications/claude/channel"
+	disconnectTo = "communicator"
 	batchKind    = "batch"
 	skippedKind  = "skipped"
 	releaseTicks = 12
@@ -40,6 +43,10 @@ const (
 // Resumed is the channel flag a re-executed channel server runs with: Claude
 // Code finished the MCP handshake with the binary it replaced.
 const Resumed = "resumed"
+
+// NoTools is the channel flag of the plugin's tool-less channel server, which
+// no tool call ever starts; the plugin's cci server serves the tools.
+const NoTools = "no-tools"
 
 var (
 	idle      = 5 * time.Second
@@ -66,7 +73,7 @@ func (u upgrade) Error() string {
 	return "cci " + u.Version + " is installed at " + u.Path
 }
 
-const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to a root reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A tag repeats when its cursor write fails after delivery, so skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
+const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to a root reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A record's cursor moves once this session's transcript shows its tag, so until then the PostToolUse hook may deliver it too and a restarted channel repeats it: skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
 
 var (
 	errStale    = errors.New("subscription replaced")
@@ -75,22 +82,27 @@ var (
 
 type hostedKey struct{}
 
-// Hosted marks ctx as a channel the daemon runs for a client: the daemon's own
-// upgrade moves it to the new release, so it never re-executes.
-func Hosted(ctx context.Context) context.Context {
-	return context.WithValue(ctx, hostedKey{}, true)
+// Hosted marks ctx as a channel the daemon runs for a client while daemon
+// lives: the daemon's own upgrade moves it to the new release, so it never
+// re-executes, and a channel the daemon ends that way never disconnected.
+func Hosted(ctx, daemon context.Context) context.Context {
+	return context.WithValue(ctx, hostedKey{}, daemon)
 }
 
 func hosted(ctx context.Context) bool {
 	return ctx.Value(hostedKey{}) != nil
 }
 
+func stopping(ctx context.Context) bool {
+	daemon, ok := ctx.Value(hostedKey{}).(context.Context)
+	return ok && daemon.Err() != nil
+}
+
 // Serve answers the MCP session on in and out and streams the window's
-// subscription once Claude Code reports the session initialized, or at once
-// when resumed. When a newer cci is installed, the server re-executes it on
-// the same stdio, resumed, so a long-lived window never keeps filtering with
-// the release it started on. It returns once a server started after proc
-// claims the window.
+// subscription once Claude Code reports it initialized, or at once when
+// resumed; a newer install re-executes on the same stdio. It returns once a
+// server started after proc claims the window. A subscribed channel ending any
+// other way than a daemon's stop posts a disconnect to the communicator.
 func Serve(ctx context.Context, st *store.Store, window, proc store.Window, channeled, resumed bool, in io.Reader, out io.Writer, tools ...mcp.Tool) error {
 	if owner, err := st.ClaimChannel(window, proc); err != nil || owner != proc {
 		return err
@@ -103,7 +115,7 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 		}
 		started = &head
 	}
-	srv := mcp.NewServer(mcp.ServerInfo{Name: Server, Version: version.String(), Instructions: instructions, Resumed: resumed}, tools)
+	srv := mcp.NewServer(mcp.ServerInfo{Name: "cci", Version: version.String(), Instructions: instructions, Resumed: resumed}, tools)
 	initialized := make(chan struct{})
 	watch := initialized
 	if resumed {
@@ -129,6 +141,10 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 		}
 		return srv.Notify(method, params)
 	}
+	again := []string{"channel", "--" + Resumed}
+	if len(tools) == 0 {
+		again = append(again, "--"+NoTools)
+	}
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -139,7 +155,7 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 				defer close(beating)
 				beat(streamCtx, st, window, owns)
 			}()
-			Stream(streamCtx, st, window, channeled, started, notify)
+			Stream(streamCtx, st, window, channeled, started, again, notify)
 			<-beating
 		case <-streamCtx.Done():
 		}
@@ -147,6 +163,37 @@ func Serve(ctx context.Context, st *store.Store, window, proc store.Window, chan
 	err := srv.Serve(ctx, requests, out)
 	stop()
 	<-done
+	if stopping(ctx) || owns() != nil {
+		return err
+	}
+	return errors.Join(err, disconnected(context.WithoutCancel(ctx), st, window))
+}
+
+func disconnected(ctx context.Context, st *store.Store, window store.Window) error {
+	sub, ok, err := st.Subscription(ctx, window)
+	if err != nil || !ok {
+		return err
+	}
+	_, _, err = st.Post(ctx, store.Record{
+		Drive: sub.Drive, Lane: sub.Reader, Kind: kinds.Disconnect, To: []string{disconnectTo},
+		Text: fmt.Sprintf("%s's cci channel disconnected: Claude Code closed it in window %d (session %s), so records to %s reach it only through its PostToolUse hook until it reconnects with %s", sub.Reader, window.PID, sub.Session, sub.Reader, hook.ReconnectCommand),
+	}, 0)
+	return err
+}
+
+func reconnected(ctx context.Context, st *store.Store, sub store.Subscription) error {
+	last, err := st.Query(ctx, store.Filter{Drive: sub.Drive, Kinds: []kinds.Kind{kinds.Disconnect}, Lanes: []string{sub.Reader}, Descending: true, Limit: 1})
+	if err != nil || len(last) == 0 {
+		return err
+	}
+	open, err := st.OpenAmong(ctx, sub.Drive, []int64{last[0].Seq})
+	if err != nil || len(open) == 0 {
+		return err
+	}
+	_, _, err = st.Post(ctx, store.Record{
+		Drive: sub.Drive, Lane: sub.Reader, Kind: kinds.Recovered, To: []string{disconnectTo}, Resolves: last[0].Seq,
+		Text: fmt.Sprintf("%s's cci channel is connected again in window %d (session %s)", sub.Reader, sub.Window.PID, sub.Session),
+	}, 0)
 	return err
 }
 
@@ -183,27 +230,42 @@ func beat(ctx context.Context, st *store.Store, window store.Window, owns func()
 	}
 }
 
-// Stream delivers window's subscription through notify until ctx ends. A
-// channel Claude Code just started passes the head it started at as started,
-// and its first follow begins live; a resumed one passes nil and keeps the
-// position the channel it replaced reached.
-func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, started *int64, notify func(method string, params any) error) {
+// Stream delivers window's subscription through notify until ctx ends, moving
+// each cursor only as the session's transcript shows the tags it sent. A new
+// channel passes the head it started at as started and begins live; a resumed
+// one passes nil and keeps its predecessor's position. A newer install
+// re-executes it with again as its arguments.
+func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, started *int64, again []string, notify func(method string, params any) error) {
+	announced := false
+	var l *ledger
 	for tick := 1; ctx.Err() == nil; tick++ {
 		sub, ok, err := st.Subscription(ctx, window)
 		switch {
-		case err == nil && ok && started != nil:
-			if err = startLive(ctx, st, sub, channeled, *started, notify); err == nil {
-				started = nil
-				err = follow(ctx, st, sub, channeled, notify)
-			}
 		case err == nil && ok:
-			err = follow(ctx, st, sub, channeled, notify)
+			if !announced {
+				err = reconnected(ctx, st, sub)
+				announced = err == nil
+			}
+			if err == nil && (l == nil || l.session != sub.Session) {
+				l, err = newLedger(ctx, st, sub.Session)
+			}
+			if err == nil {
+				err = l.listen(ctx, func(ctx context.Context) error {
+					if started != nil {
+						if err := startLive(ctx, st, sub, channeled, *started, l, notify); err != nil {
+							return err
+						}
+						started = nil
+					}
+					return follow(ctx, st, sub, channeled, l, notify)
+				})
+			}
 		case err == nil && tick%releaseTicks == 0 && !hosted(ctx):
 			err = newerRelease()
 		}
 		var newer upgrade
 		if errors.As(err, &newer) {
-			err = execve(newer.Path, []string{newer.Path, "channel", "--" + Resumed}, os.Environ())
+			err = execve(newer.Path, append([]string{newer.Path}, again...), os.Environ())
 		}
 		if err != nil && ctx.Err() == nil {
 			slog.Warn("cci channel", "pid", window.PID, "err", err)
@@ -212,8 +274,8 @@ func Stream(ctx context.Context, st *store.Store, window store.Window, channeled
 	}
 }
 
-func startLive(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, started int64, notify func(string, any) error) error {
-	from, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive)
+func startLive(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, started int64, l *ledger, notify func(string, any) error) error {
+	from, err := l.position(ctx, sub.Cursor, sub.Drive)
 	if err != nil {
 		return err
 	}
@@ -226,7 +288,7 @@ func startLive(ctx context.Context, st *store.Store, sub store.Subscription, cha
 	moves := []store.CursorMove{{Name: sub.Cursor, Drive: sub.Drive, Seq: head}}
 	if len(sub.Batch) > 0 {
 		held := sub.BatchFilter()
-		if held.After, _, err = st.Cursor(ctx, sub.BatchCursor(), sub.Drive); err != nil {
+		if held.After, err = l.position(ctx, sub.BatchCursor(), sub.Drive); err != nil {
 			return err
 		}
 		held.Before = head + 1
@@ -237,20 +299,22 @@ func startLive(ctx context.Context, st *store.Store, sub store.Subscription, cha
 		n, since = n+pending, min(since, held.After)
 		moves = append(moves, store.CursorMove{Name: sub.BatchCursor(), Drive: sub.Drive, Seq: head})
 	}
-	if n > 0 {
-		text := fmt.Sprintf("%d records addressed to %s, #%d through #%d, came before this channel started and were not replayed; the inbox tool reads them, as does cci tail --reader %s --since %d", n, sub.Reader, since+1, head, sub.Reader, since)
-		if err := notify(notifyMethod, map[string]any{"content": text, "meta": map[string]string{"seq": strconv.FormatInt(head, 10), "kind": skippedKind}}); err != nil {
+	if channeled {
+		if err := st.MoveCursors(ctx, []store.CursorMove{{Name: sub.FloorCursor(), Drive: sub.Drive, Seq: max(from, head), Exact: true}}); err != nil {
 			return err
 		}
 	}
-	if channeled {
-		moves = append(moves, store.CursorMove{Name: sub.FloorCursor(), Drive: sub.Drive, Seq: max(from, head), Exact: true})
+	if n == 0 {
+		return l.pass(ctx, moves...)
 	}
-	return st.MoveCursors(ctx, moves)
+	text := fmt.Sprintf("%d records addressed to %s, #%d through #%d, came before this channel started and were not replayed; the inbox tool reads them, as does cci tail --reader %s --since %d", n, sub.Reader, since+1, head, sub.Reader, since)
+	l.owe(tag{kind: skippedKind, seq: head}, moves...)
+	return notify(notifyMethod, map[string]any{"content": text, "meta": map[string]string{"seq": strconv.FormatInt(head, 10), "kind": skippedKind}})
 }
 
 type batch struct {
 	st     *store.Store
+	sent   *ledger
 	filter store.Filter
 	cursor string
 	notify func(string, any) error
@@ -283,7 +347,7 @@ func (b *batch) flush(ctx context.Context) error {
 	defer b.mu.Unlock()
 	f := b.filter
 	var err error
-	if f.After, _, err = b.st.Cursor(ctx, b.cursor, f.Drive); err != nil {
+	if f.After, err = b.sent.position(ctx, b.cursor, f.Drive); err != nil {
 		return err
 	}
 	records, err := b.st.Query(ctx, f)
@@ -307,11 +371,12 @@ func (b *batch) flush(ctx context.Context) error {
 		}
 	}
 	last := records[len(records)-1].Seq
+	b.sent.owe(tag{kind: batchKind, seq: last}, store.CursorMove{Name: b.cursor, Drive: f.Drive, Seq: last})
 	if err := b.notify(notifyMethod, map[string]any{"content": strings.TrimSuffix(content.String(), "\n"), "meta": map[string]string{"seq": strconv.FormatInt(last, 10), "kind": batchKind}}); err != nil {
 		return err
 	}
 	b.tick.Reset(batchWindow)
-	return b.st.SetCursor(context.WithoutCancel(ctx), b.cursor, f.Drive, last)
+	return nil
 }
 
 func newest(records []store.Record) []store.Record {
@@ -351,20 +416,24 @@ func supersedes(r store.Record) []supersede {
 	return []supersede{{kind: r.Kind, lane: r.Lane, topic: r.Topic}}
 }
 
-func follow(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, notify func(string, any) error) error {
+func follow(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, l *ledger, notify func(string, any) error) error {
 	mail, shared, err := hookMail(ctx, st, sub, channeled)
 	if err != nil {
+		return err
+	}
+	f := sub.Filter()
+	if f.After, err = l.position(ctx, sub.Cursor, sub.Drive); err != nil {
 		return err
 	}
 	watchCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	changed := make(chan error, 1)
 	go func() { changed <- untilChanged(watchCtx, st, sub, stop) }()
-	held := &batch{st: st, filter: sub.BatchFilter(), cursor: sub.BatchCursor(), notify: notify, tick: time.NewTicker(batchWindow)}
+	held := &batch{st: st, sent: l, filter: sub.BatchFilter(), cursor: sub.BatchCursor(), notify: notify, tick: time.NewTicker(batchWindow)}
 	defer held.tick.Stop()
 	batched := make(chan error, 1)
 	go func() { batched <- held.run(watchCtx, stop) }()
-	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: sub.Filter(), Cursor: sub.Cursor, Interval: interval, Compact: true}, func(r store.Record, line string) error {
+	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: f, Interval: interval, Compact: true}, func(r store.Record, line string) error {
 		now, ok, err := st.Subscription(watchCtx, sub.Window)
 		if err != nil {
 			return err
@@ -386,8 +455,11 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 			}
 			if r.Seq <= seen {
 				delivered, err := mail.has(watchCtx, st, r)
-				if err != nil || delivered {
+				if err != nil {
 					return err
+				}
+				if delivered {
+					return l.pass(watchCtx, store.CursorMove{Name: sub.Cursor, Drive: sub.Drive, Seq: r.Seq})
 				}
 			}
 		}
@@ -406,13 +478,12 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 		if err != nil {
 			return err
 		}
-		if err := notify(notifyMethod, map[string]any{"content": content, "meta": meta}); err != nil {
-			return err
-		}
+		moves := []store.CursorMove{{Name: sub.Cursor, Drive: sub.Drive, Seq: r.Seq}}
 		if shared && seen >= mail.start {
-			return st.SetCursor(watchCtx, mail.cursor, mail.filter.Drive, r.Seq)
+			moves = append(moves, store.CursorMove{Name: mail.cursor, Drive: mail.filter.Drive, Seq: r.Seq})
 		}
-		return nil
+		l.owe(tag{kind: string(r.Kind), seq: r.Seq}, moves...)
+		return notify(notifyMethod, map[string]any{"content": content, "meta": meta})
 	})
 	stop()
 	if errors.Is(err, errStale) {

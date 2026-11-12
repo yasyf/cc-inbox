@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A subscribed channel that stops for any reason but a newer channel claiming
+  its window or its daemon handing off posts a `disconnect` record from the
+  reader's lane to `communicator`, naming the window, the session and the
+  reconnect command. The next channel to stream that reader posts `recovered`
+  with `--resolves`, closing it; `withdraw` closes it too.
+
 - `cci relay export --lane <lane>` also writes, at any age, every record posted
   by or addressed to that lane, the stem it answers under, or a numbered lane of
   that stem. A successor seeded from `--since <its launch> --lane <it>` holds
@@ -48,6 +54,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record whole through it instead of keeping its own copy of the rule.
 
 ### Fixed
+
+- A subagent's cci tool call no longer takes a session's channel. The plugin
+  now runs two MCP servers: `channel`, `cci channel --no-tools`, delivers
+  records and has no tools, so no tool call starts or replaces it, and `cci`,
+  `cci mcp`, serves the `mcp__plugin_cc-inbox_cci__*` tools and never claims a
+  window. Tags now arrive with `source="plugin:cc-inbox:channel"`, and a lost
+  channel is reconnected with `/mcp reconnect plugin:cc-inbox:channel`.
+- The channel moves a subscription's cursor past a record only once the
+  session's transcript, `<config dir>/projects/*/<session>.jsonl`, shows that
+  record's tag on the main thread, in the order the tags went out. A tag
+  Claude Code dropped, as a reconnect does, leaves the record to the
+  `PostToolUse` hook instead of losing it.
 
 - A plugin update no longer restarts the `cci` channel server of every running
   session. Claude Code hashes a plugin MCP server's resolved config, `command`,

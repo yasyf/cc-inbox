@@ -65,6 +65,7 @@ const (
 	Queue      Kind = "queue"
 	Github     Kind = "github"
 	Spawn      Kind = "spawn"
+	Disconnect Kind = "disconnect"
 )
 
 const EphemeralTTL = 24 * time.Hour
@@ -134,6 +135,7 @@ var specs = map[Kind]Spec{
 	Queue:      {NeedsPR: true},
 	Github:     {TTL: ServiceTTL},
 	Spawn:      {},
+	Disconnect: {},
 }
 
 var aliases = map[string]Kind{
@@ -155,13 +157,14 @@ var aliases = map[string]Kind{
 }
 
 var openers = map[Kind][]Kind{
-	Ask:      {Answer, Go, Withdraw},
-	Decide:   {Answer, Go, Withdraw},
-	Hold:     {Lift},
-	Incident: {FixLive, Done},
-	Blocker:  {Withdraw, Answer, Done},
-	Blocked:  {Unblock},
-	Defect:   {FixLive, Done},
+	Ask:        {Answer, Go, Withdraw},
+	Decide:     {Answer, Go, Withdraw},
+	Hold:       {Lift},
+	Incident:   {FixLive, Done},
+	Blocker:    {Withdraw, Answer, Done},
+	Blocked:    {Unblock},
+	Defect:     {FixLive, Done},
+	Disconnect: {Withdraw},
 }
 
 // ServiceTTL is how long a namespaced service kind lives without an override.
