@@ -1,1 +1,1 @@
-{"v":1,"lamport":7,"ops":[{"kind":"set_criterion_status","id":"2d1124224f6920512b0b0f93b01e509d","status":"met","note":"Fixture length corrected on main. Main CI43150501070 at6f6dd1358a2f4f970af065e10cde4cc09e50a45b succeeds including store regression tests. Runtime remains quiet on current0.54.31."}]}
+{"v":1,"lamport":8,"ops":[{"kind":"set_status","status":"done"},{"kind":"link_commit","sha":"57732b95c7b8478faed96fa82e62c78ea42ffa6f"}]}
