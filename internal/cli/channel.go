@@ -20,18 +20,102 @@ import (
 	"github.com/yasyf/cc-inbox/internal/version"
 )
 
+type subscriptionFlags struct {
+	drive  string
+	reader string
+	cursor string
+	kinds  []string
+	mute   []string
+	to     []string
+	batch  []string
+	topic  []string
+	follow []string
+}
+
+func (f *subscriptionFlags) bind(cmd *cobra.Command, cursorHelp string) {
+	cmd.Flags().StringVar(&f.drive, "drive", "", "drive to deliver (default: the drive bound to this session)")
+	cmd.Flags().StringVar(&f.reader, "reader", "", "deliver records addressed to this lane, as cci tail --reader does")
+	cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
+	cmd.Flags().StringSliceVar(&f.mute, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
+	cmd.Flags().StringSliceVar(&f.to, "to-kind", nil, "deliver records addressed to --reader only of these kinds; cci tail still reads the rest (repeatable; default for root: "+kindList(kinds.RootAddressed())+", otherwise every kind)")
+	cmd.Flags().StringSliceVar(&f.batch, "batch-kinds", nil, "deliver records addressed to --reader of these kinds together, one tag at most every five minutes, never on arrival (repeatable; default for root: "+kindList(store.DefaultBatch("root"))+", otherwise none)")
+	cmd.Flags().StringSliceVar(&f.topic, "topic-kinds", nil, "also deliver records of these kinds, whoever they are addressed to, on any topic a record addressed to --reader has carried (repeatable)")
+	cmd.Flags().StringArrayVar(&f.follow, "follow", nil, "also deliver another drive's broadcasts of these kinds, as <drive>=<kind>[,<kind>...], e.g. oncall=incident (repeatable)")
+	cmd.Flags().StringVar(&f.cursor, "cursor", "", cursorHelp)
+	_ = cmd.MarkFlagRequired("reader")
+}
+
+func (f *subscriptionFlags) subscription(ctx context.Context, st *store.Store, session string, window store.Window, channeled bool, cursor string) (store.Subscription, error) {
+	d, err := resolveDrive(ctx, st, f.drive)
+	if err != nil {
+		return store.Subscription{}, err
+	}
+	sub := store.Subscription{Session: session, Window: window, Drive: d, Reader: f.reader, Cursor: cmp.Or(f.cursor, cursor)}
+	if sub.Kinds, err = kinds.ParseAll(f.kinds); err != nil {
+		return store.Subscription{}, err
+	}
+	if sub.Mute, err = kinds.ParseAll(f.mute); err != nil {
+		return store.Subscription{}, err
+	}
+	if sub.ToKinds, err = kinds.ParseAll(f.to); err != nil {
+		return store.Subscription{}, err
+	}
+	if len(sub.ToKinds) == 0 {
+		sub.ToKinds = store.DefaultToKinds(f.reader)
+	}
+	if sub.Batch, err = kinds.ParseAll(f.batch); err != nil {
+		return store.Subscription{}, err
+	}
+	if sub.TopicKinds, err = kinds.ParseAll(f.topic); err != nil {
+		return store.Subscription{}, err
+	}
+	if len(sub.Batch) > 0 && !channeled {
+		return store.Subscription{}, errors.New("--batch-kinds needs this window launched with --channels plugin:cc-inbox@cc-inbox: only the channel delivers those kinds")
+	}
+	if len(sub.Batch) == 0 && channeled {
+		sub.Batch = store.DefaultBatch(f.reader)
+	}
+	for _, spec := range f.follow {
+		other, list, ok := strings.Cut(spec, "=")
+		if !ok || other == "" || list == "" {
+			return store.Subscription{}, fmt.Errorf("--follow %q is not <drive>=<kind>[,<kind>...], e.g. oncall=incident", spec)
+		}
+		ks, err := kinds.ParseAll(strings.Split(list, ","))
+		if err != nil {
+			return store.Subscription{}, err
+		}
+		sub.Follow = append(sub.Follow, store.Follow{Drive: other, Kinds: ks})
+	}
+	return sub, nil
+}
+
+func holdLane(ctx context.Context, st *store.Store, sub store.Subscription, save func() error) error {
+	self := store.PeerKey{Session: sub.Session}
+	moves, err := st.MovesLane(ctx, sub)
+	if err != nil {
+		return err
+	}
+	if moves {
+		if err := refuseHeldLane(ctx, st, self, sub.Window, sub.Drive, sub.Reader, st.Now()); err != nil {
+			return err
+		}
+	}
+	if err := save(); err != nil || !moves {
+		return err
+	}
+	return st.ClaimLane(ctx, self, sub.Drive, sub.Reader, time.UnixMilli(sub.Window.Started))
+}
+
+func refuseRegistered(ctx context.Context, st *store.Store, session string) error {
+	r, ok, err := st.SessionRegistration(ctx, session)
+	if err != nil || !ok {
+		return err
+	}
+	return fmt.Errorf("session %s is registered as %s, which owns its channel subscription: change it with cci session register %s and every flag it should keep, or end it with cci session rm %s", session, r.Alias, r.Alias, r.Alias)
+}
+
 func newSubscribeCmd() *cobra.Command {
-	var (
-		drive  string
-		reader string
-		kindsF []string
-		muteF  []string
-		toF    []string
-		batchF []string
-		topicF []string
-		follow []string
-		cursor string
-	)
+	var flags subscriptionFlags
 	cmd := &cobra.Command{
 		Use:   "subscribe",
 		Short: "Deliver this session's records over the cci channel: records addressed to --reader of each --to-kind, plus broadcasts of each --kind",
@@ -55,76 +139,31 @@ that reads them. For reader root (or main) in a window launched with channels,
 A record of a --topic-kinds kind arrives whoever it is addressed to when its
 topic is one a record addressed to --reader has carried: being addressed on a
 topic is how a reader comes to follow its results. It only widens what
-arrives; it claims, holds and reassigns nothing.`,
+arrives; it claims, holds and reassigns nothing.
+
+A session cci session register keeps refuses this: its alias owns the
+subscription.`,
 		Args: cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, session, err := thisSession(cmd.Context())
+			ctx := cmd.Context()
+			window, session, err := thisSession(ctx)
 			if err != nil {
 				return err
 			}
-			d, err := resolveDrive(cmd.Context(), st, drive)
+			if err := refuseRegistered(ctx, st, session); err != nil {
+				return err
+			}
+			sub, err := flags.subscription(ctx, st, session, window, channelsOn(window.PID), "channel-"+session)
 			if err != nil {
 				return err
 			}
-			sub := store.Subscription{Session: session, Window: window, Drive: d, Reader: reader, Cursor: cursor}
-			if sub.Kinds, err = kinds.ParseAll(kindsF); err != nil {
+			if err := holdLane(ctx, st, sub, func() error {
+				_, err := st.Subscribe(ctx, sub)
+				return err
+			}); err != nil {
 				return err
 			}
-			if sub.Mute, err = kinds.ParseAll(muteF); err != nil {
-				return err
-			}
-			if sub.ToKinds, err = kinds.ParseAll(toF); err != nil {
-				return err
-			}
-			if len(sub.ToKinds) == 0 {
-				sub.ToKinds = store.DefaultToKinds(reader)
-			}
-			if sub.Batch, err = kinds.ParseAll(batchF); err != nil {
-				return err
-			}
-			if sub.TopicKinds, err = kinds.ParseAll(topicF); err != nil {
-				return err
-			}
-			channeled := channelsOn(window.PID)
-			if len(sub.Batch) > 0 && !channeled {
-				return errors.New("--batch-kinds needs this window launched with --channels plugin:cc-inbox@cc-inbox: only the channel delivers those kinds")
-			}
-			if len(sub.Batch) == 0 && channeled {
-				sub.Batch = store.DefaultBatch(reader)
-			}
-			for _, spec := range follow {
-				other, list, ok := strings.Cut(spec, "=")
-				if !ok || other == "" || list == "" {
-					return fmt.Errorf("--follow %q is not <drive>=<kind>[,<kind>...], e.g. oncall=incident", spec)
-				}
-				ks, err := kinds.ParseAll(strings.Split(list, ","))
-				if err != nil {
-					return err
-				}
-				sub.Follow = append(sub.Follow, store.Follow{Drive: other, Kinds: ks})
-			}
-			if sub.Cursor == "" {
-				sub.Cursor = "channel-" + session
-			}
-			self := store.PeerKey{Session: session}
-			moves, err := st.MovesLane(cmd.Context(), sub)
-			if err != nil {
-				return err
-			}
-			if moves {
-				if err := refuseHeldLane(cmd.Context(), st, self, window, d, reader, st.Now()); err != nil {
-					return err
-				}
-			}
-			if _, err := st.Subscribe(cmd.Context(), sub); err != nil {
-				return err
-			}
-			if moves {
-				if err := st.ClaimLane(cmd.Context(), self, d, reader, time.UnixMilli(window.Started)); err != nil {
-					return err
-				}
-			}
-			from, _, err := st.Cursor(cmd.Context(), sub.Cursor, d)
+			from, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive)
 			if err != nil {
 				return err
 			}
@@ -133,16 +172,7 @@ arrives; it claims, holds and reassigns nothing.`,
 			return err
 		}),
 	}
-	cmd.Flags().StringVar(&drive, "drive", "", "drive to deliver (default: the drive bound to this session)")
-	cmd.Flags().StringVar(&reader, "reader", "", "deliver records addressed to this lane, as cci tail --reader does")
-	cmd.Flags().StringSliceVar(&kindsF, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
-	cmd.Flags().StringSliceVar(&muteF, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
-	cmd.Flags().StringSliceVar(&toF, "to-kind", nil, "deliver records addressed to --reader only of these kinds; cci tail still reads the rest (repeatable; default for root: "+kindList(kinds.RootAddressed())+", otherwise every kind)")
-	cmd.Flags().StringSliceVar(&batchF, "batch-kinds", nil, "deliver records addressed to --reader of these kinds together, one tag at most every five minutes, never on arrival (repeatable; default for root: "+kindList(store.DefaultBatch("root"))+", otherwise none)")
-	cmd.Flags().StringSliceVar(&topicF, "topic-kinds", nil, "also deliver records of these kinds, whoever they are addressed to, on any topic a record addressed to --reader has carried (repeatable)")
-	cmd.Flags().StringArrayVar(&follow, "follow", nil, "also deliver another drive's broadcasts of these kinds, as <drive>=<kind>[,<kind>...], e.g. oncall=incident (repeatable)")
-	cmd.Flags().StringVar(&cursor, "cursor", "", "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")
-	_ = cmd.MarkFlagRequired("reader")
+	flags.bind(cmd, "resume from and advance this cursor, used by no other reader (default: channel-<session>, starting at the current head)")
 	return cmd
 }
 
@@ -152,8 +182,11 @@ func newUnsubscribeCmd() *cobra.Command {
 		Short: "Stop delivering records over this session's cci channel",
 		Args:  cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
-			window, _, err := thisSession(cmd.Context())
+			window, session, err := thisSession(cmd.Context())
 			if err != nil {
+				return err
+			}
+			if err := refuseRegistered(cmd.Context(), st, session); err != nil {
 				return err
 			}
 			removed, err := st.Unsubscribe(cmd.Context(), window)

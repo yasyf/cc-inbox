@@ -42,6 +42,24 @@ from the reader's lane to `communicator`; the next channel to stream that
 reader posts `recovered`, closing it. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
+A long-lived session, such as a drive's coordinator, communicator or meta
+session, registers instead, so its subscription belongs to an alias rather
+than to one Claude Code process:
+
+```bash
+cci session register release-demo-coordinator --drive release-demo --reader root --cursor coordinator --notify communicator
+```
+
+It takes the flags `cci subscribe` takes, plus `--session` (this session by
+default), `--cwd`, `--command`, `--resume-prompt` and `--notify`, which record
+how the session runs again and which lanes hear when it stops. The window the
+session runs in hears at once; a resume in a new window, or a `/clear` that
+starts a new session in the same window, keeps the alias's subscription, and
+the session never runs `cci subscribe`, which refuses it, as `cci unsubscribe`
+does. Register the alias again to change what it delivers; its cursor stays.
+`cci session list` names each alias, its session, whether it runs and its
+cursor, and `cci session rm <alias>` ends it.
+
 A record addressed to the reader arrives only when its kind is a
 `--to-kind`. For `--reader root` (or `main`) that defaults to
 `incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner`, the kinds a root

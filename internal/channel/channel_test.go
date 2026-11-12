@@ -290,6 +290,36 @@ func TestChannelDeliversTheSubscriptionAndARestartedOneCountsWhatItMissed(t *tes
 	resumed.close()
 }
 
+func TestChannelDeliversARegisteredSessionsSubscription(t *testing.T) {
+	st, clock := testutil.Store(t)
+	ctx := context.Background()
+	s := open(t, st, proc)
+	s.initialized()
+	s.quiet(50 * time.Millisecond)
+	coordinator := store.Registration{Subscription: store.Subscription{Alias: "release-demo-coordinator", Session: "s1", Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Incident}, Cursor: "coordinator"}}
+	if _, err := st.Register(ctx, coordinator); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	incident := testutil.Post(t, st, store.Record{Lane: "alerts", Kind: kinds.Incident, Topic: "api-5xx", Text: "api 5xx above 2%"})
+	s.record(incident)
+	clock.Advance(time.Second)
+	coordinator.Kinds = []kinds.Kind{kinds.Note}
+	if _, err := st.Register(ctx, coordinator); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	note := testutil.Post(t, st, store.Record{Lane: "runner", Kind: kinds.Note, Text: "LAUNCHED R1185 cci-interact"})
+	s.record(note)
+	if _, ok, err := st.Unregister(ctx, coordinator.Alias); err != nil || !ok {
+		t.Fatalf("Unregister = %v, %v", ok, err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "after the alias was removed", To: []string{"root"}})
+	s.quiet(50 * time.Millisecond)
+	s.close()
+}
+
 func TestReplacingTheSubscriptionNeverSkipsANewlySelectedRecord(t *testing.T) {
 	st, clock := newStore(t)
 	defer func(fast time.Duration) { idle = fast }(idle)

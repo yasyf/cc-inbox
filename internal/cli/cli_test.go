@@ -1431,6 +1431,35 @@ func TestSubagentCannotReplaceTheWindowSubscription(t *testing.T) {
 	}
 }
 
+func TestSessionRegisterListAndRm(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
+	t.Setenv("CCI_AGENT_ID", "")
+	out, err := run(t, "session", "register", "release-demo-coordinator", "--session", "c0ffee01", "--drive", "d", "--reader", "root", "--cursor", "coordinator",
+		"--cwd", "/work/release-demo", "--command", "claude -n release-demo-coordinator", "--resume-prompt", "resume as the coordinator", "--notify", "communicator")
+	if err != nil || !strings.HasPrefix(out, "release-demo-coordinator registered: session c0ffee01 not running: the next window it starts in hears it; drive d as root,") || !strings.HasSuffix(out, "cursor coordinator at #0\n") {
+		t.Fatalf("session register = %q, %v", out, err)
+	}
+	if out, err := run(t, "session", "register", "second", "--session", "c0ffee01", "--drive", "d", "--reader", "root"); err == nil || !strings.Contains(err.Error(), "session c0ffee01 is registered as release-demo-coordinator") {
+		t.Fatalf("a second alias for the session = %q, %v", out, err)
+	}
+	const listed = "release-demo-coordinator: session c0ffee01 not running, drive d as root, cursor coordinator at #0, notify communicator\n" +
+		"  cwd /work/release-demo\n  command claude -n release-demo-coordinator\n  resume prompt resume as the coordinator\n"
+	if out, err := run(t, "session", "list"); err != nil || out != listed {
+		t.Fatalf("session list = %q, %v; want %q", out, err, listed)
+	}
+	if out, err := run(t, "session", "rm", "release-demo-coordinator"); err != nil || out != "release-demo-coordinator removed: session c0ffee01 keeps no channel subscription until cci subscribe or cci session register gives it one\n" {
+		t.Fatalf("session rm = %q, %v", out, err)
+	}
+	if out, err := run(t, "session", "list"); err != nil || out != "no session is registered; cci session register <alias> keeps one\n" {
+		t.Fatalf("session list after rm = %q, %v", out, err)
+	}
+	if out, err := run(t, "session", "rm", "release-demo-coordinator"); err == nil || !strings.Contains(err.Error(), "no session is registered as release-demo-coordinator") {
+		t.Fatalf("session rm twice = %q, %v", out, err)
+	}
+}
+
 func TestRepeatedResolvesClosesEverySeq(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")

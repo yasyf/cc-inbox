@@ -89,7 +89,11 @@ func newMeCmd() *cobra.Command {
 			if err != nil || !ok {
 				return err
 			}
-			_, err = fmt.Fprintf(cmd.OutOrStdout(), "channel subscription of window %d: %s\n", sub.Window.PID, describe(sub))
+			owner := ""
+			if sub.Alias != "" {
+				owner = ", owned by alias " + sub.Alias
+			}
+			_, err = fmt.Fprintf(cmd.OutOrStdout(), "channel subscription of window %d%s: %s\n", sub.Window.PID, owner, describe(sub))
 			return err
 		}),
 	}

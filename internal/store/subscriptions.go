@@ -23,6 +23,7 @@ type Window struct {
 }
 
 type Subscription struct {
+	Alias      string       `json:"alias,omitempty"`
 	Session    string       `json:"session"`
 	Window     Window       `json:"window"`
 	Drive      string       `json:"drive"`
@@ -129,22 +130,8 @@ func (s *Store) windowSubscription(ctx context.Context, k PeerKey, b Binding) (S
 }
 
 func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, error) {
-	sub.At = s.Now().UTC()
-	head, err := s.MaxSeq(ctx)
+	sub, err := s.seed(ctx, sub)
 	if err != nil {
-		return Subscription{}, err
-	}
-	sub.Head = head
-	_, ok, err := s.Cursor(ctx, sub.Cursor, sub.Drive)
-	if err != nil {
-		return Subscription{}, err
-	}
-	if !ok {
-		if err := s.SetCursor(ctx, sub.Cursor, sub.Drive, head); err != nil {
-			return Subscription{}, err
-		}
-	}
-	if err := s.seedBatchCursor(ctx, sub); err != nil {
 		return Subscription{}, err
 	}
 	return sub, s.lockSubscriptions(func() error {
@@ -163,6 +150,25 @@ func (s *Store) Subscribe(ctx context.Context, sub Subscription) (Subscription, 
 	})
 }
 
+func (s *Store) seed(ctx context.Context, sub Subscription) (Subscription, error) {
+	sub.At = s.Now().UTC()
+	head, err := s.MaxSeq(ctx)
+	if err != nil {
+		return Subscription{}, err
+	}
+	sub.Head = head
+	_, ok, err := s.Cursor(ctx, sub.Cursor, sub.Drive)
+	if err != nil {
+		return Subscription{}, err
+	}
+	if !ok {
+		if err := s.SetCursor(ctx, sub.Cursor, sub.Drive, head); err != nil {
+			return Subscription{}, err
+		}
+	}
+	return sub, s.seedBatchCursor(ctx, sub)
+}
+
 func (s *Store) seedBatchCursor(ctx context.Context, sub Subscription) error {
 	if len(sub.Batch) == 0 {
 		return nil
@@ -179,7 +185,7 @@ func (s *Store) seedBatchCursor(ctx context.Context, sub Subscription) error {
 }
 
 func (s *Store) Subscription(_ context.Context, w Window) (Subscription, bool, error) {
-	sub, ok, err := s.readSubscription(s.subscriptionPath(w.PID))
+	sub, ok, err := readJSON[Subscription](s.subscriptionPath(w.PID))
 	if err != nil || !ok || sub.Window != w {
 		return Subscription{}, false, err
 	}
@@ -243,8 +249,16 @@ func (s *Store) repoint(session string, w Window) error {
 			}
 		}
 	}
-	if moved == nil || moved.Session == session && moved.Window == w {
+	if moved == nil {
+		return s.placeRegistered(session, w)
+	}
+	if moved.Session == session && moved.Window == w {
 		return nil
+	}
+	if moved.Alias != "" {
+		if err := s.followRegisteredSession(moved.Alias, session); err != nil {
+			return err
+		}
 	}
 	from := moved.Window.PID
 	moved.Session, moved.Window = session, w
@@ -294,21 +308,6 @@ func (s *Store) subscriptionPath(pid int) string {
 	return filepath.Join(s.subscriptionDir(), strconv.Itoa(pid)+".json")
 }
 
-func (s *Store) readSubscription(path string) (Subscription, bool, error) {
-	b, err := os.ReadFile(path) //nolint:gosec // G304: path is a subscription file under the cci home.
-	if errors.Is(err, fs.ErrNotExist) {
-		return Subscription{}, false, nil
-	}
-	if err != nil {
-		return Subscription{}, false, fmt.Errorf("read subscription: %w", err)
-	}
-	var sub Subscription
-	if err := json.Unmarshal(b, &sub); err != nil {
-		return Subscription{}, false, fmt.Errorf("decode subscription %s: %w", path, err)
-	}
-	return sub, true, nil
-}
-
 func (s *Store) subscriptions() ([]Subscription, error) {
 	entries, err := os.ReadDir(s.subscriptionDir())
 	if errors.Is(err, fs.ErrNotExist) {
@@ -322,7 +321,7 @@ func (s *Store) subscriptions() ([]Subscription, error) {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
-		sub, ok, err := s.readSubscription(filepath.Join(s.subscriptionDir(), e.Name()))
+		sub, ok, err := readJSON[Subscription](filepath.Join(s.subscriptionDir(), e.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -334,25 +333,44 @@ func (s *Store) subscriptions() ([]Subscription, error) {
 }
 
 func (s *Store) writeSubscription(sub Subscription) error {
-	if err := os.MkdirAll(s.subscriptionDir(), 0o700); err != nil {
-		return fmt.Errorf("create subscriptions dir: %w", err)
+	return writeJSON(s.subscriptionDir(), s.subscriptionPath(sub.Window.PID), sub)
+}
+
+func readJSON[T any](path string) (T, bool, error) {
+	var v T
+	b, err := os.ReadFile(path) //nolint:gosec // G304: path is a file under the cci home.
+	if errors.Is(err, fs.ErrNotExist) {
+		return v, false, nil
 	}
-	b, err := json.Marshal(sub)
 	if err != nil {
-		return fmt.Errorf("encode subscription: %w", err)
+		return v, false, fmt.Errorf("read %s: %w", path, err)
 	}
-	tmp, err := os.CreateTemp(s.subscriptionDir(), ".subscription-*")
+	if err := json.Unmarshal(b, &v); err != nil {
+		return v, false, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return v, true, nil
+}
+
+func writeJSON(dir, path string, v any) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create %s: %w", dir, err)
+	}
+	b, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("write subscription: %w", err)
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	tmp, err := os.CreateTemp(dir, ".write-*")
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
 	}
 	if _, err := tmp.Write(b); err != nil {
-		return errors.Join(fmt.Errorf("write subscription: %w", err), tmp.Close(), os.Remove(tmp.Name()))
+		return errors.Join(fmt.Errorf("write %s: %w", path, err), tmp.Close(), os.Remove(tmp.Name()))
 	}
 	if err := tmp.Close(); err != nil {
-		return errors.Join(fmt.Errorf("write subscription: %w", err), os.Remove(tmp.Name()))
+		return errors.Join(fmt.Errorf("write %s: %w", path, err), os.Remove(tmp.Name()))
 	}
-	if err := os.Rename(tmp.Name(), s.subscriptionPath(sub.Window.PID)); err != nil {
-		return errors.Join(fmt.Errorf("write subscription: %w", err), os.Remove(tmp.Name()))
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return errors.Join(fmt.Errorf("write %s: %w", path, err), os.Remove(tmp.Name()))
 	}
 	return nil
 }

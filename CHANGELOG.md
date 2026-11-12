@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconnect command. The next channel to stream that reader posts `recovered`
   with `--resolves`, closing it; `withdraw` closes it too.
 
+- `cci session register <alias>` keeps a session under an alias that owns its
+  channel subscription, set by the flags `cci subscribe` takes. The window the
+  session runs in hears it at once, a resume in a new window and a `/clear` in
+  the same one keep it, and the session never runs `cci subscribe`, which now
+  refuses a registered session, as `cci unsubscribe` does. `--cwd`, `--command`,
+  `--resume-prompt` and `--notify` record how the session runs again and which
+  lanes hear when it stops. `cci session list` names each alias, its session,
+  whether that session runs and in which window, and its cursor;
+  `cci session rm <alias>` ends it. Registrations are files under
+  `~/.cc-inbox/registrations`, beside the subscription files, so every cci
+  release keeps opening the same store.
 - `cci relay export --lane <lane>` also writes, at any age, every record posted
   by or addressed to that lane, the stem it answers under, or a numbered lane of
   that stem. A successor seeded from `--since <its launch> --lane <it>` holds
