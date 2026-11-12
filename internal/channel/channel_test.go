@@ -55,7 +55,7 @@ type session struct {
 
 func open(t *testing.T, st *store.Store, p store.Window) *session {
 	t.Helper()
-	s := start(t, st, p, false)
+	s := start(t, st, window, p, false)
 	s.send(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`)
 	init := s.next()
 	if _, ok := init.Result.Capabilities["experimental"].(map[string]any)["claude/channel"]; !ok || !strings.Contains(init.Result.Instructions, Source) || !strings.Contains(init.Result.Instructions, "--resolves <seq>") {
@@ -64,14 +64,14 @@ func open(t *testing.T, st *store.Store, p store.Window) *session {
 	return s
 }
 
-func start(t *testing.T, st *store.Store, p store.Window, resumed bool) *session {
+func start(t *testing.T, st *store.Store, w, p store.Window, resumed bool) *session {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	s := &session{t: t, in: inW, frames: make(chan frame, 64), done: make(chan error, 1), cancel: cancel}
 	go func() {
-		s.done <- Serve(ctx, st, window, p, false, resumed, inR, outW)
+		s.done <- Serve(ctx, st, w, p, false, resumed, inR, outW)
 		_ = outW.Close()
 	}()
 	go func() {
@@ -595,7 +595,7 @@ func TestAResumedChannelAnnouncesItsToolsThenStreamsWithoutAnotherHandshake(t *t
 	st, _ := testutil.Store(t)
 	subscribe(t, st)
 	handedOff := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "posted while the channel re-executed", To: []string{"root"}})
-	s := start(t, st, proc, true)
+	s := start(t, st, window, proc, true)
 	if f := s.next(); f.Method != "notifications/tools/list_changed" || len(f.ID) != 0 {
 		t.Fatalf("first frame = %+v, want notifications/tools/list_changed so Claude Code lists the newer build's tools", f)
 	}
@@ -908,7 +908,7 @@ func TestARecipientListNeverReachesARecipientAndOwnRepliesNeverEcho(t *testing.T
 
 func TestARunningChannelStampsItsWindow(t *testing.T) {
 	st, _ := testutil.Store(t)
-	s := start(t, st, proc, true)
+	s := start(t, st, window, proc, true)
 	defer s.close()
 	if f := s.next(); f.Method != "notifications/tools/list_changed" {
 		t.Fatalf("first frame = %+v", f)
@@ -973,6 +973,24 @@ func TestAnOlderChannelExitsOnceANewerOneStartsAndNeverTakesTheWindowBack(t *tes
 	newer.initialized()
 
 	stale.exited()
-	start(t, st, older, true).exited()
+	start(t, st, window, older, true).exited()
 	newer.close()
+}
+
+func TestTwoWindowsKeepBothChannelServersPastTwoBeats(t *testing.T) {
+	beatEvery = 10 * time.Millisecond
+	t.Cleanup(func() { beatEvery = 15 * time.Second })
+	st, _ := testutil.Store(t)
+	first := start(t, st, window, proc, true)
+	second := start(t, st, store.Window{PID: 4244, Started: window.Started}, store.Window{PID: 4345, Started: proc.Started + 1}, true)
+	time.Sleep(3 * beatEvery)
+
+	for _, s := range []*session{first, second} {
+		select {
+		case err := <-s.done:
+			t.Fatalf("a channel server exited while another window's server ran: %v", err)
+		default:
+		}
+		s.close()
+	}
 }

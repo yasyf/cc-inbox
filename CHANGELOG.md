@@ -49,6 +49,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Each `claude --bg` session under one Claude Code daemon keeps its own cci
+  channel server. Claude Code titles a `--bg` session's process
+  `claude bg-spare`, and the daemon's `cci channel` named a window by the
+  nearest ancestor whose executable is exactly `claude`, which was the
+  `claude daemon run` process every `--bg` session shares. Each newer session's
+  channel server then claimed that one window and the older sessions' servers
+  exited at their next beat. The daemon now names the window with cc-interact
+  0.42.2's `procs.IsClaude`, which matches the first word of the process
+  title, the same rule `procs.ClaudePID` uses outside the daemon, and cci's
+  own copy of the matcher is gone.
 - The MCP `post` tool posts every record of a `records` list. A `kind` beside
   the list made the call a record of its own with no text, and its refusal
   stopped the list before any listed record posted; a `to` or `attrs` beside
