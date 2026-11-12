@@ -32,6 +32,9 @@ func tailed(t *testing.T) []store.Record {
 	lines := strings.Split(strings.TrimSpace(out), "\n")
 	records := make([]store.Record, 0, len(lines))
 	for _, line := range lines {
+		if !strings.HasPrefix(line, "{") {
+			continue
+		}
 		var record store.Record
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("%q: %v", line, err)
@@ -63,23 +66,23 @@ func TestPostBatchPostsEachRecordWithTheTextAsWritten(t *testing.T) {
 	}
 }
 
-func TestPostBatchPostsTheRestPastARefusalAndExitsNonzero(t *testing.T) {
+func TestPostBatchPostsNoneOfTheListWhenARecordIsRefused(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	path := batchFile(t,
 		map[string]any{"kind": "note", "text": "before"},
 		map[string]any{"kind": "nonsense", "text": "refused"},
 		map[string]any{"kind": "note", "text": "after"},
+		map[string]any{"kind": "note"},
 	)
 	out, err := run(t, "post", "--batch", path, "--lane", "writer", "--drive", "d")
-	if err == nil || !strings.Contains(err.Error(), "1 of 3") {
-		t.Fatalf("err = %v, want one of three refused", err)
+	if err == nil || !strings.Contains(err.Error(), "2 of 4 records refused, so none posted") {
+		t.Fatalf("err = %v, want two of four refused and none posted", err)
 	}
-	if !strings.Contains(out, "--batch record 2:") {
-		t.Errorf("output = %q, want the refused position", out)
+	if !strings.Contains(out, "--batch record 2:") || !strings.Contains(out, "--batch record 4:") || strings.Contains(out, "--batch record 1:") {
+		t.Errorf("output = %q, want each refused position and only those", out)
 	}
-	got := tailed(t)
-	if len(got) != 2 || got[0].Text != "before" || got[1].Text != "after" {
-		t.Errorf("records = %+v, want before and after", got)
+	if got := tailed(t); len(got) != 0 {
+		t.Errorf("records = %+v, want none of the list stored", got)
 	}
 }
 
@@ -96,15 +99,18 @@ func TestPostBatchRefusals(t *testing.T) {
 			return []string{"--batch", batchFile(t, map[string]any{"kind": "note", "text": "x"}), "stray"}
 		}, "not an argument"},
 		{"an empty list", func(t *testing.T) []string { return []string{"--batch", batchFile(t)} }, "the list is empty"},
+		{"two ttls", func(t *testing.T) []string {
+			return []string{"--batch", batchFile(t, map[string]any{"kind": "note", "text": "x", "ttl": "1h"}, map[string]any{"kind": "note", "text": "y", "ttl": "2h"})}
+		}, "stores in one step under one ttl"},
 		{"a nested batch", func(t *testing.T) []string {
 			return []string{"--batch", batchFile(t, map[string]any{"kind": "note", "text": "x", "batch": "other.json"})}
 		}, "1 of 1"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("CCI_HOME", t.TempDir())
-			_, err := run(t, append([]string{"post", "--lane", "writer", "--drive", "d"}, tt.args(t)...)...)
-			if err == nil || !strings.Contains(err.Error(), tt.want) {
-				t.Fatalf("err = %v, want %q", err, tt.want)
+			out, err := run(t, append([]string{"post", "--lane", "writer", "--drive", "d"}, tt.args(t)...)...)
+			if err == nil || !strings.Contains(out+err.Error(), tt.want) {
+				t.Fatalf("output %q, err = %v; want %q", out, err, tt.want)
 			}
 		})
 	}

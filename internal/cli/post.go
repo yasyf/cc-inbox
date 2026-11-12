@@ -39,7 +39,18 @@ var (
 
 const clockLabel = `\b\d{1,2}:\d{2}(?::\d{2})? ?[AaPp][Mm]\b`
 
+type postPlan struct {
+	write    store.Write
+	resolved []store.Record
+	asJSON   bool
+}
+
 func newPostCmd() *cobra.Command {
+	cmd, _ := postCommand()
+	return cmd
+}
+
+func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string, time.Time) (postPlan, error)) {
 	var (
 		drive, lane, kind, text string
 		quoted                  string
@@ -100,310 +111,296 @@ func newPostCmd() *cobra.Command {
 			}
 			return nil
 		},
-		RunE: orBatch(&batch, &lane, &drive, untilStored(withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
-			at := st.Now()
-			var (
-				err      error
-				fromPath bool
-			)
-			if lane == "" {
-				if lane, err = threadLane(cmd.Context(), st); err != nil {
-					return err
+	}
+	plan := func(cmd *cobra.Command, st *store.Store, args []string, at time.Time) (postPlan, error) {
+		var (
+			err      error
+			fromPath bool
+		)
+		if lane == "" {
+			if lane, err = threadLane(cmd.Context(), st); err != nil {
+				return postPlan{}, err
+			}
+		}
+		if r.Refs.Path != "" {
+			if r.Refs.Path, err = keepPath(cmd, st, r.Refs.Path); err != nil {
+				return postPlan{}, err
+			}
+		}
+		switch {
+		case len(args) == 1 || cmd.Flags().Changed("text"):
+			if len(args) == 1 {
+				text = args[0]
+			}
+			if text == "-" {
+				stdin, err := io.ReadAll(cmd.InOrStdin())
+				if err != nil {
+					return postPlan{}, fmt.Errorf("post -: %w", err)
+				}
+				if text = strings.TrimSpace(string(stdin)); text == "" {
+					return postPlan{}, errors.New("post -: stdin is empty")
+				}
+				if err := refuseCredential("stdin", stdin); err != nil {
+					return postPlan{}, err
 				}
 			}
+			if text, err = stamped(cmd.ErrOrStderr(), text, lane, at); err != nil {
+				return postPlan{}, err
+			}
+		case r.Refs.Path != "":
+			body, err := os.ReadFile(r.Refs.Path)
+			if err != nil {
+				return postPlan{}, fmt.Errorf("--path: %w", err)
+			}
+			if !utf8.Valid(body) {
+				return postPlan{}, fmt.Errorf("--path %s is a binary file, so it cannot be the text; say what it shows with --text", r.Refs.Path)
+			}
+			text, fromPath = firstLine(string(body)), true
+		}
+		k := parsedKind
+		if clause := proseWithdrawal.FindString(text); clause != "" && k != kinds.Withdraw {
+			var re []string
+			for _, m := range seqRef.FindAllStringSubmatch(notGoRef.ReplaceAllString(clause, ""), -1) {
+				re = append(re, "--re "+m[1])
+			}
+			return postPlan{}, fmt.Errorf("a withdrawn go is one withdraw record every lane reads as gone, never a sentence in a %s record: post cci post --kind withdraw %s --text '<why>', then this record without the withdrawal", cmp.Or(string(k), "note"), cmp.Or(strings.Join(re, " "), "--re <go seq>"))
+		}
+		if err := refuseProseEnd(k, text, lane); err != nil {
+			return postPlan{}, err
+		}
+		switch {
+		case quoted == "":
+		case text == "":
+			text = quoted
+		default:
+			text += " " + quoted
+		}
+		if len(heads) > 0 {
+			if text, err = withHeads(&r, k, heads, text); err != nil {
+				return postPlan{}, err
+			}
+		}
+		if (k == kinds.Opened || k == kinds.Head && r.Refs.CCN == "") && len(r.Refs.PRs) == 0 {
+			if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
+				return postPlan{}, err
+			}
+		}
+		if fromPath {
+			text = store.Clip(text)
+		} else if utf8.RuneCountInString(text) > store.MaxText {
+			full := text
 			if r.Refs.Path != "" {
-				if r.Refs.Path, err = keepPath(cmd, st, r.Refs.Path); err != nil {
-					return err
+				attached, err := os.ReadFile(r.Refs.Path)
+				if err != nil {
+					return postPlan{}, fmt.Errorf("--path: %w", err)
 				}
+				full += "\n\n" + string(attached)
 			}
-			switch {
-			case len(args) == 1 || cmd.Flags().Changed("text"):
-				if len(args) == 1 {
-					text = args[0]
+			excerpt, path, err := st.Fit(full)
+			if err != nil {
+				return postPlan{}, err
+			}
+			text, r.Refs.Path = excerpt, path
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: text over %d characters: the record carries its first %d, and the full text is at %s\n", store.MaxText, store.MaxText, path); err != nil {
+				return postPlan{}, err
+			}
+		}
+		if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
+			return postPlan{}, err
+		}
+		if lane, err = aliasedLane(cmd.Context(), st, r.Drive, lane); err != nil {
+			return postPlan{}, err
+		}
+		self, window, identityErr := peerIdentity(cmd.Context())
+		binds := getenv(cmd.Context(), unsentEnv) == "" && getenv(cmd.Context(), parentSessionEnv) == "" && identityErr == nil && window.PID != 0 && bindsCaller(cmd.Context(), lane)
+		if binds {
+			if lane, err = registeredLane(cmd.Context(), st, self, window, r.Drive, lane); err != nil {
+				return postPlan{}, err
+			}
+		}
+		r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
+		if census != "" {
+			r.Fields.Census = &store.Census{}
+			if err := json.Unmarshal([]byte(census), r.Fields.Census); err != nil {
+				return postPlan{}, fmt.Errorf("--census: %w", err)
+			}
+		}
+		if bodyFile != "" {
+			if r.Body, err = readBody(cmd, bodyFile); err != nil {
+				return postPlan{}, err
+			}
+		}
+		if len(counts) > 0 {
+			r.Fields.Counts = map[string]int{}
+			for key, v := range counts {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return postPlan{}, fmt.Errorf("--count %s=%s: %w", key, v, err)
 				}
-				if text == "-" {
-					stdin, err := io.ReadAll(cmd.InOrStdin())
-					if err != nil {
-						return fmt.Errorf("post -: %w", err)
-					}
-					if text = strings.TrimSpace(string(stdin)); text == "" {
-						return errors.New("post -: stdin is empty")
-					}
-					if err := refuseCredential("stdin", stdin); err != nil {
-						return err
-					}
-				}
-				if text, err = stamped(cmd.ErrOrStderr(), text, lane, at); err != nil {
-					return err
-				}
-			case r.Refs.Path != "":
+				r.Fields.Counts[key] = n
+			}
+		}
+		to := r.To
+		r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
+		var needsLane []string
+		for retired := (*RetiredLane)(nil); orHeir && errors.As(err, &retired); {
+			gone := slices.Index(to, retired.to)
+			to = slices.Clone(to)
+			if slices.Contains(to, retired.heir) {
+				to = slices.Delete(to, gone, gone+1)
+			} else {
+				to[gone] = retired.heir
+			}
+			needsLane = append(needsLane, fmt.Sprintf("NEEDS-LANE %s, so this reaches %s to route", retired.down, retired.heir))
+			r.Text = needsLane[len(needsLane)-1] + ": " + r.Text
+			r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
+		}
+		if err != nil {
+			var retired *RetiredLane
+			if errors.As(err, &retired) && (k == kinds.Owner || store.Stem(lane) == ownerRelay) {
+				_, _, raised := st.Post(cmd.Context(), store.Record{Drive: r.Drive, Lane: "cci", Kind: kinds.Blocker, To: []string{ownerRelay}, Text: store.Clip(fmt.Sprintf("%s; the refused %s record from %s read: %s", retired, cmp.Or(string(k), "note"), lane, text)), Source: "post"}, 0)
+				return postPlan{}, errors.Join(err, raised)
+			}
+			return postPlan{}, err
+		}
+		if utf8.RuneCountInString(r.Text) > store.MaxText {
+			attached := text
+			if r.Refs.Path != "" {
 				body, err := os.ReadFile(r.Refs.Path)
 				if err != nil {
-					return fmt.Errorf("--path: %w", err)
+					return postPlan{}, fmt.Errorf("--path: %w", err)
 				}
-				if !utf8.Valid(body) {
-					return fmt.Errorf("--path %s is a binary file, so it cannot be the text; say what it shows with --text", r.Refs.Path)
-				}
-				text, fromPath = firstLine(string(body)), true
+				attached = string(body)
 			}
-			k := parsedKind
-			if clause := proseWithdrawal.FindString(text); clause != "" && k != kinds.Withdraw {
-				var re []string
-				for _, m := range seqRef.FindAllStringSubmatch(notGoRef.ReplaceAllString(clause, ""), -1) {
-					re = append(re, "--re "+m[1])
-				}
-				return fmt.Errorf("a withdrawn go is one withdraw record every lane reads as gone, never a sentence in a %s record: post cci post --kind withdraw %s --text '<why>', then this record without the withdrawal", cmp.Or(string(k), "note"), cmp.Or(strings.Join(re, " "), "--re <go seq>"))
-			}
-			if err := refuseProseEnd(k, text, lane); err != nil {
-				return err
-			}
-			switch {
-			case quoted == "":
-			case text == "":
-				text = quoted
-			default:
-				text += " " + quoted
-			}
-			if len(heads) > 0 {
-				if text, err = withHeads(&r, k, heads, text); err != nil {
-					return err
-				}
-			}
-			if (k == kinds.Opened || k == kinds.Head && r.Refs.CCN == "") && len(r.Refs.PRs) == 0 {
-				if r.Refs.PRs, err = namedPR(cmd.ErrOrStderr(), store.Record{Kind: k, Topic: r.Topic, Text: text}); err != nil {
-					return err
-				}
-			}
-			if fromPath {
-				text = store.Clip(text)
-			} else if utf8.RuneCountInString(text) > store.MaxText {
-				full := text
-				if r.Refs.Path != "" {
-					attached, err := os.ReadFile(r.Refs.Path)
-					if err != nil {
-						return fmt.Errorf("--path: %w", err)
-					}
-					full += "\n\n" + string(attached)
-				}
-				excerpt, path, err := st.Fit(full)
-				if err != nil {
-					return err
-				}
-				text, r.Refs.Path = excerpt, path
-				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: text over %d characters: the record carries its first %d, and the full text is at %s\n", store.MaxText, store.MaxText, path); err != nil {
-					return err
-				}
-			}
-			if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
-				return err
-			}
-			if lane, err = aliasedLane(cmd.Context(), st, r.Drive, lane); err != nil {
-				return err
-			}
-			self, window, identityErr := peerIdentity(cmd.Context())
-			binds := getenv(cmd.Context(), unsentEnv) == "" && getenv(cmd.Context(), parentSessionEnv) == "" && identityErr == nil && window.PID != 0 && bindsCaller(cmd.Context(), lane)
-			if binds {
-				if lane, err = registeredLane(cmd.Context(), st, self, window, r.Drive, lane); err != nil {
-					return err
-				}
-			}
-			r.Lane, r.Kind, r.Text, r.Source = lane, k, text, "post"
-			if census != "" {
-				r.Fields.Census = &store.Census{}
-				if err := json.Unmarshal([]byte(census), r.Fields.Census); err != nil {
-					return fmt.Errorf("--census: %w", err)
-				}
-			}
-			if bodyFile != "" {
-				if r.Body, err = readBody(cmd, bodyFile); err != nil {
-					return err
-				}
-			}
-			if len(counts) > 0 {
-				r.Fields.Counts = map[string]int{}
-				for key, v := range counts {
-					n, err := strconv.Atoi(v)
-					if err != nil {
-						return fmt.Errorf("--count %s=%s: %w", key, v, err)
-					}
-					r.Fields.Counts[key] = n
-				}
-			}
-			to := r.To
-			r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
-			var needsLane []string
-			for retired := (*RetiredLane)(nil); orHeir && errors.As(err, &retired); {
-				gone := slices.Index(to, retired.to)
-				to = slices.Clone(to)
-				if slices.Contains(to, retired.heir) {
-					to = slices.Delete(to, gone, gone+1)
-				} else {
-					to[gone] = retired.heir
-				}
-				needsLane = append(needsLane, fmt.Sprintf("NEEDS-LANE %s, so this reaches %s to route", retired.down, retired.heir))
-				r.Text = needsLane[len(needsLane)-1] + ": " + r.Text
-				r.To, err = resolveRecipients(cmd.Context(), st, r.Drive, to, k, force, cmd.ErrOrStderr())
-			}
+			path, err := st.Blob(strings.Join(needsLane, "\n") + "\n\n" + attached)
 			if err != nil {
-				var retired *RetiredLane
-				if errors.As(err, &retired) && (k == kinds.Owner || store.Stem(lane) == ownerRelay) {
-					_, _, raised := st.Post(cmd.Context(), store.Record{Drive: r.Drive, Lane: "cci", Kind: kinds.Blocker, To: []string{ownerRelay}, Text: store.Clip(fmt.Sprintf("%s; the refused %s record from %s read: %s", retired, cmp.Or(string(k), "note"), lane, text)), Source: "post"}, 0)
-					return errors.Join(err, raised)
-				}
-				return err
+				return postPlan{}, err
 			}
-			if utf8.RuneCountInString(r.Text) > store.MaxText {
-				attached := text
-				if r.Refs.Path != "" {
-					body, err := os.ReadFile(r.Refs.Path)
-					if err != nil {
-						return fmt.Errorf("--path: %w", err)
-					}
-					attached = string(body)
-				}
-				path, err := st.Blob(strings.Join(needsLane, "\n") + "\n\n" + attached)
-				if err != nil {
-					return err
-				}
-				r.Text, r.Refs.Path = store.Clip(fmt.Sprintf("NEEDS-LANE %d stood-down lanes, named in the body: %s", len(needsLane), text)), path
-				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: naming the %d stood-down lanes would put the text over %d characters, so they are named in the body at %s\n", len(needsLane), store.MaxText, path); err != nil {
-					return err
-				}
+			r.Text, r.Refs.Path = store.Clip(fmt.Sprintf("NEEDS-LANE %d stood-down lanes, named in the body: %s", len(needsLane), text)), path
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: naming the %d stood-down lanes would put the text over %d characters, so they are named in the body at %s\n", len(needsLane), store.MaxText, path); err != nil {
+				return postPlan{}, err
 			}
-			switch {
-			case k != kinds.StandDown:
-				if r.To, err = forwarded(cmd.Context(), st, r.Drive, r.To, k); err != nil {
-					return err
-				}
-			case successor != "":
-				if r.Fields.Attrs == nil {
-					r.Fields.Attrs = map[string]string{}
-				}
-				r.Fields.Attrs["successor"] = successor
+		}
+		switch {
+		case k != kinds.StandDown:
+			if r.To, err = forwarded(cmd.Context(), st, r.Drive, r.To, k); err != nil {
+				return postPlan{}, err
 			}
-			if ownedBy != "" {
-				if r.Fields.Attrs == nil {
-					r.Fields.Attrs = map[string]string{}
-				}
-				r.Fields.Attrs[store.OwnedByAttr] = ownedBy
+		case successor != "":
+			if r.Fields.Attrs == nil {
+				r.Fields.Attrs = map[string]string{}
 			}
-			if cmd.Flags().Changed("re") {
-				if reSeqs, err = resolveAll(cmd.Context(), st, r.Drive, re, false, named); err != nil {
-					return err
-				}
+			r.Fields.Attrs["successor"] = successor
+		}
+		if ownedBy != "" {
+			if r.Fields.Attrs == nil {
+				r.Fields.Attrs = map[string]string{}
 			}
-			if cmd.Flags().Changed("resolves") {
-				if resolvesSeqs, err = resolveAll(cmd.Context(), st, r.Drive, resolves, true, named); err != nil {
-					return err
-				}
+			r.Fields.Attrs[store.OwnedByAttr] = ownedBy
+		}
+		if cmd.Flags().Changed("re") {
+			if reSeqs, err = resolveAll(cmd.Context(), st, r.Drive, re, false, named); err != nil {
+				return postPlan{}, err
 			}
-			var resolved []store.Record
-			for _, seq := range resolvesSeqs {
-				if slices.ContainsFunc(resolved, func(o store.Record) bool { return o.Seq == seq }) {
-					continue
-				}
-				o, err := st.Get(cmd.Context(), seq)
-				if err != nil {
-					return fmt.Errorf("--resolves #%d: %w", seq, err)
-				}
-				if o.Num, err = st.Number(cmd.Context(), o); err != nil {
-					return err
-				}
-				if !o.Kind.Opens() {
-					return fmt.Errorf("--resolves %s: it is a %s from %s, which opens nothing to resolve; name the ask, decide, blocker, blocked, defect, hold or incident this record resolves", o.Name(), o.Kind, o.Lane)
-				}
-				resolved = append(resolved, o)
+		}
+		if cmd.Flags().Changed("resolves") {
+			if resolvesSeqs, err = resolveAll(cmd.Context(), st, r.Drive, resolves, true, named); err != nil {
+				return postPlan{}, err
 			}
-			for _, ref := range namedPRs {
-				prs, err := namedRefPRs(cmd.Context(), st, r.Drive, ref)
-				if err != nil {
-					return err
-				}
-				r.Refs.PRs = append(r.Refs.PRs, prs...)
+		}
+		var resolved []store.Record
+		for _, seq := range resolvesSeqs {
+			if slices.ContainsFunc(resolved, func(o store.Record) bool { return o.Seq == seq }) {
+				continue
 			}
-			if k == kinds.Hold && len(r.Refs.PRs) > 0 {
-				if unheld := store.UnboundPRs(store.Record{Topic: r.Topic, Text: text, Refs: r.Refs}); len(unheld) > 0 {
-					held, named := make([]string, len(r.Refs.PRs)), make([]string, len(unheld))
-					for i, pr := range r.Refs.PRs {
-						held[i] = "#" + strconv.Itoa(pr.Number)
-					}
-					for i, n := range unheld {
-						named[i] = "#" + strconv.Itoa(n)
-					}
-					if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: this hold holds %s only; its text also names %s, which it does not hold\n", strings.Join(held, ", "), strings.Join(named, ", ")); err != nil {
-						return err
-					}
-				}
-			}
-			records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
+			o, err := st.Get(cmd.Context(), seq)
 			if err != nil {
-				return err
+				return postPlan{}, fmt.Errorf("--resolves #%d: %w", seq, err)
 			}
-			if k == kinds.Lift {
-				if err := refuseStrayLift(cmd.Context(), st, records); err != nil {
-					return err
-				}
+			if o.Num, err = st.Number(cmd.Context(), o); err != nil {
+				return postPlan{}, err
 			}
-			for i := range records {
-				if len(records[i].To) == 0 && records[i].Re != 0 {
-					if records[i].To, err = replyTo(cmd.Context(), st, records[i]); err != nil {
-						return err
-					}
-				}
-				if len(records[i].To) > 0 && !slices.ContainsFunc(records[i].To, func(t string) bool { return !addressesSelf(t, lane, records[i].Drive) }) {
-					return selfAddressed(cmd.Context(), st, records[i], lane)
-				}
-				if k != kinds.StandDown && ownedBy == "" {
-					if records[i].To, err = stemmed(cmd.Context(), st, records[i].Drive, records[i].To); err != nil {
-						return err
-					}
-				}
+			if !o.Kind.Opens() {
+				return postPlan{}, fmt.Errorf("--resolves %s: it is a %s from %s, which opens nothing to resolve; name the ask, decide, blocker, blocked, defect, hold or incident this record resolves", o.Name(), o.Kind, o.Lane)
 			}
-			var (
-				bind   *store.LaneBinding
-				binder string
-			)
-			if binds {
-				holds, err := refuseSecondBinder(cmd.Context(), st, self, window, r.Drive, lane, at)
-				if err != nil {
-					return err
-				}
-				if holds {
-					binder = self.String()
-				}
-				bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
-			}
-			for i := range records {
-				records[i].Fields.Attrs = namedAttrs(records[i], named, binder)
-			}
-			posted, err := st.PostAll(cmd.Context(), bind, records, ttl, at)
-			if errors.Is(err, store.ErrUnconfirmed) {
-				if getenv(cmd.Context(), unsentEnv) != "" {
-					return &BusDown{Cause: err}
-				}
-				return keepWrite(store.Write{Bind: bind, Records: records, TTL: ttl, At: at}, err)
-			}
+			resolved = append(resolved, o)
+		}
+		for _, ref := range namedPRs {
+			prs, err := namedRefPRs(cmd.Context(), st, r.Drive, ref)
 			if err != nil {
-				return err
+				return postPlan{}, err
 			}
-			for _, p := range posted {
-				if p.Record.Num, err = st.Number(cmd.Context(), p.Record); err != nil {
-					return err
+			r.Refs.PRs = append(r.Refs.PRs, prs...)
+		}
+		if k == kinds.Hold && len(r.Refs.PRs) > 0 {
+			if unheld := store.UnboundPRs(store.Record{Topic: r.Topic, Text: text, Refs: r.Refs}); len(unheld) > 0 {
+				held, named := make([]string, len(r.Refs.PRs)), make([]string, len(unheld))
+				for i, pr := range r.Refs.PRs {
+					held[i] = "#" + strconv.Itoa(pr.Number)
 				}
-				if err := printPosted(cmd.OutOrStdout(), p.Record, p.Duplicate, asJSON); err != nil {
-					return err
+				for i, n := range unheld {
+					named[i] = "#" + strconv.Itoa(n)
+				}
+				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: this hold holds %s only; its text also names %s, which it does not hold\n", strings.Join(held, ", "), strings.Join(named, ", ")); err != nil {
+					return postPlan{}, err
 				}
 			}
-			for _, o := range resolved {
-				if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: resolved %s %s %s: %s\n", o.Name(), o.Kind, o.Lane, render.Clip(o.Text, 80)); err != nil {
-					return err
+		}
+		records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
+		if err != nil {
+			return postPlan{}, err
+		}
+		if k == kinds.Lift {
+			if err := refuseStrayLift(cmd.Context(), st, records); err != nil {
+				return postPlan{}, err
+			}
+		}
+		for i := range records {
+			if len(records[i].To) == 0 && records[i].Re != 0 {
+				if records[i].To, err = replyTo(cmd.Context(), st, records[i]); err != nil {
+					return postPlan{}, err
 				}
 			}
-			return nil
-		}))),
+			if len(records[i].To) > 0 && !slices.ContainsFunc(records[i].To, func(t string) bool { return !addressesSelf(t, lane, records[i].Drive) }) {
+				return postPlan{}, selfAddressed(cmd.Context(), st, records[i], lane)
+			}
+			if k != kinds.StandDown && ownedBy == "" {
+				if records[i].To, err = stemmed(cmd.Context(), st, records[i].Drive, records[i].To); err != nil {
+					return postPlan{}, err
+				}
+			}
+		}
+		var (
+			bind   *store.LaneBinding
+			binder string
+		)
+		if binds {
+			holds, err := refuseSecondBinder(cmd.Context(), st, self, window, r.Drive, lane, at)
+			if err != nil {
+				return postPlan{}, err
+			}
+			if holds {
+				binder = self.String()
+			}
+			bind = &store.LaneBinding{Key: self, Drive: r.Drive, Lane: lane, Started: time.UnixMilli(window.Started)}
+		}
+		for i := range records {
+			records[i].Fields.Attrs = namedAttrs(records[i], named, binder)
+		}
+		return postPlan{write: store.Write{Bind: bind, Records: records, TTL: ttl, At: at}, resolved: resolved, asJSON: asJSON}, nil
 	}
+	cmd.RunE = untilStored(withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
+		if batch != "" {
+			return postBatch(cmd, st, batch, lane, drive)
+		}
+		p, err := plan(cmd, st, args, st.Now())
+		if err != nil {
+			return err
+		}
+		return commitPosts(cmd, st, []postPlan{p})
+	}))
 	f := cmd.Flags()
-	f.StringVar(&batch, batchFlag, "", "post each record of a JSON list, from a file or - for stdin: each an object of this command's flags by name, text and to and re among them, plus body for its full text; --lane and --drive are each record's default. Every record is tried, each prints as one post does, and a refusal prints its position and exits 1 once the rest are posted")
+	f.StringVar(&batch, batchFlag, "", "post each record of a JSON list, from a file or - for stdin: each an object of this command's flags by name, text and to and re among them, plus body for its full text; --lane and --drive are each record's default. Every record is checked before any is stored, and the list stores in one step: each prints as one post does, while a refusal prints each refused record's position, stores none of the list, and exits 1")
 	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
@@ -454,7 +451,7 @@ func newPostCmd() *cobra.Command {
 		}
 		return err
 	})
-	return cmd
+	return cmd, plan
 }
 
 var textFlagSlips = []string{"subject", "title", "message", "summary"}
@@ -477,16 +474,7 @@ func batchOnly(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func orBatch(batch, lane, drive *string, post func(*cobra.Command, []string) error) func(*cobra.Command, []string) error {
-	return func(cmd *cobra.Command, args []string) error {
-		if *batch == "" {
-			return post(cmd, args)
-		}
-		return postBatch(cmd, *batch, *lane, *drive)
-	}
-}
-
-func postBatch(cmd *cobra.Command, path, lane, drive string) error {
+func postBatch(cmd *cobra.Command, st *store.Store, path, lane, drive string) error {
 	raw, err := readBatch(cmd, path)
 	if err != nil {
 		return err
@@ -498,22 +486,85 @@ func postBatch(cmd *cobra.Command, path, lane, drive string) error {
 	if len(records) == 0 {
 		return errors.New("--batch: the list is empty")
 	}
+	at := st.Now()
+	plans := make([]postPlan, 0, len(records))
+	var said strings.Builder
 	refused := 0
 	for i, record := range records {
-		args, stdin, err := record.args(lane, drive)
-		var out, errOut string
-		if err == nil {
-			out, errOut, err = runCCI(cmd.Context(), stdin, args...)
+		p, notes, err := planRecord(cmd, st, at, record, lane, drive)
+		if err == nil && len(plans) > 0 && p.write.TTL != plans[0].write.TTL {
+			err = fmt.Errorf("its --ttl %s differs from the list's %s, and the list stores in one step under one ttl: post it apart", p.write.TTL, plans[0].write.TTL)
 		}
-		_, _ = io.WriteString(cmd.OutOrStdout(), out)
-		_, _ = io.WriteString(cmd.ErrOrStderr(), errOut)
 		if err != nil {
 			refused++
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "cci: --batch record %d: %s\n", i+1, err)
+			continue
 		}
+		plans = append(plans, p)
+		said.WriteString(notes)
 	}
 	if refused > 0 {
-		return fmt.Errorf("--batch: %d of %d records refused, and the rest posted", refused, len(records))
+		return fmt.Errorf("--batch: %d of %d records refused, so none posted", refused, len(records))
+	}
+	if _, err := io.WriteString(cmd.ErrOrStderr(), said.String()); err != nil {
+		return err
+	}
+	return commitPosts(cmd, st, plans)
+}
+
+func planRecord(batch *cobra.Command, st *store.Store, at time.Time, record toolRecord, lane, drive string) (postPlan, string, error) {
+	args, stdin, err := record.args(lane, drive)
+	if err != nil {
+		return postPlan{}, "", err
+	}
+	post, plan := postCommand()
+	var p postPlan
+	post.RunE = func(cmd *cobra.Command, operands []string) (err error) {
+		p, err = plan(cmd, st, operands, at)
+		return err
+	}
+	var said bytes.Buffer
+	root := rootCommand()
+	root.AddCommand(post)
+	root.SetArgs(args)
+	root.SetIn(strings.NewReader(stdin))
+	root.SetOut(&said)
+	root.SetErr(&said)
+	err = root.ExecuteContext(batch.Context())
+	return p, said.String(), err
+}
+
+func commitPosts(cmd *cobra.Command, st *store.Store, plans []postPlan) error {
+	w := plans[0].write
+	for _, p := range plans[1:] {
+		w.Bind = cmp.Or(w.Bind, p.write.Bind)
+		w.Records = append(w.Records, p.write.Records...)
+	}
+	posted, err := st.PostAll(cmd.Context(), w.Bind, w.Records, w.TTL, w.At)
+	if errors.Is(err, store.ErrUnconfirmed) {
+		if getenv(cmd.Context(), unsentEnv) != "" {
+			return &BusDown{Cause: err}
+		}
+		return keepWrite(w, err)
+	}
+	if err != nil {
+		return err
+	}
+	for _, p := range plans {
+		for _, got := range posted[:len(p.write.Records)] {
+			if got.Record.Num, err = st.Number(cmd.Context(), got.Record); err != nil {
+				return err
+			}
+			if err := printPosted(cmd.OutOrStdout(), got.Record, got.Duplicate, p.asJSON); err != nil {
+				return err
+			}
+		}
+		posted = posted[len(p.write.Records):]
+		for _, o := range p.resolved {
+			if _, err := fmt.Fprintf(cmd.ErrOrStderr(), "cci: resolved %s %s %s: %s\n", o.Name(), o.Kind, o.Lane, render.Clip(o.Text, 80)); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
 }

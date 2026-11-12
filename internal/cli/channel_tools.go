@@ -215,7 +215,7 @@ func postTool() mcp.Tool {
 	props := recordProps()
 	props["lane"] = boundLaneProp
 	props["drive"] = driveProp
-	props["records"] = map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": items}, "description": "several records in one call, each taking any field above but lane and drive, which it inherits"}
+	props["records"] = map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": items}, "description": "several records, stored all or none; a field beside the list fills in each record lacking it"}
 	return mcp.Tool{
 		Name:        "post",
 		Description: "Post one record, or several with records. cci stamps the time; no shell quoting. Returns the new seqs.",
@@ -228,41 +228,85 @@ func postTool() mcp.Tool {
 			if err := unadvertised(in, props); err != nil {
 				return err.Error(), true
 			}
+			listed, ok := in["records"]
+			if !ok {
+				if in["kind"] == nil {
+					return "post: give kind and text, or records", true
+				}
+				args, stdin, err := in.args("", "") //nolint:contextcheck // args only reads the post command's flag table.
+				if err != nil {
+					return err.Error(), true
+				}
+				return posted(runCCI(ctx, stdin, args...))
+			}
 			var records []toolRecord
-			if in["kind"] != nil {
-				records = append(records, in)
+			if err := json.Unmarshal(listed, &records); err != nil {
+				return "decode records: " + err.Error(), true
 			}
-			if listed, ok := in["records"]; ok {
-				var more []toolRecord
-				if err := json.Unmarshal(listed, &more); err != nil {
-					return "decode records: " + err.Error(), true
-				}
-				for i, r := range more {
-					if err := unadvertised(r, items); err != nil {
-						return fmt.Sprintf("records[%d]: %s", i, err), true
-					}
-				}
-				records = append(records, more...)
-			}
-			if len(records) == 0 {
-				return "post: give kind and text, or records", true
-			}
-			seqs := make([]string, 0, len(records))
 			for i, r := range records {
-				args, stdin, err := r.args(in.text("lane"), in.text("drive")) //nolint:contextcheck // args only reads the post command's flag table.
-				if err != nil {
-					return strings.TrimSpace(fmt.Sprintf("posted %s\nrecord %d: %s", strings.Join(seqs, " "), i+1, err)), true
+				if err := unadvertised(r, items); err != nil {
+					return fmt.Sprintf("records[%d]: %s", i, err), true
 				}
-				out, errOut, err := runCCI(ctx, stdin, args...)
-				if err != nil {
-					text, _ := failed(out, errOut, err)
-					return strings.TrimSpace(fmt.Sprintf("posted %s\nrecord %d: %s", strings.Join(seqs, " "), i+1, text)), true
+				if err := r.fill(in, i+1); err != nil {
+					return fmt.Sprintf("records[%d]: %s", i, err), true
 				}
-				seqs = append(seqs, strings.TrimPrefix(strings.TrimSpace(out), "#"))
 			}
-			return strings.Join(seqs, " "), false
+			batch, err := json.Marshal(records)
+			if err != nil {
+				return err.Error(), true
+			}
+			args := appendDrive([]string{"post", "--" + batchFlag + "=-"}, in.text("drive"))
+			if lane := in.text("lane"); lane != "" {
+				args = append(args, "--lane="+lane)
+			}
+			return posted(runCCI(ctx, string(batch), args...))
 		},
 	}
+}
+
+func (r toolRecord) fill(from toolRecord, n int) error {
+	for key, value := range from {
+		own, set := r[key]
+		switch {
+		case key == "lane", key == "drive", key == "records":
+		case key == "id" && !set:
+			id, err := json.Marshal(fmt.Sprintf("%s#%d", word(value), n))
+			if err != nil {
+				return err
+			}
+			r[key] = id
+		case !set:
+			r[key] = value
+		case key == "attrs":
+			var listed, mine map[string]string
+			if err := json.Unmarshal(value, &listed); err != nil {
+				return fmt.Errorf("attrs: %w", err)
+			}
+			if err := json.Unmarshal(own, &mine); err != nil {
+				return fmt.Errorf("attrs: %w", err)
+			}
+			attrs := map[string]string{}
+			maps.Copy(attrs, listed)
+			maps.Copy(attrs, mine)
+			merged, err := json.Marshal(attrs)
+			if err != nil {
+				return err
+			}
+			r[key] = merged
+		}
+	}
+	return nil
+}
+
+func posted(out, errOut string, err error) (string, bool) {
+	if err != nil {
+		return failed(out, errOut, err)
+	}
+	seqs := strings.Split(strings.TrimSpace(out), "\n")
+	for i, seq := range seqs {
+		seqs[i] = strings.TrimPrefix(seq, "#")
+	}
+	return strings.Join(seqs, " "), false
 }
 
 func unadvertised(r toolRecord, fields map[string]any) error {

@@ -94,6 +94,52 @@ func TestThePostToolKeepsEachBatchedRecordsOwnAttrs(t *testing.T) {
 	}
 }
 
+func TestThePostToolFillsEachListedRecordFromTheFieldsBesideTheList(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	got := mustTool(t, "post", map[string]any{
+		"drive": "d", "lane": "meta", "kind": "report", "to": []string{"communicator"}, "attrs": map[string]string{"order": "o1"},
+		"records": []map[string]any{
+			{"text": "first", "attrs": map[string]string{"job": "j1"}},
+			{"kind": "note", "text": "second", "to": []string{"root"}},
+		},
+	})
+	if got != "1 2" {
+		t.Fatalf("post records = %q, want the two listed records and no record of the call itself", got)
+	}
+	stored := tailed(t)
+	if len(stored) != 2 {
+		t.Fatalf("records = %+v, want two", stored)
+	}
+	for i, want := range []struct {
+		kind, to string
+		attrs    map[string]string
+	}{
+		{"report", "communicator", map[string]string{"order": "o1", "job": "j1"}},
+		{"note", "root", map[string]string{"order": "o1"}},
+	} {
+		if r := stored[i]; string(r.Kind) != want.kind || !slices.Equal(r.To, []string{want.to}) || !maps.Equal(r.Fields.Attrs, want.attrs) {
+			t.Errorf("record %d = kind %s to %v attrs %v; want kind %s to %s attrs %v", i+1, r.Kind, r.To, r.Fields.Attrs, want.kind, want.to, want.attrs)
+		}
+	}
+	keyed := map[string]any{"drive": "d", "lane": "meta", "kind": "note", "id": "k1", "records": []map[string]any{{"text": "keyed one"}, {"text": "keyed two"}}}
+	if got := mustTool(t, "post", keyed); got != "3 4" {
+		t.Fatalf("post records under one id = %q, want two records, each keyed by its place", got)
+	}
+	if again := mustTool(t, "post", keyed); again != "3 (duplicate) 4 (duplicate)" {
+		t.Errorf("the same list again = %q, want both records returned as duplicates", again)
+	}
+	text, isErr := callTool(t, "post", map[string]any{
+		"drive": "d", "lane": "meta", "kind": "report",
+		"records": []map[string]any{{"text": "third"}, {"kind": "nonsense", "text": "refused"}},
+	})
+	if !isErr || !strings.Contains(text, "record 2:") || !strings.Contains(text, "none posted") {
+		t.Errorf("post with one bad record = %q, %v; want it named and none posted", text, isErr)
+	}
+	if after := tailed(t); len(after) != 4 {
+		t.Errorf("records after the refused list = %+v, want still four", after)
+	}
+}
+
 func TestThePostToolStampsALeadingLabel(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	stale := time.Now().Add(-2 * time.Hour).Format("3:04 PM")

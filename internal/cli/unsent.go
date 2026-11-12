@@ -94,7 +94,7 @@ func keepUnsent(cmd *cobra.Command, args []string, cause error) error {
 			return &BusDown{Cause: fmt.Errorf("%w; repost it with --lane and --drive, which a post kept for the bus to come back must name", cause)}
 		}
 	}
-	if slices.Contains(args, "-") || slices.ContainsFunc([]string{"text", "path", "body-file"}, func(name string) bool {
+	if slices.Contains(args, "-") || slices.ContainsFunc([]string{"text", "path", "body-file", batchFlag}, func(name string) bool {
 		return slices.Contains([]string{"-", "/dev/stdin"}, cmd.Flags().Lookup(name).Value.String())
 	}) {
 		return &BusDown{Cause: fmt.Errorf("%w; a post read from stdin cannot be kept, so repost it once the bus answers", cause)}
