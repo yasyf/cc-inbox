@@ -433,7 +433,7 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 	defer held.tick.Stop()
 	batched := make(chan error, 1)
 	go func() { batched <- held.run(watchCtx, stop) }()
-	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: f, Interval: interval, Compact: true}, func(r store.Record, line string) error {
+	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: f, Positioned: true, Interval: interval, Compact: true}, func(r store.Record, line string) error {
 		now, ok, err := st.Subscription(watchCtx, sub.Window)
 		if err != nil {
 			return err
