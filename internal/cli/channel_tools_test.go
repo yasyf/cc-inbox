@@ -4,7 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -343,5 +347,35 @@ func TestTheWhoToolListsOnlyTheWindowsDrive(t *testing.T) {
 	}
 	if out := mustTool(t, "who", map[string]any{"drive": "other"}); !strings.Contains(out, "session=aaaa1111") {
 		t.Errorf("who drive other = %q, want the session on other", out)
+	}
+}
+
+func TestTheToolsServerServesEveryToolAndNeverClaimsAWindowsChannel(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	var out bytes.Buffer
+	root := cli.NewRootCmd()
+	root.SetIn(strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}` + "\n" + `{"jsonrpc":"2.0","id":2,"method":"tools/list"}` + "\n"))
+	root.SetOut(&out)
+	root.SetArgs([]string{"mcp"})
+	if err := root.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Result struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(listed.Result.Tools), len(cli.ChannelTools()); got == 0 || got != want {
+		t.Fatalf("cci mcp lists %d tools, want all %d", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(home, "channels")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("cci mcp touched the channel claims under %s: %v", home, err)
 	}
 }

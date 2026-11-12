@@ -12,10 +12,12 @@ import (
 
 	"github.com/shirou/gopsutil/v4/process"
 	"github.com/spf13/cobra"
+	mcp "github.com/yasyf/cc-interact/channel"
 
 	"github.com/yasyf/cc-inbox/internal/channel"
 	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/version"
 )
 
 func newSubscribeCmd() *cobra.Command {
@@ -169,7 +171,7 @@ func newUnsubscribeCmd() *cobra.Command {
 }
 
 func newChannelCmd() *cobra.Command {
-	var resumed bool
+	var resumed, noTools bool
 	cmd := &cobra.Command{
 		Use:    "channel",
 		Short:  "Run the cci channel MCP server (stdio) for this Claude Code window",
@@ -184,12 +186,34 @@ func newChannelCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return channel.Serve(cmd.Context(), st, window, proc, channelsOn(window.PID), resumed, cmd.InOrStdin(), cmd.OutOrStdout(), channelTools()...)
+			tools := channelTools()
+			if noTools {
+				tools = nil
+			}
+			return channel.Serve(cmd.Context(), st, window, proc, channelsOn(window.PID), resumed, cmd.InOrStdin(), cmd.OutOrStdout(), tools...)
 		}),
 	}
 	cmd.Flags().BoolVar(&resumed, channel.Resumed, false, "stream at once: the cci this replaced already finished the MCP handshake")
+	cmd.Flags().BoolVar(&noTools, channel.NoTools, false, "serve no tools, so no tool call ever starts this server; cci mcp serves them")
 	return cmd
 }
+
+func newMCPCmd() *cobra.Command {
+	var resumed bool
+	cmd := &cobra.Command{
+		Use:    "mcp",
+		Short:  "Run the cci tools MCP server (stdio), which never delivers records: cci channel --no-tools does",
+		Hidden: true,
+		Args:   cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return mcp.NewServer(mcp.ServerInfo{Name: "cci", Version: version.String(), Instructions: toolsInstructions, Resumed: resumed}, channelTools()).Serve(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
+		},
+	}
+	cmd.Flags().BoolVar(&resumed, channel.Resumed, false, "skip the handshake: the cci this replaced already finished it")
+	return cmd
+}
+
+const toolsInstructions = "This MCP server holds cci's tools: post, read, inbox, find, close, who and digest write and read the drive's records, as cci in Bash does. Records for this session arrive from the separate cc-inbox channel server as <channel source=\"" + channel.Source + "\"> tags once it runs cci subscribe."
 
 var (
 	errNoSession    = errors.New("run this from a Claude Code session: no claude ancestor process or " + sessionEnv)

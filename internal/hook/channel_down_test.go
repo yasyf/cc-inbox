@@ -68,7 +68,7 @@ func TestAServerThatStopsOpensOneBlockerAndClosesItWhenBack(t *testing.T) {
 	f.clock.Advance(3 * time.Minute)
 	note := f.notice()
 	got := f.blockers()
-	if len(got) != 1 || got[0].Lane != "lane-x" || !slices.Equal(got[0].To, []string{"meta-desk"}) || !strings.Contains(got[0].Text, "/mcp reconnect plugin:cc-inbox:cci") {
+	if len(got) != 1 || got[0].Lane != "lane-x" || !slices.Equal(got[0].To, []string{"meta-desk"}) || !strings.Contains(got[0].Text, "/mcp reconnect plugin:cc-inbox:channel") {
 		t.Fatalf("blockers after the server stopped = %+v, want one from the lane to meta-desk naming the reconnect", got)
 	}
 	if !strings.Contains(note, "down") || !slices.Equal(f.reached, []string{"/orca/bin term_1"}) {
@@ -166,7 +166,7 @@ func TestTypeReconnectWaitsOutADraftThenTypesOnce(t *testing.T) {
 	if err := hook.TypeReconnect(context.Background(), o.run, "term_1", func() { o.pauses++ }); err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"--terminal term_1 --text /mcp reconnect plugin:cc-inbox:cci --enter"}; !slices.Equal(o.sent, want) || o.pauses != 1 {
+	if want := []string{"--terminal term_1 --text /mcp reconnect plugin:cc-inbox:channel --enter"}; !slices.Equal(o.sent, want) || o.pauses != 1 {
 		t.Fatalf("sent %q after %d pauses, want %q after one", o.sent, o.pauses, want)
 	}
 }

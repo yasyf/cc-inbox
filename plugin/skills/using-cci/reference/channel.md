@@ -3,10 +3,12 @@
 ## Receive records over the channel
 
 A session launched with `--channels plugin:cc-inbox@cc-inbox` can take its
-records as pushed `<channel source="plugin:cc-inbox:cci">` tags instead of a
-Monitor. The channel server is the `cci` on `PATH`, started with the same
-config in every plugin version, so a plugin update and `/reload-plugins` leave
-it running. Subscribe once:
+records as pushed `<channel source="plugin:cc-inbox:channel">` tags instead
+of a Monitor. The plugin's `channel` server, `cci channel --no-tools`, has no
+tools, so no tool call, a subagent's included, starts or replaces it; its `cci`
+server, `cci mcp`, serves the tools. Both are the `cci` on `PATH`, started with
+the same config in every plugin version, so a plugin update and
+`/reload-plugins` leave them running. Subscribe once:
 
 ```bash
 cci subscribe --drive release-demo --reader root --kind incident,decide,ask
@@ -17,10 +19,12 @@ and its body is the record's compact line, the line `cci tail` prints, under
 an `@<clock>` line. A `+` marks text or a body the line leaves out;
 `cci show <seq>` or the `read` tool prints the whole record. A record addressed to a root reader
 carries that rest under its line when it fits 2,000 bytes, so the root needs no read for it. In a window launched with the
-channel, a record addressed to the root's lane arrives once: the
-`PostToolUse` hook skips what the channel delivered, and the channel skips
-what the hook delivered first. Delivery is at-least-once, so skip a seq you
-have already handled. The subscription survives compaction and `/clear`, and
+channel, the `PostToolUse` hook skips what the channel delivered, and the
+channel skips what the hook delivered first. The channel moves its cursor past
+a record only once the session's transcript shows its tag on the main thread,
+so a tag Claude Code never showed the session still reaches it through the
+hook, and a tag arriving mid-turn can arrive from the hook as well. Delivery is
+at-least-once, so skip a seq you have already handled. The subscription survives compaction and `/clear`, and
 the `SessionStart` hook carries it into a resumed session. Re-running
 `cci subscribe` replaces it, and `cci unsubscribe` ends it. Only the main
 thread subscribes: both commands refuse to run in a subagent or teammate,
@@ -32,7 +36,10 @@ reconnect, begins at the head instead of replaying what the cursor missed: one
 the `inbox` tool or `cci tail --since` reads them. Claude Code reads only a
 window's newest channel server and leaves the older ones running, so the newest
 to start owns the window: an older one delivers nothing, moves no cursor, and
-exits. Stop any Monitor that watched the same records after
+exits. A subscribed channel that stops any other way, such as Claude Code
+closing it on a reconnect, a reload or an exit, posts a `disconnect` record
+from the reader's lane to `communicator`; the next channel to stream that
+reader posts `recovered`, closing it. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
 A record addressed to the reader arrives only when its kind is a

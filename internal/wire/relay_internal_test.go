@@ -54,21 +54,24 @@ func exitWith(code int) daemonEnd {
 	}
 }
 
-func TestAChannelADaemonEndsWhileClaudeHoldsStdinRunsItselfResumed(t *testing.T) {
-	stdin, claude := io.Pipe()
-	go func() { _, _ = claude.Write([]byte(`{"method":"notifications/initialized"}` + "\n")) }()
-	pump := &stdinPump{in: stdin, needs: make(chan struct{}, 1)}
-	go pump.run()
-	request := Request{Argv: []string{"cci", "channel"}}
-	code, ok, argv := relay(fakeDaemon(t, exitWith(0)), request, pump, func() io.ReadWriteCloser {
-		t.Error("redialed after the daemon ended the channel")
-		return nil
-	}, io.Discard, io.Discard)
-	if ok {
-		t.Fatalf("relay = %d, true; want the channel handed back while Claude still holds stdin", code)
-	}
-	if !slices.Equal(argv, []string{"cci", "channel", "--resumed"}) {
-		t.Errorf("argv = %v, want the channel to resume the handshake Claude already made", argv)
+func TestAServerADaemonEndsWhileClaudeHoldsStdinRunsItselfResumed(t *testing.T) {
+	for _, server := range [][]string{{"cci", "channel", "--no-tools"}, {"cci", "mcp"}} {
+		t.Run(server[1], func(t *testing.T) {
+			stdin, claude := io.Pipe()
+			go func() { _, _ = claude.Write([]byte(`{"method":"notifications/initialized"}` + "\n")) }()
+			pump := &stdinPump{in: stdin, needs: make(chan struct{}, 1)}
+			go pump.run()
+			code, ok, argv := relay(fakeDaemon(t, exitWith(0)), Request{Argv: server}, pump, func() io.ReadWriteCloser {
+				t.Error("redialed after the daemon ended the server")
+				return nil
+			}, io.Discard, io.Discard)
+			if ok {
+				t.Fatalf("relay = %d, true; want the server handed back while Claude still holds stdin", code)
+			}
+			if want := append(slices.Clone(server), "--resumed"); !slices.Equal(argv, want) {
+				t.Errorf("argv = %v, want %v, resuming the handshake Claude already made", argv, want)
+			}
+		})
 	}
 }
 

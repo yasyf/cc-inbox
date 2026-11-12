@@ -17,7 +17,7 @@ import (
 // ReconnectCommand is the slash command that reconnects the channel server in a
 // live Claude Code session, the only route the harness offers: stdio servers
 // get no automatic retry, and hooks and tools cannot run a slash command.
-const ReconnectCommand = "/mcp reconnect plugin:cc-inbox:cci"
+const ReconnectCommand = "/mcp reconnect plugin:cc-inbox:channel"
 
 const (
 	channelStale   = 2 * time.Minute
@@ -80,7 +80,7 @@ func NoticeChannel(ctx context.Context, st *store.Store, p Payload, wired func(p
 			return "", err
 		}
 		outage.Blocker = r.Seq
-		note = "The cci MCP server is down in this session, so its tools and channel delivery are gone; cci in Bash still posts and reads. Blocker #" + strconv.FormatInt(r.Seq, 10) + " went to " + channelDownTo + ". Reconnect with `" + ReconnectCommand + "`, typed at the prompt; a session inside Orca gets it typed at its next idle prompt.\n"
+		note = "The cci channel server is down in this session, so channel delivery is gone; this hook still delivers records addressed to this lane, and the cci tools and cci in Bash still post and read. Blocker #" + strconv.FormatInt(r.Seq, 10) + " went to " + channelDownTo + ". Reconnect with `" + ReconnectCommand + "`, typed at the prompt; a session inside Orca gets it typed at its next idle prompt.\n"
 	}
 	if terminal := peer.Env["ORCA_TERMINAL_HANDLE"]; terminal != "" && now.Sub(outage.TypedAt) >= reconnectEvery {
 		reconnect(peer.Env[peers.OrcaBinDirEnv], terminal)
@@ -91,15 +91,15 @@ func NoticeChannel(ctx context.Context, st *store.Store, p Payload, wired func(p
 
 func outageText(lane string, beat time.Time, seen bool, now time.Time) string {
 	if !seen {
-		return "cci MCP down: " + lane + " was launched with the server and it never started. Reconnect: " + ReconnectCommand
+		return "cci channel down: " + lane + " was launched with the channel server and it never started. Reconnect: " + ReconnectCommand
 	}
-	return fmt.Sprintf("cci MCP down: %s's channel server last ran %s ago; its MCP tools and channel delivery are gone until it reconnects. Reconnect: %s", lane, now.Sub(beat).Round(time.Second), ReconnectCommand)
+	return fmt.Sprintf("cci channel down: %s's channel server last ran %s ago; its channel delivery is gone until it reconnects. Reconnect: %s", lane, now.Sub(beat).Round(time.Second), ReconnectCommand)
 }
 
 func closeOutage(ctx context.Context, st *store.Store, b store.Binding, window store.Window, outage store.ChannelOutage) error {
 	_, _, err := st.Post(ctx, store.Record{
 		Drive: b.Drive, Lane: b.Lane, Kind: kinds.Note, To: []string{channelDownTo}, Topic: channelTopic, Resolves: outage.Blocker,
-		Text: "cci MCP is back in " + b.Lane + ".",
+		Text: "cci channel is back in " + b.Lane + ".",
 	}, 0)
 	if err != nil {
 		return err

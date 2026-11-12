@@ -158,13 +158,14 @@ func TestClosureIndexAgreesWithTheOracleOnEdgeCases(t *testing.T) {
 
 func TestClosureIndexPairsEveryOpenerWithItsClosers(t *testing.T) {
 	pairs := map[kinds.Kind][]kinds.Kind{
-		kinds.Ask:      {kinds.Answer, kinds.Go, kinds.Withdraw},
-		kinds.Decide:   {kinds.Answer, kinds.Go, kinds.Withdraw},
-		kinds.Hold:     {kinds.Lift},
-		kinds.Incident: {kinds.FixLive, kinds.Done},
-		kinds.Blocker:  {kinds.Withdraw, kinds.Answer, kinds.Done},
-		kinds.Blocked:  {kinds.Unblock},
-		kinds.Defect:   {kinds.FixLive, kinds.Done},
+		kinds.Ask:        {kinds.Answer, kinds.Go, kinds.Withdraw},
+		kinds.Decide:     {kinds.Answer, kinds.Go, kinds.Withdraw},
+		kinds.Hold:       {kinds.Lift},
+		kinds.Incident:   {kinds.FixLive, kinds.Done},
+		kinds.Blocker:    {kinds.Withdraw, kinds.Answer, kinds.Done},
+		kinds.Blocked:    {kinds.Unblock},
+		kinds.Defect:     {kinds.FixLive, kinds.Done},
+		kinds.Disconnect: {kinds.Withdraw},
 	}
 	byRef := []kinds.Kind{kinds.FixLive, kinds.Lift, kinds.Done}
 	if got, want := kinds.Openers(), slices.Sorted(maps.Keys(pairs)); !slices.Equal(got, want) {

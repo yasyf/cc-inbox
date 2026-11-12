@@ -141,11 +141,14 @@ an explicit time window starts at the current head.
 ### Receive records in the session without a Monitor
 
 A Monitor holds a process open for the whole session, and a record posted
-while it is down waits until it restarts. The plugin's `cci` channel removes the
+while it is down waits until it restarts. The plugin's channel removes the
 Monitor. Each new record is pushed into the session as soon as it is posted.
-The channel server is the `cci` on `PATH`, started with the same config in
-every plugin version, so a plugin update and `/reload-plugins` leave it
-running. Launch the session with the channel enabled, then subscribe once:
+The plugin runs two Model Context Protocol (MCP) servers from the `cci` on
+`PATH`, each started with the same config in every plugin version, so a plugin update and `/reload-plugins`
+leave them running. `channel`, `cci channel --no-tools`, delivers records and
+has no tools, so no tool call, a subagent's included, ever starts or replaces
+it. `cci`, `cci mcp`, serves the tools and delivers nothing. Launch the session
+with the channel enabled, then subscribe once:
 
 ```bash
 claude --channels plugin:cc-inbox@cc-inbox
@@ -156,7 +159,7 @@ cci subscribe --drive release-demo --reader root --kind incident,decide,ask --mu
 ```
 
 ```text
-window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, batched done, topic kinds none, followed none, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:cci"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, batched done, topic kinds none, followed none, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:channel"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
 ```
 
 What arrives:
@@ -201,14 +204,24 @@ at 400 characters, or a record with a body, shows `+` before its text; the
 
 In a window launched with the channel, the `PostToolUse` hook
 skips records the channel delivered, and the channel skips records the hook
-delivered first, so each record addressed to the root arrives once. The subscription's cursor
-starts at the head when you subscribe, and the channel advances it past each
-delivered record. A channel Claude Code starts, as on a resume or a reconnect,
+delivered first. The subscription's cursor starts at the head when you
+subscribe, and the channel moves it past a record only once the session's
+transcript, `<config dir>/projects/*/<session>.jsonl`, shows that record's tag
+on the main thread, in the order the tags went out. A tag Claude Code never
+showed the session leaves the cursor where it was, so the hook still delivers
+that record. Claude Code writes a tag that arrives mid-turn after the hook
+runs, so such a record can arrive twice. A channel Claude Code starts, as on a resume or a reconnect,
 begins at the head instead of replaying what the cursor missed: one `skipped`
 tag counts the records addressed to the reader it passed over, and the `inbox`
 tool or `cci tail --since` reads them. Claude Code reads only a window's newest
 channel server and leaves the older ones running, so the newest to start owns
-the window: an older one delivers nothing, moves no cursor, and exits. It defaults to `channel-<session>`; give each subscription
+the window: an older one delivers nothing, moves no cursor, and exits. A
+subscribed channel that stops any other way, such as Claude Code closing it on
+a reconnect, a reload or an exit, posts a `disconnect` record from the reader's
+lane to `communicator` in the subscription's drive, naming the window, the
+session and `/mcp reconnect plugin:cc-inbox:channel`. The next channel to
+stream that reader posts `recovered`, which closes it; a daemon handing its
+channels to a new release posts neither. The cursor defaults to `channel-<session>`; give each subscription
 its own cursor. When a Monitor watched the same records, stop it after
 subscribing; records in the overlap arrive twice. A subscription belongs to the
 Claude Code window: compaction and `/clear` keep it, and the `SessionStart`
@@ -616,7 +629,7 @@ names no stack, a shared target is enough. TTL means time to live; `--ttl`
 overrides the default.
 
 Use `--resolves <seq>` on a later record of any kind to close a specific `ask`,
-`decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident`. The target must
+`decide`, `blocker`, `blocked`, `defect`, `disconnect`, `hold`, or `incident`. The target must
 already exist in the same drive; missing or cross-drive targets are rejected.
 An `opened`, `landed`, `go`, or `fix-live` record can carry this link without a
 matching topic or `--re`. Only a resolver with a later sequence closes the opener.
@@ -629,7 +642,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `blocker` | None | Open until `withdraw`, `answer`, or `done` with `--re` or the same `--topic`. |
 | `blocked` | None | A stack or target cannot deploy. Open until `unblock` with `--re` or the same `--topic`, or an explicit resolver. |
 | `unblock` | None | Closes a matching `blocked`; requires `--re`, `--topic`, or `--resolves`. |
-| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`, which must name a record of the withdrawal's own drive. |
+| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`, and `withdraw` also `disconnect`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`, which must name a record of the withdrawal's own drive. |
 | `go` | None | Closes a matching `ask` or `decide`. |
 | `hold` | None | Open until `lift`. It holds exactly the PRs its `--pr` names, and its text is prose; a hold whose text or topic names `#<number>` with no `--pr` at all is refused, so guards that read pull request refs see the hold, and a hold with `--pr` whose text names other pull requests posts with a line listing them as not held. |
 | `lift` | None | Closes `hold`; its `--re` or `--resolves` must name an open hold, and a lift that names none is refused with the open holds on its `--pr` and on the pull requests of the records it named. |
@@ -642,6 +655,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `github` | 14 days | A GitHub pull request, review or check change, or a push to the default branch, with the action or conclusion in `--outcome` and the commit in `--commit`. A commit status or a push names no pull request. |
 | `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
+| `disconnect` | None | A subscribed session's channel stopped; its channel server posts it to `communicator`. Open until `withdraw` or a resolver, such as the `recovered` record the session's next channel server posts with `--resolves`. |
 | `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
 | `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
@@ -827,13 +841,16 @@ tool calls.
 
 ## Plugin channel
 
-The plugin's `cci` Model Context Protocol (MCP) server, `cci channel`, is a Claude Code channel built
+The plugin's `channel` MCP server, `cci channel --no-tools`, is a Claude Code channel built
 on [cc-interact](https://github.com/yasyf/cc-interact)'s channel server. It
 reads the subscription for its window every five seconds. While a
 subscription exists, it streams that subscription's records through the same
-watch loop and cursor as `cci watch`, polling once a second. It has no tools.
-Each record becomes a `notifications/claude/channel` push whose content is
-the record line and whose meta carries `seq`, `kind`, and `lane`.
+watch loop as `cci watch`, polling once a second, and reads the session's
+transcript once a second to move the cursor past each tag it shows. It has no
+tools. Each record becomes a `notifications/claude/channel` push whose content
+is the record line and whose meta carries `seq`, `kind`, and `lane`. The
+plugin's `cci` MCP server, `cci mcp`, serves the tools,
+`mcp__plugin_cc-inbox_cci__*`, and never claims a window or delivers a record.
 
 ## Store, budgets, and caps
 
