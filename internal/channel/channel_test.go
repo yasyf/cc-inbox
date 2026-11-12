@@ -71,8 +71,8 @@ func tagText(source string, meta map[string]string) string {
 	return fmt.Sprintf(`<channel source="%s" seq="%s" kind="%s" lane="%s">`+"\n@now\n%s %s\n</channel>", source, meta["seq"], meta["kind"], meta["lane"], meta["seq"], meta["kind"])
 }
 
-func transcribe(lines ...string) error {
-	path, err := transcriptOf(context.Background(), "s1")
+func transcribe(ctx context.Context, lines ...string) error {
+	path, err := transcriptOf(ctx, "s1")
 	if err != nil {
 		return err
 	}
@@ -89,8 +89,8 @@ func transcribe(lines ...string) error {
 	return f.Close()
 }
 
-func hears(params any) error {
-	return transcribe(userLine(tagText(Source, params.(map[string]any)["meta"].(map[string]string)), false))
+func hears(ctx context.Context, params any) error {
+	return transcribe(ctx, userLine(tagText(Source, params.(map[string]any)["meta"].(map[string]string)), false))
 }
 
 func followHeard(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, notify func(string, any) error) error {
@@ -100,7 +100,7 @@ func followHeard(ctx context.Context, st *store.Store, sub store.Subscription, c
 	}
 	return l.listen(ctx, func(ctx context.Context) error {
 		return follow(ctx, st, sub, channeled, l, func(method string, params any) error {
-			if err := hears(params); err != nil {
+			if err := hears(ctx, params); err != nil {
 				return err
 			}
 			return notify(method, params)
@@ -175,7 +175,7 @@ func start(t *testing.T, st *store.Store, w, p store.Window, resumed bool) *sess
 				continue
 			}
 			if f.Method == notifyMethod {
-				_ = transcribe(userLine(tagText(Source, f.Params.Meta), false))
+				_ = transcribe(ctx, userLine(tagText(Source, f.Params.Meta), false))
 			}
 			s.frames <- f
 		}
@@ -468,7 +468,7 @@ func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T
 	go func() {
 		defer close(streamed)
 		Stream(streamCtx, st, window, true, &started, nil, func(_ string, params any) error {
-			if err := hears(params); err != nil {
+			if err := hears(streamCtx, params); err != nil {
 				return err
 			}
 			seqs <- params.(map[string]any)["meta"].(map[string]string)["seq"]
@@ -1151,15 +1151,15 @@ func TestACursorMovesOnlyOnceTheSessionsTranscriptShowsItsTag(t *testing.T) {
 		}
 	}
 	unmoved("sending into a session that never showed the tags")
-	if err := transcribe(userLine(tagText(Source, tags[0]), true), userLine([]map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": tagText(Source, tags[0])}}, false)); err != nil {
+	if err := transcribe(ctx, userLine(tagText(Source, tags[0]), true), userLine([]map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": tagText(Source, tags[0])}}, false)); err != nil {
 		t.Fatal(err)
 	}
 	unmoved("a subagent's copy and a tool result")
-	if err := transcribe(userLine(tagText(Source, tags[1]), false)); err != nil {
+	if err := transcribe(ctx, userLine(tagText(Source, tags[1]), false)); err != nil {
 		t.Fatal(err)
 	}
 	unmoved("hearing the second tag ahead of the first")
-	if err := transcribe(queuedLine([]map[string]string{{"type": "text", "text": tagText(Source, tags[0])}})); err != nil {
+	if err := transcribe(ctx, queuedLine([]map[string]string{{"type": "text", "text": tagText(Source, tags[0])}})); err != nil {
 		t.Fatal(err)
 	}
 	cursorReaches(t, st, sub.Cursor, second.Seq)
