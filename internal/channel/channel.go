@@ -598,11 +598,14 @@ func supersedes(r store.Record) []supersede {
 
 func follow(ctx context.Context, st *store.Store, sub store.Subscription, channeled bool, l *ledger, notify func(string, any) error) error {
 	mail, shared, err := hookMail(ctx, st, sub, channeled)
-	if err != nil {
-		return err
-	}
 	f := sub.Filter()
-	if f.After, err = l.position(ctx, sub.Cursor, sub.Drive); err != nil {
+	if err == nil {
+		f.After, err = l.position(ctx, sub.Cursor, sub.Drive)
+	}
+	if ctx.Err() != nil {
+		return nil
+	}
+	if err != nil {
 		return err
 	}
 	watchCtx, stop := context.WithCancel(ctx)
