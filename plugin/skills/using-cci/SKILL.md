@@ -35,7 +35,7 @@ The MCP `post` tool takes `kind`, `text`, `to`, `re`, `resolves`, `pr`, `topic`,
 
 Post one record per event. Set `to` for recipients, `to: owner` when an action needs the owner, or omit `to` to broadcast. Text over 400 characters spills to a file, keeping 400 characters and the path; use `body` for long content. Never type clock times; write `{at}` so `cci` substitutes the record's timestamp. Name earlier records by `seq`, never time.
 
-Reply with `re: <seq>`. Close `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident` with `resolves: <seq>` (accepts multiple). The `close` tool posts one record closing all given `seq` numbers, addressed to their writers, as `answer`, `withdraw`, `lift`, `go`, `unblock`, or `fix-live`.
+Reply with `re: <seq>`. Close `ask`, `decide`, `blocker`, `blocked`, `defect`, `hold`, or `incident` with `resolves: <seq>` (accepts multiple). The `close` tool posts one record closing all given `seq` numbers, addressed to their writers, as `answer`, `withdraw`, `lift`, `go`, `unblock`, or `fix-live`; `withdraw` also takes back a record that opens nothing, such as your own `report`.
 
 Exit 75 from `cci post` means the bus is down and nothing was stored; never treat it as sent. Exit 76 means another live thread holds the lane and nothing was stored; stop.
 

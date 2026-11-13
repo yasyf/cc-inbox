@@ -308,9 +308,12 @@ func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string,
 				return postPlan{}, err
 			}
 		}
-		var resolved []store.Record
+		var (
+			resolved []store.Record
+			taken    []int64
+		)
 		for _, seq := range resolvesSeqs {
-			if slices.ContainsFunc(resolved, func(o store.Record) bool { return o.Seq == seq }) {
+			if slices.ContainsFunc(resolved, func(o store.Record) bool { return o.Seq == seq }) || slices.Contains(taken, seq) {
 				continue
 			}
 			o, err := st.Get(cmd.Context(), seq)
@@ -320,10 +323,14 @@ func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string,
 			if o.Num, err = st.Number(cmd.Context(), o); err != nil {
 				return postPlan{}, err
 			}
-			if !o.Kind.Opens() {
+			switch {
+			case o.Kind.Opens():
+				resolved = append(resolved, o)
+			case k == kinds.Withdraw:
+				taken = append(taken, seq)
+			default:
 				return postPlan{}, fmt.Errorf("--resolves %s: it is a %s from %s, which opens nothing to resolve; name the ask, decide, blocker, blocked, defect, hold or incident this record resolves", o.Name(), o.Kind, o.Lane)
 			}
-			resolved = append(resolved, o)
 		}
 		for _, ref := range namedPRs {
 			prs, err := namedRefPRs(cmd.Context(), st, r.Drive, ref)
@@ -346,7 +353,7 @@ func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string,
 				}
 			}
 		}
-		records, err := perTarget(r, reSeqs, resolvesSeqs, pairwise)
+		records, err := perTarget(r, append(slices.Clone(reSeqs), taken...), slices.DeleteFunc(slices.Clone(resolvesSeqs), func(seq int64) bool { return slices.Contains(taken, seq) }), pairwise)
 		if err != nil {
 			return postPlan{}, err
 		}
@@ -411,7 +418,7 @@ func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string,
 	f.StringSliceVar(&r.To, "to", nil, "addressed lanes (repeatable); peer:<session prefix or name>[/<agent id or name>] reaches one session's root thread or one of its subagents here, peer:<agent id or name> one of this session's own subagents, a Workflow agent named by its label, peer:<node>/<session>[/<agent>] one on another node, and <lane>@<drive> a lane in another drive; a bare lane that no live thread reads in this drive, but one does in exactly one other drive, is addressed <lane>@<that drive>, and in several the post is refused; a bare lane no live thread reads, no thread is bound as on this drive, and no record on it was posted as is accepted and read once that lane registers, unless the name looks like a slip for a live lane, such as one or two edits from it or an older number of it, which is refused naming that lane unless --force; a lane that stood down, or a stem whose every lane stood down, is refused before anything is written, naming its live successor or root, and an owner record or an owner-relay post so refused also raises a blocker to owner-relay; a name ending -<n> answers under its stem, the name without it: --to <stem> reaches the stem's newest live lane, a numbered name is stored as its stem while the stem reaches that same lane, and the post prints one line when no live lane reads a name or several running lanes share its stem; owner and all always pass; a record every --to of which names the posting lane itself is refused, naming who wrote the record it answers, or, from an agent whose session holds that lane, naming the agent's own lane to post as, such as --lane handler or --lane builder")
 	f.StringVar(&r.ID, "id", "", "idempotency key; a repost with a key already in the drive returns the stored record as a duplicate")
 	f.StringSliceVar(&re, "re", nil, "number (#N or #N@node) or alias (t:<topic>, ccn:<id or text prefix>, card:<id>, pr#N, last:<kind>[:<lane>]) of the record this one answers or closes; an alias names its one open record, else its one record, and refuses naming the candidates; repeated, each gets its own record; with no --to, each is addressed to the lane that wrote the record it answers, as <lane>@<drive> when that record is on another drive")
-	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) or alias, as for --re but naming an open record, of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one")
+	f.StringSliceVar(&resolves, "resolves", nil, "number (#N or #N@node) or alias, as for --re but naming an open record, of the ask, decide, blocker, blocked, defect, hold or incident this record resolves; repeated or a comma list, the one record resolves every one; a --kind withdraw takes back any other record it names, as --re does")
 	f.Int64SliceVar(&reSeqs, "re-seq", nil, "internal store sequences this record answers")
 	f.Int64SliceVar(&resolvesSeqs, "resolves-seq", nil, "internal store sequences this record resolves")
 	_ = f.MarkHidden("re-seq")

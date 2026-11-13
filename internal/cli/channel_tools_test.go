@@ -175,6 +175,26 @@ func TestTheCloseToolClosesEverySeqAddressedToTheirWriters(t *testing.T) {
 	}
 }
 
+func TestTheCloseToolWithdrawsItsOwnReportAndResolvesAnAsk(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	mustTool(t, "post", map[string]any{"drive": "d", "lane": "root", "kind": "report", "text": "POST o946 is done", "to": []string{"communicator"}})
+	mustTool(t, "post", map[string]any{"drive": "d", "lane": "api", "kind": "ask", "text": "which branch?", "to": []string{"root"}})
+	if got := mustTool(t, "close", map[string]any{"drive": "d", "lane": "root", "seqs": []any{1, 2}, "how": "withdraw", "text": "o946 is not done"}); got != "3" {
+		t.Fatalf("close = %q, want one record", got)
+	}
+	out, err := run(t, "show", "--json", "3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var withdraw store.Record
+	if err := json.Unmarshal([]byte(out), &withdraw); err != nil {
+		t.Fatal(err)
+	}
+	if withdraw.Kind != "withdraw" || withdraw.Re != 1 || withdraw.Resolves != 2 || !slices.Equal(withdraw.To, []string{"api"}) {
+		t.Errorf("withdraw = %+v, want re the report, resolving the ask, to the ask's writer", withdraw)
+	}
+}
+
 func TestTheInboxToolReturnsOnlyNewRecordsAndCutsBroadcasts(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	long := strings.Repeat("word ", 60) + "END"

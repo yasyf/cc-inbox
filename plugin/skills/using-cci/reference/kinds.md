@@ -59,7 +59,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `decision` | None | A call already made; not open. Imported `DECISION` uses it. |
 | `blocker` | None | Open until `withdraw`, `answer`, or `done`. |
 | `blocked` / `unblock` | None | A deploy block stays open until unblock or a resolver. |
-| `answer`, `withdraw` | None | Close asks, decision requests, or blockers, and withdraw also a disconnect; require a link. |
+| `answer`, `withdraw` | None | Close asks, decision requests, or blockers, and withdraw also a disconnect; require a link. A withdraw takes back any other record it names. |
 | `go` | None | Closes a matching ask or decision request. |
 | `hold` / `lift` | None | Lift closes the open hold its `--re` or `--resolves` names. A hold holds exactly its `--pr` PRs; a hold naming `#<number>` with no `--pr` is refused. |
 | `incident`, `defect` / `fix-live`, `done` | None | Fix-live or done closes the opener; done also closes blockers. |
