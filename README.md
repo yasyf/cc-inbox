@@ -480,7 +480,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci session run <alias>` | The tmux session's own command: start the registered command, wait for Claude Code to exit, and start it again resuming the session, until `cci session rm`. |
 | `cci session rm <alias>` | Stop keeping the alias's session: drop the subscription it owned, and once Claude Code exits nothing starts it again and its tmux session ends. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
-| `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. `-F` matches the pattern literally. |
+| `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. Several words before, between or after the flags are one pattern joined by single spaces, so `cci grep --drive d Send them ahead` searches for `Send them ahead`. `-F` matches the pattern literally. |
 | `cci show SEQ...` | Print records whole, in the order named: each line without a width cut, then the full text or `--path` body file the record names. A node joined to a relay reads a record it lacks from the relay's log. |
 | `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |

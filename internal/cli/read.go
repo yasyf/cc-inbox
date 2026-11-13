@@ -388,9 +388,9 @@ func newGrepCmd() *cobra.Command {
 		Use:     "grep PATTERN",
 		Aliases: []string{"search"},
 		Short:   "Search whole record lines (kind, lane, topic, text, refs), newest first",
-		Args:    cobra.ExactArgs(1),
+		Args:    cobra.MinimumNArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
-			expr := args[0]
+			expr := strings.Join(args, " ")
 			if fixed {
 				expr = regexp.QuoteMeta(expr)
 			}

@@ -496,6 +496,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `cci grep` takes its pattern as several words, joined by single spaces, as
+  `ccn`'s search verbs do. `cci grep --drive durable-agents Send them ahead`
+  used to refuse with `accepts 1 arg(s), received 3`; it now searches for
+  `Send them ahead`, and a quoted pattern runs as before.
+
 - The `using-cci` skill loads a 6 KB core instead of 41 KB: records and tags,
   reading mail, posting, answering and closing, and the kinds a lane posts
   daily. Everything else moved to seven files under `reference/` that the core

@@ -223,6 +223,8 @@ func TestGrepMatchesWholeRecordLines(t *testing.T) {
 		want []string
 	}{
 		{[]string{"STATE census"}, []string{"state census"}},
+		{[]string{"STATE", "census"}, []string{"state census"}},
+		{[]string{"STATE", "census", "-n", "1"}, []string{"state census"}},
 		{[]string{"CLAIM merge-walker-r2"}, []string{"claim merge-walker-r2 #30541"}},
 		{[]string{"runner-protocol-idle-tenant"}, []string{"runner-protocol-idle-tenant GREEN #30568"}},
 		{[]string{"census|GREEN"}, []string{"state census", "runner-protocol-idle-tenant GREEN"}},
