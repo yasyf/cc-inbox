@@ -14,12 +14,14 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/yasyf/cc-inbox/internal/harness"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
 var (
+	deafAfter    = 30 * time.Second
 	transcriptOf = harness.Transcript
 	tagOpening   = regexp.MustCompile(`^<channel source="` + regexp.QuoteMeta(Plugin) + `[^"]*"([^>]*)>`)
 	tagAttribute = regexp.MustCompile(`([a-z]+)="([^"]*)"`)
@@ -32,23 +34,28 @@ type tag struct {
 }
 
 type owed struct {
-	tag   tag
-	moves []store.CursorMove
-	heard bool
+	tag      tag
+	moves    []store.CursorMove
+	sent     time.Time
+	received bool
+	heard    bool
 }
 
 type ledger struct {
-	st      *store.Store
-	session string
-	path    string
-	read    int64
-	mu      sync.Mutex
-	owed    []owed
-	sent    map[string]int64
+	st       *store.Store
+	session  string
+	window   store.Window
+	path     string
+	read     int64
+	mu       sync.Mutex
+	owed     []owed
+	sent     map[string]int64
+	received time.Time
+	deaf     bool
 }
 
-func newLedger(ctx context.Context, st *store.Store, session string) (*ledger, error) {
-	path, err := transcriptOf(ctx, session)
+func newLedger(ctx context.Context, st *store.Store, sub store.Subscription) (*ledger, error) {
+	path, err := transcriptOf(ctx, sub.Session)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +63,7 @@ func newLedger(ctx context.Context, st *store.Store, session string) (*ledger, e
 	if err != nil {
 		return nil, fmt.Errorf("stat the session's transcript: %w", err)
 	}
-	return &ledger{st: st, session: session, path: path, read: info.Size(), sent: map[string]int64{}}, nil
+	return &ledger{st: st, session: sub.Session, window: sub.Window, path: path, read: info.Size(), sent: map[string]int64{}}, nil
 }
 
 func (l *ledger) listen(ctx context.Context, fn func(context.Context) error) error {
@@ -90,8 +97,8 @@ func (l *ledger) hearAll(ctx context.Context, transcript io.Reader) error {
 		switch {
 		case err == nil:
 			l.read += int64(len(line))
-			if t, ok := heardTag(line); ok {
-				if err := l.hear(ctx, t); err != nil {
+			if t, heard, ok := transcriptTag(line); ok {
+				if err := l.receive(ctx, t, heard); err != nil {
 					slog.Warn("cci channel: move the cursors of a heard tag", "seq", t.seq, "err", err)
 				}
 			}
@@ -101,18 +108,24 @@ func (l *ledger) hearAll(ctx context.Context, transcript io.Reader) error {
 		case ctx.Err() != nil:
 			return nil
 		default:
+			if t, ok := l.deafened(); ok {
+				if err := deafened(ctx, l.st, l.window, t); err != nil {
+					slog.Warn("cci channel: tell the session's notify lanes it stopped hearing", "seq", t.seq, "err", err)
+				}
+			}
 			sleep(ctx, interval)
 		}
 	}
 }
 
-func heardTag(line []byte) (tag, bool) {
+func transcriptTag(line []byte) (tag, bool, bool) {
 	if !bytes.Contains(line, tagMarker) {
-		return tag{}, false
+		return tag{}, false, false
 	}
 	var event struct {
 		Type        string `json:"type"`
 		IsSidechain bool   `json:"isSidechain"`
+		Content     string `json:"content"`
 		Message     struct {
 			Content json.RawMessage `json:"content"`
 		} `json:"message"`
@@ -122,7 +135,11 @@ func heardTag(line []byte) (tag, bool) {
 		} `json:"attachment"`
 	}
 	if json.Unmarshal(line, &event) != nil || event.IsSidechain {
-		return tag{}, false
+		return tag{}, false, false
+	}
+	if event.Type == "queue-operation" {
+		t, ok := openingTag(event.Content)
+		return t, false, ok
 	}
 	var prompt json.RawMessage
 	switch {
@@ -131,9 +148,14 @@ func heardTag(line []byte) (tag, bool) {
 	case event.Type == "attachment" && event.Attachment.Type == "queued_command":
 		prompt = event.Attachment.Prompt
 	default:
-		return tag{}, false
+		return tag{}, false, false
 	}
-	opening := tagOpening.FindStringSubmatch(promptText(prompt))
+	t, ok := openingTag(promptText(prompt))
+	return t, ok, ok
+}
+
+func openingTag(text string) (tag, bool) {
+	opening := tagOpening.FindStringSubmatch(text)
 	if opening == nil {
 		return tag{}, false
 	}
@@ -174,26 +196,48 @@ func (l *ledger) owe(t tag, moves ...store.CursorMove) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.note(moves)
-	l.owed = append(l.owed, owed{tag: t, moves: moves})
+	l.owed = append(l.owed, owed{tag: t, moves: moves, sent: time.Now()})
 }
 
 func (l *ledger) pass(ctx context.Context, moves ...store.CursorMove) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.note(moves)
-	l.owed = append(l.owed, owed{moves: moves, heard: true})
+	l.owed = append(l.owed, owed{moves: moves, received: true, heard: true})
 	return l.settle(ctx)
 }
 
-func (l *ledger) hear(ctx context.Context, t tag) error {
+func (l *ledger) receive(ctx context.Context, t tag, heard bool) error {
 	l.mu.Lock()
-	defer l.mu.Unlock()
-	i := slices.IndexFunc(l.owed, func(o owed) bool { return !o.heard && o.tag == t })
+	i := slices.IndexFunc(l.owed, func(o owed) bool { return o.tag == t && !o.heard && (heard || !o.received) })
 	if i < 0 {
+		l.mu.Unlock()
 		return nil
 	}
-	l.owed[i].heard = true
-	return l.settle(ctx)
+	l.owed[i].received = true
+	l.owed[i].heard = heard
+	regained := l.received.IsZero() || l.deaf
+	l.received, l.deaf = time.Now(), false
+	err := l.settle(ctx)
+	l.mu.Unlock()
+	if regained {
+		err = errors.Join(err, reconnected(context.WithoutCancel(ctx), l.st, l.window))
+	}
+	return err
+}
+
+func (l *ledger) deafened() (tag, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.deaf || time.Since(l.received) < deafAfter {
+		return tag{}, false
+	}
+	i := slices.IndexFunc(l.owed, func(o owed) bool { return !o.received && time.Since(o.sent) >= deafAfter })
+	if i < 0 {
+		return tag{}, false
+	}
+	l.deaf = true
+	return l.owed[i].tag, true
 }
 
 func (l *ledger) note(moves []store.CursorMove) {

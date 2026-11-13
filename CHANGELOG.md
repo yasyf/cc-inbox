@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A channel whose session stops hearing it, a tag its transcript does not show
+  received 30 seconds after it went out while the transcript showed no other,
+  posts a `disconnect` and, for a registered session, types
+  `/mcp reconnect plugin:cc-inbox:channel` into its tmux session once per open
+  `disconnect`. A tag Claude Code queues while the session is busy counts as
+  received, and the next tag the session receives posts `recovered`. A
+  registered session's new channel replays what its cursor missed instead of
+  starting at the head: each `owner` record as its own tag, then the rest as one
+  `batch` tag, less what the hook already delivered.
+
+- A registered session's tmux session keeps the `ORCA_TERMINAL_HANDLE` of the
+  terminal that last attached to it, and `cci session run` starts Claude Code
+  with it, so the session's Orca calls name the Orca terminal that shows it
+  rather than none.
+
 - A subscribed channel that stops for any reason but a newer channel claiming
   its window or its daemon handing off posts a `disconnect` record from the
   reader's lane to `communicator`, naming the window, the session and the

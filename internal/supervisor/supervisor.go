@@ -19,16 +19,20 @@ import (
 	"github.com/yasyf/cc-inbox/internal/store"
 )
 
+const orcaTerminal = "ORCA_TERMINAL_HANDLE"
+
 var restartPause = 2 * time.Second
 
 // Launch starts the tmux session named by r's alias, running cci session run in
 // r's login shell, unless it already exists, and reports whether it started it.
+// Each client attaching to it then copies its ORCA_TERMINAL_HANDLE, the Orca
+// terminal Orca names as the caller, into the tmux session's environment.
 func Launch(ctx context.Context, r store.Registration) (bool, error) {
 	up, err := Up(ctx, r)
 	if err != nil || up {
 		return false, err
 	}
-	if err := tmux(ctx, r, "new-session", "-d", "-s", r.Alias, "-c", r.Cwd, "--", r.Shell, "-l", "-c", "exec cci session run "+r.Alias); err != nil {
+	if _, err := tmux(ctx, r, "new-session", "-d", "-s", r.Alias, "-c", r.Cwd, "--", r.Shell, "-l", "-c", "exec cci session run "+r.Alias, ";", "set-option", "-a", "-t", "="+r.Alias, "update-environment", orcaTerminal); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -36,7 +40,7 @@ func Launch(ctx context.Context, r store.Registration) (bool, error) {
 
 // Up reports whether the tmux session named by r's alias exists.
 func Up(ctx context.Context, r store.Registration) (bool, error) {
-	err := tmux(ctx, r, "has-session", "-t", "="+r.Alias)
+	_, err := tmux(ctx, r, "has-session", "-t", "="+r.Alias)
 	if exit := (*exec.ExitError)(nil); errors.As(err, &exit) {
 		return false, nil
 	}
@@ -46,10 +50,11 @@ func Up(ctx context.Context, r store.Registration) (bool, error) {
 // Type types line at the prompt of r's tmux session and presses Enter.
 func Type(ctx context.Context, r store.Registration, line string) error {
 	pane := "=" + r.Alias + ":"
-	if err := tmux(ctx, r, "send-keys", "-t", pane, "-l", line); err != nil {
+	if _, err := tmux(ctx, r, "send-keys", "-t", pane, "-l", line); err != nil {
 		return err
 	}
-	return tmux(ctx, r, "send-keys", "-t", pane, "Enter")
+	_, err := tmux(ctx, r, "send-keys", "-t", pane, "Enter")
+	return err
 }
 
 // Keep launches the tmux session of each registered session that runs in no
@@ -73,7 +78,8 @@ func Keep(ctx context.Context, st *store.Store) error {
 // Run keeps alias's session running on this terminal until cci session rm
 // removes alias: it starts the registered command in a login shell, as a
 // top-level session with none of the Claude Code, cci lane or Orca pane
-// variables of whatever started the tmux server, waits for it to exit, and
+// variables of whatever started the tmux server but the ORCA_TERMINAL_HANDLE
+// of the Orca terminal that last attached to it, waits for it to exit, and
 // starts it again resuming the session.
 func Run(ctx context.Context, st *store.Store, alias string, stdin io.Reader, stdout, stderr io.Writer) error {
 	for again := false; ; again = true {
@@ -107,6 +113,9 @@ func Run(ctx context.Context, st *store.Store, alias string, stdin io.Reader, st
 			name, _, _ := strings.Cut(kv, "=")
 			return name != "CLAUDE_CONFIG_DIR" && (strings.HasPrefix(name, "CLAUDE") || strings.HasPrefix(name, "ORCA_") || name == "CCI_AGENT_ID")
 		})
+		if kv, err := tmux(ctx, r, "show-environment", "-t", "="+r.Alias, orcaTerminal); err == nil && bytes.HasPrefix(kv, []byte(orcaTerminal+"=")) {
+			c.Env = append(c.Env, string(bytes.TrimSpace(kv)))
+		}
 		exited := c.Run()
 		if ctx.Err() != nil {
 			return nil
@@ -139,10 +148,10 @@ func CommandLine(ctx context.Context, r store.Registration) (string, error) {
 	return line, nil
 }
 
-func tmux(ctx context.Context, r store.Registration, args ...string) error {
+func tmux(ctx context.Context, r store.Registration, args ...string) ([]byte, error) {
 	out, err := exec.CommandContext(ctx, r.Tmux, args...).CombinedOutput() //nolint:gosec // G204: the tmux the session was registered with.
 	if err != nil {
-		return fmt.Errorf("%s %s: %w: %s", r.Tmux, strings.Join(args, " "), err, bytes.TrimSpace(out))
+		return out, fmt.Errorf("%s %s: %w: %s", r.Tmux, strings.Join(args, " "), err, bytes.TrimSpace(out))
 	}
-	return nil
+	return out, nil
 }
