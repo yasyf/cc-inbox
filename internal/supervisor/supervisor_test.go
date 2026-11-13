@@ -42,6 +42,11 @@ func TestRunStartsTheSessionAgainUntilItsAliasIsRemoved(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", config)
 	t.Setenv("CLAUDECODE", "1")
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "the-session-that-started-tmux")
+	t.Setenv("ORCA_TERMINAL_HANDLE", "term_that_started_tmux")
+	tmux := filepath.Join(t.TempDir(), "tmux")
+	if err := os.WriteFile(tmux, []byte("#!/bin/sh\n[ \"$1\" = show-environment ] && echo ORCA_TERMINAL_HANDLE=term_attached\n"), 0o700); err != nil { //nolint:gosec // G306: the fake tmux runs as a program.
+		t.Fatal(err)
+	}
 	projects := filepath.Join(config, "projects", "-work-release-demo")
 	if err := os.MkdirAll(projects, 0o700); err != nil {
 		t.Fatal(err)
@@ -51,8 +56,8 @@ func TestRunStartsTheSessionAgainUntilItsAliasIsRemoved(t *testing.T) {
 	ctx := context.Background()
 	r := store.Registration{
 		Subscription: store.Subscription{Alias: "release-demo-coordinator", Session: "s1", Drive: "d", Reader: "root", Cursor: "coordinator"},
-		Cwd:          t.TempDir(), Shell: "/bin/sh", ResumePrompt: "resume as the coordinator",
-		Command: "touch " + filepath.Join(projects, "s1.jsonl") + `; echo "${CLAUDECODE:-top-level}" "${CLAUDE_CODE_SESSION_ID:-}" >> ` + starts,
+		Cwd:          t.TempDir(), Shell: "/bin/sh", Tmux: tmux, ResumePrompt: "resume as the coordinator",
+		Command: "touch " + filepath.Join(projects, "s1.jsonl") + `; echo "${CLAUDECODE:-top-level}" "${CLAUDE_CODE_SESSION_ID:-}" "${ORCA_TERMINAL_HANDLE:-}" >> ` + starts,
 	}
 	if _, err := st.Register(ctx, r); err != nil {
 		t.Fatal(err)
@@ -79,8 +84,8 @@ func TestRunStartsTheSessionAgainUntilItsAliasIsRemoved(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("Run kept starting the session after its alias was removed")
 	}
-	if lines[0] != "top-level  --session-id s1 -- resume as the coordinator" || lines[1] != "top-level  --resume s1 -- resume as the coordinator" {
-		t.Fatalf("the session started with %q, want a top-level session with --session-id first and --resume after", lines)
+	if lines[0] != "top-level  term_attached --session-id s1 -- resume as the coordinator" || lines[1] != "top-level  term_attached --resume s1 -- resume as the coordinator" {
+		t.Fatalf("the session started with %q, want a top-level session in the attached Orca terminal with --session-id first and --resume after", lines)
 	}
 	if !strings.Contains(stderr.String(), "cci: starting release-demo-coordinator again: touch ") || !strings.HasSuffix(stderr.String(), "cci: release-demo-coordinator is no longer registered, so nothing starts it again\n") {
 		t.Fatalf("stderr = %q", stderr.String())

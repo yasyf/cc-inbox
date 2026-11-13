@@ -213,15 +213,19 @@ that record. Claude Code writes a tag that arrives mid-turn after the hook
 runs, so such a record can arrive twice. A channel Claude Code starts, as on a resume or a reconnect,
 begins at the head instead of replaying what the cursor missed: one `skipped`
 tag counts the records addressed to the reader it passed over, and the `inbox`
-tool or `cci tail --since` reads them. Claude Code reads only a window's newest
+tool or `cci tail --since` reads them. A registered session's channel replays
+instead: each `owner` record its cursor missed arrives as its own tag, then the
+rest as one `batch` tag, less what the hook already delivered. Claude Code reads only a window's newest
 channel server and leaves the older ones running, so the newest to start owns
 the window: an older one delivers nothing, moves no cursor, and exits. A
 subscribed channel that stops any other way, such as Claude Code closing it on
 a reconnect, a reload or an exit, posts a `disconnect` record from the reader's
 lane to `communicator` in the subscription's drive, naming the window, the
-session and `/mcp reconnect plugin:cc-inbox:channel`. The next channel to
-stream that reader posts `recovered`, which closes it; a daemon handing its
-channels to a new release posts neither. The cursor defaults to `channel-<session>`; give each subscription
+session and `/mcp reconnect plugin:cc-inbox:channel`. So does a channel whose
+session stops hearing it: a tag its transcript does not show received, queued
+or delivered, 30 seconds after the channel sent it while it showed no other.
+The next tag the session receives posts `recovered`, which closes it; a daemon
+handing its channels to a new release posts neither. The cursor defaults to `channel-<session>`; give each subscription
 its own cursor. When a Monitor watched the same records, stop it after
 subscribing; records in the overlap arrive twice. A subscription belongs to the
 Claude Code window: compaction and `/clear` keep it, and the `SessionStart`
@@ -471,7 +475,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci unsubscribe` | Stop this window's channel delivery. |
 | `cci session register <alias>` | Keep a session alive under `<alias>` in the tmux session named `<alias>`, where `cci session run` starts `--command` from `--cwd` and starts it again with `--resume` and `--resume-prompt` each time Claude Code exits. `--session` defaults to this one and `--new` starts a fresh one. The alias owns the session's channel subscription, set by the flags `cci subscribe` takes, so each window the session runs in hears it; `--notify` names the lanes told when its channel disconnects, `communicator` by default. Registering again replaces what the alias holds and keeps its cursor; `cci subscribe` and `cci unsubscribe` refuse a registered session. |
 | `cci session list` | Each alias, the session it keeps, the window it runs in, its tmux session, its cursor and the lanes it notifies. |
-| `cci session attach <alias>` | Attach this terminal, such as an Orca terminal, to the alias's tmux session, launching it when it is down. |
+| `cci session attach <alias>` | Attach this terminal, such as an Orca terminal, to the alias's tmux session, launching it when it is down; the tmux session keeps the terminal's `ORCA_TERMINAL_HANDLE` for the next start. |
 | `cci session type <alias> <line>` | Type `<line>` at the session's prompt and press Enter, as cci does with `/mcp reconnect plugin:cc-inbox:channel` when the session's channel disconnects while Claude Code runs on. |
 | `cci session run <alias>` | The tmux session's own command: start the registered command, wait for Claude Code to exit, and start it again resuming the session, until `cci session rm`. |
 | `cci session rm <alias>` | Stop keeping the alias's session: drop the subscription it owned, and once Claude Code exits nothing starts it again and its tmux session ends. |

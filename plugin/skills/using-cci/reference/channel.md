@@ -33,13 +33,15 @@ The cursor starts at the head when you subscribe and defaults to
 `channel-<session>`. A channel Claude Code starts, as on a resume or a
 reconnect, begins at the head instead of replaying what the cursor missed: one
 `skipped` tag counts the records addressed to the reader it passed over, and
-the `inbox` tool or `cci tail --since` reads them. Claude Code reads only a
+the `inbox` tool or `cci tail --since` reads them; a registered session's
+channel replays them instead. Claude Code reads only a
 window's newest channel server and leaves the older ones running, so the newest
 to start owns the window: an older one delivers nothing, moves no cursor, and
 exits. A subscribed channel that stops any other way, such as Claude Code
 closing it on a reconnect, a reload or an exit, posts a `disconnect` record
-from the reader's lane to `communicator`; the next channel to stream that
-reader posts `recovered`, closing it. Stop any Monitor that watched the same records after
+from the reader's lane to `communicator`, and so does a channel whose session
+shows no tag received 30 seconds after one went out; the next tag the session
+receives posts `recovered`, closing it. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
 A long-lived session, such as a drive's coordinator, communicator or meta
@@ -55,12 +57,16 @@ It takes the flags `cci subscribe` takes, plus `--command`, `--cwd`,
 `--new`. cci runs the session in the tmux session named by the alias, where
 `cci session run` starts the command and starts it again with `--resume` and
 the resume prompt each time Claude Code exits; `cci session attach <alias>`
-shows it in a terminal such as Orca's. Each window the session runs in hears
+shows it in a terminal such as Orca's, whose `ORCA_TERMINAL_HANDLE` the tmux
+session keeps and each start passes to Claude Code. Each window the session runs in hears
 the alias's subscription, and the session never runs `cci subscribe`, which
 refuses it, as `cci unsubscribe` does. When its channel disconnects while
-Claude Code runs on, cci types `/mcp reconnect plugin:cc-inbox:channel` into
-its tmux session, and the `disconnect` record goes to each `--notify` lane,
-`communicator` by default. Register the alias again to change what it
+Claude Code runs on, or its session stops hearing it, cci types
+`/mcp reconnect plugin:cc-inbox:channel` into its tmux session once per open
+`disconnect`, and that record goes to each `--notify` lane, `communicator` by
+default. Its next channel replays from the cursor: each `owner` record it
+missed as its own tag, then the rest as one `batch` tag ending in the
+`cci tail` that reads what the tag leaves out. Register the alias again to change what it
 delivers; its cursor stays. `cci session list` names each alias, its session,
 where it runs and its cursor, and `cci session rm <alias>` ends it.
 
