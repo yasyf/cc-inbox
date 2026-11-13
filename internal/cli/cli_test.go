@@ -1466,7 +1466,7 @@ func TestSessionRegisterListTypeAndRm(t *testing.T) {
 			t.Fatalf("tmux was called with %q, %v; want %q", got, err, want)
 		}
 	}
-	launched := "has-session -t =release-demo-coordinator\nnew-session -d -s release-demo-coordinator -c /work/release-demo -- /bin/sh -l -c exec cci session run release-demo-coordinator ; set-option -a -t =release-demo-coordinator update-environment ORCA_TERMINAL_HANDLE\n"
+	launched := "has-session -t =release-demo-coordinator\nnew-session -d -s release-demo-coordinator -c /work/release-demo -- /bin/sh -l -c exec cci session run release-demo-coordinator ; set-option -a -t =release-demo-coordinator: update-environment ORCA_TERMINAL_HANDLE\n"
 	called(launched)
 	if out, err := run(t, "session", "register", "second", "--session", "c0ffee01", "--drive", "d", "--reader", "root", "--command", "claude"); err == nil || !strings.Contains(err.Error(), "session c0ffee01 is registered as release-demo-coordinator") {
 		t.Fatalf("a second alias for the session = %q, %v", out, err)

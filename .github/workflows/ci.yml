@@ -460,6 +460,8 @@ jobs:
           go test -count=1 -race -run '^TestHookOwedDoesNotDecodeUnrelatedCloserHistory$' -v ./internal/hook
           go test -count=1 -race -run '^TestOpenToSelected' -v ./internal/store
 
+      - name: Install tmux
+        run: command -v tmux || if [ "$RUNNER_OS" = macOS ]; then brew install tmux; else sudo apt-get update && sudo apt-get install -y tmux; fi
       - name: Test (race, store)
         run: go test -json -race -timeout 20m -skip "$TAIL_COST_TESTS|$RACE_STEP_TESTS|$WORK_COUNT_TESTS|^TestIncident|^TestUrgentRepeatIndex" ./internal/store
       - name: Test (race)

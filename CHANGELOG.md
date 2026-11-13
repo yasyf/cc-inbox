@@ -92,6 +92,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `cci session register`, `cci session attach`, a supervised session's restart
+  and the daemon's start no longer exit 1 after starting a registered session's
+  tmux session. The `set-option -a update-environment ORCA_TERMINAL_HANDLE`
+  chained after `new-session` targeted `=<alias>`, which tmux reads as a pane
+  and looks up a session literally named `=<alias>`; it now targets
+  `=<alias>:`, the form `cci session type` already used.
 - A subagent's cci tool call no longer takes a session's channel. The plugin
   now runs two MCP servers: `channel`, `cci channel --no-tools`, delivers
   records and has no tools, so no tool call starts or replaces it, and `cci`,
