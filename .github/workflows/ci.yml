@@ -967,7 +967,7 @@ jobs:
       - name: Every cci MCP server's config is the same in every plugin version, so /reload-plugins keeps it running
         run: jq -e '[.mcpServers[] | (tostring | contains("CLAUDE_PLUGIN_ROOT}") | not) and .env.CLAUDE_PLUGIN_ROOT == ""] | all' plugin/.claude-plugin/plugin.json
       - name: The channel is a server of its own that serves no tools, so no tool call starts it
-        run: jq -e '.channels == [{"server":"channel","displayName":"cci"}] and .mcpServers.channel.args == ["channel","--no-tools"] and .mcpServers.cci.args == ["mcp"]' plugin/.claude-plugin/plugin.json
+        run: jq -e '.channels == [{"server":"channel","displayName":"cci"}] and .mcpServers.channel.args[3:] == ["channel","--no-tools"] and .mcpServers.cci.args[3:] == ["mcp"]' plugin/.claude-plugin/plugin.json
 
   provisioning-candidate:
     name: Prepublication Darwin arm64 provisioning candidate

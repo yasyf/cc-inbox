@@ -92,6 +92,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `channel` and `cci` MCP servers start the plugin's own `cci`. They ran `cci channel --no-tools` and `cci mcp` from `PATH`, which resolves to a copy outside the plugin, such as the Homebrew cask, so a plugin update that reached a session before that copy did could name a subcommand or flag the copy lacked, and the server never started, as the codex plugin's channel did in nine sessions at its 1.16.0 update. Each entry now runs `python3` with a launcher that reads Claude Code's `installed_plugins.json` and execs the newest `cc-inbox@cc-inbox` install's own `bin/cci`, so the binary always ships with the manifest that names its arguments, and the entry still names no plugin version, so `/reload-plugins` keeps the server. Neither server needs a `cci` on `PATH` any more.
 - `cci session register`, `cci session attach`, a supervised session's restart
   and the daemon's start no longer exit 1 after starting a registered session's
   tmux session. The `set-option -a update-environment ORCA_TERMINAL_HANDLE`

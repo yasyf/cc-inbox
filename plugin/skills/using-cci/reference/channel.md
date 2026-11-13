@@ -6,9 +6,10 @@ A session launched with `--channels plugin:cc-inbox@cc-inbox` can take its
 records as pushed `<channel source="plugin:cc-inbox:channel">` tags instead
 of a Monitor. The plugin's `channel` server, `cci channel --no-tools`, has no
 tools, so no tool call, a subagent's included, starts or replaces it; its `cci`
-server, `cci mcp`, serves the tools. Both are the `cci` on `PATH`, started with
-the same config in every plugin version, so a plugin update and
-`/reload-plugins` leave them running. Subscribe once:
+server, `cci mcp`, serves the tools. Both run through a `python3` launcher that
+names no plugin version and execs the newest installed plugin's own `bin/cci`,
+so each starts with the same config in every plugin version and a plugin
+update and `/reload-plugins` leave them running. Subscribe once:
 
 ```bash
 cci subscribe --drive release-demo --reader root --kind incident,decide,ask

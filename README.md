@@ -143,9 +143,10 @@ an explicit time window starts at the current head.
 A Monitor holds a process open for the whole session, and a record posted
 while it is down waits until it restarts. The plugin's channel removes the
 Monitor. Each new record is pushed into the session as soon as it is posted.
-The plugin runs two Model Context Protocol (MCP) servers from the `cci` on
-`PATH`, each started with the same config in every plugin version, so a plugin update and `/reload-plugins`
-leave them running. `channel`, `cci channel --no-tools`, delivers records and
+The plugin runs two Model Context Protocol (MCP) servers, each through a
+`python3` launcher that names no plugin version and execs the newest installed
+plugin's own `bin/cci`, so each starts with the same config in every plugin
+version and a plugin update and `/reload-plugins` leave them running. `channel`, `cci channel --no-tools`, delivers records and
 has no tools, so no tool call, a subagent's included, ever starts or replaces
 it. `cci`, `cci mcp`, serves the tools and delivers nothing. Launch the session
 with the channel enabled, then subscribe once:
