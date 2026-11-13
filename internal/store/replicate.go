@@ -245,23 +245,11 @@ func pointer(p Pointer) *Pointer {
 // has already verified each row's provenance; Apply stores what it is given,
 // keeping its time and source.
 func (s *Store) Apply(ctx context.Context, rows []Row, receipt *Receipt) (Applied, error) {
-	rows, err := s.blobbed(rows)
+	done, err := s.Commit(ctx, Write{Apply: rows, Receipt: receipt})
 	if err != nil {
-		return Applied{}, err
+		return Applied{}, fmt.Errorf("apply: %w", err)
 	}
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return Applied{}, fmt.Errorf("begin apply: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	a, err := s.applyRows(ctx, tx, rows, receipt)
-	if err != nil {
-		return Applied{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Applied{}, fmt.Errorf("commit apply: %w", err)
-	}
-	return a, nil
+	return done.Applied, nil
 }
 
 func (s *Store) applyRows(ctx context.Context, tx *sql.Tx, rows []Row, receipt *Receipt) (Applied, error) {
@@ -289,36 +277,16 @@ ON CONFLICT (channel, origin) DO UPDATE SET change_id = excluded.change_id, revi
 // stores a page of held rows, and a row it stores releases the rows waiting on
 // it in a later page; a Settle that stops partway keeps the pages it committed.
 func (s *Store) Settle(ctx context.Context, absent []Pointer) (Applied, error) {
-	gone := make(map[Pointer]bool, len(absent))
-	for _, p := range absent {
-		gone[p] = true
-	}
 	var a Applied
-	for waiting := slices.Clone(absent); len(waiting) > 0; {
-		var err error
-		if waiting, err = s.settle(ctx, waiting, gone, &a); err != nil {
-			return a, err
+	for waiting := absent; len(waiting) > 0; {
+		done, err := s.Commit(ctx, Write{Settle: &SettlePage{Waiting: waiting, Absent: absent}})
+		if err != nil {
+			return a, fmt.Errorf("settle: %w", err)
 		}
+		a.add(done.Applied)
+		waiting = done.Waiting
 	}
 	return a, nil
-}
-
-func (s *Store) settle(ctx context.Context, waiting []Pointer, gone map[Pointer]bool, a *Applied) ([]Pointer, error) {
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin settle: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	settled := *a
-	waiting, err = s.settlePage(ctx, tx, waiting, gone, &settled)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit settle: %w", err)
-	}
-	*a = settled
-	return waiting, nil
 }
 
 func (s *Store) settlePage(ctx context.Context, tx *sql.Tx, waiting []Pointer, gone map[Pointer]bool, a *Applied) ([]Pointer, error) {
@@ -373,26 +341,11 @@ func (s *Store) releasePage(ctx context.Context, tx *sql.Tx, arrived Pointer, li
 // them, so it reaches the lane as a row Apply stores does. A Backfill that
 // starts where the last one ended extends that one's span.
 func (s *Store) Backfill(ctx context.Context, rows []Row, moves []CursorMove) (Applied, error) {
-	rows, err := s.blobbed(rows)
+	done, err := s.Commit(ctx, Write{Backfill: rows, Cursors: moves})
 	if err != nil {
-		return Applied{}, err
+		return Applied{}, fmt.Errorf("backfill: %w", err)
 	}
-	tx, err := s.rw.BeginTx(ctx, nil)
-	if err != nil {
-		return Applied{}, fmt.Errorf("begin apply: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	a, span, err := s.backfillRows(ctx, tx, rows)
-	if err != nil {
-		return Applied{}, err
-	}
-	if _, err := s.write(ctx, tx, Write{Cursors: append(moves, span...)}); err != nil {
-		return Applied{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return Applied{}, fmt.Errorf("commit apply: %w", err)
-	}
-	return a, nil
+	return done.Applied, nil
 }
 
 func (s *Store) backfillRows(ctx context.Context, tx *sql.Tx, rows []Row) (Applied, []CursorMove, error) {
