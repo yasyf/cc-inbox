@@ -940,6 +940,16 @@ func TestABatchHeldAcrossARestartArrivesOnce(t *testing.T) {
 	noTag(t, tags, 100*time.Millisecond)
 }
 
+func TestAChannelStoppedBeforeItReadsItsCursorEndsWithNoError(t *testing.T) {
+	st, _ := newStore(t)
+	sub := batched(t, st, kinds.Note)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := followHeard(ctx, st, sub, false, func(string, any) error { return nil }); err != nil {
+		t.Fatalf("follow stopped before its first read = %v, want nil", err)
+	}
+}
+
 func TestANewChannelCountsTheBatchItWasHolding(t *testing.T) {
 	st, _ := newStore(t)
 	batchWindow = time.Hour
