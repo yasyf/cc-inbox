@@ -91,6 +91,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A channel tag carries the rest of a record addressed to its reader under its
+  line when that rest fits 2,000 bytes, whoever the reader is, as it already
+  did for a root reader. A drive's communicator, which may not run the `read`
+  tool in its own turn, got a handler's `done` line cut at 400 characters and
+  never its last clause, such as the `DEFECT` the handler found; that tag now
+  ends with the whole text. A broadcast that does not name the reader still
+  arrives as its cut line.
 - A session busy in a tool call longer than 30 seconds no longer reads as
   deaf to its cci channel. Claude Code shows a tag it queued at the session's
   next tool round, and Claude Code 2.1.319 to 2.1.322 write no tag on the line
