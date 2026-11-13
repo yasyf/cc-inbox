@@ -92,6 +92,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `close` tool with `how: withdraw` takes back a record that opens nothing,
+  such as a lane's own `report`, instead of refusing it with `it is a report
+  from root, which opens nothing to resolve`. `cci post --kind withdraw
+  --resolves <seq>`, which the tool runs, posts the withdrawal `--re` each such
+  record, as `--kind withdraw --re <seq>` does, and still resolves each `ask`,
+  `decide`, `blocker` or other opener it names.
 - `cci session register`, `cci session attach`, a supervised session's restart
   and the daemon's start no longer exit 1 after starting a registered session's
   tmux session. The `set-option -a update-environment ORCA_TERMINAL_HANDLE`

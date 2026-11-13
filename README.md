@@ -652,7 +652,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `blocker` | None | Open until `withdraw`, `answer`, or `done` with `--re` or the same `--topic`. |
 | `blocked` | None | A stack or target cannot deploy. Open until `unblock` with `--re` or the same `--topic`, or an explicit resolver. |
 | `unblock` | None | Closes a matching `blocked`; requires `--re`, `--topic`, or `--resolves`. |
-| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`, and `withdraw` also `disconnect`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record using `--re`, which must name a record of the withdrawal's own drive. |
+| `answer`, `withdraw` | None | Close `ask`, `decide`, or `blocker`, and `withdraw` also `disconnect`; require `--re`, `--topic`, or `--resolves`. A withdrawal can also retract another kind of record named by `--re` or `--resolves`, which must name a record of the withdrawal's own drive. |
 | `go` | None | Closes a matching `ask` or `decide`. |
 | `hold` | None | Open until `lift`. It holds exactly the PRs its `--pr` names, and its text is prose; a hold whose text or topic names `#<number>` with no `--pr` at all is refused, so guards that read pull request refs see the hold, and a hold with `--pr` whose text names other pull requests posts with a line listing them as not held. |
 | `lift` | None | Closes `hold`; its `--re` or `--resolves` must name an open hold, and a lift that names none is refused with the open holds on its `--pr` and on the pull requests of the records it named. |
