@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A channel tag carries the rest of a record addressed to its reader under its
+  line when that rest fits 2,000 bytes, whoever the reader is, as it already
+  did for a root reader. A drive's communicator, which may not run the `read`
+  tool in its own turn, got a handler's `done` line cut at 400 characters and
+  never its last clause, such as the `DEFECT` the handler found; that tag now
+  ends with the whole text. A broadcast that does not name the reader still
+  arrives as its cut line.
 - The `close` tool with `how: withdraw` takes back a record that opens nothing,
   such as a lane's own `report`, instead of refusing it with `it is a report
   from root, which opens nothing to resolve`. `cci post --kind withdraw

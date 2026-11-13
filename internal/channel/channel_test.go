@@ -876,30 +876,34 @@ func TestACutSingleTagPointsAtTheReadToolInsteadOfAPath(t *testing.T) {
 	}
 }
 
-func TestARootGetsARecordAddressedToItWholeWhenItsRestFits(t *testing.T) {
-	st, _ := newStore(t)
-	idle, interval = 10*time.Millisecond, 5*time.Millisecond
-	fits, fitsPath, err := st.Fit(strings.Repeat("fits ", 200) + "end-of-fit")
-	if err != nil {
-		t.Fatal(err)
-	}
-	big, bigPath, err := st.Fit(strings.Repeat("big ", 1000) + "end-of-big")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sub, err := st.Subscribe(context.Background(), store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Cursor: "root-channel"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	tags, stop := following(t, st, sub)
-	defer stop()
-	whole := testutil.Post(t, st, store.Record{Lane: "fixer", Kind: kinds.Ask, To: []string{"root@d"}, Text: fits, Refs: store.Refs{Path: fitsPath}})
-	cut := testutil.Post(t, st, store.Record{Lane: "fixer", Kind: kinds.Ask, To: []string{"root"}, Text: big, Refs: store.Refs{Path: bigPath}})
-	if tag := nextTag(t, tags); tag.meta["seq"] != fmt.Sprint(whole.Seq) || !strings.HasSuffix(tag.content, "end-of-fit") {
-		t.Fatalf("tag = %q, want #%d with the rest of its text under its line", tag.content, whole.Seq)
-	}
-	if tag := nextTag(t, tags); tag.meta["seq"] != fmt.Sprint(cut.Seq) || strings.Contains(tag.content, "end-of-big") {
-		t.Fatalf("tag = %q, want #%d cut, since its rest runs past 2,000 bytes", tag.content, cut.Seq)
+func TestEveryReaderGetsARecordAddressedToItWholeWhenItsRestFits(t *testing.T) {
+	for _, reader := range []string{"root", "communicator"} {
+		t.Run(reader, func(t *testing.T) {
+			st, _ := newStore(t)
+			idle, interval = 10*time.Millisecond, 5*time.Millisecond
+			fits, fitsPath, err := st.Fit(strings.Repeat("fits ", 200) + "end-of-fit")
+			if err != nil {
+				t.Fatal(err)
+			}
+			big, bigPath, err := st.Fit(strings.Repeat("big ", 1000) + "end-of-big")
+			if err != nil {
+				t.Fatal(err)
+			}
+			sub, err := st.Subscribe(context.Background(), store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: reader, Cursor: reader + "-channel"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tags, stop := following(t, st, sub)
+			defer stop()
+			whole := testutil.Post(t, st, store.Record{Lane: "fixer", Kind: kinds.Ask, To: []string{reader + "@d"}, Text: fits, Refs: store.Refs{Path: fitsPath}})
+			cut := testutil.Post(t, st, store.Record{Lane: "fixer", Kind: kinds.Ask, To: []string{reader}, Text: big, Refs: store.Refs{Path: bigPath}})
+			if tag := nextTag(t, tags); tag.meta["seq"] != fmt.Sprint(whole.Seq) || !strings.HasSuffix(tag.content, "end-of-fit") {
+				t.Fatalf("tag = %q, want #%d with the rest of its text under its line", tag.content, whole.Seq)
+			}
+			if tag := nextTag(t, tags); tag.meta["seq"] != fmt.Sprint(cut.Seq) || strings.Contains(tag.content, "end-of-big") {
+				t.Fatalf("tag = %q, want #%d cut, since its rest runs past 2,000 bytes", tag.content, cut.Seq)
+			}
+		})
 	}
 }
 
