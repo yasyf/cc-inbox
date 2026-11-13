@@ -1356,7 +1356,7 @@ func TestARegisteredSessionWhoseClaudeCodeExitedStartsAgainInTmux(t *testing.T) 
 	if len(posted) != 1 || !slices.Equal(posted[0].To, []string{"meta"}) || posted[0].Text != "root's Claude Code exited in window 4242 (session s1); cci session run starts it again in tmux session release-demo-coordinator" {
 		t.Fatalf("disconnects = %+v, want one to meta saying tmux starts it again", posted)
 	}
-	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\nnew-session -d -s release-demo-coordinator -c "+r.Cwd+" -- /bin/sh -l -c exec cci session run release-demo-coordinator ; set-option -a -t =release-demo-coordinator update-environment ORCA_TERMINAL_HANDLE\n"; got != want {
+	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\nnew-session -d -s release-demo-coordinator -c "+r.Cwd+" -- /bin/sh -l -c exec cci session run release-demo-coordinator ; set-option -a -t =release-demo-coordinator: update-environment ORCA_TERMINAL_HANDLE\n"; got != want {
 		t.Fatalf("tmux was called with %q, want %q", got, want)
 	}
 }

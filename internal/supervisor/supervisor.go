@@ -32,7 +32,7 @@ func Launch(ctx context.Context, r store.Registration) (bool, error) {
 	if err != nil || up {
 		return false, err
 	}
-	if _, err := tmux(ctx, r, "new-session", "-d", "-s", r.Alias, "-c", r.Cwd, "--", r.Shell, "-l", "-c", "exec cci session run "+r.Alias, ";", "set-option", "-a", "-t", "="+r.Alias, "update-environment", orcaTerminal); err != nil {
+	if _, err := tmux(ctx, r, "new-session", "-d", "-s", r.Alias, "-c", r.Cwd, "--", r.Shell, "-l", "-c", "exec cci session run "+r.Alias, ";", "set-option", "-a", "-t", pane(r), "update-environment", orcaTerminal); err != nil {
 		return false, err
 	}
 	return true, nil
@@ -49,12 +49,15 @@ func Up(ctx context.Context, r store.Registration) (bool, error) {
 
 // Type types line at the prompt of r's tmux session and presses Enter.
 func Type(ctx context.Context, r store.Registration, line string) error {
-	pane := "=" + r.Alias + ":"
-	if _, err := tmux(ctx, r, "send-keys", "-t", pane, "-l", line); err != nil {
+	if _, err := tmux(ctx, r, "send-keys", "-t", pane(r), "-l", line); err != nil {
 		return err
 	}
-	_, err := tmux(ctx, r, "send-keys", "-t", pane, "Enter")
+	_, err := tmux(ctx, r, "send-keys", "-t", pane(r), "Enter")
 	return err
+}
+
+func pane(r store.Registration) string {
+	return "=" + r.Alias + ":"
 }
 
 // Keep launches the tmux session of each registered session that runs in no
