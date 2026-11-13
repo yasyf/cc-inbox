@@ -169,3 +169,68 @@ func TestAFollowedDriveDeliversOnlyItsBroadcastsOfTheFollowedKinds(t *testing.T)
 		})
 	}
 }
+
+func everyDriveCorpus() []timed {
+	return []timed{
+		{0, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"communicator"}, Text: "home bare"}},
+		{0, store.Record{Drive: "ssql", Lane: "root", Kind: kinds.Note, To: []string{"communicator@ssql"}, Text: "ssql addressed"}},
+		{0, store.Record{Drive: "agents", Lane: "root", Kind: kinds.Note, To: []string{"communicator"}, Text: "agents bare"}},
+		{0, store.Record{Drive: "agents", Lane: "root", Kind: kinds.Note, To: []string{"meta@agents"}, Text: "agents to meta"}},
+		{0, store.Record{Drive: "agents", Lane: "root", Kind: kinds.Note, Text: "agents broadcast"}},
+		{0, store.Record{Drive: "x", Lane: "root", Kind: kinds.Note, To: []string{"communicator-old@x", "communicatorA@x"}, Text: "lanes sharing the name's start"}},
+		{0, store.Record{Drive: "ssql", Lane: "root", Kind: kinds.Note, To: []string{"communicator@agents"}, Text: "agents addressed from ssql"}},
+	}
+}
+
+func TestAnEveryDriveReaderHearsItsAddressInEveryDrive(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		filter store.Filter
+		want   []string
+	}{
+		{
+			name:   "every drive",
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "communicator", EveryDrive: true}.Filter(),
+			want:   []string{"home bare", "ssql addressed", "agents bare", "agents addressed from ssql"},
+		},
+		{
+			name:   "its own drive",
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "communicator"}.Filter(),
+			want:   []string{"home bare"},
+		},
+		{
+			name:   "batched",
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "communicator", EveryDrive: true, Batch: []kinds.Kind{kinds.Note}}.BatchFilter(),
+			want:   []string{"home bare", "ssql addressed", "agents bare", "agents addressed from ssql"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := delivered(t, tc.filter, everyDriveCorpus()); !slices.Equal(got, tc.want) {
+				t.Fatalf("delivered %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnEveryDriveReaderWakesOnAnotherDrivesRecord(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := context.Background()
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, To: []string{"meta"}, Text: "not ours"})
+	want := testutil.Post(t, st, store.Record{Drive: "ssql", Lane: "root", Kind: kinds.Note, To: []string{"communicator@ssql"}, Text: "ours"})
+	every := store.Subscription{Drive: "d", Session: "s1", Reader: "communicator", EveryDrive: true}.Filter()
+	home := store.Subscription{Drive: "d", Session: "s1", Reader: "communicator"}.Filter()
+	matches, err := st.FirstMatches(ctx, []store.Filter{every, home}, want.Seq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if matches[0].Seq != want.Seq || matches[1].Seq != 0 {
+		t.Fatalf("first matches = %d, %d; want %d for the every-drive reader and none for the home reader", matches[0].Seq, matches[1].Seq, want.Seq)
+	}
+	n, err := st.Count(ctx, store.Filter{Drive: "d", EveryDrive: true, Addressed: "communicator"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("count = %d, want 1", n)
+	}
+}

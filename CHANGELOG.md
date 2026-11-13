@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci subscribe --every-drive` and `cci session register --every-drive`
+  deliver the records addressed to `--reader` in every drive, bare or as
+  `<reader>@<drive>`, not only `--drive`'s, and name each line's sender with
+  its drive, as `root@ssql-duckdb`. `--drive` still holds the cursor, the lane
+  and the `disconnect` records. One session serving every drive on a machine,
+  such as one communicator for its owner's DM, reads all of them through one
+  subscription.
+
 - A channel whose session stops hearing it, a tag its transcript does not show
   received 30 seconds after it went out while the transcript showed no other,
   posts a `disconnect` and, for a registered session, types

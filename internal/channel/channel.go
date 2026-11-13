@@ -390,7 +390,7 @@ func startLive(ctx context.Context, st *store.Store, sub store.Subscription, cha
 	if sub.Alias != "" {
 		return replay(ctx, st, sub, channeled, from, head, l, notify)
 	}
-	n, err := st.Count(ctx, store.Filter{Drive: sub.Drive, Addressed: sub.Reader, Peer: sub.Session, Mute: slices.Concat(sub.Mute, sub.Batch), After: from, Before: head + 1})
+	n, err := st.Count(ctx, store.Filter{Drive: sub.Drive, EveryDrive: sub.EveryDrive, Addressed: sub.Reader, Peer: sub.Session, Mute: slices.Concat(sub.Mute, sub.Batch), After: from, Before: head + 1})
 	if err != nil {
 		return err
 	}
@@ -461,7 +461,11 @@ func replay(ctx context.Context, st *store.Store, sub store.Subscription, channe
 	owner := slices.DeleteFunc(slices.Clone(missed), func(r store.Record) bool { return r.Kind != kinds.Owner })
 	rest := slices.DeleteFunc(missed, func(r store.Record) bool { return r.Kind == kinds.Owner })
 	for i, r := range owner {
-		content, err := tagContent((&render.Wire{Now: st.Now()}).Line(r, 0), r, sub.Reader)
+		shown := r
+		if sub.EveryDrive {
+			shown = render.OnDrive(r)
+		}
+		content, err := tagContent((&render.Wire{Now: st.Now()}).Line(shown, 0), r, sub.Reader)
 		if err != nil {
 			return err
 		}
@@ -478,7 +482,7 @@ func replay(ctx context.Context, st *store.Store, sub store.Subscription, channe
 		return nil
 	}
 	last := rest[len(rest)-1].Seq
-	content := batchContent(rest, st.Now(), func(more int, since int64) string {
+	content := batchContent(rest, st.Now(), sub.EveryDrive, func(more int, since int64) string {
 		return fmt.Sprintf("+%d more; cci tail --reader %s --since %d reads them", more, sub.Reader, since)
 	})
 	l.owe(tag{kind: batchKind, seq: last}, through)
@@ -531,7 +535,7 @@ func (b *batch) flush(ctx context.Context) error {
 	for j, k := range f.Kinds {
 		names[j] = string(k)
 	}
-	content := batchContent(records, b.st.Now(), func(more int, since int64) string {
+	content := batchContent(records, b.st.Now(), f.EveryDrive, func(more int, since int64) string {
 		return fmt.Sprintf("+%d more; cci tail --to %s --kind %s --since %d reads them", more, f.Addressed, strings.Join(names, ","), since)
 	})
 	last := records[len(records)-1].Seq
@@ -543,7 +547,7 @@ func (b *batch) flush(ctx context.Context) error {
 	return nil
 }
 
-func batchContent(records []store.Record, now time.Time, rest func(more int, since int64) string) string {
+func batchContent(records []store.Record, now time.Time, drives bool, rest func(more int, since int64) string) string {
 	kept := newest(records)
 	wire := render.Wire{Now: now}
 	var content strings.Builder
@@ -551,6 +555,9 @@ func batchContent(records []store.Record, now time.Time, rest func(more int, sin
 	for i, r := range kept {
 		line := r
 		line.To = nil
+		if drives {
+			line = render.OnDrive(line)
+		}
 		if !budget.Line(render.WithBody(wire.Line(line, 0), r)) {
 			budget.Trailer(rest(len(kept)-i, kept[i].Seq-1))
 			break
@@ -613,7 +620,7 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 	defer held.tick.Stop()
 	batched := make(chan error, 1)
 	go func() { batched <- held.run(watchCtx, stop) }()
-	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: f, Positioned: true, Interval: interval, Compact: true}, func(r store.Record, line string) error {
+	err = inbox.Watch(watchCtx, st, inbox.WatchOptions{Filter: f, Positioned: true, Interval: interval, Compact: true, Drives: sub.EveryDrive}, func(r store.Record, line string) error {
 		now, ok, err := st.Subscription(watchCtx, sub.Window)
 		if err != nil {
 			return err

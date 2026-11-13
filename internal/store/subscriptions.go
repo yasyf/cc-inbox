@@ -28,6 +28,7 @@ type Subscription struct {
 	Window     Window       `json:"window"`
 	Drive      string       `json:"drive"`
 	Follow     []Follow     `json:"follow,omitempty"`
+	EveryDrive bool         `json:"every_drive,omitempty"`
 	Reader     string       `json:"reader"`
 	Kinds      []kinds.Kind `json:"kinds"`
 	Mute       []kinds.Kind `json:"mute,omitempty"`
@@ -60,7 +61,7 @@ func DefaultBatch(reader string) []kinds.Kind {
 }
 
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.held(), ToKinds: s.ToKinds, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
+	return Filter{Drive: s.Drive, Follow: s.Follow, EveryDrive: s.EveryDrive, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.held(), ToKinds: s.ToKinds, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
 }
 
 func (s Subscription) held() []kinds.Kind {
@@ -71,7 +72,7 @@ func (s Subscription) held() []kinds.Kind {
 // the records addressed to the reader of a batch kind, whether addressed as
 // the lane or as <reader>@<drive>.
 func (s Subscription) BatchFilter() Filter {
-	return Filter{Drive: s.Drive, Addressed: s.Reader, Kinds: s.Batch, ToKinds: s.Batch, Mute: s.Mute}
+	return Filter{Drive: s.Drive, EveryDrive: s.EveryDrive, Addressed: s.Reader, Kinds: s.Batch, ToKinds: s.Batch, Mute: s.Mute}
 }
 
 func (s Subscription) BatchCursor() string {

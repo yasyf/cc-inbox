@@ -31,6 +31,8 @@ const (
 type Filter struct {
 	Drive          string
 	Follow         []Follow
+	EveryDrive     bool
+	readerDrives   []string
 	Origin         string
 	Peer           string
 	Kinds          []kinds.Kind
@@ -73,7 +75,9 @@ type Filter struct {
 
 // where renders the filter. Records in the drive pass the selectors;
 // <reader>@<Drive> records, and peer:<Peer> records past PeerAfter, pass
-// whatever drive they sit in; broadcasts of a Follow's kinds pass from its drive.
+// whatever drive they sit in; with EveryDrive, so do records addressed to the
+// reader bare or as <reader>@<any drive>; broadcasts of a Follow's kinds pass
+// from its drive.
 func (f Filter) where(self string, now time.Time) (string, []any) {
 	scoped := []string{"drive = ?"}
 	params := []any{f.Drive}
@@ -382,12 +386,48 @@ func (f Filter) peerAddresses(self string) []any {
 func (f Filter) readerAddresses() []any {
 	var out []any
 	reader := cmp.Or(f.To, f.For, f.Addressed)
-	if reader != "" && f.Drive != "" {
-		for _, n := range f.addressees(reader) {
-			out = append(out, n.(string)+"@"+f.Drive)
+	if reader == "" || f.Drive == "" {
+		return out
+	}
+	drives := []string{f.Drive}
+	if f.EveryDrive {
+		drives = slices.Compact(slices.Sorted(slices.Values(append(drives, f.readerDrives...))))
+	}
+	for _, n := range f.addressees(reader) {
+		if f.EveryDrive {
+			out = append(out, n)
+		}
+		for _, drive := range drives {
+			out = append(out, n.(string)+"@"+drive)
 		}
 	}
 	return out
+}
+
+func addressedDrives(ctx context.Context, q rowsQuerier, names []any) ([]string, error) {
+	var drives []string
+	for _, name := range names {
+		prefix := name.(string) + "@"
+		rows, err := q.QueryContext(ctx, `WITH RECURSIVE named(address) AS (
+SELECT (SELECT MIN(address) FROM record_recipients WHERE address > ?1 AND address < ?2)
+UNION ALL SELECT (SELECT MIN(address) FROM record_recipients WHERE address > named.address AND address < ?2) FROM named WHERE named.address IS NOT NULL
+) SELECT address FROM named WHERE address IS NOT NULL`, prefix, name.(string)+"A")
+		if err != nil {
+			return nil, fmt.Errorf("read the drives addressing %s: %w", name, err)
+		}
+		for rows.Next() {
+			var address string
+			if err := rows.Scan(&address); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			drives = append(drives, strings.TrimPrefix(address, prefix))
+		}
+		if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+			return nil, err
+		}
+	}
+	return drives, nil
 }
 
 // PeerAddress is the recipient form that reaches one session thread in any drive.
@@ -461,8 +501,16 @@ func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 	if reader == "" || f.Drive == "" {
 		return f, nil
 	}
-	if f.Aliases, err = s.readerAliases(ctx, f, reader); err != nil || !f.AliasFloor || len(f.Aliases) == 0 {
+	if f.Aliases, err = s.readerAliases(ctx, f, reader); err != nil {
 		return f, err
+	}
+	if f.EveryDrive {
+		if f.readerDrives, err = addressedDrives(ctx, s.db, f.addressees(reader)); err != nil {
+			return f, err
+		}
+	}
+	if !f.AliasFloor || len(f.Aliases) == 0 {
+		return f, nil
 	}
 	f.aliasSince, f.aliasOrders, err = s.aliasMailSince(ctx, f.Drive, reader)
 	return f, err

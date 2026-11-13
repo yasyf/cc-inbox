@@ -26,6 +26,7 @@ type WatchOptions struct {
 	Width      int
 	JSON       bool
 	Compact    bool
+	Drives     bool
 }
 
 // Watch emits each record opts.Filter passes as it commits. With a feed on st
@@ -179,7 +180,7 @@ func (w *watcher) page(ctx context.Context) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	rendered, _, err := lines(ctx, w.st, records, view{JSON: w.opts.JSON, Compact: w.opts.Compact, Width: w.opts.Width, Unnamed: f.For != "" || f.To != ""})
+	rendered, _, err := lines(ctx, w.st, records, view{JSON: w.opts.JSON, Compact: w.opts.Compact, Width: w.opts.Width, Unnamed: f.For != "" || f.To != "", Drives: w.opts.Drives})
 	if ctx.Err() != nil {
 		return 0, errWatchStopped
 	}

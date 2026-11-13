@@ -49,12 +49,24 @@ func header(r store.Record, now time.Time) string {
 
 func sender(r store.Record) string {
 	lane := cmp.Or(r.Stem, r.Lane)
+	if strings.Contains(lane, "@") {
+		return lane
+	}
 	for _, to := range r.To {
 		if _, drive, cross := strings.Cut(to, "@"); cross && drive != r.Drive {
 			return lane + "@" + r.Drive
 		}
 	}
 	return lane
+}
+
+// OnDrive names the sender of r with r's drive, as a reader of every drive
+// reads it: <lane>@<drive>.
+func OnDrive(r store.Record) store.Record {
+	if r.Stem = sender(r); !strings.Contains(r.Stem, "@") {
+		r.Stem += "@" + r.Drive
+	}
+	return r
 }
 
 func rest(r store.Record, brief, elide bool) string {

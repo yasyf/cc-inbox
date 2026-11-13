@@ -47,6 +47,18 @@ func TestASenderFromAnotherDriveCarriesItsDrive(t *testing.T) {
 	}
 }
 
+func TestOnDriveNamesEverySenderWithItsDriveOnce(t *testing.T) {
+	at := time.Date(2026, 11, 13, 9, 0, 0, 0, pacific.Zone)
+	own := store.Record{Seq: 7, Drive: "ssql-duckdb", Lane: "root", Kind: "note", At: at, Text: "Card is up."}
+	if got, want := render.Compact(render.OnDrive(own), 0), "7 note root@ssql-duckdb Card is up."; got != want {
+		t.Errorf("Compact = %q\nwant      %q", got, want)
+	}
+	crossing := store.Record{Seq: 8, Drive: "other", Lane: "root", Kind: "note", At: at, To: []string{"communicator@ssql-duckdb"}, Text: "Ours."}
+	if got, want := render.Compact(render.OnDrive(crossing), 0), "8 note root@other>communicator@ssql-duckdb Ours."; got != want {
+		t.Errorf("Compact of a record leaving its drive = %q\nwant      %q", got, want)
+	}
+}
+
 func TestEveryLineOfARecordCarriesItsAttrsButTheBinder(t *testing.T) {
 	at := time.Date(2026, 11, 10, 12, 57, 0, 0, pacific.Zone)
 	r := store.Record{

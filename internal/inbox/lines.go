@@ -98,6 +98,7 @@ type view struct {
 	Fold    int
 	Now     time.Time
 	Unnamed bool
+	Drives  bool
 }
 
 func lines(ctx context.Context, st *store.Store, records []store.Record, v view) ([]string, []bool, error) {
@@ -144,6 +145,9 @@ func textLines(records []store.Record, replies map[int64][]store.Record, v view,
 		shown := r
 		if v.Unnamed || v.Compact && v.Reader != "" {
 			shown.To = nil
+		}
+		if v.Drives {
+			shown = render.OnDrive(shown)
 		}
 		if v.Compact {
 			width := compactWidth(r, v)

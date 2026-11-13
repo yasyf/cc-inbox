@@ -30,6 +30,7 @@ type subscriptionFlags struct {
 	batch  []string
 	topic  []string
 	follow []string
+	every  bool
 }
 
 func (f *subscriptionFlags) bind(cmd *cobra.Command, cursorHelp string) {
@@ -41,6 +42,7 @@ func (f *subscriptionFlags) bind(cmd *cobra.Command, cursorHelp string) {
 	cmd.Flags().StringSliceVar(&f.batch, "batch-kinds", nil, "deliver records addressed to --reader of these kinds together, one tag at most every five minutes, never on arrival (repeatable; default for root: "+kindList(store.DefaultBatch("root"))+", otherwise none)")
 	cmd.Flags().StringSliceVar(&f.topic, "topic-kinds", nil, "also deliver records of these kinds, whoever they are addressed to, on any topic a record addressed to --reader has carried (repeatable)")
 	cmd.Flags().StringArrayVar(&f.follow, "follow", nil, "also deliver another drive's broadcasts of these kinds, as <drive>=<kind>[,<kind>...], e.g. oncall=incident (repeatable)")
+	cmd.Flags().BoolVar(&f.every, "every-drive", false, "also deliver records addressed to --reader in every other drive, bare or as <reader>@<drive>, each line naming its drive; --drive still holds the cursor and the lane")
 	cmd.Flags().StringVar(&f.cursor, "cursor", "", cursorHelp)
 	_ = cmd.MarkFlagRequired("reader")
 }
@@ -50,7 +52,7 @@ func (f *subscriptionFlags) subscription(ctx context.Context, st *store.Store, s
 	if err != nil {
 		return store.Subscription{}, err
 	}
-	sub := store.Subscription{Session: session, Window: window, Drive: d, Reader: f.reader, Cursor: cmp.Or(f.cursor, cursor)}
+	sub := store.Subscription{Session: session, Window: window, Drive: d, EveryDrive: f.every, Reader: f.reader, Cursor: cmp.Or(f.cursor, cursor)}
 	if sub.Kinds, err = kinds.ParseAll(f.kinds); err != nil {
 		return store.Subscription{}, err
 	}
@@ -329,7 +331,11 @@ func describe(sub store.Subscription) string {
 	for i, f := range sub.Follow {
 		followed[i] = f.Drive + "=" + kindList(f.Kinds)
 	}
-	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, batched %s, topic kinds %s, followed %s, urgent repeats held %s", sub.Drive, sub.Reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), kindList(sub.Batch), kindList(sub.TopicKinds), cmp.Or(strings.Join(followed, " "), "none"), store.UrgentRepeat)
+	reader := sub.Reader
+	if sub.EveryDrive {
+		reader += " in every drive"
+	}
+	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, batched %s, topic kinds %s, followed %s, urgent repeats held %s", sub.Drive, reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), kindList(sub.Batch), kindList(sub.TopicKinds), cmp.Or(strings.Join(followed, " "), "none"), store.UrgentRepeat)
 }
 
 func addressedList(ks []kinds.Kind) string {

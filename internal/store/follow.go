@@ -171,6 +171,15 @@ func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) 
 				continue
 			}
 		}
+		if f.EveryDrive && reader != "" && f.Drive != "" {
+			if f.readerDrives, err = addressedDrives(ctx, tx, f.addressees(reader)); err != nil {
+				if ctx.Err() != nil {
+					return nil, ctx.Err()
+				}
+				out[i].Seq = f.After + 1
+				continue
+			}
+		}
 		out[i].Aliases = f.Aliases
 		if m := s.reads.model.Load(); m != nil {
 			if seq, ok := m.first(ctx, s, f, now); ok {

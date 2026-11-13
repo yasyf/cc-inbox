@@ -117,6 +117,40 @@ func TestReadModelMatchesTheStore(t *testing.T) {
 	}
 }
 
+func TestReadModelMatchesTheStoreForAnEveryDriveReader(t *testing.T) {
+	st, _ := testutil.Store(t)
+	readModelFixture(t, st)
+	testutil.Post(t, st, store.Record{Drive: "f", Lane: "root", Kind: kinds.Note, Text: "on its own drive", To: []string{"worker@f"}})
+	testutil.Post(t, st, store.Record{Drive: "g", Lane: "root", Kind: kinds.Decide, Text: "bare in another drive", To: []string{"worker"}})
+	testutil.Post(t, st, store.Record{Drive: "g", Lane: "root", Kind: kinds.Note, Text: "to another lane", To: []string{"other@g"}})
+	model, err := st.BuildReadModel(t.Context(), noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	for _, f := range []store.Filter{
+		{Drive: "d", For: "worker", EveryDrive: true},
+		{Drive: "d", Addressed: "worker", EveryDrive: true},
+		{Drive: "d", For: "worker", EveryDrive: true, ToKinds: []kinds.Kind{kinds.Decide}},
+	} {
+		got, answered, err := model.Answer(t.Context(), st, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !answered {
+			t.Fatal("the model did not answer")
+		}
+		want, err := st.Query(t.Context(), f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sameRecords(t, got, want)
+		if !slices.ContainsFunc(want, func(r store.Record) bool { return r.Drive == "g" }) {
+			t.Fatalf("%+v selected no record from drive g: %+v", f, want)
+		}
+	}
+}
+
 func TestReadModelSkipsWhatASeedBackfilledAfterALaneBound(t *testing.T) {
 	st, clock := testutil.Store(t)
 	ctx := t.Context()
