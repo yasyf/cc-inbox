@@ -92,7 +92,7 @@ func TestRootAudienceCandidateEmissions(t *testing.T) {
 					t.Fatal(err)
 				}
 				var objects int
-				if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('record_root_audience','record_root_audience_stream','record_root_audience_kind_stream','record_root_audience_insert','record_root_audience_update','record_root_audience_delete')").Scan(&objects); err != nil {
+				if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ('record_root_audience_v2','record_root_audience_v2_stream','record_root_audience_v2_kind_stream','record_root_audience_v2_insert','record_root_audience_v2_update','record_root_audience_v2_delete')").Scan(&objects); err != nil {
 					t.Fatal(err)
 				}
 				optimized := os.Getenv("CCI_ROOT_AUDIENCE_OPTIMIZED") == "1"

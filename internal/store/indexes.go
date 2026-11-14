@@ -47,6 +47,14 @@ type physicalObject struct {
 	kind, name, sql, fill string
 }
 
+var retiredObjects = [...]physicalObject{
+	{kind: "trigger", name: "record_root_audience_insert"},
+	{kind: "trigger", name: "record_root_audience_update"},
+	{kind: "trigger", name: "record_root_audience_delete"},
+	{kind: "index", name: "record_root_audience_parent"},
+	{kind: "table", name: "record_root_audience"},
+}
+
 var recordMemberships = [...]physicalObject{
 	{
 		"table",
@@ -142,6 +150,9 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	}
 	report.Before, err = s.indexStorageStats(ctx)
 	if err != nil {
+		return report, err
+	}
+	if err := s.dropRetiredObjects(ctx); err != nil {
 		return report, err
 	}
 	missing, err := missingPhysicalIndexes(ctx, s.db)
@@ -245,6 +256,34 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	}
 	report.Elapsed = time.Since(started)
 	return report, nil
+}
+
+func (s *Store) dropRetiredObjects(ctx context.Context) error {
+	names := make([]any, len(retiredObjects))
+	for i, object := range retiredObjects {
+		names[i] = object.name
+	}
+	var found bool
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE name IN ("+placeholders(len(names))+"))", names...).Scan(&found); err != nil {
+		return fmt.Errorf("look for retired objects: %w", err)
+	}
+	if !found {
+		return nil
+	}
+	tx, err := s.rw.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin dropping retired objects: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, object := range retiredObjects {
+		if _, err := tx.ExecContext(ctx, "DROP "+object.kind+" IF EXISTS "+object.name); err != nil {
+			return fmt.Errorf("drop retired %s %s: %w", object.kind, object.name, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit dropping retired objects: %w", err)
+	}
+	return nil
 }
 
 func lockMaintenance(home string) (*os.File, error) {
