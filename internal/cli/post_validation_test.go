@@ -99,6 +99,23 @@ func TestPostValidArgumentsCreateStore(t *testing.T) {
 	}
 }
 
+func TestPostRefusesARecipientNamingItsDriveTwiceBeforeWritingAnyRecord(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CODEX_THREAD_ID", "")
+	const want = `recipient "root@d@d" is not <lane>@<drive>`
+	if out, err := run(t, "post", "--drive", "d", "--lane", "meta", "--kind", "note", "--to", "root@d@d", "--text", "his ruling"); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("post --to root@d@d = %q, %v; want %s", out, err, want)
+	}
+	records := []map[string]any{{"text": "his ruling", "to": []string{"root@d"}}, {"text": "his ruling", "to": []string{"root@d@d"}}}
+	if text, isErr := callTool(t, "post", map[string]any{"drive": "d", "lane": "meta", "kind": "note", "records": records}); !isErr || !strings.Contains(text, want) {
+		t.Errorf("post tool with root@d@d = %q, %v; want %s", text, isErr, want)
+	}
+	if out, err := run(t, "post", "--drive", "d", "--lane", "meta", "--kind", "note", "--to", "root@d", "--text", "his ruling"); err != nil || out != "#1\n" {
+		t.Errorf("post --to root@d = %q, %v; want #1, the first record stored", out, err)
+	}
+}
+
 func TestPostTakesKindsAsReadersPrintThem(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	for kind, want := range map[string]string{"DECIDE": `"kind":"decide"`, "status": `"kind":"state"`} {

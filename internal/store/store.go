@@ -832,7 +832,7 @@ func Validate(r Record) error {
 		}
 	}
 	for _, to := range r.To {
-		if lane, drive, ok := strings.Cut(to, "@"); ok && (lane == "" || drive == "") {
+		if lane, drive, ok := strings.Cut(to, "@"); ok && (lane == "" || drive == "" || strings.Contains(drive, "@")) {
 			return fmt.Errorf("recipient %q is not <lane>@<drive>", to)
 		}
 	}
