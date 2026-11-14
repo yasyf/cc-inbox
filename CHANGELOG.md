@@ -562,6 +562,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- A reply reaches only the lanes its `--to` names. `--reader`, a session's
+  channel, the MCP `inbox` tool and `cci tail`'s addressed-first page no longer
+  also deliver a record that answers one of the reader's own records but names
+  other lanes, such as root's `owner` record to `iris` with `--re` on the
+  communicator's record, which reached the communicator too. A reply posted with
+  no `--to` still reaches the writer of the record it answers, since `cci post`
+  addresses it there.
+
 - No clock in a post's text refuses it any more. A leading `H:MM AM/PM` label
   off the post's own clock is replaced with that time and a one-line hint on
   stderr, and any other clock is stored as typed without a future check.

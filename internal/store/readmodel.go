@@ -159,7 +159,6 @@ type ReadModel struct {
 
 	window      modelWindow
 	builtBytes  int64
-	unnamed     []int64
 	mu          sync.RWMutex
 	head        int64
 	mutations   int64
@@ -474,9 +473,6 @@ func (m *ReadModel) catchUpBatch(ctx context.Context) (bool, error) {
 	if err := rows.Err(); err != nil {
 		return false, fmt.Errorf("read records for the read model: %w", err)
 	}
-	if err := m.nameReplyTargets(ctx, snapshot); err != nil {
-		return false, err
-	}
 	return copied == readModelBatch, nil
 }
 
@@ -571,11 +567,6 @@ func (m *ReadModel) ingest(rows *sql.Rows) error {
 	}
 	if row.wrong {
 		m.wrong = append(m.wrong, index)
-	}
-	if row.re != 0 && row.re < m.window.floor {
-		if _, held := m.window.replyLanes[row.re]; !held {
-			m.unnamed = append(m.unnamed, row.re)
-		}
 	}
 	m.indexClosure(&row, kind, refs, also, index)
 	m.held.Store(m.bytes)
@@ -1320,19 +1311,11 @@ func anyOf(values, names []string) bool {
 	return false
 }
 
-func (sel *modelSelection) addressedTo(v *modelView, names []string) bool {
-	if anyOf(v.addressees.to, names) {
-		return true
+func (sel *modelSelection) recipient(v *modelView, names []string) bool {
+	if sel.f.aliasSince == 0 || len(names) < 2 {
+		return anyOf(v.addressees.to, names)
 	}
-	if v.row.re == 0 {
-		return false
-	}
-	own := sel.m.rowOf(v.row.re)
-	if own == nil {
-		lane, held := sel.m.window.replyLanes[v.row.re]
-		return held && slices.Contains(names, lane) && v.lane != lane
-	}
-	return slices.Contains(names, sel.m.strs[own.lane]) && v.row.lane != own.lane
+	return anyOf(v.addressees.to, names[:1]) || sel.fresh(v) && anyOf(v.addressees.to, names[1:])
 }
 
 func (sel *modelSelection) fresh(v *modelView) bool {
@@ -1345,7 +1328,7 @@ func (sel *modelSelection) scoped(v *modelView) bool {
 		return false
 	}
 	if f.For != "" {
-		addressed := sel.addressedTo(v, sel.forNames) && sel.addressedKinds(v)
+		addressed := anyOf(v.addressees.to, sel.forNames) && sel.addressedKinds(v)
 		broadcast := (v.addressees.raw == "[]" || v.addressees.all) &&
 			!slices.Contains(sel.forNames, v.lane) && !slices.Contains(sel.forHooks, v.source) && sel.selectors(v)
 		if !addressed && !broadcast {
@@ -1354,31 +1337,18 @@ func (sel *modelSelection) scoped(v *modelView) bool {
 	} else if !sel.selectors(v) {
 		return false
 	}
-	if f.Addressed != "" {
-		if f.aliasSince > 0 && len(sel.addressed) > 1 {
-			if !sel.addressedTo(v, sel.addressed[:1]) && (!sel.fresh(v) || !sel.addressedTo(v, sel.addressed[1:])) {
-				return false
-			}
-		} else if !sel.addressedTo(v, sel.addressed) {
-			return false
-		}
+	if f.Addressed != "" && !sel.recipient(v, sel.addressed) {
+		return false
 	}
 	return f.To == "" || sel.toMatches(v)
 }
 
 func (sel *modelSelection) toMatches(v *modelView) bool {
-	f := sel.f
-	var recipient bool
-	if f.aliasSince == 0 || len(sel.to) < 2 {
-		recipient = anyOf(v.addressees.to, sel.to)
-	} else {
-		recipient = anyOf(v.addressees.to, sel.to[:1]) || sel.fresh(v) && anyOf(v.addressees.to, sel.to[1:])
-	}
 	all := v.addressees.all && !slices.Contains(sel.to, v.lane)
 	if all && sel.laneBound {
 		all = v.row.seq > sel.broadcastAfter && v.row.at >= sel.laneStart
 	}
-	return (recipient || all) && sel.addressedKinds(v)
+	return (sel.recipient(v, sel.to) || all) && sel.addressedKinds(v)
 }
 
 func (sel *modelSelection) peerBranch(v *modelView) bool {
