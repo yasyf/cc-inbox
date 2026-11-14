@@ -14,43 +14,38 @@ import (
 
 func rootAudienceRows(where string) string {
 	return `SELECT r.seq, r.drive, r.kind,
-CASE WHEN EXISTS (SELECT 1 FROM json_each(CASE WHEN json_error_position(r.recipients) = 0 THEN r.recipients ELSE '[]' END) WHERE value IN ('root', 'main'))
-OR EXISTS (SELECT 1 FROM records own WHERE own.seq = r.re AND own.lane IN ('root', 'main')) THEN 1 ELSE 0 END
+CASE WHEN EXISTS (SELECT 1 FROM json_each(CASE WHEN json_error_position(r.recipients) = 0 THEN r.recipients ELSE '[]' END) WHERE value IN ('root', 'main')) THEN 1 ELSE 0 END
 + CASE WHEN (r.recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_error_position(r.recipients) = 0 THEN r.recipients ELSE '[]' END) WHERE value = 'all'))
 AND r.lane NOT IN ('root', 'main') AND r.source NOT IN ('hook:root', 'hook:main') THEN 2 ELSE 0 END
 FROM records r WHERE ` + where
 }
 
 func refreshRootAudience(where string) string {
-	return "DELETE FROM record_root_audience WHERE source_seq IN (SELECT r.seq FROM records r WHERE " + where + ");\n" +
-		"INSERT INTO record_root_audience (source_seq, drive, kind, audience) " + rootAudienceRows(where) + ";\n"
+	return "DELETE FROM record_root_audience_v2 WHERE source_seq IN (SELECT r.seq FROM records r WHERE " + where + ");\n" +
+		"INSERT INTO record_root_audience_v2 (source_seq, drive, kind, audience) " + rootAudienceRows(where) + ";\n"
 }
 
 var rootAudienceObjects = [...]physicalObject{
 	{
-		"table", "record_root_audience",
-		"CREATE TABLE record_root_audience (source_seq INTEGER PRIMARY KEY, drive TEXT NOT NULL, kind TEXT NOT NULL, audience INTEGER NOT NULL)",
-		"INSERT INTO record_root_audience (source_seq, drive, kind, audience) " + rootAudienceRows("1"),
+		"table", "record_root_audience_v2",
+		"CREATE TABLE record_root_audience_v2 (source_seq INTEGER PRIMARY KEY, drive TEXT NOT NULL, kind TEXT NOT NULL, audience INTEGER NOT NULL)",
+		"INSERT INTO record_root_audience_v2 (source_seq, drive, kind, audience) " + rootAudienceRows("1"),
 	},
-	{"index", "record_root_audience_parent", "CREATE INDEX record_root_audience_parent ON records(re)", ""},
-	{"index", "record_root_audience_stream", "CREATE INDEX record_root_audience_stream ON record_root_audience(drive, audience, source_seq)", ""},
-	{"index", "record_root_audience_kind_stream", "CREATE INDEX record_root_audience_kind_stream ON record_root_audience(drive, audience, kind, source_seq)", ""},
+	{"index", "record_root_audience_v2_stream", "CREATE INDEX record_root_audience_v2_stream ON record_root_audience_v2(drive, audience, source_seq)", ""},
+	{"index", "record_root_audience_v2_kind_stream", "CREATE INDEX record_root_audience_v2_kind_stream ON record_root_audience_v2(drive, audience, kind, source_seq)", ""},
 	{
-		"trigger", "record_root_audience_insert",
-		"CREATE TRIGGER record_root_audience_insert AFTER INSERT ON records\nBEGIN\n" +
-			refreshRootAudience("r.seq = NEW.seq") + refreshRootAudience("r.re = NEW.seq AND r.seq != NEW.seq") + "END", "",
+		"trigger", "record_root_audience_v2_insert",
+		"CREATE TRIGGER record_root_audience_v2_insert AFTER INSERT ON records\nBEGIN\n" + refreshRootAudience("r.seq = NEW.seq") + "END", "",
 	},
 	{
-		"trigger", "record_root_audience_update",
-		"CREATE TRIGGER record_root_audience_update AFTER UPDATE OF seq, drive, kind, lane, source, recipients, re ON records\n" +
-			"WHEN OLD.seq IS NOT NEW.seq OR OLD.drive IS NOT NEW.drive OR OLD.kind IS NOT NEW.kind OR OLD.lane IS NOT NEW.lane OR OLD.source IS NOT NEW.source OR OLD.recipients IS NOT NEW.recipients OR OLD.re IS NOT NEW.re\nBEGIN\n" +
-			"DELETE FROM record_root_audience WHERE source_seq = OLD.seq;\n" + refreshRootAudience("r.seq = NEW.seq") +
-			refreshRootAudience("r.re IN (OLD.seq, NEW.seq) AND r.seq != NEW.seq AND (OLD.seq IS NOT NEW.seq OR OLD.lane IS NOT NEW.lane)") + "END", "",
+		"trigger", "record_root_audience_v2_update",
+		"CREATE TRIGGER record_root_audience_v2_update AFTER UPDATE OF seq, drive, kind, lane, source, recipients ON records\n" +
+			"WHEN OLD.seq IS NOT NEW.seq OR OLD.drive IS NOT NEW.drive OR OLD.kind IS NOT NEW.kind OR OLD.lane IS NOT NEW.lane OR OLD.source IS NOT NEW.source OR OLD.recipients IS NOT NEW.recipients\nBEGIN\n" +
+			"DELETE FROM record_root_audience_v2 WHERE source_seq = OLD.seq;\n" + refreshRootAudience("r.seq = NEW.seq") + "END", "",
 	},
 	{
-		"trigger", "record_root_audience_delete",
-		"CREATE TRIGGER record_root_audience_delete AFTER DELETE ON records\nBEGIN\nDELETE FROM record_root_audience WHERE source_seq = OLD.seq;\n" +
-			refreshRootAudience("r.re = OLD.seq") + "END", "",
+		"trigger", "record_root_audience_v2_delete",
+		"CREATE TRIGGER record_root_audience_v2_delete AFTER DELETE ON records\nBEGIN\nDELETE FROM record_root_audience_v2 WHERE source_seq = OLD.seq;\nEND", "",
 	},
 }
 
@@ -123,7 +118,7 @@ func (f Filter) rootAudienceArms(bounds func(string, int64) string, params *[]an
 					selector = " AND kind = ?"
 					*params = append(*params, string(*kind))
 				}
-				arms = append(arms, "SELECT source_seq AS candidate_seq FROM record_root_audience WHERE drive = ? AND audience = ?"+selector+bounds("source_seq", f.After))
+				arms = append(arms, "SELECT source_seq AS candidate_seq FROM record_root_audience_v2 WHERE drive = ? AND audience = ?"+selector+bounds("source_seq", f.After))
 			}
 			if len(ks) == 0 {
 				appendArm(nil)

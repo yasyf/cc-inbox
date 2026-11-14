@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -41,13 +42,13 @@ func assertRootAudienceDerived(ctx context.Context, t *testing.T, st *Store) {
 		return
 	}
 	var differences int
-	query := "WITH expected(source_seq, drive, kind, audience) AS (" + rootAudienceRows("1") + ") SELECT COUNT(*) FROM (SELECT * FROM (SELECT * FROM record_root_audience EXCEPT SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT SELECT * FROM record_root_audience))"
+	query := "WITH expected(source_seq, drive, kind, audience) AS (" + rootAudienceRows("1") + ") SELECT COUNT(*) FROM (SELECT * FROM (SELECT * FROM record_root_audience_v2 EXCEPT SELECT * FROM expected) UNION ALL SELECT * FROM (SELECT * FROM expected EXCEPT SELECT * FROM record_root_audience_v2))"
 	if err := st.db.QueryRowContext(ctx, query).Scan(&differences); err != nil || differences != 0 {
 		t.Fatalf("root routing differences = %d, %v", differences, err)
 	}
 }
 
-func TestRootAudienceParentAndWriterTransitions(t *testing.T) {
+func TestRootAudienceWriterTransitions(t *testing.T) {
 	for _, recreateRootLast := range []bool{false, true} {
 		t.Run(fmt.Sprint(recreateRootLast), func(t *testing.T) {
 			ctx := t.Context()
@@ -210,7 +211,7 @@ func TestRootAudienceAdmissionAndManualProvision(t *testing.T) {
 	if err != nil || len(repeated.Memberships) != 0 {
 		t.Fatalf("repeat=%+v, %v", repeated, err)
 	}
-	for _, damage := range []string{"DROP TRIGGER record_root_audience_delete", "DROP INDEX record_root_audience_stream; CREATE INDEX record_root_audience_stream ON record_root_audience(drive)"} {
+	for _, damage := range []string{"DROP TRIGGER record_root_audience_v2_delete", "DROP INDEX record_root_audience_v2_stream; CREATE INDEX record_root_audience_v2_stream ON record_root_audience_v2(drive)"} {
 		t.Run(damage, func(t *testing.T) {
 			other := openMembershipStore(ctx, t, t.TempDir())
 			if _, err := other.db.ExecContext(ctx, damage); err != nil {
@@ -235,6 +236,67 @@ func TestRootAudienceAdmissionAndManualProvision(t *testing.T) {
 				t.Fatal("outside scope touched root group", err)
 			}
 		})
+	}
+}
+
+func TestMaintainIndexesRetiresRootAudienceReplyArm(t *testing.T) {
+	ctx := t.Context()
+	st := openMembershipStore(ctx, t, t.TempDir())
+	dropRootAudience(ctx, t, st)
+	replyArm, err := os.ReadFile("testdata/root-audience-v1/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.db.ExecContext(ctx, string(replyArm)); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(seq, re int64, lane, recipients string) {
+		t.Helper()
+		if _, err := st.db.ExecContext(ctx, `INSERT INTO records(seq,drive,lane,kind,at,text,recipients,re,source,hash) VALUES(?,'d',?,'note',1,'fixture',?,?,'post',?)`, seq, lane, recipients, re, fmt.Sprint("reply-arm-", seq)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	audience := func(table string, seq int64) int {
+		t.Helper()
+		var got int
+		if err := st.db.QueryRowContext(ctx, "SELECT audience FROM "+table+" WHERE source_seq = ?", seq).Scan(&got); err != nil {
+			t.Fatal(table, seq, err)
+		}
+		return got
+	}
+	insert(100, 0, "root", `["worker"]`)
+	insert(200, 100, "worker", `["other"]`)
+	if got := audience("record_root_audience", 200); got != 1 {
+		t.Fatalf("reply arm audience = %d, want 1", got)
+	}
+	assertRootAudienceInstalled(ctx, t, st, false)
+	report, err := MaintainIndexes(ctx, st.home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, object := range rootAudienceObjects {
+		if !slices.Contains(report.Memberships, object.name) {
+			t.Fatal("missing root report", object.name)
+		}
+	}
+	retired := make([]any, len(retiredObjects))
+	for i, object := range retiredObjects {
+		retired[i] = object.name
+	}
+	var left int
+	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_schema WHERE name IN ("+placeholders(len(retired))+")", retired...).Scan(&left); err != nil || left != 0 {
+		t.Fatalf("retired objects left = %d, %v", left, err)
+	}
+	assertRootAudienceInstalled(ctx, t, st, true)
+	assertRootAudienceDerived(ctx, t, st)
+	if got := audience("record_root_audience_v2", 200); got != 0 {
+		t.Fatalf("reply audience = %d, want 0", got)
+	}
+	insert(201, 100, "worker", `["other"]`)
+	assertRootAudienceDerived(ctx, t, st)
+	repeated, err := MaintainIndexes(ctx, st.home)
+	if err != nil || len(repeated.Memberships) != 0 {
+		t.Fatalf("repeat=%+v, %v", repeated, err)
 	}
 }
 
@@ -323,7 +385,7 @@ func TestRootAudienceNativePlan(t *testing.T) {
 		query, args := st.selectionColumnsAudience(f, columns, true)
 		plan := queryPlan(ctx, t, st, query, args...)
 		joined := strings.Join(plan, "\n")
-		if !strings.Contains(joined, "SEARCH record_root_audience USING COVERING INDEX record_root_audience_") || strings.Contains(joined, "SCAN record_root_audience") || strings.Contains(joined, "SCAN records") {
+		if !strings.Contains(joined, "SEARCH record_root_audience_v2 USING COVERING INDEX record_root_audience_v2_") || strings.Contains(joined, "SCAN record_root_audience_v2") || strings.Contains(joined, "SCAN records") {
 			t.Fatalf("root plan: %s", joined)
 		}
 		t.Logf("ROOT_AUDIENCE_NATIVE_PLAN nodes=%d plan=%q", len(plan), plan)
