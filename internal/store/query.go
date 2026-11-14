@@ -102,22 +102,15 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		addressed, kindParams := f.addressedKinds(addressedTo(in))
 		held, heldParams := f.heldTopics(in, names)
 		scoped = append(scoped, "("+addressed+" OR ("+strings.Join(broadcast, " AND ")+")"+held+")")
-		params = append(append(append(append(append(append(append(params, names...), names...), kindParams...), names...), hookSources(names)...), selected...), heldParams...)
+		params = append(append(append(append(append(append(params, names...), kindParams...), names...), hookSources(names)...), selected...), heldParams...)
 	} else {
 		scoped = append(scoped, selectors...)
 		params = append(params, selected...)
 	}
 	if f.Addressed != "" {
-		names := f.addressees(f.Addressed)
-		if f.aliasSince > 0 && len(names) > 1 {
-			aliases := names[1:]
-			fresh, freshParams := f.aliasFresh()
-			scoped = append(scoped, "("+addressedTo("(?)")+" OR ("+fresh+" AND "+addressedTo("("+placeholders(len(aliases))+")")+"))")
-			params = append(append(append(append(params, names[0], names[0]), freshParams...), aliases...), aliases...)
-		} else {
-			scoped = append(scoped, addressedTo("("+placeholders(len(names))+")"))
-			params = append(append(params, names...), names...)
-		}
+		recipient, recipientParams := f.addressedRecipient(f.addressees(f.Addressed))
+		scoped = append(scoped, recipient)
+		params = append(params, recipientParams...)
 	}
 	if f.To != "" {
 		names := f.addressees(f.To)
@@ -356,11 +349,11 @@ func kindArgs(ks []kinds.Kind) []any {
 
 func (f Filter) addressedRecipient(names []any) (string, []any) {
 	if f.aliasSince == 0 || len(names) < 2 {
-		return "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(names)) + "))", names
+		return addressedTo("(" + placeholders(len(names)) + ")"), names
 	}
 	aliases := names[1:]
 	fresh, freshParams := f.aliasFresh()
-	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = ?) OR (" + fresh + " AND EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN (" + placeholders(len(aliases)) + "))))", slices.Concat([]any{names[0]}, freshParams, aliases)
+	return "(" + addressedTo("(?)") + " OR (" + fresh + " AND " + addressedTo("("+placeholders(len(aliases))+")") + "))", slices.Concat([]any{names[0]}, freshParams, aliases)
 }
 
 func (f Filter) aliasFresh() (string, []any) {
@@ -369,7 +362,7 @@ func (f Filter) aliasFresh() (string, []any) {
 }
 
 func addressedTo(in string) string {
-	return "(EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ") OR EXISTS (SELECT 1 FROM records own WHERE own.seq = records.re AND own.lane IN " + in + " AND records.lane <> own.lane))"
+	return "EXISTS (SELECT 1 FROM json_each(recipients) WHERE value IN " + in + ")"
 }
 
 func (f Filter) peerAddresses(self string) []any {

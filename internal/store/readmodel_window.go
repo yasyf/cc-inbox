@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -29,7 +28,6 @@ type modelWindow struct {
 	wrong          bool
 	incidents      map[int64]string
 	foreignNumbers map[int64]bool
-	replyLanes     map[int64]string
 }
 
 func readModelWindowRows(limit int64) int64 {
@@ -44,7 +42,7 @@ func (s *Store) readModelWindow(ctx context.Context, rows int64) (modelWindow, e
 	case err != nil:
 		return modelWindow{}, fmt.Errorf("find the read model's window: %w", err)
 	}
-	w := modelWindow{floor: newestOut + 1, pinned: map[int64]Record{}, pinnedDrive: map[int64]string{}, incidents: map[int64]string{}, foreignNumbers: map[int64]bool{}, replyLanes: map[int64]string{}}
+	w := modelWindow{floor: newestOut + 1, pinned: map[int64]Record{}, pinnedDrive: map[int64]string{}, incidents: map[int64]string{}, foreignNumbers: map[int64]bool{}}
 	if err := s.db.QueryRowContext(ctx, "SELECT COALESCE(MAX(at), 0) FROM records WHERE seq < ?", w.floor).Scan(&w.floorAt); err != nil {
 		return modelWindow{}, fmt.Errorf("read the read model's window: %w", err)
 	}
@@ -52,9 +50,6 @@ func (s *Store) readModelWindow(ctx context.Context, rows int64) (modelWindow, e
 		return modelWindow{}, err
 	}
 	if err := s.scanPairs(ctx, "SELECT origin_seq, origin FROM records WHERE seq < ? AND origin != ?", []any{w.floor, s.Self()}, func(seq int64, _ string) { w.foreignNumbers[seq] = true }); err != nil {
-		return modelWindow{}, err
-	}
-	if err := s.scanPairs(ctx, "SELECT DISTINCT target.seq, target.lane FROM records reply JOIN records target ON target.seq = reply.re WHERE reply.seq >= ?1 AND reply.re != 0 AND target.seq < ?1", []any{w.floor}, func(seq int64, lane string) { w.replyLanes[seq] = lane }); err != nil {
 		return modelWindow{}, err
 	}
 	var drives []string
@@ -106,7 +101,7 @@ func (s *Store) scanPairs(ctx context.Context, query string, args []any, each fu
 }
 
 func (w modelWindow) bytes() int64 {
-	return w.pinnedBytes + int64(len(w.incidents)+len(w.foreignNumbers)+len(w.replyLanes))*readModelKeyBytes
+	return w.pinnedBytes + int64(len(w.incidents)+len(w.foreignNumbers))*readModelKeyBytes
 }
 
 func pinnedBytes(o Record) int64 {
@@ -155,37 +150,4 @@ func (w modelWindow) heldOpeners(drive string, openers []Record) ([]Record, erro
 		}
 	}
 	return kept, nil
-}
-
-func (m *ReadModel) nameReplyTargets(ctx context.Context, snapshot *sql.Tx) error {
-	if len(m.unnamed) == 0 {
-		return nil
-	}
-	wanted, err := json.Marshal(m.unnamed)
-	if err != nil {
-		return err
-	}
-	rows, err := snapshot.QueryContext(ctx, "SELECT seq, lane FROM records WHERE seq IN (SELECT value FROM json_each(?))", string(wanted))
-	if err != nil {
-		return fmt.Errorf("read the lanes replies name: %w", err)
-	}
-	defer func() { _ = rows.Close() }()
-	for rows.Next() {
-		var (
-			seq  int64
-			lane string
-		)
-		if err := rows.Scan(&seq, &lane); err != nil {
-			return fmt.Errorf("read the lanes replies name: %w", err)
-		}
-		if _, held := m.window.replyLanes[seq]; !held {
-			m.window.replyLanes[seq] = lane
-			m.bytes += readModelKeyBytes
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("read the lanes replies name: %w", err)
-	}
-	m.unnamed = m.unnamed[:0]
-	return nil
 }

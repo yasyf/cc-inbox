@@ -560,7 +560,7 @@ func TestReaderTailDeliversAddressedRecordsBeforeABacklogOfBroadcasts(t *testing
 		broadcast(i)
 	}
 	order := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"desk"}, Text: "enqueue the chain now"})
-	reply := testutil.Post(t, st, store.Record{Lane: "fidelity", Kind: kinds.Review, To: []string{"root"}, Re: own.Seq, Text: "a review of the desk's head"})
+	reply := testutil.Post(t, st, store.Record{Lane: "fidelity", Kind: kinds.Review, To: []string{"desk"}, Re: own.Seq, Text: "a review of the desk's head"})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Decide, To: []string{"other"}, Text: "an order for another lane"})
 	for i := range 30 {
 		broadcast(30 + i)

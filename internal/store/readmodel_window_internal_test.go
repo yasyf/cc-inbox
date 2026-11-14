@@ -82,12 +82,12 @@ func TestAWindowedReadModelMatchesTheStore(t *testing.T) {
 	if _, answered, err := model.Answer(ctx, st, Filter{Drive: "d"}); err != nil || answered {
 		t.Errorf("a read from the first record answered = %t, %v; want it left to the store", answered, err)
 	}
-	if got, answered, err := model.Answer(ctx, st, Filter{Drive: "d", For: "asker", Descending: true, Limit: 1}); err != nil || !answered || len(got) != 1 || got[0].Seq != reply.Seq {
-		t.Errorf("the asker's newest record = %v, %t, %v; want the model to name #%d through its reply target", seqsOf(got), answered, err, reply.Seq)
+	if got, answered, err := model.Answer(ctx, st, Filter{Drive: "d", For: "asker", Descending: true, Limit: 1}); err != nil || !answered || len(got) != 1 || got[0].Seq != update.Seq {
+		t.Errorf("the asker's newest record = %v, %t, %v; want #%d, never #%d, a reply to the asker's note addressed to other", seqsOf(got), answered, err, update.Seq, reply.Seq)
 	}
-	later := selectedPost(t, st, Record{Lane: "desk", Kind: kinds.Note, Re: closedOld.Seq, To: []string{"other"}, Text: "a reply the model takes after it was built"})
-	if got, answered, err := model.Answer(ctx, st, Filter{Drive: "d", For: "asker", Descending: true, Limit: 1}); err != nil || !answered || len(got) != 1 || got[0].Seq != later.Seq {
-		t.Errorf("the asker's newest record = %v, %t, %v; want #%d, named while the model caught up", seqsOf(got), answered, err, later.Seq)
+	selectedPost(t, st, Record{Lane: "desk", Kind: kinds.Note, Re: closedOld.Seq, To: []string{"other"}, Text: "a reply the model takes after it was built"})
+	if got, answered, err := model.Answer(ctx, st, Filter{Drive: "d", For: "asker", Descending: true, Limit: 1}); err != nil || !answered || len(got) != 1 || got[0].Seq != update.Seq {
+		t.Errorf("the asker's newest record = %v, %t, %v; want #%d, never a reply the model caught up on that is addressed to other", seqsOf(got), answered, err, update.Seq)
 	}
 	if _, answered, err := model.Answer(ctx, st, Filter{Drive: "d", Descending: true, Limit: 3}); err != nil || !answered {
 		t.Errorf("the newest three answered = %t, %v; want the model to answer them", answered, err)

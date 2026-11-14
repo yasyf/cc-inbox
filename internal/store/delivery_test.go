@@ -136,6 +136,39 @@ func TestALaneHearsRecordsAddressedToAllButNotItsOwn(t *testing.T) {
 	}
 }
 
+func TestAReplyReachesOnlyTheLanesItsRecipientsName(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := t.Context()
+	handed := testutil.Post(t, st, store.Record{Lane: "communicator", Kind: kinds.Owner, To: []string{"root"}, Text: "his words, handed to root"})
+	onward := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Owner, To: []string{"iris"}, Re: handed.Seq, Text: "his words, sent on to iris"})
+	model, err := st.BuildReadModel(ctx, noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	for reader, want := range map[string][]int64{"communicator": nil, "root": {handed.Seq}, "iris": {onward.Seq}} {
+		for _, f := range []store.Filter{{Drive: "d", For: reader}, {Drive: "d", Addressed: reader}} {
+			stored, err := st.Query(ctx, f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			modeled, answered, err := model.Answer(ctx, st, f)
+			if err != nil || !answered {
+				t.Fatalf("model answered %t, %v", answered, err)
+			}
+			for path, got := range map[string][]store.Record{"store": stored, "model": modeled} {
+				seqs := make([]int64, 0, len(got))
+				for _, r := range got {
+					seqs = append(seqs, r.Seq)
+				}
+				if !slices.Equal(seqs, want) {
+					t.Errorf("the %s's read %+v = %v, want %v", path, f, seqs, want)
+				}
+			}
+		}
+	}
+}
+
 func TestAFollowedDriveDeliversOnlyItsBroadcastsOfTheFollowedKinds(t *testing.T) {
 	corpus := []timed{
 		{0, store.Record{Drive: "oncall", Lane: "ai-oncall", Kind: kinds.Incident, Text: "page opened"}},

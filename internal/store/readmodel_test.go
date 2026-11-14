@@ -66,7 +66,7 @@ func TestReadModelMatchesTheStore(t *testing.T) {
 		{"for with kinds", store.Filter{Drive: "d", For: "worker", Kinds: asks, ToKinds: asks}},
 		{"to", store.Filter{Drive: "d", To: "worker"}},
 		{"to first only", store.Filter{Drive: "d", To: "worker", FirstOnly: asks}},
-		{"addressed through a reply", store.Filter{Drive: "d", Addressed: "root"}},
+		{"addressed", store.Filter{Drive: "d", Addressed: "worker"}},
 		{"lanes", store.Filter{Drive: "d", Lanes: []string{"other"}}},
 		{"kinds", store.Filter{Drive: "d", Kinds: asks}},
 		{"topics", store.Filter{Drive: "d", Topics: []string{"fire"}}},
