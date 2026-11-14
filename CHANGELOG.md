@@ -92,6 +92,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A registered session no longer runs on the PATH of the process that
+  registered it. `cci session run` starts the session's command with
+  `$SHELL -l -i -c` in place of `$SHELL -l -c`, so the shell's interactive
+  startup files, such as `mise activate`, set PATH for the session's `--cwd`:
+  a session registered from another checkout's shell keeps no `tools/bin` of
+  that checkout, and its bare commands run its own checkout's.
 - The `close` tool with `how: withdraw` takes back a record that opens nothing,
   such as a lane's own `report`, instead of refusing it with `it is a report
   from root, which opens nothing to resolve`. `cci post --kind withdraw

@@ -79,11 +79,10 @@ func Keep(ctx context.Context, st *store.Store) error {
 }
 
 // Run keeps alias's session running on this terminal until cci session rm
-// removes alias: it starts the registered command in a login shell, as a
-// top-level session with none of the Claude Code, cci lane or Orca pane
-// variables of whatever started the tmux server but the ORCA_TERMINAL_HANDLE
-// of the Orca terminal that last attached to it, waits for it to exit, and
-// starts it again resuming the session.
+// removes alias: it starts the registered command in an interactive login
+// shell, which sets PATH for the session's cwd, with none of the Claude Code,
+// cci lane or Orca pane variables of whatever started tmux but the attached
+// Orca terminal's ORCA_TERMINAL_HANDLE, and starts it again on each exit.
 func Run(ctx context.Context, st *store.Store, alias string, stdin io.Reader, stdout, stderr io.Writer) error {
 	for again := false; ; again = true {
 		r, ok, err := st.Registration(ctx, alias)
@@ -110,7 +109,7 @@ func Run(ctx context.Context, st *store.Store, alias string, stdin io.Reader, st
 				return err
 			}
 		}
-		c := exec.CommandContext(ctx, r.Shell, "-l", "-c", line) //nolint:gosec // G204: the command the session was registered with.
+		c := exec.CommandContext(ctx, r.Shell, "-l", "-i", "-c", line) //nolint:gosec // G204: the command the session was registered with.
 		c.Dir, c.Stdin, c.Stdout, c.Stderr = r.Cwd, stdin, stdout, stderr
 		c.Env = slices.DeleteFunc(os.Environ(), func(kv string) bool {
 			name, _, _ := strings.Cut(kv, "=")
