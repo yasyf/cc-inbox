@@ -40,8 +40,8 @@ to start owns the window: an older one delivers nothing, moves no cursor, and
 exits. A subscribed channel that stops any other way, such as Claude Code
 closing it on a reconnect, a reload or an exit, posts a `disconnect` record
 from the reader's lane to `communicator`, and so does a channel whose session
-shows no tag received 30 seconds after one went out; the next tag the session
-receives posts `recovered`, closing it. Stop any Monitor that watched the same records after
+transcript still lacks a tag once Claude Code answered two requests built after
+it went out; the next tag the session hears posts `recovered`, closing it. Stop any Monitor that watched the same records after
 subscribing; records in the overlap arrive twice.
 
 A long-lived session, such as a drive's coordinator, communicator or meta

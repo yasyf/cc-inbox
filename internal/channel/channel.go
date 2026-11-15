@@ -271,7 +271,7 @@ func deafened(ctx context.Context, st *store.Store, window store.Window, t tag) 
 	if err != nil {
 		return err
 	}
-	lost := fmt.Sprintf("%s stopped hearing its cci channel in window %d (session %s): #%d is not in its transcript %s after the channel sent it", sub.Reader, window.PID, sub.Session, t.seq, deafAfter)
+	lost := fmt.Sprintf("%s stopped hearing its cci channel in window %d (session %s): #%d is not in its transcript after a tool round that began after the channel sent it", sub.Reader, window.PID, sub.Session, t.seq)
 	text := lost + fmt.Sprintf(", so records to %s reach it only through its PostToolUse hook until it reconnects with %s", sub.Reader, hook.ReconnectCommand)
 	var typed error
 	if registered {
@@ -341,12 +341,13 @@ func beat(ctx context.Context, st *store.Store, window store.Window, owns func()
 
 // Stream delivers window's subscription through notify until ctx ends, moving
 // each cursor only as the session's transcript shows the tags it sent. A tag
-// the transcript does not show received within 30 seconds posts a disconnect
-// and, for a registered session, types its reconnect; the next tag it receives
-// resolves that disconnect. A new channel passes the head it started at as
-// started and begins live, or, for a registered session, replays from its
-// cursor; a resumed one passes nil and keeps its predecessor's position. A
-// newer install re-executes it with again as its arguments.
+// the transcript lacks once Claude Code answered two requests built after the
+// send posts a disconnect and, for a registered session, types its reconnect;
+// the next tag the session hears resolves that disconnect. A new channel
+// passes the head it started at as started and begins live, or, for a
+// registered session, replays from its cursor; a resumed one passes nil and
+// keeps its predecessor's position. A newer install re-executes it with again
+// as its arguments.
 func Stream(ctx context.Context, st *store.Store, window store.Window, channeled bool, started *int64, again []string, notify func(method string, params any) error) {
 	var l *ledger
 	for tick := 1; ctx.Err() == nil; tick++ {
