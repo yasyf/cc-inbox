@@ -41,7 +41,7 @@ func Compact(r store.Record, width int) string {
 		}
 		b.WriteString(" " + pr.Repo[strings.LastIndex(pr.Repo, "/")+1:] + short)
 	}
-	if r.Topic != "" && !strings.Contains(text, r.Topic) {
+	if r.Topic != "" && !strings.Contains(text, "t:"+r.Topic) {
 		b.WriteString(" t:" + r.Topic)
 	}
 	for _, ref := range slices.Concat(prefixed("stack:", r.Refs.Stacks), prefixed("target:", r.Refs.Targets), prefixed("build:", r.Refs.Builds)) {

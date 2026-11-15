@@ -475,7 +475,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci session run <alias>` | The tmux session's own command: start the registered command, wait for Claude Code to exit, and start it again resuming the session, until `cci session rm`. |
 | `cci session rm <alias>` | Stop keeping the alias's session: drop the subscription it owned, and once Claude Code exits nothing starts it again and its tmux session ends. |
 | `cci digest` | Summarize the last 24 hours by default with counts, open items, and the latest record per lane. |
-| `cci grep` | Search whole rendered record lines with a case-insensitive regular expression, newest first, including expired records. Several words before, between or after the flags are one pattern joined by single spaces, so `cci grep --drive d Send them ahead` searches for `Send them ahead`. `-F` matches the pattern literally. |
+| `cci grep` | Search the compact record lines it prints with a case-insensitive regular expression, newest first, including expired records. Several words before, between or after the flags are one pattern joined by single spaces, so `cci grep --drive d Send them ahead` searches for `Send them ahead`. `-F` matches the pattern literally. |
 | `cci show SEQ...` | Print records whole, in the order named: each line without a width cut, then the full text or `--path` body file the record names. A node joined to a relay reads a record it lacks from the relay's log. |
 | `cci state` | Show the latest `head`, `contract`, and `state` per lane and topic, skipping withdrawn records, within a byte budget. Text output names the drive when no records match. |
 | `cci import` | Import markdown files incrementally. Unrecognized lines become `note` records. |
@@ -553,12 +553,15 @@ value per read; when combined, all must match.
 Text `tail`, `grep` and `show` print one compact line per record:
 `<seq> <kind> <lane>[><to>] [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [stack:… target:… build:… ccn:…] [<url>] [+] <text>`,
 under an `@<clock>` line each time the minute changes. `+` marks a body that
-`cci show` prints. `watch`, `state` and text `digest` keep the long line,
+`cci show` prints, and `t:<topic>` is left off only when the text already
+holds it. `watch`, `state` and text `digest` keep the long line,
 `#<seq> <time> <KIND> <lane> -> <to> re #<n> [<topic>] <text> <refs>`.
 
 Tail and watch text lines append reply marks after clipping, so the marks stay
-visible. Grep matches each record's long line: sequence number, time,
-kind, lane, recipients, topic, text, and rendered refs. It searches all matching
+visible. Grep and the MCP `find` tool match each record's compact line as they
+print it, before reply marks, so a token copied from a result, such as
+`t:<topic>`, `^<re>` or `x<closed>`, finds every record that carries it. It
+searches all matching
 records newest first, including expired records, and prints whole lines with
 reply marks within the byte budget. Patterns are case-insensitive regular
 expressions by default, so `HOLD|DEFECT` matches either word; `-F` matches the

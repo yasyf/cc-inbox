@@ -2,6 +2,7 @@ package inbox
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"slices"
 	"testing"
@@ -16,6 +17,9 @@ import (
 func TestRequiredWordsNeverDropAMatch(t *testing.T) {
 	ctx := context.Background()
 	st, _ := testutil.Store(t)
+	for i := range 120 {
+		testutil.Post(t, st, store.Record{Lane: "filler", Kind: kinds.Note, Text: fmt.Sprintf("filler %d", i)})
+	}
 	asked := testutil.Post(t, st, store.Record{Lane: "finder-desk", Kind: kinds.Ask, Text: "REVIEW the  plan for 991d899, then close sess_01abc", Topic: "rollout-7"})
 	testutil.Post(t, st, store.Record{Lane: "review-tab-1", Kind: kinds.Review, Text: "finder: ok", To: []string{"root", "desk-2"}, Re: asked.Seq})
 	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "landed", Refs: store.Refs{PRs: []store.PR{{Repo: "yasyf/cc-inbox", Number: 49333}, {Number: 12345}}, Stacks: []string{"infra/dev"}, Targets: []string{"api"}, URL: "https://example.com/a-b.c?x=1&y=2", Path: "/tmp/file.md", CCN: "doc-c3230a2", Builds: []string{"8821"}, Board: "main"}})
@@ -28,7 +32,6 @@ func TestRequiredWordsNeverDropAMatch(t *testing.T) {
 	if err := st.IndexTrigrams(ctx, func(context.Context) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	now := st.Now()
 	for _, tt := range []struct {
 		pattern string
 		pruned  bool
@@ -46,15 +49,17 @@ func TestRequiredWordsNeverDropAMatch(t *testing.T) {
 		{"sess_01abc", true},
 		{"(?i)stack:infra/dev", true},
 		{"example.com/a-b.c", true},
+		{"t:rollout-7", true},
+		{"review-tab-1>root,desk-2", true},
+		{"cc-inbox#49333", true},
+		{"build:8821", true},
+		{"ccn:doc-c3230a2", true},
+		{fmt.Sprintf(`\^%d`, asked.Seq), true},
+		{fmt.Sprintf("x%d", asked.Seq), true},
 		{"(ok|plan) 991", false},
 		{"(?i)target", false},
 		{"stack:", false},
-		{"Oct", false},
-		{"resolves", false},
 		{"#1\\b", false},
-		{"pr#", false},
-		{"->", false},
-		{"[0-9]+ PM", false},
 		{".*", false},
 	} {
 		t.Run(tt.pattern, func(t *testing.T) {
@@ -66,7 +71,7 @@ func TestRequiredWordsNeverDropAMatch(t *testing.T) {
 			matching := func(records []store.Record) []int64 {
 				out := []int64{}
 				for _, r := range records {
-					if pattern.MatchString(render.Line(r, now)) {
+					if pattern.MatchString(render.Compact(r, 0)) {
 						out = append(out, r.Seq)
 					}
 				}

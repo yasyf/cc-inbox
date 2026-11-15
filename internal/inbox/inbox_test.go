@@ -343,6 +343,27 @@ func TestGrep(t *testing.T) {
 	}
 }
 
+func TestGrepFindsEveryRecordOnATopicByTheTagItPrints(t *testing.T) {
+	st, _ := testutil.Store(t)
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.State, Text: "the window is open until 5", Topic: "staging-slots"})
+	testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Report, Text: "from topic staging-slots", Topic: "staging-slots"})
+	testutil.Post(t, st, store.Record{Lane: "meta", Kind: kinds.Note, Text: "searching t:staging-slots on each wake"})
+	testutil.Post(t, st, store.Record{Lane: "meta", Kind: kinds.Note, Text: "staging-slots named with no topic"})
+	var out bytes.Buffer
+	if err := inbox.Grep(context.Background(), st, store.Filter{Drive: "d"}, regexp.MustCompile("t:staging-slots"), 0, 0, 0, false, &out, nil); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.TrimSpace(out.String())
+	for _, want := range []string{"state root t:staging-slots the window is open", "report root t:staging-slots from topic staging-slots", "note meta searching t:staging-slots on each wake"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("grep t:staging-slots = %q, want a line %q", got, want)
+		}
+	}
+	if strings.Contains(got, "named with no topic") {
+		t.Errorf("grep t:staging-slots = %q, want no record off the topic", got)
+	}
+}
+
 func TestDigest(t *testing.T) {
 	st, c := testutil.Store(t)
 	old := testutil.Post(t, st, store.Record{Kind: kinds.Ask, Text: "stale question"})

@@ -10,12 +10,13 @@ const minRequiredWord = 3
 
 // renderedWords are what a record's line says that no column holds, so a word
 // inside one of them can match a record whose columns never hold it.
-var renderedWords = []string{"origin", "stack", "target", "resolves", "ccn", "build", "board", "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"}
+var renderedWords = []string{"stack", "target", "ccn", "build"}
 
 // requiredWords returns lower-case words of which a line that pattern matches
 // must hold at least one, nil when no such words are known. A word runs over
-// letters, digits, '-' and '.', none of which a line puts between two columns,
-// so it sits whole in one column.
+// letters, digits, '-' and '.', none of which a line puts between two columns
+// but the x before each seq it closes, so a word sits whole in one column once
+// that x is dropped.
 func requiredWords(pattern string) []string {
 	re, err := syntax.Parse(pattern, syntax.Perl)
 	if err != nil {
@@ -100,6 +101,9 @@ func longestWord(literal []rune) string {
 	})
 	best := ""
 	for _, word := range words {
+		if seq, closes := strings.CutPrefix(word, "x"); closes && strings.Trim(seq, "0123456789") == "" {
+			word = seq
+		}
 		if len(word) > len(best) && len(word) >= minRequiredWord && !slices.ContainsFunc(renderedWords, func(rendered string) bool { return strings.Contains(rendered, word) }) {
 			best = word
 		}
