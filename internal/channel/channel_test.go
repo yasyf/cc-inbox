@@ -560,7 +560,7 @@ func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T
 		return testutil.Post(t, st, store.Record{Lane: "stall-watch", Kind: kinds.Urgent, Topic: "go:1", To: []string{"root"}, Text: fmt.Sprintf("go 1 stalled %d min", minutes)})
 	}
 	first := stall(10)
-	queued := testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"root"}, Text: "QUEUED go 1"})
+	queued := testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"all"}, Text: "QUEUED go 1"})
 	repeat := stall(20)
 	var out bytes.Buffer
 	if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {
@@ -1150,29 +1150,29 @@ func TestTwoWindowsKeepBothChannelServersPastTwoBeats(t *testing.T) {
 	}
 }
 
-func TestTranscriptTagReadsOnlyTagsClaudeCodeGaveTheMainThread(t *testing.T) {
+func TestATagIsHeardOnlyWhereClaudeCodeGaveItToTheMainThread(t *testing.T) {
 	meta := map[string]string{"seq": "671504", "kind": "owner", "lane": "communicator"}
 	want := tag{kind: "owner", seq: 671504}
 	for _, tt := range []struct {
-		name            string
-		line            string
-		received, heard bool
+		name  string
+		line  string
+		heard bool
 	}{
-		{"a tag Claude Code delivered at an idle prompt", userLine(tagText(Source, meta), false), true, true},
-		{"a tag queued mid-turn", queuedLine(tagText(Source, meta)), true, true},
-		{"a tag queued mid-turn as text blocks", queuedLine([]map[string]string{{"type": "text", "text": tagText(Source, meta)}}), true, true},
-		{"a tag Claude Code enqueued while busy", enqueuedLine(tagText(Source, meta)), true, false},
-		{"a tag from the one-server layout", userLine(tagText(Plugin+"cci", meta), false), true, true},
-		{"a subagent's copy", userLine(tagText(Source, meta), true), false, false},
-		{"a tool result quoting a tag", userLine([]map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": tagText(Source, meta)}}, false), false, false},
-		{"another plugin's channel", userLine(tagText("plugin:cc-slack:cc-slack", meta), false), false, false},
-		{"another plugin's channel enqueued", enqueuedLine(tagText("plugin:cc-slack:cc-slack", meta)), false, false},
-		{"a prompt quoting a tag mid-sentence", userLine("did "+tagText(Source, meta)+" arrive?", false), false, false},
+		{"a tag Claude Code delivered at an idle prompt", userLine(tagText(Source, meta), false), true},
+		{"a tag queued mid-turn", queuedLine(tagText(Source, meta)), true},
+		{"a tag queued mid-turn as text blocks", queuedLine([]map[string]string{{"type": "text", "text": tagText(Source, meta)}}), true},
+		{"a tag from the one-server layout", userLine(tagText(Plugin+"cci", meta), false), true},
+		{"a tag Claude Code enqueued while busy", enqueuedLine(tagText(Source, meta)), false},
+		{"a subagent's copy", userLine(tagText(Source, meta), true), false},
+		{"a tool result quoting a tag", userLine([]map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": tagText(Source, meta)}}, false), false},
+		{"another plugin's channel", userLine(tagText("plugin:cc-slack:cc-slack", meta), false), false},
+		{"a prompt quoting a tag mid-sentence", userLine("did "+tagText(Source, meta)+" arrive?", false), false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			got, heard, ok := transcriptTag([]byte(tt.line + "\n"))
-			if ok != tt.received || heard != tt.heard || (ok && got != want) {
-				t.Fatalf("transcriptTag = %+v, %v, %v; want %+v, %v, %v", got, heard, ok, want, tt.heard, tt.received)
+			e, ok := transcriptEvent([]byte(tt.line + "\n"))
+			got, heard := e.tag()
+			if heard = ok && heard; heard != tt.heard || (heard && got != want) {
+				t.Fatalf("tag = %+v, %v; want %+v, %v", got, heard, want, tt.heard)
 			}
 		})
 	}
@@ -1402,9 +1402,14 @@ func TestARegisteredSessionStillRunningHasItsReconnectTyped(t *testing.T) {
 	}
 }
 
+func toolRound(at time.Time, sidechain bool, between ...string) []string {
+	stamp := at.UTC().Format("2006-01-02T15:04:05.000Z")
+	result := jsonLine(map[string]any{"type": "user", "isSidechain": sidechain, "timestamp": stamp, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"}}}})
+	answer := jsonLine(map[string]any{"type": "assistant", "isSidechain": sidechain, "timestamp": stamp, "message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "toolu_2", "name": "Bash", "input": map[string]string{}}}}})
+	return append(append([]string{result}, between...), answer)
+}
+
 func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAndHearingResolvesIt(t *testing.T) {
-	t.Cleanup(func() { deafAfter = 30 * time.Second })
-	deafAfter = 50 * time.Millisecond
 	st, _ := newStore(t)
 	ctx := context.Background()
 	tmux, calls := fakeTmux(t, true)
@@ -1430,24 +1435,50 @@ func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAndHearingResolvesIt(t 
 			t.Error(err)
 		}
 	})
+	before := time.Now().Add(-time.Second)
 	first := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "first"})
 	second := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Report, To: []string{"root"}, Text: "second"})
 	tags := []map[string]string{<-sent, <-sent}
+	quiet := func(why string) {
+		t.Helper()
+		time.Sleep(20 * interval)
+		if posted := disconnects(t, st); len(posted) != 0 {
+			t.Fatalf("disconnects = %+v after %s, want none", posted, why)
+		}
+	}
+	if err := transcribe(ctx, toolRound(before, false)...); err != nil {
+		t.Fatal(err)
+	}
+	quiet("an answer to a request built before the send and a tool call running on")
+	if err := transcribe(ctx, append(toolRound(time.Now(), true), toolRound(time.Now(), true)...)...); err != nil {
+		t.Fatal(err)
+	}
+	quiet("two tool rounds of a subagent")
+	if err := transcribe(ctx, toolRound(time.Now(), false, queuedLine(tagText(Source, tags[1])))...); err != nil {
+		t.Fatal(err)
+	}
+	quiet("the tool round that folded in the second tag")
+	if err := transcribe(ctx, append(toolRound(time.Now(), false), toolRound(time.Now(), false)...)...); err != nil {
+		t.Fatal(err)
+	}
 	var posted []store.Record
 	for deadline := time.Now().Add(5 * time.Second); len(posted) == 0; time.Sleep(interval) {
 		if posted = disconnects(t, st); time.Now().After(deadline) {
-			t.Fatal("a session deaf to its channel posted no disconnect")
+			t.Fatal("a tag missing after a whole tool round posted no disconnect")
 		}
 	}
-	time.Sleep(5 * deafAfter)
-	want := fmt.Sprintf("root stopped hearing its cci channel in window %d (session s1): #%d is not in its transcript %s after the channel sent it, so cci typed %s into tmux session release-demo-coordinator, whose next channel replays from the record it last heard", window.PID, first.Seq, deafAfter, hook.ReconnectCommand)
+	if err := transcribe(ctx, toolRound(time.Now(), false)...); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * interval)
+	want := fmt.Sprintf("root stopped hearing its cci channel in window %d (session s1): #%d is not in its transcript after a tool round that began after the channel sent it, so cci typed %s into tmux session release-demo-coordinator, whose next channel replays from the record it last heard", window.PID, first.Seq, hook.ReconnectCommand)
 	if posted = disconnects(t, st); len(posted) != 1 || posted[0].Lane != "root" || !slices.Equal(posted[0].To, []string{"communicator"}) || posted[0].Text != want {
 		t.Fatalf("disconnects = %+v, want one from root to communicator saying %q", posted, want)
 	}
 	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\nsend-keys -t =release-demo-coordinator: -l "+hook.ReconnectCommand+"\nsend-keys -t =release-demo-coordinator: Enter\n"; got != want {
 		t.Fatalf("tmux was called with %q, want the reconnect typed once, %q", got, want)
 	}
-	if err := transcribe(ctx, enqueuedLine(tagText(Source, tags[0]))); err != nil {
+	if err := transcribe(ctx, queuedLine(tagText(Source, tags[0]))); err != nil {
 		t.Fatal(err)
 	}
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
@@ -1459,14 +1490,8 @@ func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAndHearingResolvesIt(t 
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("recovered = %+v; want one resolving #%d once the session received a tag", recovered, posted[0].Seq)
+			t.Fatalf("recovered = %+v; want one resolving #%d once the session heard the tag", recovered, posted[0].Seq)
 		}
-	}
-	if seq, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive); err != nil || seq >= first.Seq {
-		t.Fatalf("cursor at #%d, %v; want it short of #%d until the session hears the tag it only received", seq, err, first.Seq)
-	}
-	if err := transcribe(ctx, userLine(tagText(Source, tags[0]), false), userLine(tagText(Source, tags[1]), false)); err != nil {
-		t.Fatal(err)
 	}
 	cursorReaches(t, st, sub.Cursor, second.Seq)
 }

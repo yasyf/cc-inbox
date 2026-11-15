@@ -217,9 +217,10 @@ subscribed channel that stops any other way, such as Claude Code closing it on
 a reconnect, a reload or an exit, posts a `disconnect` record from the reader's
 lane to `communicator` in the subscription's drive, naming the window, the
 session and `/mcp reconnect plugin:cc-inbox:channel`. So does a channel whose
-session stops hearing it: a tag its transcript does not show received, queued
-or delivered, 30 seconds after the channel sent it while it showed no other.
-The next tag the session receives posts `recovered`, which closes it; a daemon
+session stops hearing it: a tag its transcript still lacks once Claude Code
+answered two requests built after the channel sent it, since Claude Code folds
+each message it queued into the next request it builds; a long tool call builds
+none. The next tag the session hears posts `recovered`, which closes it; a daemon
 handing its channels to a new release posts neither. The cursor defaults to `channel-<session>`; give each subscription
 its own cursor. When a Monitor watched the same records, stop it after
 subscribing; records in the overlap arrive twice. A subscription belongs to the

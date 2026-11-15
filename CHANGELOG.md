@@ -8,12 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A channel whose session stops hearing it, a tag its transcript does not show
-  received 30 seconds after it went out while the transcript showed no other,
-  posts a `disconnect` and, for a registered session, types
+- A channel whose session stops hearing it, a tag its transcript still lacks
+  once Claude Code answered two requests built after the tag went out, posts a
+  `disconnect` and, for a registered session, types
   `/mcp reconnect plugin:cc-inbox:channel` into its tmux session once per open
-  `disconnect`. A tag Claude Code queues while the session is busy counts as
-  received, and the next tag the session receives posts `recovered`. A
+  `disconnect`. The next tag the session hears posts `recovered`. A
   registered session's new channel replays what its cursor missed instead of
   starting at the head: each `owner` record as its own tag, then the rest as one
   `batch` tag, less what the hook already delivered.
@@ -91,6 +90,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   record whole through it instead of keeping its own copy of the rule.
 
 ### Fixed
+
+- A session busy in a tool call longer than 30 seconds no longer reads as
+  deaf to its cci channel. Claude Code shows a tag it queued at the session's
+  next tool round, and Claude Code 2.1.319 to 2.1.322 write no tag on the line
+  that queues it, so each such call posted a false `disconnect` and its
+  `recovered`, 96 of each a day across five drive sessions. A tag now counts
+  as lost only once the transcript shows a whole tool round begun after the
+  send without it.
 
 - Every record addressed to a lane reaches it, whatever its kind. A
   subscription's `--mute-kinds` now drops only records not addressed to its
