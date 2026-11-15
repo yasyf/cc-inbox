@@ -48,7 +48,7 @@ SELECT n+1,?,'noise','ask',?,'ignored','post','changed-watch-'||n,'["other"]',?,
 				if err := st.SetCursor(t.Context(), "changed-root-channel", "d", 1); err != nil {
 					t.Fatal(err)
 				}
-				filter := (Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Incident, kinds.Decide, kinds.Ask, kinds.Defect, kinds.Blocker}, ToKinds: DefaultToKinds("root")}).Filter()
+				filter := (Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Incident, kinds.Decide, kinds.Ask, kinds.Defect, kinds.Blocker}}).Filter()
 				filter.After, filter.Limit = 1, 500
 				query, params := st.selectionColumns(filter, columns)
 				rows, err := st.db.QueryContext(t.Context(), "EXPLAIN QUERY PLAN "+query, params...)

@@ -8,7 +8,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -31,7 +30,6 @@ type Subscription struct {
 	Reader     string       `json:"reader"`
 	Kinds      []kinds.Kind `json:"kinds"`
 	Mute       []kinds.Kind `json:"mute,omitempty"`
-	ToKinds    []kinds.Kind `json:"to_kinds,omitempty"`
 	TopicKinds []kinds.Kind `json:"topic_kinds,omitempty"`
 	Batch      []kinds.Kind `json:"batch,omitempty"`
 	Cursor     string       `json:"cursor"`
@@ -43,13 +41,6 @@ type Subscription struct {
 // a repeat inside it reaches no channel or hook, only cci tail.
 const UrgentRepeat = 30 * time.Minute
 
-func DefaultToKinds(reader string) []kinds.Kind {
-	if RootName(reader) {
-		return kinds.RootAddressed()
-	}
-	return nil
-}
-
 // DefaultBatch is the kinds a channel subscription for reader carries together
 // when it names none: done, for a root.
 func DefaultBatch(reader string) []kinds.Kind {
@@ -59,19 +50,18 @@ func DefaultBatch(reader string) []kinds.Kind {
 	return nil
 }
 
+// Filter selects what the channel delivers on arrival: every record addressed
+// to the reader but those of a batch kind, and other lanes' broadcasts of its
+// kinds but those it mutes.
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.held(), ToKinds: s.ToKinds, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
-}
-
-func (s Subscription) held() []kinds.Kind {
-	return slices.Concat(s.Mute, s.Batch)
+	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Batch, MuteBroadcasts: s.Mute, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
 }
 
 // BatchFilter selects what the channel delivers together, never on arrival:
 // the records addressed to the reader of a batch kind, whether addressed as
 // the lane or as <reader>@<drive>.
 func (s Subscription) BatchFilter() Filter {
-	return Filter{Drive: s.Drive, Addressed: s.Reader, Kinds: s.Batch, ToKinds: s.Batch, Mute: s.Mute}
+	return Filter{Drive: s.Drive, Addressed: s.Reader, Kinds: s.Batch, ToKinds: s.Batch}
 }
 
 func (s Subscription) BatchCursor() string {
@@ -85,14 +75,14 @@ func (s Subscription) FloorCursor() string {
 }
 
 // WindowMail is what the hook delivers to the thread k bound as b: its lane's
-// mail, less what its window's subscription keeps off that thread.
+// mail, less its window's batch kinds and the broadcasts its subscription mutes.
 func (s *Store) WindowMail(ctx context.Context, k PeerKey, b Binding) (Filter, error) {
 	f := LaneMail(k, b)
 	sub, ok, err := s.windowSubscription(ctx, k, b)
 	if err != nil || !ok {
 		return f, err
 	}
-	f.Mute, f.ToKinds = sub.held(), sub.ToKinds
+	f.Mute, f.MuteBroadcasts = sub.Batch, sub.Mute
 	return f, nil
 }
 

@@ -324,17 +324,13 @@ func newWatchCmd() *cobra.Command {
 		Short: "Print one line per new matching record, for a Monitor",
 		Long: `Print one line per new matching record, for a Monitor.
 
-Watching for reader root (or main), records addressed to it arrive only of the
-kinds a drive's root acts on, as cci subscribe delivers them; --to-kind names
-others. cci tail reads every kind.`,
+Watching for a reader, every record addressed to it arrives, whatever its kind,
+as cci subscribe delivers them; --to-kind narrows them.`,
 		Args: cobra.NoArgs,
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, _ []string) error {
 			f, err := rf.filter(cmd.Context(), st)
 			if err != nil {
 				return err
-			}
-			if len(f.ToKinds) == 0 {
-				f.ToKinds = store.DefaultToKinds(cmp.Or(f.For, f.To))
 			}
 			err = inbox.Watch(cmd.Context(), st, inbox.WatchOptions{Filter: f, Cursor: cursor, Interval: interval, For: limit, Width: rf.width, JSON: rf.json}, inbox.WriteLines(cmd.OutOrStdout(), rf.json))
 			if err == nil && cmd.Context().Err() != nil {

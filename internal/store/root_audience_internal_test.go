@@ -149,7 +149,7 @@ func TestRootAudienceMatchesCanonicalPredicates(t *testing.T) {
 					{Drive: "d", For: reader, Kinds: []kinds.Kind{kinds.Kind("svc.raw")}},
 					{Drive: "d", For: reader, Peer: "reader", After: 1, Limit: 3, Descending: true},
 					{Drive: "d", For: reader, Peer: "reader", Before: 14, IncludeExpired: true, Limit: 500},
-					(Subscription{Drive: "d", Reader: reader, Session: "reader", ToKinds: DefaultToKinds(reader)}).Filter(),
+					(Subscription{Drive: "d", Reader: reader, Session: "reader", Mute: []kinds.Kind{kinds.Decide}}).Filter(),
 				}
 				for i, f := range filters {
 					got, gotErr := st.Query(ctx, f)
@@ -167,7 +167,7 @@ func TestRootAudienceMatchesCanonicalPredicates(t *testing.T) {
 func TestRootAudienceAdmissionAndManualProvision(t *testing.T) {
 	ctx := t.Context()
 	st := openMembershipStore(ctx, t, t.TempDir())
-	f := (Subscription{Drive: "d", Reader: "root", Session: "reader", ToKinds: DefaultToKinds("root")}).Filter()
+	f := (Subscription{Drive: "d", Reader: "root", Session: "reader"}).Filter()
 	connection := func(want bool) {
 		t.Helper()
 		conn, err := st.rootAudienceConnection(ctx, f)
@@ -376,7 +376,7 @@ func TestRootAudienceActualConnectionLimits(t *testing.T) {
 func TestRootAudienceNativePlan(t *testing.T) {
 	ctx := t.Context()
 	st := openMembershipStore(ctx, t, t.TempDir())
-	for _, f := range []Filter{{Drive: "d", For: "root"}, {Drive: "d", For: "main", Kinds: []kinds.Kind{kinds.Note}, ToKinds: DefaultToKinds("main")}} {
+	for _, f := range []Filter{{Drive: "d", For: "root"}, {Drive: "d", For: "main", Kinds: []kinds.Kind{kinds.Note}, ToKinds: []kinds.Kind{kinds.Ask, kinds.Decide}}} {
 		conn, err := st.rootAudienceConnection(ctx, f)
 		if err != nil || conn == nil {
 			t.Fatal("not admitted", err)

@@ -42,7 +42,7 @@ SELECT 'd','worker','urgent',?,'unrouted','topic-'||n,'["elsewhere"]','post','ur
 VALUES ('d','worker','urgent',?,'selected','selected-topic','["root"]','post','urgent-selected')`, now.UnixMilli()); err != nil {
 				t.Fatal(err)
 			}
-			filter := (Subscription{Drive: "d", Session: "reader", Reader: "root", Kinds: []kinds.Kind{kinds.Urgent}, ToKinds: DefaultToKinds("root")}).Filter()
+			filter := (Subscription{Drive: "d", Session: "reader", Reader: "root", Kinds: []kinds.Kind{kinds.Urgent}}).Filter()
 			filter.After = int64(population)
 			filter.Limit = 500
 			bound := int64(4*bits.Len(uint(population)) + 8)

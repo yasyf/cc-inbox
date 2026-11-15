@@ -71,6 +71,8 @@ func TestReadModelMatchesTheStore(t *testing.T) {
 		{"kinds", store.Filter{Drive: "d", Kinds: asks}},
 		{"topics", store.Filter{Drive: "d", Topics: []string{"fire"}}},
 		{"mute", store.Filter{Drive: "d", Mute: asks}},
+		{"mute broadcasts for", store.Filter{Drive: "d", For: "worker", MuteBroadcasts: []kinds.Kind{kinds.Note, kinds.Decide}}},
+		{"mute broadcasts to", store.Filter{Drive: "d", To: "worker", Peer: "abc", MuteBroadcasts: []kinds.Kind{kinds.Note}}},
 		{"repeat", store.Filter{Drive: "d", RepeatWindow: time.Hour}},
 		{"contains folds case", store.Filter{Drive: "d", Contains: []string{"on it"}}},
 		{"contains a number", store.Filter{Drive: "d", Contains: []string{"41", "3"}}},

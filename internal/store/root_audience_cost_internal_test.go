@@ -99,7 +99,7 @@ func TestRootAudienceCandidateEmissions(t *testing.T) {
 				if optimized && objects != 6 || !optimized && objects != 0 {
 					t.Fatalf("actual root group objects=%d optimized=%t", objects, optimized)
 				}
-				f := (Subscription{Drive: "d", Reader: "root", Session: "reader", ToKinds: DefaultToKinds("root")}).Filter()
+				f := (Subscription{Drive: "d", Reader: "root", Session: "reader"}).Filter()
 				f.After = 1
 				f.Limit = 500
 				var total int64

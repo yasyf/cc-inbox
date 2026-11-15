@@ -159,35 +159,30 @@ cci subscribe --drive release-demo --reader root --kind incident,decide,ask --mu
 ```
 
 ```text
-window 29348 (session 900424b6-…) subscribed: drive release-demo as root, addressed kinds incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner, kinds incident,decide,ask, muted state,review,note, batched done, topic kinds none, followed none, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:channel"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
+window 29348 (session 900424b6-…) subscribed: drive release-demo as root, kinds incident,decide,ask, muted state,review,note, batched done, topic kinds none, followed none, urgent repeats held 30m0s, cursor channel-900424b6-… at #28325; records arrive as <channel source="plugin:cc-inbox:channel"> tags when this session was launched with --channels plugin:cc-inbox@cc-inbox
 ```
 
 What arrives:
 
-- records addressed to `root` or to its other name, `main`, of each
-  `--to-kind`;
+- every record addressed to `root` or to its other name, `main`, whatever its
+  kind;
 - other lanes' broadcasts of each `--kind`.
 
-`--to-kind` defaults to `incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner`
-for `root`, the kinds a root acts on, and to every kind for any other reader.
-In a window launched with `--channels`, `--batch-kinds` defaults to `done` for
-`root`, so a lane's `done` arrives in the next batch while `answer` and `owner`
-arrive at once.
+No kind list keeps a reader from a record addressed to it. In a window launched
+with `--channels`, `--batch-kinds` defaults to `done` for `root`, so a lane's
+`done` arrives in the next batch while `answer` and `owner` arrive at once.
 
 What never arrives:
 
-- records addressed to the reader of a kind outside `--to-kind`; neither the
-  channel nor the `PostToolUse` hook delivers them, and `cci tail` and
-  `cci digest` still read them;
 - records of a `--batch-kinds` kind addressed to the reader, on arrival: the
   channel carries them together in one tag, at most every five minutes and at
   once ahead of any other record, and the hook leaves them to it. A tag keeps
   the newest record per lane and topic, and per pull request for `head`, within
   about 3 KB, and ends in a `+N more` line naming the `cci tail` that reads the
   rest. A window not launched with `--channels` cannot use this flag;
-- records of a `--mute-kinds` kind, even addressed to `root`; neither the
-  channel nor the `PostToolUse` hook delivers them, and `cci tail` still reads
-  them;
+- records of a `--mute-kinds` kind not addressed to the reader, those to `all`
+  included; neither the channel nor the `PostToolUse` hook delivers them, and
+  `cci tail` still reads them. One addressed to the reader still arrives;
 - an `urgent` record whose lane posted another `urgent` record with the same
   `--topic` within the previous 30 minutes. The first of a run arrives, a
   repeat 30 minutes or more after the last one arrives again, and `cci tail`
@@ -471,7 +466,7 @@ Commands that select a drive accept `--drive` or use the current session binding
 | `cci post` | Append one typed record. Requires lane, kind, and text, given as `--text` or the one argument, which a bare `-` reads from stdin; prints its sequence number. `{at}` in that text becomes the record's own Pacific time in the form readers print, such as `10:52 AM`. A clock typed in a leading `R<n> (<clock>)` stamp, such as `R84 (10:59 AM)`, is replaced with that time. A leading `H:MM AM/PM` label that labels the post, a time followed by a colon or beside the lane's own name, is replaced the same way, with a one-line hint on stderr. Any other time in the text is stored as typed, and no time refuses a post. A deadline goes in an attribute, such as `--attr due=3:00 PM`. Text taken from a `--path` file is stored as written. `--quoted` appends another writer's words, such as a relayed Slack page, after one space, and cci replaces no `{at}` and checks no withdrawal in them. |
 | `cci tail` | Read after a saved cursor, bounded by bytes. The default cursor is the session, `CLAUDE_CODE_SESSION_ID` or else `CODEX_THREAD_ID`; `drive use` sets it to the selected drive's latest record. `--since` reads an explicit window without changing the cursor. |
 | `cci watch` | Stream matching records. Polls once a second until interrupted; `--for` exits after a duration. |
-| `cci subscribe` | Deliver records for `--reader` of each `--to-kind` (for `root`, by default, the kinds a root acts on), plus other lanes' broadcasts of each `--kind`, plus each `--follow <drive>=<kinds>` drive's broadcasts of those kinds, plus records of each `--topic-kinds` kind on any topic a record addressed to `--reader` has carried, whoever they are addressed to, minus each `--mute-kinds` kind and urgent repeats, to this Claude Code window's `cci` channel, advancing `--cursor`. A root follows the on-call feed with `--follow oncall=incident`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
+| `cci subscribe` | Deliver every record addressed to `--reader`, plus other lanes' broadcasts of each `--kind`, plus each `--follow <drive>=<kinds>` drive's broadcasts of those kinds, plus records of each `--topic-kinds` kind on any topic a record addressed to `--reader` has carried, whoever they are addressed to, minus each `--mute-kinds` kind not addressed to `--reader` and urgent repeats, to this Claude Code window's `cci` channel, advancing `--cursor`. A root follows the on-call feed with `--follow oncall=incident`. The cursor defaults to `channel-<session>`; a new cursor starts at the head. |
 | `cci unsubscribe` | Stop this window's channel delivery. |
 | `cci session register <alias>` | Keep a session alive under `<alias>` in the tmux session named `<alias>`, where `cci session run` starts `--command` from `--cwd` and starts it again with `--resume` and `--resume-prompt` each time Claude Code exits. `--session` defaults to this one and `--new` starts a fresh one. The alias owns the session's channel subscription, set by the flags `cci subscribe` takes, so each window the session runs in hears it; `--notify` names the lanes told when its channel disconnects, `communicator` by default. Registering again replaces what the alias holds and keeps its cursor; `cci subscribe` and `cci unsubscribe` refuse a registered session. |
 | `cci session list` | Each alias, the session it keeps, the window it runs in, its tmux session, its cursor and the lanes it notifies. |

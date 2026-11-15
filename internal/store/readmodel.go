@@ -1041,8 +1041,9 @@ type modelSelection struct {
 	now                       int64
 	forNames, forHooks        []string
 	addressed, to             []string
-	peers, readers            []string
+	peers, readers, own       []string
 	kindSet, muteSet, toKinds map[string]bool
+	muteBroadcasts            map[string]bool
 	firstOnly                 map[string]bool
 	orders                    map[string]bool
 	wordsLower                [][]byte
@@ -1082,7 +1083,7 @@ func (m *ReadModel) idOf(s string) int32 {
 }
 
 func newModelSelection(m *ReadModel, s *Store, f Filter, now time.Time) *modelSelection {
-	sel := &modelSelection{m: m, f: f, now: now.UnixMilli(), kindSet: kindSet(f.Kinds), muteSet: kindSet(f.Mute), toKinds: kindSet(f.ToKinds), firstOnly: kindSet(f.FirstOnly), orders: kindSet(kinds.Orders())}
+	sel := &modelSelection{m: m, f: f, now: now.UnixMilli(), kindSet: kindSet(f.Kinds), muteSet: kindSet(f.Mute), muteBroadcasts: kindSet(f.MuteBroadcasts), toKinds: kindSet(f.ToKinds), firstOnly: kindSet(f.FirstOnly), orders: kindSet(kinds.Orders())}
 	if f.For != "" {
 		sel.forNames = stringsOf(f.addressees(f.For))
 		sel.forHooks = stringsOf(hookSources(f.addressees(f.For)))
@@ -1093,7 +1094,7 @@ func newModelSelection(m *ReadModel, s *Store, f Filter, now time.Time) *modelSe
 	if f.To != "" {
 		sel.to = stringsOf(f.addressees(f.To))
 	}
-	sel.peers, sel.readers = stringsOf(f.peerAddresses(s.Self())), stringsOf(f.readerAddresses())
+	sel.peers, sel.readers, sel.own = stringsOf(f.peerAddresses(s.Self())), stringsOf(f.readerAddresses()), stringsOf(f.ownAddresses(s.Self()))
 	sel.urgent, sel.stack, sel.target = m.idOf(string(kinds.Urgent)), m.idOf(f.Stack), m.idOf(f.Target)
 	sel.repoPR = modelNone
 	if f.PR.Number != 0 && f.PR.Repo != "" {
@@ -1250,6 +1251,9 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 		}
 	}
 	if sel.muteSet[v.kind] {
+		return false, true
+	}
+	if sel.muteBroadcasts[v.kind] && !anyOf(v.addressees.to, sel.own) {
 		return false, true
 	}
 	if sel.firstOnly[v.kind] && f.To != "" && (len(v.addressees.to) == 0 || !slices.Contains(sel.to, v.addressees.to[0])) {

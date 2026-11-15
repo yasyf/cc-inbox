@@ -35,6 +35,7 @@ type Filter struct {
 	Peer           string
 	Kinds          []kinds.Kind
 	Mute           []kinds.Kind
+	MuteBroadcasts []kinds.Kind
 	ToKinds        []kinds.Kind
 	TopicKinds     []kinds.Kind
 	FirstOnly      []kinds.Kind
@@ -198,6 +199,15 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	if len(f.Mute) > 0 {
 		clauses = append(clauses, "kind NOT IN ("+placeholders(len(f.Mute))+")")
 		params = append(params, kindArgs(f.Mute)...)
+	}
+	if len(f.MuteBroadcasts) > 0 {
+		clause := "kind NOT IN (" + placeholders(len(f.MuteBroadcasts)) + ")"
+		params = append(params, kindArgs(f.MuteBroadcasts)...)
+		if own := f.ownAddresses(self); len(own) > 0 {
+			clause = "(" + clause + " OR " + addressedTo("("+placeholders(len(own))+")") + ")"
+			params = append(params, own...)
+		}
+		clauses = append(clauses, clause)
 	}
 	if len(f.FirstOnly) > 0 && f.To != "" {
 		names := f.addressees(f.To)
@@ -370,6 +380,14 @@ func (f Filter) peerAddresses(self string) []any {
 		return nil
 	}
 	return []any{PeerAddress(f.Peer), PeerAddressOn(self, f.Peer)}
+}
+
+func (f Filter) ownAddresses(self string) []any {
+	var lanes []any
+	if reader := cmp.Or(f.To, f.For, f.Addressed); reader != "" {
+		lanes = f.addressees(reader)
+	}
+	return slices.Concat(lanes, f.readerAddresses(), f.peerAddresses(self))
 }
 
 func (f Filter) readerAddresses() []any {
