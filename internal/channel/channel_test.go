@@ -560,7 +560,7 @@ func TestMutedKindsAndUrgentRepeatsReachNeitherTheChannelNorTheHook(t *testing.T
 		return testutil.Post(t, st, store.Record{Lane: "stall-watch", Kind: kinds.Urgent, Topic: "go:1", To: []string{"root"}, Text: fmt.Sprintf("go 1 stalled %d min", minutes)})
 	}
 	first := stall(10)
-	queued := testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"root"}, Text: "QUEUED go 1"})
+	queued := testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"all"}, Text: "QUEUED go 1"})
 	repeat := stall(20)
 	var out bytes.Buffer
 	if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {

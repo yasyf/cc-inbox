@@ -430,7 +430,7 @@ func findTool() mcp.Tool {
 		Name:        "find",
 		Description: "Search records newest first by pattern and filters; prs answers many pull requests in one call.",
 		InputSchema: schema(nil, map[string]any{
-			"pattern": prop("string", "regular expression over the record line find prints, before width clips it, so t:<topic> finds every record on that topic (default: any)"),
+			"pattern": prop("string", "regular expression over the unclipped line find prints, so t:<topic> finds a topic (default: any)"),
 			"kinds":   list("only these kinds"),
 			"lanes":   list("only these writers"),
 			"to":      prop("string", "only records addressed to this lane"),
