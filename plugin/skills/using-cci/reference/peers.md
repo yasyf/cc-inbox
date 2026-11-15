@@ -138,7 +138,11 @@ none or several. `<lane>@<drive>` reaches a lane in a named drive, with
 lane that no live thread reads in the posting drive, but one reads in exactly
 one other drive, is addressed `<lane>@<that drive>` and the post says so on
 stderr; when live threads read it in several other drives, the post fails and
-names them.
+names them. A session bound to a drive posts only on that drive, since a record
+is written as a lane of its own drive: a post naming another `--drive` is
+refused, naming the same record with no `--drive` and `--to <lane>@<that
+drive>`. A post with `CCI_PARENT_SESSION` set, made for its parent session,
+keeps `--drive`.
 
 ```bash
 cci post --lane root --kind ask --to peer:900424b6 "can you take #34363?"
