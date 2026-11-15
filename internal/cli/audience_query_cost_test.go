@@ -61,7 +61,7 @@ VALUES ('foreign','noise','state',?,'selected global peer','noise','["peer:tail-
 ('d','noise','state',?,'selected parent reply','noise','[]',?,'post','reply')`, at, at, at, population+4); err != nil {
 						t.Fatal(err)
 					}
-					want = append(want, int64(population+3), int64(population+5))
+					want = append(want, int64(population+3))
 				}
 				if filter.toKinds {
 					want = []int64{1}

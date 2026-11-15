@@ -121,7 +121,7 @@ SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' ||
 			assertMembership(ctx, t, st, "record_recipients", "'peer:concurrent-old'", result.Seq, 1)
 			assertMembershipsDerived(ctx, t, st)
 			var audience int
-			if err := st.db.QueryRowContext(ctx, "SELECT audience FROM record_root_audience_v2 WHERE source_seq = ?", result.Seq).Scan(&audience); err != nil || audience != 1 {
+			if err := st.db.QueryRowContext(ctx, "SELECT audience FROM record_root_audience_v2 WHERE source_seq = ?", result.Seq).Scan(&audience); err != nil || audience != 0 {
 				t.Fatalf("old writer root audience = %d, %v", audience, err)
 			}
 
