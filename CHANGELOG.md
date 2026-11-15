@@ -92,6 +92,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Every record addressed to a lane reaches it, whatever its kind. A
+  subscription's `--mute-kinds` now drops only records not addressed to its
+  reader, those to `all` included, so root's `go` to `platform`, `sandsql` and
+  `iris` reaches each of them on the channel and through the `PostToolUse` hook
+  while their `--mute-kinds report,opened` still keeps other lanes' reports and
+  opened records off them. A lane's report addressed to root arrives too.
+
 - A registered session no longer runs on the PATH of the process that
   registered it. `cci session run` starts the session's command with
   `$SHELL -l -i -c` in place of `$SHELL -l -c`, so the shell's interactive
@@ -561,6 +568,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   when the writer holds it. One registry read per drive per page decides it.
 
 ### Removed
+
+- `cci subscribe --to-kind` and `cci session register --to-kind` are gone, with
+  root's default list of the kinds a root acts on and `cci watch --reader root`'s
+  copy of it. A list per role let one role's subscription leave out a kind
+  another role sends it, as the sub-coordinators' did with root's `go`. A
+  registration kept with the flag keeps working, its list ignored; a command
+  still passing the flag is refused as an unknown flag. `cci tail --to-kind`
+  and `cci watch --to-kind` still narrow a read.
 
 - A reply reaches only the lanes its `--to` names. `--reader`, a session's
   channel, the MCP `inbox` tool and `cci tail`'s addressed-first page no longer

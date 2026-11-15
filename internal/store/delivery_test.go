@@ -75,19 +75,28 @@ func TestDeliveryMutesKindsAndHoldsUrgentRepeats(t *testing.T) {
 	}
 }
 
-func TestAddressedKindsNarrowOnlyRecordsAddressedToTheReader(t *testing.T) {
-	corpus := []timed{
-		{0, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"root"}, Text: "state to root"}},
-		{0, store.Record{Lane: "ship-lane", Kind: kinds.Report, To: []string{"main"}, Text: "report to main"}},
-		{0, store.Record{Lane: "ship-lane", Kind: kinds.Ask, To: []string{"main"}, Text: "ask to main"}},
-		{0, store.Record{Lane: "fix-lane", Kind: kinds.Incident, To: []string{"root"}, Text: "incident to root"}},
-		{0, store.Record{Lane: "split-lane", Kind: kinds.Design, To: []string{"root"}, Text: "design to root"}},
-		{0, store.Record{Lane: "ship-lane", Kind: kinds.Head, Text: "head broadcast"}},
-		{0, store.Record{Lane: "ship-lane", Kind: kinds.State, Text: "state broadcast"}},
-		{0, store.Record{Lane: "peer-lane", Kind: kinds.Note, To: []string{"peer:s1"}, Text: "note to peer"}},
-		{0, store.Record{Lane: "peer-lane", Kind: kinds.Answer, Topic: "schema", To: []string{"peer:s1"}, Text: "answer to peer"}},
+func TestEveryKindAddressedToTheReaderArrivesAndMuteDropsOnlyOthers(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := t.Context()
+	for _, r := range []store.Record{
+		{Lane: "desk-runner", Kind: kinds.State, To: []string{"root"}, Text: "state to root"},
+		{Lane: "ship-lane", Kind: kinds.Report, To: []string{"main"}, Text: "report to main"},
+		{Lane: "ship-lane", Kind: kinds.Ask, To: []string{"main"}, Text: "ask to main"},
+		{Lane: "coordinator", Kind: kinds.Go, To: []string{"root@d"}, Text: "go to root@d"},
+		{Lane: "ship-lane", Kind: kinds.Head, Text: "head broadcast"},
+		{Lane: "ship-lane", Kind: kinds.State, Text: "state broadcast"},
+		{Lane: "ship-lane", Kind: kinds.Report, Text: "report to nobody"},
+		{Lane: "ship-lane", Kind: kinds.Report, To: []string{"all"}, Text: "report to all"},
+		{Lane: "peer-lane", Kind: kinds.Report, To: []string{"peer:s1"}, Text: "report to peer"},
+	} {
+		testutil.Post(t, st, r)
 	}
-	rootKinds := store.DefaultToKinds("main")
+	model, err := st.BuildReadModel(ctx, noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	reports := []kinds.Kind{kinds.Report}
 	for _, tc := range []struct {
 		name   string
 		filter store.Filter
@@ -95,28 +104,39 @@ func TestAddressedKindsNarrowOnlyRecordsAddressedToTheReader(t *testing.T) {
 	}{
 		{
 			name:   "subscription",
-			filter: store.Filter{Drive: "d", Peer: "s1", For: "root", Kinds: []kinds.Kind{kinds.State}, ToKinds: rootKinds},
-			want:   []string{"ask to main", "incident to root", "design to root", "state broadcast", "answer to peer"},
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "root", Kinds: []kinds.Kind{kinds.State, kinds.Report}, Mute: reports}.Filter(),
+			want:   []string{"state to root", "report to main", "ask to main", "go to root@d", "state broadcast", "report to peer"},
 		},
 		{
 			name:   "hook",
-			filter: store.Filter{Drive: "d", Peer: "s1", To: "root", ToKinds: rootKinds},
-			want:   []string{"ask to main", "incident to root", "design to root", "answer to peer"},
+			filter: store.Filter{Drive: "d", Peer: "s1", To: "root", MuteBroadcasts: reports},
+			want:   []string{"state to root", "report to main", "ask to main", "go to root@d", "report to peer"},
 		},
 		{
 			name:   "tail",
-			filter: store.Filter{Drive: "d", Peer: "s1", For: "root", Kinds: []kinds.Kind{kinds.State}},
-			want:   []string{"state to root", "report to main", "ask to main", "incident to root", "design to root", "state broadcast", "note to peer", "answer to peer"},
+			filter: store.Filter{Drive: "d", Peer: "s1", For: "root", Kinds: []kinds.Kind{kinds.State, kinds.Report}},
+			want:   []string{"state to root", "report to main", "ask to main", "go to root@d", "state broadcast", "report to nobody", "report to all", "report to peer"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := delivered(t, tc.filter, corpus); !slices.Equal(got, tc.want) {
-				t.Fatalf("delivered %q, want %q", got, tc.want)
+			stored, err := st.Query(ctx, tc.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			modeled, answered, err := model.Answer(ctx, st, tc.filter)
+			if err != nil || !answered {
+				t.Fatalf("model answered %t, %v", answered, err)
+			}
+			for path, got := range map[string][]store.Record{"store": stored, "model": modeled} {
+				texts := make([]string, 0, len(got))
+				for _, r := range got {
+					texts = append(texts, r.Text)
+				}
+				if !slices.Equal(texts, tc.want) {
+					t.Errorf("the %s delivered %q, want %q", path, texts, tc.want)
+				}
 			}
 		})
-	}
-	if got := store.DefaultToKinds("ship-lane"); got != nil {
-		t.Fatalf("DefaultToKinds(ship-lane) = %v, want every kind", got)
 	}
 }
 
@@ -186,12 +206,12 @@ func TestAFollowedDriveDeliversOnlyItsBroadcastsOfTheFollowedKinds(t *testing.T)
 	}{
 		{
 			name:   "subscription",
-			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "root", ToKinds: store.DefaultToKinds("root"), Follow: follow}.Filter(),
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "root", Follow: follow}.Filter(),
 			want:   []string{"page opened", "page resolved", "incident to root"},
 		},
 		{
 			name:   "unfollowed",
-			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "root", ToKinds: store.DefaultToKinds("root")}.Filter(),
+			filter: store.Subscription{Drive: "d", Session: "s1", Reader: "root"}.Filter(),
 			want:   []string{"incident to root"},
 		},
 	} {

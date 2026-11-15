@@ -117,7 +117,7 @@ SELECT n+1,?,'noise','ask',?,'ignored','post','changed-watch-'||n,'["other"]',?,
 			queries.Add(1)
 			return clock.Now()
 		}
-		sub := store.Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Incident, kinds.Decide, kinds.Ask, kinds.Defect, kinds.Blocker}, ToKinds: store.DefaultToKinds("root")}
+		sub := store.Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Incident, kinds.Decide, kinds.Ask, kinds.Defect, kinds.Blocker}}
 		filter := sub.Filter()
 		filter.After = 1
 		ctx, cancel := context.WithCancel(t.Context())

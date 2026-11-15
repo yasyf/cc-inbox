@@ -390,7 +390,7 @@ func startLive(ctx context.Context, st *store.Store, sub store.Subscription, cha
 	if sub.Alias != "" {
 		return replay(ctx, st, sub, channeled, from, head, l, notify)
 	}
-	n, err := st.Count(ctx, store.Filter{Drive: sub.Drive, Addressed: sub.Reader, Peer: sub.Session, Mute: slices.Concat(sub.Mute, sub.Batch), After: from, Before: head + 1})
+	n, err := st.Count(ctx, store.Filter{Drive: sub.Drive, Addressed: sub.Reader, Peer: sub.Session, Mute: sub.Batch, After: from, Before: head + 1})
 	if err != nil {
 		return err
 	}

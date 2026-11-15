@@ -26,7 +26,6 @@ type subscriptionFlags struct {
 	cursor string
 	kinds  []string
 	mute   []string
-	to     []string
 	batch  []string
 	topic  []string
 	follow []string
@@ -34,10 +33,9 @@ type subscriptionFlags struct {
 
 func (f *subscriptionFlags) bind(cmd *cobra.Command, cursorHelp string) {
 	cmd.Flags().StringVar(&f.drive, "drive", "", "drive to deliver (default: the drive bound to this session)")
-	cmd.Flags().StringVar(&f.reader, "reader", "", "deliver records addressed to this lane, as cci tail --reader does")
+	cmd.Flags().StringVar(&f.reader, "reader", "", "deliver every record addressed to this lane, as cci tail --reader does")
 	cmd.Flags().StringSliceVar(&f.kinds, "kind", nil, "also deliver other lanes' broadcasts of these kinds (repeatable)")
-	cmd.Flags().StringSliceVar(&f.mute, "mute-kinds", nil, "never deliver these kinds, even addressed to --reader; cci tail still reads them (repeatable)")
-	cmd.Flags().StringSliceVar(&f.to, "to-kind", nil, "deliver records addressed to --reader only of these kinds; cci tail still reads the rest (repeatable; default for root: "+kindList(kinds.RootAddressed())+", otherwise every kind)")
+	cmd.Flags().StringSliceVar(&f.mute, "mute-kinds", nil, "never deliver records of these kinds that are not addressed to --reader, those to all included; cci tail still reads them (repeatable)")
 	cmd.Flags().StringSliceVar(&f.batch, "batch-kinds", nil, "deliver records addressed to --reader of these kinds together, one tag at most every five minutes, never on arrival (repeatable; default for root: "+kindList(store.DefaultBatch("root"))+", otherwise none)")
 	cmd.Flags().StringSliceVar(&f.topic, "topic-kinds", nil, "also deliver records of these kinds, whoever they are addressed to, on any topic a record addressed to --reader has carried (repeatable)")
 	cmd.Flags().StringArrayVar(&f.follow, "follow", nil, "also deliver another drive's broadcasts of these kinds, as <drive>=<kind>[,<kind>...], e.g. oncall=incident (repeatable)")
@@ -56,12 +54,6 @@ func (f *subscriptionFlags) subscription(ctx context.Context, st *store.Store, s
 	}
 	if sub.Mute, err = kinds.ParseAll(f.mute); err != nil {
 		return store.Subscription{}, err
-	}
-	if sub.ToKinds, err = kinds.ParseAll(f.to); err != nil {
-		return store.Subscription{}, err
-	}
-	if len(sub.ToKinds) == 0 {
-		sub.ToKinds = store.DefaultToKinds(f.reader)
 	}
 	if sub.Batch, err = kinds.ParseAll(f.batch); err != nil {
 		return store.Subscription{}, err
@@ -118,15 +110,14 @@ func newSubscribeCmd() *cobra.Command {
 	var flags subscriptionFlags
 	cmd := &cobra.Command{
 		Use:   "subscribe",
-		Short: "Deliver this session's records over the cci channel: records addressed to --reader of each --to-kind, plus broadcasts of each --kind",
+		Short: "Deliver this session's records over the cci channel: every record addressed to --reader, plus broadcasts of each --kind",
 		Long: `Deliver this session's records over the cci channel.
 
-A record addressed to --reader arrives when its kind is a --to-kind; other
-lanes' broadcasts arrive when their kind is a --kind. For reader root (or main)
---to-kind defaults to ` + kindList(kinds.RootAddressed()) + `, the kinds a
-drive's root acts on; for any other reader every addressed kind arrives.
-Records the channel holds back still show in cci tail, cci digest and the stop
-hook's overdue-ask nudge.
+Every record addressed to --reader arrives, whatever its kind; other lanes'
+broadcasts arrive when their kind is a --kind. --mute-kinds holds back only
+records not addressed to --reader, so no kind list keeps a lane from a record
+sent to it. Records the channel holds back still show in cci tail, cci digest
+and the stop hook's overdue-ask nudge.
 
 A record addressed to --reader of a --batch-kinds kind wakes nobody on arrival:
 the channel carries those together in one tag, at most every five minutes and
@@ -329,14 +320,7 @@ func describe(sub store.Subscription) string {
 	for i, f := range sub.Follow {
 		followed[i] = f.Drive + "=" + kindList(f.Kinds)
 	}
-	return fmt.Sprintf("drive %s as %s, addressed kinds %s, kinds %s, muted %s, batched %s, topic kinds %s, followed %s, urgent repeats held %s", sub.Drive, sub.Reader, addressedList(sub.ToKinds), kindList(sub.Kinds), kindList(sub.Mute), kindList(sub.Batch), kindList(sub.TopicKinds), cmp.Or(strings.Join(followed, " "), "none"), store.UrgentRepeat)
-}
-
-func addressedList(ks []kinds.Kind) string {
-	if len(ks) == 0 {
-		return "all"
-	}
-	return kindList(ks)
+	return fmt.Sprintf("drive %s as %s, kinds %s, muted %s, batched %s, topic kinds %s, followed %s, urgent repeats held %s", sub.Drive, sub.Reader, kindList(sub.Kinds), kindList(sub.Mute), kindList(sub.Batch), kindList(sub.TopicKinds), cmp.Or(strings.Join(followed, " "), "none"), store.UrgentRepeat)
 }
 
 func kindList(ks []kinds.Kind) string {

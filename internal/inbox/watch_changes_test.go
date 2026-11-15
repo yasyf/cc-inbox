@@ -30,7 +30,7 @@ SELECT 'd','worker','note',1,'backlog','post','backlog-'||n,'[]',?,n,'backlog-'|
 		if err != nil {
 			t.Fatal(err)
 		}
-		filter := (store.Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Note}, ToKinds: store.DefaultToKinds("root")}).Filter()
+		filter := (store.Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Note}}).Filter()
 		filter.After = 1
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()

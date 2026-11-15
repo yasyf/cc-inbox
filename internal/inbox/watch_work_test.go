@@ -41,7 +41,7 @@ SELECT ?,'noise','state',1,'ignored','post','watch-'||n,'["noise"]',?,n,'watch-'
 						queries.Add(1)
 						return clock.Now()
 					}
-					filter := (store.Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Note}, ToKinds: store.DefaultToKinds("root")}).Filter()
+					filter := (store.Subscription{Drive: "d", Session: "missing", Reader: "root", Kinds: []kinds.Kind{kinds.Note}}).Filter()
 					filter.After = 1
 					ctx, cancel := context.WithCancel(t.Context())
 					defer cancel()

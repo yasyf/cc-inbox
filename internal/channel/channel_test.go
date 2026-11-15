@@ -585,7 +585,7 @@ func TestARecordAddressedToTheReaderAtItsDriveArrivesOnceOutsideTheBatch(t *test
 	st, _ := newStore(t)
 	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, time.Hour
 	ctx := context.Background()
-	sub, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", ToKinds: store.DefaultToKinds("root"), Batch: store.DefaultBatch("root"), Cursor: "root-channel"})
+	sub, err := st.Subscribe(ctx, store.Subscription{Session: "s1", Window: window, Drive: "d", Reader: "root", Batch: store.DefaultBatch("root"), Cursor: "root-channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func TestARecordAddressedToTheReaderAtItsDriveArrivesOnceOutsideTheBatch(t *test
 	noTag(t, tags, 50*time.Millisecond)
 }
 
-func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
+func TestRootHearsEveryKindAddressedToIt(t *testing.T) {
 	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
 	ctx := context.Background()
@@ -615,18 +615,19 @@ func TestRootHearsOnlyAddressedKindsItActsOn(t *testing.T) {
 	if err := st.BindLane(ctx, store.PeerKey{Session: root.SessionID}, "d", "root", time.Time{}); err != nil {
 		t.Fatal(err)
 	}
-	sub, err := st.Subscribe(ctx, store.Subscription{Session: root.SessionID, Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Decide}, ToKinds: store.DefaultToKinds("root"), Batch: store.DefaultBatch("root"), Cursor: "root-channel"})
+	sub, err := st.Subscribe(ctx, store.Subscription{Session: root.SessionID, Window: window, Drive: "d", Reader: "root", Kinds: []kinds.Kind{kinds.Decide}, Mute: []kinds.Kind{kinds.Report}, Batch: store.DefaultBatch("root"), Cursor: "root-channel"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	state := testutil.Post(t, st, store.Record{Lane: "desk-runner", Kind: kinds.State, To: []string{"root"}, Text: "QUEUED go 1"})
-	report := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Report, To: []string{"main"}, Text: "PR opened"})
+	report := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Report, To: []string{"main"}, Text: "staging cut 1 ready"})
+	muted := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Report, To: []string{"all"}, Text: "PR opened for every lane"})
 	var out bytes.Buffer
 	if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); strings.Contains(got, state.Text) || strings.Contains(got, report.Text) {
-		t.Fatalf("hook delivered %q", got)
+	if got := out.String(); !strings.Contains(got, state.Text) || !strings.Contains(got, report.Text) || strings.Contains(got, muted.Text) {
+		t.Fatalf("hook delivered %q, want the state and report addressed to root and not the muted report to all", got)
 	}
 	done := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Done, To: []string{"main"}, Text: "first PR merged"})
 	ask := testutil.Post(t, st, store.Record{Lane: "ship-lane", Kind: kinds.Ask, To: []string{"main"}, Text: "merge go 1?"})

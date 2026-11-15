@@ -70,14 +70,10 @@ missed as its own tag, then the rest as one `batch` tag ending in the
 delivers; its cursor stays. `cci session list` names each alias, its session,
 where it runs and its cursor, and `cci session rm <alias>` ends it.
 
-A record addressed to the reader arrives only when its kind is a
-`--to-kind`. For `--reader root` (or `main`) that defaults to
-`incident,mechanism,fix-live,decide,ask,design,blocker,blocked,urgent,answer,release,correction,defect,owner`, the kinds a root
-acts on, and `--batch-kinds` defaults to `done` in a window launched with
-`--channels`; the state, head, red, report, review, note and evidence records lanes
-copy to root stay in `cci tail` and `cci digest`, and the root's `PostToolUse`
-hook holds them back too. Other readers get every addressed kind unless they
-name `--to-kind`. `cci watch --reader root` applies the same default.
+Every record addressed to the reader arrives, whatever its kind: no kind list
+keeps a lane from a record sent to it, and `cci watch` delivers the same. For
+`--reader root` (or `main`), `--batch-kinds` defaults to `done` in a window
+launched with `--channels`.
 
 `--batch-kinds report,note` holds those addressed kinds off a window until one
 tag carries them together, at most every five minutes and at once ahead of any
@@ -88,9 +84,10 @@ the thread bound as that lane, reads its mail through the hook's cursor, so a
 wait and the hook deliver a record once. `--to <stem> --mail` from a numbered
 lane that holds the stem reads the same mail through the same cursor. A delivered line names no recipients;
 `cci show <seq>` does.
-`--mute-kinds state,review,note` keeps those kinds off the channel and out of
-the root's hook delivery, even when addressed to the root; `cci tail` still
-reads them. An `urgent` record repeating its lane's `urgent` topic within 30
+`--mute-kinds report,opened` keeps those kinds off the channel and out of the
+hook's delivery when they are not addressed to the reader, those to `all`
+included; one addressed to the reader still arrives, and `cci tail` still reads
+them all. An `urgent` record repeating its lane's `urgent` topic within 30
 minutes reaches no channel and no hook, for any reader; post a stall once and
 repeat it no sooner than every 30 minutes. `cci me` prints the window's
 subscription, to confirm a subscribe took.
