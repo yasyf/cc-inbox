@@ -172,22 +172,26 @@ func resolveDrive(ctx context.Context, st *store.Store, drive string) (string, e
 	if drive != "" {
 		return drive, nil
 	}
-	if self := SelfPeer(ctx); self.Session != "" {
-		b, ok, err := st.Binding(ctx, self)
-		if err == nil && !ok {
-			_, b, ok, err = st.Owner(ctx, self)
-		}
-		if err != nil {
-			return "", err
-		}
-		if ok {
-			return b.Drive, nil
-		}
+	bound, ok, err := sessionDrive(ctx, st)
+	if err != nil || ok {
+		return bound, err
 	}
 	if d := getenv(ctx, driveEnv); d != "" {
 		return d, nil
 	}
 	return "", store.ErrNoDrive
+}
+
+func sessionDrive(ctx context.Context, st *store.Store) (string, bool, error) {
+	self := SelfPeer(ctx)
+	if self.Session == "" {
+		return "", false, nil
+	}
+	b, ok, err := st.Binding(ctx, self)
+	if err == nil && !ok {
+		_, b, ok, err = st.Owner(ctx, self)
+	}
+	return b.Drive, ok, err
 }
 
 type readFlags struct {

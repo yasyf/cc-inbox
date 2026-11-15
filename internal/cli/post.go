@@ -208,6 +208,9 @@ func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string,
 		if r.Drive, err = resolveDrive(cmd.Context(), st, drive); err != nil {
 			return postPlan{}, err
 		}
+		if err := refuseForeignDrive(cmd.Context(), st, drive, r.To); err != nil {
+			return postPlan{}, err
+		}
 		if lane, err = aliasedLane(cmd.Context(), st, r.Drive, lane); err != nil {
 			return postPlan{}, err
 		}
@@ -408,7 +411,7 @@ func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string,
 	}))
 	f := cmd.Flags()
 	f.StringVar(&batch, batchFlag, "", "post each record of a JSON list, from a file or - for stdin: each an object of this command's flags by name, text and to and re among them, plus body for its full text; --lane and --drive are each record's default. Every record is checked before any is stored, and the list stores in one step: each prints as one post does, while a refusal prints each refused record's position, stores none of the list, and exits 1")
-	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does")
+	f.StringVar(&drive, "drive", "", "drive of this one record (default: the drive bound to this session); it never moves the binding, which only cci drive use does, and a session bound to a drive is refused any other, since the record would post as a lane of that drive: reach a lane of another drive with --to <lane>@<drive>")
 	f.StringVar(&lane, "lane", "", "the writing lane (default: the lane this thread is bound to; never root, so the root passes --lane root)")
 	f.StringVar(&kind, "kind", "", "record kind: "+strings.Join(kinds.Names(), ", "))
 	f.StringVar(&text, "text", "", "the record text, also accepted as the one argument, and read from stdin when it is a bare -; {at} anywhere in it becomes the record's own Pacific time as readers print it, and a clock typed in a leading R<n> (<clock>) stamp, such as R84 (10:52 AM), is replaced with that time; a leading H:MM AM/PM label is replaced with it too, with a hint on stderr: one that opens the text followed by a colon or the lane's own name, one that follows the lane's own name, or one that follows at most four words and ends in a colon; any other time, such as a deadline that opens the text, is stored as typed; over 400 characters it spills to a file under $CCI_HOME/blobs, followed by the --path file when one is named, and the record carries its first 400 characters, cut at a word and ended with …; without either, the --path file's first line, stored as written")
@@ -661,6 +664,27 @@ func stemmed(ctx context.Context, st *store.Store, drive string, to []string) ([
 		}
 	}
 	return out, nil
+}
+
+func refuseForeignDrive(ctx context.Context, st *store.Store, drive string, to []string) error {
+	if drive == "" || getenv(ctx, unsentEnv) != "" || getenv(ctx, parentSessionEnv) != "" {
+		return nil
+	}
+	bound, ok, err := sessionDrive(ctx, st)
+	if err != nil || !ok || bound == drive {
+		return err
+	}
+	across := make([]string, 0, max(len(to), 1))
+	for _, t := range to {
+		if !strings.HasPrefix(t, "peer:") && !strings.Contains(t, "@") {
+			t += "@" + drive
+		}
+		across = append(across, "--to "+t)
+	}
+	if len(across) == 0 {
+		across = append(across, "--to <lane>@"+drive)
+	}
+	return fmt.Errorf("--drive %s is not %s, the drive this session is bound to, and a record is written on the drive of the lane writing it, so this would post as a lane of %s: post the same record with no --drive and %s", drive, bound, drive, strings.Join(across, " "))
 }
 
 func addressesSelf(t, lane, drive string) bool {

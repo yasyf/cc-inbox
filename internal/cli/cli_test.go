@@ -1071,6 +1071,45 @@ func TestPostToPeerAcrossDrives(t *testing.T) {
 	}
 }
 
+func TestABoundSessionReachesAnotherDrivesLaneByAddressNeverByDrive(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CCI_PARENT_SESSION", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-meta-a")
+	if _, err := run(t, "drive", "use", "drive-a"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-meta-b")
+	if _, err := run(t, "drive", "use", "drive-b"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-meta-a")
+	for to, want := range map[string]string{"meta@drive-b": "--to meta@drive-b", "root": "--to root@drive-b"} {
+		out, err := run(t, "post", "--drive", "drive-b", "--lane", "meta", "--kind", "defect", "--to", to, "--text", "please land the fix")
+		if err == nil || !strings.Contains(err.Error(), "--drive drive-b is not drive-a") || !strings.Contains(err.Error(), "post the same record with no --drive and "+want) {
+			t.Fatalf("post --drive drive-b --to %s from drive-a = %q, %v; want the refusal naming %s", to, out, err, want)
+		}
+	}
+	if out, err := run(t, "post", "--lane", "meta", "--kind", "defect", "--to", "meta@drive-b", "--text", "please land the fix"); err != nil || out != "#1\n" {
+		t.Fatalf("post --to meta@drive-b from drive-a = %q, %v", out, err)
+	}
+	if out, err := run(t, "tail", "--since", "0", "--reader", "meta"); err != nil || out != "" {
+		t.Fatalf("drive-a's meta read its own record to meta@drive-b: %q, %v", out, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "bbbb2222-meta-b")
+	if out, err := run(t, "tail", "--since", "0", "--reader", "meta"); err != nil || len(recordLines(out)) != 1 || !strings.Contains(out, "defect meta@drive-a>meta@drive-b please land the fix") {
+		t.Fatalf("drive-b's meta tail = %q, %v", out, err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-meta-a")
+	t.Setenv("CCI_PARENT_SESSION", "aaaa1111-meta-a")
+	if out, err := run(t, "post", "--drive", "drive-b", "--lane", "meta", "--kind", "note", "--to", "root", "--text", "posted for the drive"); err != nil || out != "#2\n" {
+		t.Fatalf("post --drive drive-b for a parent session = %q, %v", out, err)
+	}
+}
+
 func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("CCI_HOME", home)
@@ -2109,7 +2148,12 @@ func TestPostReplyAddressesTheLaneThatWroteTheRecordItAnswers(t *testing.T) {
 		return got
 	}
 	ask := post("--lane", "lane-a", "--kind", "ask", "--text", "who owns the relay?")
-	peerAsk := post("--lane", "lane-c", "--drive", "peer-drive", "--kind", "ask", "--text", "can root take this?")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-2")
+	if _, err := run(t, "drive", "use", "peer-drive"); err != nil {
+		t.Fatal(err)
+	}
+	peerAsk := post("--lane", "lane-c", "--kind", "ask", "--text", "can root take this?")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "session-1")
 	for _, tt := range []struct {
 		re   store.Record
 		want []string
