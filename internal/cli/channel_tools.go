@@ -182,7 +182,6 @@ var (
 	laneProp      = prop("string", "your lane")
 	boundLaneProp = prop("string", "your lane (default: this window's)")
 	driveProp     = prop("string", "drive (default: this session's)")
-	postDriveProp = prop("string", "drive the record is written on, as the writing lane's (default: this session's); a bound session never names another: reach a lane of another drive with to <lane>@<drive>")
 )
 
 func recordProps() map[string]any {
@@ -191,7 +190,7 @@ func recordProps() map[string]any {
 		"text":     prop("string", "the record line; over 400 chars the rest moves to the body"),
 		"body":     prop("string", "full body of any length, read back with read"),
 		"path":     prop("string", "absolute path of a file to attach as the body"),
-		"to":       list("addressed lanes; <lane>@<drive> reaches a lane of another drive"),
+		"to":       list("addressed lanes, as lane or lane@drive"),
 		"re":       map[string]any{"type": []string{"string", "integer"}, "description": "seq this answers, or an alias: t:<topic>, ccn:<id>, card:<id>, pr#N, last:<kind>[:<lane>]"},
 		"resolves": list("seqs or aliases this closes"),
 		"pr":       list("pull requests: N, owner/repo#N or URL"),
@@ -215,7 +214,7 @@ func postTool() mcp.Tool {
 	}
 	props := recordProps()
 	props["lane"] = boundLaneProp
-	props["drive"] = postDriveProp
+	props["drive"] = driveProp
 	props["records"] = map[string]any{"type": "array", "items": map[string]any{"type": "object", "properties": items}, "description": "several records, stored all or none; a field beside the list fills in each record lacking it"}
 	return mcp.Tool{
 		Name:        "post",
@@ -497,7 +496,7 @@ func closeTool() mcp.Tool {
 			"how":   map[string]any{"type": "string", "enum": []string{"answer", "withdraw", "lift", "go", "unblock", "fix-live"}},
 			"text":  prop("string", "the closing line"),
 			"to":    list("addressed lanes (default: the closed records' writers)"),
-			"drive": postDriveProp,
+			"drive": driveProp,
 		}),
 		Handler: func(ctx context.Context, raw json.RawMessage, _ func(string)) (string, bool) {
 			in, msg, ok := decode[struct {
