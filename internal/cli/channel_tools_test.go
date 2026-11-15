@@ -195,6 +195,39 @@ func TestTheCloseToolWithdrawsItsOwnReportAndResolvesAnAsk(t *testing.T) {
 	}
 }
 
+func TestTheCloseToolAnswersAWriterOnAnotherDriveOnItsDrive(t *testing.T) {
+	t.Setenv("CCI_HOME", t.TempDir())
+	mustTool(t, "post", map[string]any{"drive": "other", "lane": "root", "kind": "ask", "text": "ship it?", "to": []string{"root@d"}})
+	mustTool(t, "post", map[string]any{"drive": "other", "lane": "api", "kind": "ask", "text": "which branch?", "to": []string{"root@d"}})
+	for _, tt := range []struct {
+		name         string
+		seq          int64
+		writer, text string
+	}{
+		{"same lane name", 1, "root", "yes, ship it"},
+		{"another lane name", 2, "api", "branch main"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			seq := mustTool(t, "close", map[string]any{"drive": "d", "lane": "root", "seqs": []any{tt.seq}, "how": "answer", "text": tt.text})
+			out, err := run(t, "show", "--json", seq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var answer store.Record
+			if err := json.Unmarshal([]byte(out), &answer); err != nil {
+				t.Fatal(err)
+			}
+			if want := []string{tt.writer + "@other"}; answer.Drive != "d" || answer.Resolves != tt.seq || !slices.Equal(answer.To, want) {
+				t.Errorf("close of #%d = drive %s resolves %d to %v; want drive d resolving it, to %v", tt.seq, answer.Drive, answer.Resolves, answer.To, want)
+			}
+			read, err := run(t, "tail", "--drive", "other", "--since", "0", "--reader", tt.writer)
+			if err != nil || !strings.Contains(read, tt.text) {
+				t.Errorf("%s on drive other reads %q, %v; want the answer %q", tt.writer, read, err, tt.text)
+			}
+		})
+	}
+}
+
 func TestTheInboxToolReturnsOnlyNewRecordsAndCutsBroadcasts(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	long := strings.Repeat("word ", 60) + "END"
