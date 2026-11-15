@@ -484,7 +484,7 @@ func newShowCmd() *cobra.Command {
 		}),
 	}
 	cmd.Flags().BoolVar(&asJSON, "json", false, "one JSON record per line, the body file not inlined")
-	cmd.Flags().StringVar(&drive, "drive", "", "refuse a seq that is not on this drive")
+	cmd.Flags().StringVar(&drive, "drive", "", "drive the reader is on: a seq of another drive still prints, after a line naming its drive (with --json, the record's drive field names it)")
 	cmd.Flags().IntVar(&budget, "budget", 0, "bytes of body to print, split evenly across the seqs asked; each cut body names the show that reads it whole (default: whole bodies; with --body, 16000, and 0 prints them whole)")
 	cmd.Flags().BoolVar(&body, "body", false, "print only each record's whole text, with no header line; several seqs each open on a #SEQ line")
 	cmd.MarkFlagsMutuallyExclusive("body", "json")

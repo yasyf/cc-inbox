@@ -1744,8 +1744,21 @@ func TestShowPrintsEachRecordsTextOnceWithinItsBudget(t *testing.T) {
 	if strings.Contains(out, "LAST WORD") || !strings.Contains(out, "cci show #2 reads it whole") {
 		t.Errorf("show 1 2 --budget 200 = %q, want #2's body cut with the show that reads it whole", out)
 	}
-	if _, err := run(t, "show", "1", "--drive", "other"); err == nil || !strings.Contains(err.Error(), "#1 is on drive release-v3") {
-		t.Errorf("show 1 --drive other = %v, want it to name the record's drive", err)
+	if _, err := run(t, "post", "--drive", "other", "--lane", "root", "--kind", "note", "--text", "ELSEWHERE"); err != nil {
+		t.Fatal(err)
+	}
+	out, err = run(t, "show", "1", "3", "--drive", "release-v3")
+	if err != nil {
+		t.Fatalf("show 1 3 --drive release-v3 = %v, want #3 of drive other shown beside #1", err)
+	}
+	if !strings.Contains(out, "OPENING") || !strings.Contains(out, "#3 is on drive other, not release-v3\n") || !strings.Contains(out, "ELSEWHERE") {
+		t.Errorf("show 1 3 --drive release-v3 = %q, want both records, #3 after a line naming its drive", out)
+	}
+	if out, err = run(t, "show", "3", "--drive", "release-v3", "--json"); err != nil || !strings.Contains(out, `"drive":"other"`) || strings.Contains(out, "is on drive") {
+		t.Errorf("show 3 --drive release-v3 --json = %q, %v, want the record alone, its drive field naming other", out, err)
+	}
+	if out, err = run(t, "show", "3", "--drive", "release-v3", "--body"); err != nil || out != "#3 is on drive other, not release-v3\nELSEWHERE\n" {
+		t.Errorf("show 3 --drive release-v3 --body = %q, %v, want its text after the line naming its drive", out, err)
 	}
 }
 

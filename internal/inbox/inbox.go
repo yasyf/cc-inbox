@@ -779,9 +779,6 @@ func grepPages(ctx context.Context, st *store.Store, selected [][]store.Record, 
 }
 
 func Show(ctx context.Context, st *store.Store, records []store.Record, drive string, budget int, asJSON bool, w io.Writer) error {
-	if err := onDrive(records, drive); err != nil {
-		return err
-	}
 	rendered, _, err := lines(ctx, st, records, view{JSON: asJSON, Compact: true})
 	if err != nil {
 		return err
@@ -794,6 +791,9 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 	for i, line := range rendered {
 		if !asJSON {
 			line = wire.Headed(records[i].At, line)
+			if note := elsewhere(records[i], drive); note != "" {
+				line = note + "\n" + line
+			}
 		}
 		if _, err := fmt.Fprintln(w, line); err != nil {
 			return err
@@ -822,9 +822,6 @@ func Show(ctx context.Context, st *store.Store, records []store.Record, drive st
 }
 
 func ShowBodies(records []store.Record, drive string, budget int, w io.Writer) error {
-	if err := onDrive(records, drive); err != nil {
-		return err
-	}
 	share := 0
 	if budget > 0 {
 		share = max(budget/len(records), 1)
@@ -834,8 +831,12 @@ func ShowBodies(records []store.Record, drive string, budget int, w io.Writer) e
 		if err != nil {
 			return fmt.Errorf("show %s: %w", r.Name(), err)
 		}
-		if len(records) > 1 {
-			if _, err := fmt.Fprintln(w, r.Name()); err != nil {
+		heading := elsewhere(r, drive)
+		if heading == "" && len(records) > 1 {
+			heading = r.Name()
+		}
+		if heading != "" {
+			if _, err := fmt.Fprintln(w, heading); err != nil {
 				return err
 			}
 		}
@@ -849,13 +850,11 @@ func ShowBodies(records []store.Record, drive string, budget int, w io.Writer) e
 	return nil
 }
 
-func onDrive(records []store.Record, drive string) error {
-	for _, r := range records {
-		if drive != "" && r.Drive != drive {
-			return fmt.Errorf("show: %s is on drive %s, not %s", r.Name(), r.Drive, drive)
-		}
+func elsewhere(r store.Record, drive string) string {
+	if drive == "" || r.Drive == drive {
+		return ""
 	}
-	return nil
+	return fmt.Sprintf("%s is on drive %s, not %s", r.Name(), r.Drive, drive)
 }
 
 func WholeText(r store.Record) ([]byte, error) {
