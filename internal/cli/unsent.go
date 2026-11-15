@@ -73,7 +73,7 @@ func untilStored(run func(*cobra.Command, []string) error) func(*cobra.Command, 
 			if err == nil {
 				return drainUnsent(parent, cmd)
 			}
-			if !store.Busy(err) && !errors.Is(err, context.DeadlineExceeded) {
+			if down := (*BusDown)(nil); errors.As(err, &down) || !store.Unstored(err) {
 				return err
 			}
 			cause = err
@@ -285,7 +285,7 @@ func drainWrites(ctx context.Context, cmd *cobra.Command, home string) (int, err
 		switch {
 		case refused == nil:
 			stored++
-		case store.Busy(refused), errors.Is(refused, store.ErrUnconfirmed):
+		case store.Unstored(refused):
 			return stored, nil
 		default:
 			if err := os.WriteFile(path+refusedExt, append(raw, "\n"+refused.Error()+"\n"...), 0o600); err != nil { //nolint:gosec // G703: path is a kept post this cci home globbed under its own unsent directory.

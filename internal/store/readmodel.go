@@ -57,7 +57,10 @@ var (
 	modelOpeners = kindSet(kinds.Openers())
 )
 
-var errReadModelStale = errors.New("a stored record changed under the read model")
+var (
+	errReadModelStale = errors.New("a stored record changed under the read model")
+	modelBuilds       atomic.Int64
+)
 
 // ReadModelOn reports whether home's switch asks the daemon for a read model.
 func ReadModelOn(home string) bool {
@@ -131,13 +134,11 @@ type modelChunk struct {
 	used   int
 }
 
-// walChange is the part of SQLite's WAL index header that moves on every commit:
-// iChange and mxFrame in the header's first copy.
-const (
-	walChangeOffset = 8
-	walFrameOffset  = 16
-	walHeaderBytes  = 48
-)
+// modelMark is where one model last saw the store's commits: a data_version
+// compares only with reads of the same connection, so marks of two models differ.
+type modelMark struct {
+	build, version int64
+}
 
 type modelCloser struct {
 	row, next int32
@@ -150,8 +151,9 @@ type modelCloser struct {
 type ReadModel struct {
 	source   *Store
 	observer *ChangeVersion
-	walIndex []byte
-	walMu    sync.RWMutex
+	build    int64
+	marks    *ChangeVersion
+	marksMu  sync.RWMutex
 	limit    int64
 	text     *os.File
 	textEnd  int64
@@ -189,7 +191,7 @@ type ReadModel struct {
 
 	stale       atomic.Bool
 	full        atomic.Bool
-	seen        atomic.Uint64
+	seen        atomic.Int64
 	searchFloor atomic.Int64
 	searchSince atomic.Int64
 	held        atomic.Int64
@@ -238,20 +240,25 @@ func (s *Store) buildReadModel(ctx context.Context, pace func(context.Context) e
 	if err != nil {
 		return nil, err
 	}
-	walIndex, err := mapWALIndex(ctx, s)
+	marks, err := s.OpenChangeVersion(ctx)
 	if err != nil {
 		return nil, errors.Join(err, observer.Close())
 	}
+	before, err := marks.Read(ctx)
+	if err != nil {
+		return nil, errors.Join(err, marks.Close(), observer.Close())
+	}
 	textFile, err := openModelText(s.home)
 	if err != nil {
-		return nil, errors.Join(err, syscall.Munmap(walIndex), observer.Close())
+		return nil, errors.Join(err, marks.Close(), observer.Close())
 	}
 	m := &ReadModel{
-		source: s, observer: observer, walIndex: walIndex, text: textFile, limit: limit, mutations: tip.Mutations, window: window, head: max(window.floor-1, 0),
+		source: s, observer: observer, build: modelBuilds.Add(1), marks: marks, text: textFile, limit: limit, mutations: tip.Mutations, window: window, head: max(window.floor-1, 0),
 		byDrive: map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
 		closerHead: map[modelCloserKey]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
 		ids: map[string]int32{}, addrIDs: map[string]int32{},
 	}
+	m.seen.Store(before)
 	m.keepMetas = limit >= readModelMetaFloor
 	m.bytes = int64(unsafe.Sizeof(m.metas))
 	m.bytes += window.bytes()
@@ -307,41 +314,24 @@ func (s *Store) Covers(f Filter) bool {
 	return m != nil && !m.stale.Load() && (f.After >= m.searchFloor.Load()-1 || !f.Since.IsZero() && f.Since.UnixMilli() > m.searchSince.Load())
 }
 
-func mapWALIndex(ctx context.Context, s *Store) ([]byte, error) {
-	var filename string
-	if err := s.db.QueryRowContext(ctx, "SELECT file FROM pragma_database_list WHERE name='main'").Scan(&filename); err != nil {
-		return nil, fmt.Errorf("find the store's file: %w", err)
-	}
-	file, err := os.Open(filename + "-shm") //nolint:gosec // G304: SQLite named this file.
-	if err != nil {
-		return nil, fmt.Errorf("open the WAL index: %w", err)
-	}
-	defer func() { _ = file.Close() }()
-	mapped, err := syscall.Mmap(int(file.Fd()), 0, walHeaderBytes, syscall.PROT_READ, syscall.MAP_SHARED) //nolint:gosec // G115: a descriptor fits an int.
-	if err != nil {
-		return nil, fmt.Errorf("map the WAL index: %w", err)
-	}
-	return mapped, nil
-}
-
 // mark is committed for a caller inside the model's lock or outside it: false
-// once the model is closed, when its WAL index is gone. It takes only walMu, so
-// a reader already holding mu never queues behind a waiting writer.
-func (m *ReadModel) mark() (uint64, bool) {
-	m.walMu.RLock()
-	defer m.walMu.RUnlock()
-	if m.walIndex == nil {
-		return 0, false
+// once the model is closed or its read fails. It takes only marksMu, so a
+// reader already holding mu never queues behind a waiting writer.
+func (m *ReadModel) mark(ctx context.Context) (modelMark, bool) {
+	m.marksMu.RLock()
+	defer m.marksMu.RUnlock()
+	if m.marks == nil {
+		return modelMark{}, false
 	}
-	return m.committed(), true
+	committed, err := m.committed(ctx)
+	return modelMark{build: m.build, version: committed}, err == nil
 }
 
-// committed moves whenever a commit reaches the store, from any process, and
-// costs no system call. It reads what PRAGMA data_version reads, directly.
-func (m *ReadModel) committed() uint64 {
-	change := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walChangeOffset]))) //nolint:gosec // G103: the header's fields are aligned, shared memory.
-	frame := atomic.LoadUint32((*uint32)(unsafe.Pointer(&m.walIndex[walFrameOffset])))   //nolint:gosec // G103: the header's fields are aligned, shared memory.
-	return uint64(change)<<32 | uint64(frame)
+// committed moves whenever a commit reaches the store, from any process: it
+// is PRAGMA data_version on a connection that never writes and holds no
+// snapshot, so SQLite's own locking guards every byte it reads.
+func (m *ReadModel) committed(ctx context.Context) (int64, error) {
+	return m.marks.Read(ctx)
 }
 
 // ServeReadModel has s's reads try m first; nil returns them to the store alone.
@@ -365,12 +355,12 @@ func (m *ReadModel) Close() error {
 	}
 	m.chunks = nil
 	failed = errors.Join(failed, m.text.Close())
-	m.walMu.Lock()
-	if m.walIndex != nil {
-		failed = errors.Join(failed, syscall.Munmap(m.walIndex))
-		m.walIndex = nil
+	m.marksMu.Lock()
+	if m.marks != nil {
+		failed = errors.Join(failed, m.marks.Close())
+		m.marks = nil
 	}
-	m.walMu.Unlock()
+	m.marksMu.Unlock()
 	return errors.Join(failed, m.observer.Close())
 }
 
@@ -406,13 +396,16 @@ func (m *ReadModel) CatchUp(ctx context.Context) error {
 
 func (m *ReadModel) catchUp(ctx context.Context) error {
 	m.mu.RLock()
-	stale := m.stale.Load()
-	current := stale || m.committed() == m.seen.Load()
-	m.mu.RUnlock()
-	if stale {
+	if m.stale.Load() {
+		m.mu.RUnlock()
 		return errReadModelStale
 	}
-	if current {
+	committed, err := m.committed(ctx)
+	m.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	if committed == m.seen.Load() {
 		return nil
 	}
 	m.mu.Lock()
@@ -420,7 +413,9 @@ func (m *ReadModel) catchUp(ctx context.Context) error {
 	if m.stale.Load() {
 		return errReadModelStale
 	}
-	committed := m.committed()
+	if committed, err = m.committed(ctx); err != nil {
+		return err
+	}
 	if committed == m.seen.Load() {
 		return nil
 	}

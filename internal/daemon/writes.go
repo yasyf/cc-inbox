@@ -24,6 +24,7 @@ const (
 	codeUnrouted = "unrouted"
 	codeExpired  = "expired"
 	codeBusy     = "busy"
+	codeFailed   = "failed"
 
 	queueDepth  = 256
 	batchLimit  = 64
@@ -204,6 +205,8 @@ func (p *Product) write(ctx context.Context, body []byte) (daemonkit.Reply, erro
 		return daemonkit.Reply{}, err
 	case store.Busy(err):
 		return daemonkit.Reply{}, &daemonkit.ProductError{Code: codeBusy, Message: err.Error()}
+	case store.Unstored(err):
+		return daemonkit.Reply{}, &daemonkit.ProductError{Code: codeFailed, Message: err.Error()}
 	case err != nil:
 		return daemonkit.Reply{}, err
 	}
@@ -286,6 +289,8 @@ func refusal(err error) error {
 		return store.ErrExpired
 	case refused.Code == codeBusy:
 		return fmt.Errorf("%w: %s", store.ErrBusy, refused.Message)
+	case refused.Code == codeFailed:
+		return fmt.Errorf("%w: %s", store.ErrFailed, refused.Message)
 	}
 	return errors.New(refused.Message)
 }
