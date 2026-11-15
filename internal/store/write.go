@@ -130,10 +130,16 @@ func (s *Store) Dedicated(busy time.Duration) (*Store, error) {
 }
 
 // Commit writes the bodies of w's relayed rows to this node's blobs, then
-// applies w in one transaction, through the store's Writer when it has one.
+// applies w in one transaction, through the store's Writer when it has one,
+// within ctx's deadline or ClientBudget when ctx has none.
 func (s *Store) Commit(ctx context.Context, w Write) (Written, error) {
 	if err := w.check(); err != nil {
 		return Written{}, err
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, ClientBudget)
+		defer cancel()
 	}
 	var err error
 	if w.Apply, err = s.blobbed(w.Apply); err != nil {

@@ -495,19 +495,11 @@ func (s *Store) Compact(ctx context.Context, drive string, keep time.Duration) (
 }
 
 func (s *Store) foldPage(ctx context.Context, drive, day string, records []Record) (int, error) {
-	tx, err := s.rw.BeginTx(ctx, nil)
+	done, err := s.Commit(ctx, Write{Fold: &FoldPage{Drive: drive, Day: day, Records: records}})
 	if err != nil {
-		return 0, fmt.Errorf("begin compact: %w", err)
+		return 0, fmt.Errorf("compact: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
-	folded, err := s.fold(ctx, tx, drive, day, records)
-	if err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("commit compact: %w", err)
-	}
-	return folded, nil
+	return done.Folded, nil
 }
 
 func (s *Store) foreignResolvers(ctx context.Context, drive string) (map[int64]bool, error) {

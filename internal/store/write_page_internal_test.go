@@ -349,3 +349,76 @@ func TestAFoldCountsOnlyTheRecordsItDeletes(t *testing.T) {
 		t.Fatalf("digests = %+v, %v; want one counting 2 records", digests, err)
 	}
 }
+
+type routedWrites struct {
+	st     *Store
+	writes []Write
+}
+
+func (r *routedWrites) Commit(ctx context.Context, w Write) (Written, error) {
+	r.writes = append(r.writes, w)
+	done, errs := r.st.CommitAll(ctx, []Write{w})
+	return done[0], errs[0]
+}
+
+func TestPagedWritesReachTheStoresWriterAPageAtATime(t *testing.T) {
+	ctx := t.Context()
+	st, _ := pagedStore(t)
+	routed := &routedWrites{st: st}
+	st.WriteThrough(routed)
+	if inserted, err := st.IngestAll(ctx, lineItems(WritePage+1, time.Now().Add(-time.Hour))); err != nil || inserted != WritePage+1 {
+		t.Fatalf("ingest = %d, %v", inserted, err)
+	}
+	rows := foreignNotes(1, time.Now().Add(-time.Hour))
+	rows[0].PathBody = "a relayed body"
+	if applied, err := st.Apply(ctx, rows, nil); err != nil || applied.Inserted != 1 {
+		t.Fatalf("apply = %+v, %v", applied, err)
+	}
+	if len(routed.writes) != 3 || len(routed.writes[0].Ingest) != WritePage || len(routed.writes[1].Ingest) != 1 {
+		t.Fatalf("the writer took %d writes; want two import pages of %d and 1, then the apply", len(routed.writes), WritePage)
+	}
+	relayed := routed.writes[2].Apply
+	if len(relayed) != 1 || relayed[0].PathBody != "" || filepath.Dir(relayed[0].Refs.Path) != filepath.Join(st.HomeDir(), blobDir) {
+		t.Fatalf("the writer took the relayed row %+v; want its body already in this node's blobs", relayed)
+	}
+}
+
+func TestAReparseCommitsAParentWithEverySplitLineHoweverManyFollowIt(t *testing.T) {
+	ctx := t.Context()
+	st, _ := pagedStore(t)
+	parentAt := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	children := 8 * WritePage
+	words := make([]string, children)
+	for i := range words {
+		words[i] = fmt.Sprintf("w%d", i)
+	}
+	parent := Ingestion{Record: Record{Drive: "d", Lane: "importer", Kind: kinds.Note, At: parentAt, Text: strings.Join(words, " "), Source: "import:/inbox.md"}, LineHash: "parent", Line: "the parent"}
+	if inserted, err := st.IngestAll(ctx, []Ingestion{parent}); err != nil || inserted != 1 {
+		t.Fatalf("ingest of the parent = %d, %v", inserted, err)
+	}
+	parent.Record.Text = "the parent"
+	items := append(make([]Ingestion, 0, 1+len(words)), parent)
+	for _, word := range words {
+		items = append(items, Ingestion{Record: Record{Drive: "d", Lane: "importer", Kind: kinds.Note, At: time.Now(), Text: word, Source: "import:/inbox.md"}, LineHash: "split-" + word, Line: word})
+	}
+	last := words[len(words)-1]
+	if _, err := st.db.ExecContext(ctx, "CREATE TRIGGER interrupt BEFORE INSERT ON records WHEN NEW.text = '"+last+"' BEGIN SELECT RAISE(ABORT, 'interrupted'); END"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := st.Reparse(ctx, items, false); err == nil {
+		t.Fatal("the interrupted reparse succeeded")
+	}
+	if _, err := st.db.ExecContext(ctx, "DROP TRIGGER interrupt"); err != nil {
+		t.Fatal(err)
+	}
+	if _, inserted, err := st.Reparse(ctx, items, false); err != nil || inserted != children {
+		t.Fatalf("the retried reparse = %d inserted, %v; want all %d split lines", inserted, err, children)
+	}
+	var stamped int
+	if err := st.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM records WHERE at = ?", parentAt.UnixMilli()).Scan(&stamped); err != nil {
+		t.Fatal(err)
+	}
+	if stamped != children+1 {
+		t.Fatalf("%d records carry the parent's time after the retry, want the parent and its %d split lines", stamped, children)
+	}
+}
