@@ -69,7 +69,7 @@ jobs:
           if git diff --cached --quiet; then
             echo "${GITHUB_REF_NAME} already carries its descriptor and manifest"
           else
-            git commit -m "chore: sync cci.binrun + manifest to ${GITHUB_REF_NAME}"
+            git commit -m "chore(release): sync cci.binrun + manifest to ${GITHUB_REF_NAME}"
             git tag -fa "${GITHUB_REF_NAME}" -m "${GITHUB_REF_NAME}"
             git push --force origin "refs/tags/${GITHUB_REF_NAME}"
           fi
@@ -112,7 +112,7 @@ jobs:
               parents+=(-p "$descriptor_commit")
             fi
             tree="$(git write-tree)"
-            candidate="$(printf 'chore: sync cci.binrun + manifest to %s\n' "$GITHUB_REF_NAME" | git commit-tree "$tree" "${parents[@]}")"
+            candidate="$(printf 'chore(release): sync cci.binrun + manifest to %s\n' "$GITHUB_REF_NAME" | git commit-tree "$tree" "${parents[@]}")"
             if git push origin "$candidate:refs/heads/main"; then
               git reset --hard "$candidate"
               accepted_main="$candidate"

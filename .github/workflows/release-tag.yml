@@ -24,5 +24,6 @@ jobs:
         go.mod
         go.sum
         .goreleaser.yaml
+        plugin/.claude-plugin/plugin.json
         :(exclude,glob)**/*_test.go
         :(exclude,glob)**/testdata/**
