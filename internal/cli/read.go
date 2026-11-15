@@ -383,7 +383,7 @@ func newGrepCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "grep PATTERN",
 		Aliases: []string{"search"},
-		Short:   "Search whole record lines (kind, lane, topic, text, refs), newest first",
+		Short:   "Search the compact record lines it prints (seq, kind, lane, recipients, t:<topic>, refs, text), newest first",
 		Args:    cobra.MinimumNArgs(1),
 		RunE: withStore(func(cmd *cobra.Command, st *store.Store, args []string) error {
 			expr := strings.Join(args, " ")

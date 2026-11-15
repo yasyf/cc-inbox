@@ -637,7 +637,7 @@ func Grep(ctx context.Context, st *store.Store, f store.Filter, pattern *regexp.
 		}
 		var hits []store.Record
 		for _, r := range records {
-			line := render.Line(r, now)
+			line := render.Compact(r, 0)
 			if !pattern.MatchString(line) {
 				continue
 			}

@@ -99,6 +99,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   while their `--mute-kinds report,opened` still keeps other lanes' reports and
   opened records off them. A lane's report addressed to root arrives too.
 
+- `cci grep` and the MCP `find` tool match their pattern against the compact
+  line they print, `render.Compact` at no width, in place of the long line
+  `render.Line`, which printed a topic as `[<topic>]`. The compact line prints
+  `t:<topic>` unless the text already holds `t:<topic>`, so `t:staging-slots`
+  copied from a result finds every record on that topic, where it found only
+  the records whose text held the string. A pattern for a long-line form, such
+  as the clock, `->` or `[<topic>]`, now finds nothing.
 - A registered session no longer runs on the PATH of the process that
   registered it. `cci session run` starts the session's command with
   `$SHELL -l -i -c` in place of `$SHELL -l -c`, so the shell's interactive

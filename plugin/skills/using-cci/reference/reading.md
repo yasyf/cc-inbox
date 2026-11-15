@@ -49,9 +49,11 @@ or `closed`; those without either ref use `imported` and remain untracked.
 Text `tail`, `grep` and `show` print one compact line per record,
 `<seq> <kind> <lane>[><to>] [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`,
 under an `@<clock>` line each time the minute changes; `+` marks a body that
-`cci show` prints. `watch` and `state` keep the long line. Text tail and watch
+`cci show` prints, and `t:<topic>` is left off only when the text already holds
+it. `watch` and `state` keep the long line. Text tail and watch
 reads append reply marks after clipping; grep prints whole record lines with
-reply marks, and its pattern matches each record's long line. Text tail cuts a
+reply marks, and its pattern matches each record's compact line as grep prints
+it, before the reply marks. Text tail cuts a
 record a later one resolved to 160 characters and says so in a trailer;
 `--all` prints those whole, and `cci show <seq>` prints one whole. These include
 `[ANSWERED #12]`,
@@ -65,9 +67,10 @@ decision requests. `open blockers` (`open_blockers`) contains `blocker` and
 have their own sections, followed by a count of older open items. An
 `untracked holds` line (JSON `untracked_holds`) lists imported holds that name
 no `stack:<project>/<env>` or `target:<name>` ref; no later imported line can close them, but a
-post with `--resolves <seq>`, or a `lift` with `--re <seq>`, does. `grep` searches
-whole rendered record lines, including sequence number, time, kind, lane,
-recipients, topic, text, and rendered refs. Patterns are
+post with `--resolves <seq>`, or a `lift` with `--re <seq>`, does. `grep` and
+the MCP `find` tool search the compact line they print, so a token copied from a
+result, such as `t:<topic>`, `^<re>` or `x<closed>`, finds every record that
+carries it. Patterns are
 case-insensitive regular expressions by default, so `HOLD|DEFECT` matches either
 word (`-i` is accepted; `--ignore-case=false` matches case exactly); `-F`
 matches the pattern literally. `-n N` (`--limit N`) on `tail` or `grep` prints

@@ -48,7 +48,7 @@ func TestGrepMatchesPagedOutput(t *testing.T) {
 		{"one", "REVIEW", store.Filter{Drive: "d"}, 1, 6144},
 		{"cross page limit", "REVIEW", store.Filter{Drive: "d"}, 501, 1 << 20},
 		{"none", "absent", store.Filter{Drive: "d"}, 0, 6144},
-		{"whole line regex", "ASK lane-a.*peer:reader", store.Filter{Drive: "d"}, 0, 6144},
+		{"whole line regex", "ask lane-a>peer:reader", store.Filter{Drive: "d"}, 0, 6144},
 		{"peer and filters", "REVIEW", store.Filter{Drive: "d", Peer: "reader", Kinds: []kinds.Kind{kinds.Ask}}, 0, 6144},
 		{"keyset", "REVIEW", store.Filter{Drive: "d", After: 300, Before: 900}, 0, 6144},
 	} {
@@ -83,7 +83,7 @@ func pagedGrep(ctx context.Context, st *store.Store, f store.Filter, pattern *re
 		}
 		var hits []store.Record
 		for _, r := range records {
-			if pattern.MatchString(render.Line(r, now)) {
+			if pattern.MatchString(render.Compact(r, 0)) {
 				hits = append(hits, r)
 			}
 		}
