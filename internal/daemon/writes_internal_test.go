@@ -25,6 +25,7 @@ func TestRefusalTellsAppliedNothingFromUnknown(t *testing.T) {
 		{"another store", &daemonkit.ProductError{Code: codeUnrouted, Message: "this daemon writes /elsewhere"}, store.ErrUnrouted},
 		{"expired", &daemonkit.ProductError{Code: codeExpired, Message: "late"}, store.ErrExpired},
 		{"busy", &daemonkit.ProductError{Code: codeBusy, Message: "locked"}, store.ErrBusy},
+		{"failed", &daemonkit.ProductError{Code: codeFailed, Message: "insert record: database disk image is malformed (11)"}, store.ErrFailed},
 		{"lost reply", context.DeadlineExceeded, store.ErrUnconfirmed},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -34,7 +35,7 @@ func TestRefusalTellsAppliedNothingFromUnknown(t *testing.T) {
 		})
 	}
 	got := refusal(&daemonkit.ProductError{Message: "withdraw --re #9 names no record in drive d"})
-	if got.Error() != "withdraw --re #9 names no record in drive d" || errors.Is(got, store.ErrUnconfirmed) || store.Busy(got) {
+	if got.Error() != "withdraw --re #9 names no record in drive d" || store.Unstored(got) {
 		t.Fatalf("refusal of a product error = %v, want its message alone", got)
 	}
 }

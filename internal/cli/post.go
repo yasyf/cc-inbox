@@ -548,7 +548,7 @@ func commitPosts(cmd *cobra.Command, st *store.Store, plans []postPlan) error {
 		w.Records = append(w.Records, p.write.Records...)
 	}
 	posted, err := st.PostAll(cmd.Context(), w.Bind, w.Records, w.TTL, w.At)
-	if errors.Is(err, store.ErrUnconfirmed) {
+	if store.Unstored(err) {
 		if getenv(cmd.Context(), unsentEnv) != "" {
 			return &BusDown{Cause: err}
 		}
@@ -560,7 +560,7 @@ func commitPosts(cmd *cobra.Command, st *store.Store, plans []postPlan) error {
 	for _, p := range plans {
 		for _, got := range posted[:len(p.write.Records)] {
 			if got.Record.Num, err = st.Number(cmd.Context(), got.Record); err != nil {
-				return err
+				return fmt.Errorf("stored as seq %d, but cci cannot number it, so repost nothing: %v", got.Record.Seq, err) //nolint:errorlint // %v: a stored post's error must never read as unstored and be resent.
 			}
 			if err := printPosted(cmd.OutOrStdout(), got.Record, got.Duplicate, p.asJSON); err != nil {
 				return err

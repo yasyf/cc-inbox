@@ -379,6 +379,9 @@ var (
 	ErrNeedsInit = errors.New("cci store needs initialization")
 	// ErrBusy reports a store another process held past the caller's deadline.
 	ErrBusy = errors.New("cci store is busy")
+	// ErrFailed reports a write SQLite failed in the store itself, such as on a
+	// corrupt or full file, rather than for anything the write holds.
+	ErrFailed = errors.New("cci store failed the write")
 )
 
 // Open opens home as its initializer: it migrates a store that is not current,
@@ -469,6 +472,23 @@ var openRetries = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second}
 func Busy(err error) bool {
 	var locked *sqlite.Error
 	return errors.Is(err, ErrBusy) || errors.As(err, &locked) && locked.Code()&0xff == sqlite3.SQLITE_BUSY
+}
+
+// Unstored reports whether err means the store did not take a write that a
+// later try can store: another process held it, SQLite failed in the store
+// itself, its writer did not confirm the write, or the caller's deadline
+// passed. A write SQLite refused for what it holds, such as a constraint it
+// breaks, fails the same way on every try, so it is not unstored.
+func Unstored(err error) bool {
+	var failed *sqlite.Error
+	if errors.As(err, &failed) {
+		switch failed.Code() & 0xff {
+		case sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED, sqlite3.SQLITE_NOMEM, sqlite3.SQLITE_READONLY, sqlite3.SQLITE_INTERRUPT, sqlite3.SQLITE_IOERR,
+			sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_FULL, sqlite3.SQLITE_CANTOPEN, sqlite3.SQLITE_PROTOCOL, sqlite3.SQLITE_NOTADB:
+			return true
+		}
+	}
+	return errors.Is(err, ErrBusy) || errors.Is(err, ErrFailed) || errors.Is(err, ErrUnconfirmed) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func storeDSN(home string, timeoutMS int) string {

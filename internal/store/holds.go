@@ -160,12 +160,12 @@ type aliasKey struct {
 type aliasMemo struct {
 	mu      sync.Mutex
 	exact   bool
-	mark    uint64
+	mark    modelMark
 	changes [2]int64
 	lanes   map[aliasKey][]string
 	holding map[aliasKey]bool
 	unheard map[string]map[string]bool
-	heardAt uint64
+	heardAt modelMark
 }
 
 // ErrNoLaneRegistry is what a registry read returns on a store whose lane
@@ -343,11 +343,11 @@ func readAliasChanges(ctx context.Context, q querier) ([2]int64, error) {
 func (s *Store) aliasChanges(ctx context.Context) ([2]int64, bool, error) {
 	memo := &s.reads.aliases
 	var (
-		mark uint64
+		mark modelMark
 		live bool
 	)
 	if model := s.reads.model.Load(); model != nil {
-		mark, live = model.mark()
+		mark, live = model.mark(ctx)
 	}
 	memo.mu.Lock()
 	exact, held, known := memo.exact, memo.changes, memo.exact && live && memo.mark == mark
@@ -693,7 +693,7 @@ func (s *Store) unheardNow(ctx context.Context, q rowsQuerier, drive string, lan
 	if model == nil || q != rowsQuerier(s.db) {
 		return unheard(ctx, q, drive, lanes)
 	}
-	mark, live := model.mark()
+	mark, live := model.mark(ctx)
 	if !live {
 		return unheard(ctx, q, drive, lanes)
 	}
