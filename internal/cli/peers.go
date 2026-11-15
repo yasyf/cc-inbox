@@ -747,7 +747,7 @@ func resolveRecipients(ctx context.Context, st *store.Store, drive string, to []
 			}
 			if err == nil {
 				readers := reading[t]
-				if registry && reach.Lane != "" && reach.Lane != t {
+				if registry && reach.Lane != "" {
 					readers = []string{drive}
 				}
 				out[i], err = routeLane(t, drive, readers, notices)

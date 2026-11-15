@@ -35,7 +35,8 @@ with `--strict-mcp-config` and have no server by design: the CLI is their route.
 - `find`: newest matches for `pattern`, `kinds`, `lanes`, `to`, `since`; `prs`
   answers several pull requests in one call. Each query returns about 4 KB;
   `budget` raises it.
-- `close`: one record closing every seq in `seqs`, addressed to their writers.
+- `close`: one record closing every seq in `seqs`, addressed to their writers,
+  as `<lane>@<drive>` for a writer on another drive.
 - `who`: the live sessions on the session's drive, or on `drive`.
 - `digest`: as the command.
 

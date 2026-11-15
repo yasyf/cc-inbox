@@ -1169,6 +1169,61 @@ func TestPostAddressesALaneInTheDriveItReads(t *testing.T) {
 	}
 }
 
+func TestPostKeepsABareLaneOnItsOwnDriveWhileOnlyAnotherDrivesThreadIsLive(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	if _, err := run(t, "post", "--drive", "drive-a", "--lane", "communicator", "--kind", "note", "--text", "between handlers"); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaa1111-root-a")
+	if _, err := run(t, "drive", "use", "drive-a", "--root"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := store.PeerKey{Session: "bbbb2222-communicator", Agent: "acommunicator"}
+	if err := st.BindLane(ctx, k, "drive-b", "communicator", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Announce(ctx, store.Peer{Session: k.Session, Agent: k.Agent}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := run(t, "post", "--lane", "root", "--kind", "report", "--to", "communicator", "--text", "POST we are done")
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if err != nil || strings.Contains(out, "drive-b") || !strings.HasPrefix(lines[len(lines)-1], "#") {
+		t.Fatalf("post --to communicator from drive-a, whose communicator has no live thread = %q, %v; want it kept on drive-a", out, err)
+	}
+	shown, err := run(t, "show", "--json", strings.TrimPrefix(lines[len(lines)-1], "#"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var report store.Record
+	if err := json.Unmarshal([]byte(shown), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Drive != "drive-a" || !slices.Equal(report.To, []string{"communicator"}) {
+		t.Errorf("report = drive %s to %v; want drive-a's own communicator", report.Drive, report.To)
+	}
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	if out, err := run(t, "tail", "--drive", "drive-a", "--since", "0", "--reader", "communicator"); err != nil || !strings.Contains(out, "POST we are done") {
+		t.Errorf("drive-a reader communicator = %q, %v; want the report", out, err)
+	}
+	if out, err := run(t, "tail", "--drive", "drive-b", "--since", "0", "--reader", "communicator"); err != nil || strings.Contains(out, "POST we are done") {
+		t.Errorf("drive-b reader communicator = %q, %v; want none of drive-a's mail", out, err)
+	}
+}
+
 func TestAgentThreadsClaimAndAreAddressedApart(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())

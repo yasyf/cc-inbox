@@ -17,6 +17,7 @@ import (
 	mcp "github.com/yasyf/cc-interact/channel"
 
 	"github.com/yasyf/cc-inbox/internal/inbox"
+	"github.com/yasyf/cc-inbox/internal/kinds"
 	"github.com/yasyf/cc-inbox/internal/render"
 	"github.com/yasyf/cc-inbox/internal/store"
 )
@@ -524,18 +525,14 @@ func closeTool() mcp.Tool {
 			}
 			to := in.To
 			if len(to) == 0 {
-				out, errOut, err := runCCI(ctx, "", withOperands([]string{"show", "--json"}, in.Seqs...)...)
-				if err != nil {
-					return failed(out, errOut, err)
-				}
-				records, err := wireRecords(out)
+				st, release, err := hookStore(ctx)
 				if err != nil {
 					return err.Error(), true
 				}
-				for _, r := range records {
-					if r.Lane != lane && !slices.Contains(to, r.Lane) {
-						to = append(to, r.Lane)
-					}
+				to, err = closedWriters(ctx, st, in.Drive, lane, kinds.Kind(in.How), in.Seqs)
+				release()
+				if err != nil {
+					return err.Error(), true
 				}
 			}
 			args := []string{"post", "--lane=" + lane, "--kind=" + in.How, "--resolves=" + strings.Join(in.Seqs, ",")}
@@ -555,6 +552,30 @@ func closeTool() mcp.Tool {
 			return strings.TrimPrefix(strings.TrimSpace(out), "#"), false
 		},
 	}
+}
+
+func closedWriters(ctx context.Context, st *store.Store, drive, lane string, kind kinds.Kind, refs []string) ([]string, error) {
+	drive, err := resolveDrive(ctx, st, drive)
+	if err != nil {
+		return nil, err
+	}
+	seqs, err := resolveAll(ctx, st, drive, refs, true, map[int64]string{})
+	if err != nil {
+		return nil, err
+	}
+	var to []string
+	for _, seq := range seqs {
+		writer, err := replyTo(ctx, st, store.Record{Re: seq, Lane: lane, Drive: drive, Kind: kind})
+		if err != nil {
+			return nil, err
+		}
+		for _, t := range writer {
+			if !slices.Contains(to, t) {
+				to = append(to, t)
+			}
+		}
+	}
+	return to, nil
 }
 
 func whoTool() mcp.Tool {
