@@ -6,17 +6,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **The plugin runs `cci mcp` on stdio again.** Agent-team teammates have no `~/.claude/sessions/<pid>.json`, so the HTTP tools server could not tell which session a teammate's call came from. The daemon keeps its HTTP endpoint; the manifest moves to it once every session kind can be resolved.
-
 ### Added
 
 - The daemon serves cci's tools over MCP Streamable HTTP at
-  `127.0.0.1:7377/mcp`. A headers helper, `scripts/tools-headers.sh`, sends the
+  `127.0.0.1:7377/mcp`, and the plugin's `cci` server is that endpoint, so a
+  new session no longer runs a `cci mcp` process. A headers helper sends the
   session's `claude` pid and the cci variables of its environment; each tool
-  call reads that pid's session registry entry for the session id and cwd. The
-  plugin still declares the stdio `cci mcp`.
+  call reads that pid's session registry entry for the session id and cwd.
+  Sessions started before this release keep their `cci mcp` until they end.
 
 - A channel whose session stops hearing it, a tag its transcript still lacks
   once Claude Code answered two requests built after the tag went out, posts a

@@ -143,12 +143,17 @@ an explicit time window starts at the current head.
 A Monitor holds a process open for the whole session, and a record posted
 while it is down waits until it restarts. The plugin's channel removes the
 Monitor. Each new record is pushed into the session as soon as it is posted.
-The plugin runs two Model Context Protocol (MCP) servers, each through a
-`python3` launcher that names no plugin version and execs the newest installed
-plugin's own `bin/cci`, so each starts with the same config in every plugin
-version and a plugin update and `/reload-plugins` leave them running. `channel`, `cci channel --no-tools`, delivers records and
+The plugin declares two Model Context Protocol (MCP) servers. `channel`,
+`cci channel --no-tools`, runs once per session through a `python3` launcher
+that names no plugin version and execs the newest installed plugin's own
+`bin/cci`, so it starts with the same config in every plugin version and a
+plugin update and `/reload-plugins` leave it running. It delivers records and
 has no tools, so no tool call, a subagent's included, ever starts or replaces
-it. `cci`, `cci mcp`, serves the tools and delivers nothing. Launch the session
+it. `cci` serves the tools and delivers nothing: the daemon answers it over
+HTTP at `127.0.0.1:7377/mcp`, so no session runs a tools process of its own.
+The plugin's `scripts/tools-headers.sh` sends the session's `claude` pid with
+each connection, and the daemon reads that pid's entry in
+`~/.claude/sessions` on every tool call for the session id and cwd. Launch the session
 with the channel enabled, then subscribe once:
 
 ```bash
@@ -859,7 +864,7 @@ watch loop as `cci watch`, polling once a second, and reads the session's
 transcript once a second to move the cursor past each tag it shows. It has no
 tools. Each record becomes a `notifications/claude/channel` push whose content
 is the record line and whose meta carries `seq`, `kind`, and `lane`. The
-plugin's `cci` MCP server, `cci mcp`, serves the tools,
+plugin's `cci` MCP server, the daemon's `/mcp` endpoint, serves the tools,
 `mcp__plugin_cc-inbox_cci__*`, and never claims a window or delivers a record.
 
 ## Store, budgets, and caps
