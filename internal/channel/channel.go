@@ -58,7 +58,7 @@ var (
 
 	exitSettle = 5 * time.Second
 
-	deafAfter         = 2 * time.Minute
+	deafAfter         = 3 * time.Minute
 	reconnectsPerHour = 3
 
 	batchWindow = 5 * time.Minute
