@@ -34,6 +34,7 @@ func NativeReadHandler(ctx context.Context, st *store.Store, home string) (*nati
 	mux.Handle("/v1/board-records", board)
 	mux.Handle("/v1/board-provision", board)
 	mux.Handle("/v1/hook/", HookHandler(st, home))
+	mux.Handle("/mcp", ToolsHandler(ctx, st, home))
 	return &nativeHTTP{Handler: mux, incident: incident, board: board}, nil
 }
 

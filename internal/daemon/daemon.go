@@ -150,6 +150,7 @@ func (r *Runtime) Start(c daemonkit.Ctx) (daemonkit.Product, error) {
 	handler.Handle("/v1/tail", reads)
 	handler.Handle("/v1/hook/", reads)
 	handler.Handle("/v1/incident-holds", reads)
+	handler.Handle("/mcp", reads)
 	handler.HandleFunc("/debug/pprof/", pprof.Index)
 	handler.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
 	handler.HandleFunc("/debug/pprof/profile", pprof.Profile)
