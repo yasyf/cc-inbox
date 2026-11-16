@@ -4,11 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -88,17 +85,6 @@ func TestCommandInputDoesNotHoldStoreLocks(t *testing.T) {
 				t.Fatalf("command returned before input: %v", err)
 			case <-time.After(2 * time.Second):
 				t.Fatal("command did not reach input")
-			}
-			lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = lock.Close() })
-			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-				t.Fatalf("command held init lock while reading input: %v", err)
-			}
-			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-				t.Fatal(err)
 			}
 			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 			defer cancel()

@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
@@ -160,33 +158,6 @@ func TestMaintainIndexesRejectsNewerLogicalSchema(t *testing.T) {
 	assertRootAudienceInstalled(ctx, t, st, false)
 }
 
-func TestMaintainIndexesFailsBusyWithoutDDL(t *testing.T) {
-	ctx := context.Background()
-	st, err := Open(ctx, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	dropLaneIndexes(t, st)
-	dropMemberships(ctx, t, st)
-	dropRootAudience(ctx, t, st)
-	lock, err := os.OpenFile(filepath.Join(st.home, "init.lock"), os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Close() })
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) })
-	if _, err := MaintainIndexes(ctx, st.home); err == nil {
-		t.Fatal("maintenance crossed active initialization barrier")
-	}
-	assertLaneIndexCount(t, st, 0)
-	assertMembershipsInstalled(ctx, t, st, false)
-	assertRootAudienceInstalled(ctx, t, st, false)
-}
-
 func TestMaintainIndexesFailsBusyBehindOrdinaryWriter(t *testing.T) {
 	ctx := context.Background()
 	st, err := Open(ctx, t.TempDir())
@@ -245,9 +216,6 @@ func TestMaintainIndexesRollsBackCancelledBuild(t *testing.T) {
 				t.Fatal(err)
 			}
 			st.home = filepath.Dir(dbPath)
-			if err := os.WriteFile(filepath.Join(st.home, "init.lock"), nil, 0o600); err != nil {
-				t.Fatal(err)
-			}
 			for _, query := range []string{"PRAGMA journal_mode = WAL", "PRAGMA user_version = 14"} {
 				if _, err := st.db.ExecContext(context.Background(), query); err != nil {
 					t.Fatal(err)

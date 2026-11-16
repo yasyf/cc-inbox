@@ -264,12 +264,6 @@ func nativeTailImageFiles(home string) (string, error) {
 		}
 		digest := sha256.Sum256(data)
 		hash := hex.EncodeToString(digest[:])
-		if name == "init.lock" {
-			if len(data) != 0 {
-				return fmt.Errorf("empty template init lock contains %d bytes", len(data))
-			}
-			return nil
-		}
 		if strings.HasSuffix(name, "-wal") || strings.HasSuffix(name, "-shm") || strings.HasSuffix(name, "-journal") {
 			return fmt.Errorf("closed template sidecar %s mode=%s size=%d sha256=%s", name, info.Mode(), info.Size(), hash)
 		}
@@ -379,7 +373,6 @@ func nativeTailIndependentFiles(image nativeTailEmptyImage, homes ...string) (er
 	if err := json.Unmarshal([]byte(image.files), &files); err != nil {
 		return err
 	}
-	files = append(files, nativeTailImageFile{Path: "init.lock"})
 	for _, file := range files {
 		var identities []fs.FileInfo
 		for _, home := range homes {

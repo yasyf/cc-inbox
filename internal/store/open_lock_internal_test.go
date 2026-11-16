@@ -5,84 +5,53 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/node"
 )
 
-func TestOpenCurrentSchemaDoesNotWaitForLocks(t *testing.T) {
-	for _, lock := range []string{"reader", "writer"} {
-		t.Run(lock, func(t *testing.T) {
-			home := t.TempDir()
-			st, err := Open(context.Background(), home)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = st.Close() })
-			var release func()
-			switch lock {
-			case "reader":
-				file, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Cleanup(func() { _ = file.Close() })
-				if err := syscall.Flock(int(file.Fd()), syscall.LOCK_SH); err != nil {
-					t.Fatal(err)
-				}
-				release = func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) }
-			case "writer":
-				tx, err := st.db.BeginTx(context.Background(), nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				release = func() { _ = tx.Rollback() }
-			}
-			t.Cleanup(release)
-			opened := make(chan error, 1)
-			go func() {
-				other, err := Open(context.Background(), home)
-				if err == nil {
-					err = other.Close()
-				}
-				opened <- err
-			}()
-			select {
-			case err := <-opened:
-				if err != nil {
-					t.Fatal(err)
-				}
-				t.Logf("current-schema open completed while %s lock stayed held", lock)
-			case <-time.After(2 * time.Second):
-				release()
-				err := <-opened
-				t.Fatalf("current-schema open waited for %s lock: %v", lock, err)
-			}
-		})
-	}
-}
-
-func TestConnectWaitsForConcurrentSchemaUpgrade(t *testing.T) {
+func TestOpenCurrentSchemaDoesNotWaitForTheWriter(t *testing.T) {
 	home := t.TempDir()
 	st, err := Open(context.Background(), home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = st.Close() })
-	file, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
+	tx, err := st.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = file.Close() })
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	t.Cleanup(func() { _ = tx.Rollback() })
+	opened := make(chan error, 1)
+	go func() {
+		other, err := Open(context.Background(), home)
+		if err == nil {
+			err = other.Close()
+		}
+		opened <- err
+	}()
+	select {
+	case err := <-opened:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		_ = tx.Rollback()
+		err := <-opened
+		t.Fatalf("current-schema open waited for the writer: %v", err)
+	}
+}
+
+func TestConnectReadsTheCommittedSchemaDuringAnUpgrade(t *testing.T) {
+	home := t.TempDir()
+	st, err := Open(context.Background(), home)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) })
+	t.Cleanup(func() { _ = st.Close() })
 	tx, err := st.db.BeginTx(context.Background(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -91,59 +60,22 @@ func TestConnectWaitsForConcurrentSchemaUpgrade(t *testing.T) {
 	if _, err := tx.ExecContext(context.Background(), "PRAGMA user_version = "+fmt.Sprint(len(migrations)+1)); err != nil {
 		t.Fatal(err)
 	}
-	opened := make(chan error, 1)
-	go func() {
-		other, err := Connect(context.Background(), home)
-		if err == nil {
-			err = other.Close()
-		}
-		opened <- err
-	}()
-	select {
-	case err := <-opened:
-		t.Fatalf("connect crossed the active upgrade barrier: %v", err)
-	case <-time.After(100 * time.Millisecond):
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	during, err := Connect(ctx, home)
+	if err != nil {
+		t.Fatalf("connect during an uncommitted upgrade = %v, want the committed schema", err)
 	}
+	_ = during.Close()
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN); err != nil {
-		t.Fatal(err)
-	}
-	if err := <-opened; err == nil || !strings.Contains(err.Error(), "is newer than this cci") {
-		t.Fatalf("connect after newer schema commit = %v", err)
-	}
-}
-
-func TestConnectReturnsBusyWithinItsDeadlineWhileInitLockIsHeld(t *testing.T) {
-	home := t.TempDir()
-	st, err := Open(context.Background(), home)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = st.Close() })
-	file, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = file.Close() })
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	const deadline = 300 * time.Millisecond
-	ctx, cancel := context.WithTimeout(context.Background(), deadline)
-	defer cancel()
-	started := time.Now()
-	other, err := Connect(ctx, home)
-	elapsed := time.Since(started)
+	after, err := Connect(context.Background(), home)
 	if err == nil {
-		_ = other.Close()
+		_ = after.Close()
 	}
-	if !errors.Is(err, ErrBusy) || !Busy(err) || errors.Is(err, ErrNeedsInit) {
-		t.Fatalf("connect behind a held init lock = %v, want ErrBusy", err)
-	}
-	if elapsed < deadline || elapsed > deadline+time.Second {
-		t.Fatalf("connect behind a held init lock returned after %v, want about %v", elapsed, deadline)
+	if err == nil || !strings.Contains(err.Error(), "is newer than this cci") {
+		t.Fatalf("connect after newer schema commit = %v", err)
 	}
 }
 

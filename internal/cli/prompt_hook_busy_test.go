@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -23,7 +22,6 @@ func TestPromptHookAnswersWithinItsBudgetWhileTheStoreIsHeld(t *testing.T) {
 		hold func(t *testing.T, home string) func()
 	}{
 		{"writer", holdWriter},
-		{"migration lock", holdMigrationLock},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			home := t.TempDir()
@@ -101,17 +99,4 @@ func holdWriter(t *testing.T, home string) func() {
 		_, _ = conn.ExecContext(context.Background(), "ROLLBACK")
 		_ = conn.Close()
 	}
-}
-
-func holdMigrationLock(t *testing.T, home string) func() {
-	t.Helper()
-	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Close() })
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
-	return func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }
 }

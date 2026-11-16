@@ -8,8 +8,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -69,15 +67,6 @@ SELECT 'concurrent','seed','note',n,'seed','["peer:before"]','post','before-' ||
 			if event := <-events; event != "ready" {
 				t.Fatalf("old writer readiness = %q", event)
 			}
-			lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = lock.Close() }()
-			if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-				t.Fatal(err)
-			}
-			defer func() { _ = syscall.Flock(int(lock.Fd()), syscall.LOCK_UN) }()
 			missing, err := missingPhysicalIndexes(ctx, st.db)
 			if err != nil {
 				t.Fatal(err)

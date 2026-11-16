@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -40,17 +39,11 @@ func TestAPostTheBusCannotStoreTellsItsSenderAndTheNextPostStoresIt(t *testing.T
 		t.Fatal(err)
 	}
 	t.Cleanup(cli.SetPostPatience(500 * time.Millisecond))
-	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_CREATE|os.O_RDWR, 0o600)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = lock.Close() })
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
-		t.Fatal(err)
-	}
+	release := holdWriter(t, home)
+	t.Cleanup(release)
 
 	refusal := `go refused: "approve, then land" reads as key=value, not one reason`
-	_, err = run(t, "post", "--drive", "d1", "--lane", "lane-a", "--kind", "note", "--to", "root", "--text", "the coordinator decision", "--attr", "refusal="+refusal, "--attr", "step=two")
+	_, err := run(t, "post", "--drive", "d1", "--lane", "lane-a", "--kind", "note", "--to", "root", "--text", "the coordinator decision", "--attr", "refusal="+refusal, "--attr", "step=two")
 	var down *cli.BusDown
 	if !errors.As(err, &down) || down.Path == "" || !strings.Contains(err.Error(), "NOT stored yet") {
 		t.Fatalf("a post the bus could not store = %v; want a BusDown naming the kept post", err)
@@ -60,9 +53,7 @@ func TestAPostTheBusCannotStoreTellsItsSenderAndTheNextPostStoresIt(t *testing.T
 		t.Fatalf("a post naming no --drive = %v; want a BusDown that keeps nothing and says to repost", err)
 	}
 
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		t.Fatal(err)
-	}
+	release()
 	out, err := run(t, "post", "--drive", "d1", "--lane", "root", "--kind", "note", "--text", "after the outage")
 	if err != nil || !strings.Contains(out, "stored 1 post(s) kept while the bus was down") {
 		t.Fatalf("the first post after the outage = %q, %v; want it to store the kept post", out, err)

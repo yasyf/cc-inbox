@@ -457,9 +457,9 @@ func (p *Product) Drain(b daemonkit.Budget) error {
 }
 
 func recordMigration(ctx context.Context, st *store.Store, m store.Migration) {
-	text := fmt.Sprintf("migrated the store from schema %d to %d in %s, holding every client open behind init.lock meanwhile", m.From, m.To, m.Took.Round(time.Millisecond))
+	text := fmt.Sprintf("migrated the store from schema %d to %d in %s, holding the store's writer meanwhile", m.From, m.To, m.Took.Round(time.Millisecond))
 	if m.From == m.To {
-		text = fmt.Sprintf("built the store's query indexes in %s, holding every client open behind init.lock meanwhile", m.Took.Round(time.Millisecond))
+		text = fmt.Sprintf("built the store's query indexes in %s, holding the store's writer meanwhile", m.Took.Round(time.Millisecond))
 	}
 	slog.Info("cci daemon migrated the store", "from", m.From, "to", m.To, "took", m.Took)
 	if _, _, err := st.Post(ctx, store.Record{Drive: MaintenanceDrive, Lane: "daemon", Kind: kinds.Note, Text: text, Source: "daemon"}, 0); err != nil {

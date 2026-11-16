@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf8"
 
@@ -347,7 +346,7 @@ type Store struct {
 }
 
 // Migration is the schema upgrade an initializer ran on a store that already
-// held data, and how long it held every client open behind init.lock.
+// held data, and how long it held the store's writer.
 type Migration struct {
 	From int
 	To   int
@@ -365,10 +364,7 @@ func Home() (string, error) {
 	return filepath.Join(dir, ".cc-inbox"), nil
 }
 
-const (
-	busyTimeout = time.Minute
-	lockPoll    = 10 * time.Millisecond
-)
+const busyTimeout = time.Minute
 
 // ClientBudget bounds how long Connect waits on a store whose caller set no deadline.
 const ClientBudget = 30 * time.Second
@@ -384,8 +380,9 @@ var (
 	ErrFailed = errors.New("cci store failed the write")
 )
 
-// Open opens home as its initializer: it migrates a store that is not current,
-// serializing with every other initializer on the store's init lock.
+// Open opens home as its initializer: it migrates a store that is not current
+// in one immediate transaction that rereads the schema version first, so a
+// concurrent initializer waits on SQLite's writer and then finds it current.
 func Open(ctx context.Context, home string) (*Store, error) {
 	s, err := openDB(home, busyTimeout)
 	if err != nil {
@@ -407,8 +404,8 @@ func Open(ctx context.Context, home string) (*Store, error) {
 	return s, nil
 }
 
-// Connect opens home as a client: it waits for an in-flight schema upgrade
-// and for SQLite's writer only until ctx's deadline, or ClientBudget when ctx
+// Connect opens home as a client: it reads the last committed schema, waits
+// for SQLite's writer only until ctx's deadline, or ClientBudget when ctx
 // has none, then fails with ErrBusy, and returns ErrNeedsInit for a store an
 // initializer has not brought current. Its reads run on a read-only handle,
 // so a client that only reads never checkpoints the log or takes the
@@ -496,11 +493,6 @@ func storeDSN(home string, timeoutMS int) string {
 }
 
 func (s *Store) connect(ctx context.Context) error {
-	lock, err := lockInit(ctx, s.home, syscall.LOCK_SH)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = lock.Close() }()
 	schema, current, err := s.current(ctx)
 	switch {
 	case Busy(err) || err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded):
@@ -516,35 +508,20 @@ func (s *Store) connect(ctx context.Context) error {
 }
 
 func (s *Store) initialize(ctx context.Context) error {
-	lock, err := lockInit(ctx, s.home, syscall.LOCK_SH)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = lock.Close() }()
-	if _, current, err := s.current(ctx); err != nil || current {
-		return err
-	}
-	// Darwin keeps a shared flock that fails a nonblocking upgrade, so
-	// concurrent cold openers would each hold one and wait on the others.
-	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_UN); err != nil {
-		return fmt.Errorf("release init lock: %w", err)
-	}
-	if err := flock(ctx, lock, syscall.LOCK_EX); err != nil {
-		return fmt.Errorf("take migration lock: %w", err)
-	}
-	locked := time.Now()
 	schema, current, err := s.current(ctx)
 	if err != nil || current {
 		return err
 	}
+	started := time.Now()
 	if _, err := s.rw.ExecContext(ctx, "PRAGMA journal_mode = WAL"); err != nil {
 		return fmt.Errorf("set journal mode: %w", err)
 	}
-	if err := s.migrate(ctx); err != nil {
+	migrated, err := s.migrate(ctx)
+	if err != nil {
 		return err
 	}
-	if schema > 0 {
-		s.moved = &Migration{From: schema, To: len(migrations), Took: time.Since(locked)}
+	if migrated && schema > 0 {
+		s.moved = &Migration{From: schema, To: len(migrations), Took: time.Since(started)}
 	}
 	return nil
 }
@@ -556,37 +533,6 @@ func (s *Store) Migrated() (Migration, bool) {
 		return Migration{}, false
 	}
 	return *s.moved, true
-}
-
-func lockInit(ctx context.Context, home string, how int) (*os.File, error) {
-	lock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_CREATE|os.O_RDWR, 0o600) //nolint:gosec // G304: init.lock is the fixed lock in the caller-selected CCI home.
-	if err != nil {
-		return nil, fmt.Errorf("open init lock: %w", err)
-	}
-	if err := flock(ctx, lock, how); err != nil {
-		_ = lock.Close()
-		return nil, fmt.Errorf("take init lock: %w", err)
-	}
-	return lock, nil
-}
-
-func flock(ctx context.Context, lock *os.File, how int) error {
-	tick := time.NewTicker(lockPoll)
-	defer tick.Stop()
-	for {
-		err := syscall.Flock(int(lock.Fd()), how|syscall.LOCK_NB)
-		if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EINTR) {
-			return err
-		}
-		select {
-		case <-ctx.Done():
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return fmt.Errorf("%w: %s is held past the deadline", ErrBusy, lock.Name())
-			}
-			return ctx.Err()
-		case <-tick.C:
-		}
-	}
 }
 
 func (s *Store) current(ctx context.Context) (int, bool, error) {
@@ -659,38 +605,38 @@ func (s *Store) origin(local string) string {
 	return local
 }
 
-func (s *Store) migrate(ctx context.Context) error {
+func (s *Store) migrate(ctx context.Context) (bool, error) {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin migration: %w", err)
+		return false, fmt.Errorf("begin migration: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	var schema int
 	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&schema); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
+		return false, fmt.Errorf("read schema version: %w", err)
 	}
 	if schema == len(migrations) {
 		created, err := createQueryIndexes(ctx, tx)
 		if err != nil || !created {
-			return err
+			return false, err
 		}
 		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("commit query indexes: %w", err)
+			return false, fmt.Errorf("commit query indexes: %w", err)
 		}
-		return nil
+		return true, nil
 	}
 	if schema > len(migrations) {
-		return newerSchema(schema)
+		return false, newerSchema(schema)
 	}
 	var empty bool
 	if schema == 0 {
 		if err := tx.QueryRowContext(ctx, "SELECT NOT EXISTS (SELECT 1 FROM sqlite_schema)").Scan(&empty); err != nil {
-			return fmt.Errorf("inspect empty store: %w", err)
+			return false, fmt.Errorf("inspect empty store: %w", err)
 		}
 	}
 	for i, step := range migrations[schema:] {
 		if _, err := tx.ExecContext(ctx, strings.ReplaceAll(step, "{self}", "'"+s.Self()+"'")); err != nil {
-			return fmt.Errorf("migrate store to schema %d: %w", schema+i+1, err)
+			return false, fmt.Errorf("migrate store to schema %d: %w", schema+i+1, err)
 		}
 	}
 	if empty {
@@ -699,52 +645,52 @@ func (s *Store) migrate(ctx context.Context) error {
 			indexes[i] = i
 		}
 		if err := createPhysicalIndexes(ctx, tx, indexes); err != nil {
-			return err
+			return false, err
 		}
 		if err := installProjection(ctx, tx, rootAudienceObjects[:], "root audience"); err != nil {
-			return err
+			return false, err
 		}
 	}
 	installed, err := membershipsInstalled(ctx, tx)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !installed {
 		if err := installMemberships(ctx, tx); err != nil {
-			return err
+			return false, err
 		}
 	}
 	if err := installProjection(ctx, tx, closerMemberships[:], "closer membership"); err != nil {
-		return err
+		return false, err
 	}
 	if err := installProjection(ctx, tx, refKeyObjects[:], "alias index"); err != nil {
-		return err
+		return false, err
 	}
 	if err := installProjection(ctx, tx, recordMutationObjects[:], "record mutation"); err != nil {
-		return err
+		return false, err
 	}
 	if err := installProjection(ctx, tx, laneHoldObjects[:], "lane registry"); err != nil {
-		return err
+		return false, err
 	}
 	if err := installProjection(ctx, tx, laneHoldChangeObjects[:], "lane hold change"); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := createQueryIndexes(ctx, tx); err != nil {
-		return err
+		return false, err
 	}
 	if err := createIncidentOwnerLock(s.home); err != nil {
-		return err
+		return false, err
 	}
 	if err := installIncidentProjection(ctx, tx); err != nil {
-		return err
+		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version = %d", len(migrations))); err != nil {
-		return fmt.Errorf("record schema version: %w", err)
+		return false, fmt.Errorf("record schema version: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit migration: %w", err)
+		return false, fmt.Errorf("commit migration: %w", err)
 	}
-	return nil
+	return true, nil
 }
 
 func Hash(r Record) string {

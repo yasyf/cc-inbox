@@ -111,21 +111,13 @@ const maintenanceBusy = 500 * time.Millisecond
 // MaintainIndexes explicitly tunes an initialized store: it installs its
 // record memberships in one transaction and then builds each missing physical
 // index in a transaction of its own, so no client open waits on it. It fails
-// immediately when another maintainer runs or an initializer holds the init
-// lock, and when the database writer stays busy past half a second.
+// immediately when another maintainer runs or the schema is not current, and
+// when the database writer stays busy past half a second.
 func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, error) {
 	started := time.Now()
 	report := IndexMaintenanceReport{Created: []string{}, Memberships: []string{}, Incidents: []string{}}
 	if err := ctx.Err(); err != nil {
 		return report, err
-	}
-	initLock, err := os.OpenFile(filepath.Join(home, "init.lock"), os.O_RDWR, 0) //nolint:gosec // G304: home is the caller-selected CCI store; init.lock is its fixed existing lock.
-	if err != nil {
-		return report, fmt.Errorf("open index maintenance lock: %w", err)
-	}
-	defer func() { _ = initLock.Close() }()
-	if err := syscall.Flock(int(initLock.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err != nil {
-		return report, fmt.Errorf("take index maintenance lock: %w", err)
 	}
 	lock, err := lockMaintenance(home)
 	if err != nil {
@@ -144,9 +136,6 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	}
 	if schema != len(migrations) {
 		return report, fmt.Errorf("index maintenance requires schema %d, got %d", len(migrations), schema)
-	}
-	if err := initLock.Close(); err != nil {
-		return report, fmt.Errorf("release index maintenance init lock: %w", err)
 	}
 	report.Before, err = s.indexStorageStats(ctx)
 	if err != nil {
