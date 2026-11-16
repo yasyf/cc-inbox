@@ -208,6 +208,16 @@ func (l *ledger) owe(t tag, moves ...store.CursorMove) {
 	l.owed = append(l.owed, owed{tag: t, moves: moves, sent: time.Now()})
 }
 
+func (l *ledger) delivered(ctx context.Context, sub store.Subscription, seq int64) error {
+	l.mu.Lock()
+	deaf := l.deaf
+	l.mu.Unlock()
+	if deaf {
+		return nil
+	}
+	return l.st.MoveCursors(ctx, []store.CursorMove{{Name: sub.SentCursor(), Drive: sub.Drive, Seq: seq}})
+}
+
 func (l *ledger) pass(ctx context.Context, moves ...store.CursorMove) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
