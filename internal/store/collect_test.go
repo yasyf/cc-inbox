@@ -40,7 +40,7 @@ func TestCollectDeletesOnlyWhatNothingDependsOn(t *testing.T) {
 	expiringCloser := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Note, Text: "closes the recent ask", Resolves: recentAsk.Seq})
 	replacedState := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.State, Text: "first", Topic: "t"})
 	latestState := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.State, Text: "second", Topic: "t"})
-	clock.Advance(5 * 24 * time.Hour)
+	clock.Advance(97 * time.Hour)
 	fresh := testutil.Post(t, st, store.Record{Lane: "a", Kind: kinds.Note, Text: "fresh note"})
 	res, err := st.Collect(t.Context(), noPause)
 	if err != nil {
@@ -299,7 +299,7 @@ func TestCollectKeepsTheNewestHeadForThirtyDays(t *testing.T) {
 	if exists(t, st, older.Seq) || !exists(t, st, newest.Seq) {
 		t.Fatalf("older kept = %t, newest kept = %t", exists(t, st, older.Seq), exists(t, st, newest.Seq))
 	}
-	clock.Advance(20 * 24 * time.Hour)
+	clock.Advance(30 * 24 * time.Hour)
 	if _, err := st.Collect(t.Context(), noPause); err != nil {
 		t.Fatal(err)
 	}

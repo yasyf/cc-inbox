@@ -26,7 +26,7 @@ import (
 
 const (
 	// HotWindow is how long a record that nothing open depends on stays in the store.
-	HotWindow = 14 * 24 * time.Hour
+	HotWindow = 5 * 24 * time.Hour
 
 	expiredGrace     = 72 * time.Hour
 	sessionWindow    = 30 * 24 * time.Hour
