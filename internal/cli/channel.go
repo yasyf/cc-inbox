@@ -230,7 +230,8 @@ func newMCPCmd() *cobra.Command {
 		Hidden: true,
 		Args:   cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return mcp.NewServer(mcp.ServerInfo{Name: "cci", Version: version.String(), Instructions: toolsInstructions, Resumed: resumed}, channelTools()).Serve(cmd.Context(), cmd.InOrStdin(), cmd.OutOrStdout())
+			srv := mcp.NewServer(mcp.ServerInfo{Name: "cci", Version: version.String(), Instructions: toolsInstructions, Resumed: resumed}, channelTools())
+			return channel.ServeTools(cmd.Context(), srv, cmd.InOrStdin(), cmd.OutOrStdout())
 		},
 	}
 	cmd.Flags().BoolVar(&resumed, channel.Resumed, false, "skip the handshake: the cci this replaced already finished it")
