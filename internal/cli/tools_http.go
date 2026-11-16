@@ -65,7 +65,7 @@ func ToolsHandler(daemon context.Context, st *store.Store, home string) http.Han
 			w.WriteHeader(http.StatusAccepted)
 			return
 		}
-		ctx := r.Context()
+		ctx := r.Context() //nolint:contextcheck // a tool call lives for its request; the daemon context only marks it hosted.
 		if msg.Method == "tools/call" {
 			if ctx, err = toolsCaller(daemon, r, st, home); err != nil {
 				http.Error(w, err.Error(), http.StatusForbidden)
