@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -538,7 +539,7 @@ func TestTheHookSkipsWhatTheChannelSentBeforeTheTranscriptShowsItUntilTheChannel
 	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
-	if err := deafened(ctx, st, window, tag{kind: string(kinds.Ask), seq: sent.Seq}); err != nil {
+	if _, _, err := deafened(ctx, st, window, tag{kind: string(kinds.Ask), seq: sent.Seq}); err != nil {
 		t.Fatal(err)
 	}
 	if got := hookReads(); !strings.Contains(got, sent.Text) {
@@ -1471,14 +1472,39 @@ func TestARegisteredSessionStillRunningHasItsReconnectTyped(t *testing.T) {
 	}
 }
 
-func toolRound(at time.Time, sidechain bool, between ...string) []string {
-	stamp := at.UTC().Format("2006-01-02T15:04:05.000Z")
-	result := jsonLine(map[string]any{"type": "user", "isSidechain": sidechain, "timestamp": stamp, "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"}}}})
-	answer := jsonLine(map[string]any{"type": "assistant", "isSidechain": sidechain, "timestamp": stamp, "message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "toolu_2", "name": "Bash", "input": map[string]string{}}}}})
-	return append(append([]string{result}, between...), answer)
+var requestIDs atomic.Int64
+
+func stamp(at time.Time) string {
+	return at.UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
-func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAndHearingResolvesIt(t *testing.T) {
+func toolResult(at time.Time, sidechain bool) string {
+	return jsonLine(map[string]any{"type": "user", "isSidechain": sidechain, "timestamp": stamp(at), "message": map[string]any{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "toolu_1", "content": "done"}}}})
+}
+
+func toolUse(at time.Time, sidechain bool, request string) string {
+	return jsonLine(map[string]any{"type": "assistant", "isSidechain": sidechain, "timestamp": stamp(at), "requestId": request, "message": map[string]any{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "toolu_2", "name": "Bash", "input": map[string]string{}}}}})
+}
+
+func toolRound(at time.Time, sidechain bool, between ...string) []string {
+	return append(append([]string{toolResult(at, sidechain)}, between...), toolUse(at, sidechain, fmt.Sprintf("req_%d", requestIDs.Add(1))))
+}
+
+func streamedRound(at time.Time, results int) []string {
+	request := fmt.Sprintf("req_%d", requestIDs.Add(1))
+	var lines []string
+	for range results {
+		lines = append(lines, toolResult(at, false), toolUse(at, false, request))
+	}
+	return lines
+}
+
+func turnEnd(at time.Time) string {
+	return jsonLine(map[string]any{"type": "system", "subtype": "stop_hook_summary", "isSidechain": false, "timestamp": stamp(at), "hookCount": 1, "preventedContinuation": false})
+}
+
+func deafLedger(t *testing.T) (*store.Store, store.Subscription, string, <-chan map[string]string) {
+	t.Helper()
 	st, _ := newStore(t)
 	ctx := context.Background()
 	tmux, calls := fakeTmux(t, true)
@@ -1504,10 +1530,87 @@ func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAndHearingResolvesIt(t 
 			t.Error(err)
 		}
 	})
+	return st, sub, calls, sent
+}
+
+func waitDisconnect(t *testing.T, st *store.Store) []store.Record {
+	t.Helper()
+	var posted []store.Record
+	for deadline := time.Now().Add(5 * time.Second); len(posted) == 0; time.Sleep(interval) {
+		if posted = disconnects(t, st); time.Now().After(deadline) {
+			t.Fatal("a tag missing after two requests past the confirm window posted no disconnect")
+		}
+	}
+	return posted
+}
+
+func recoveredFrom(t *testing.T, st *store.Store, disconnect int64) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
+		recovered, err := st.Query(context.Background(), store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Recovered}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(recovered) == 1 && recovered[0].Resolves == disconnect {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("recovered = %+v; want one resolving #%d once the session heard the tag", recovered, disconnect)
+		}
+	}
+}
+
+func TestATagHeardBeforeTheTurnEndsCancelsTheReconnect(t *testing.T) {
+	ctx := context.Background()
+	st, _, calls, sent := deafLedger(t)
+	testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "late"})
+	late := <-sent
+	confirmed := time.Now().Add(deafAfter + time.Second)
+	if err := transcribe(ctx, append(toolRound(confirmed, false), toolRound(confirmed, false)...)...); err != nil {
+		t.Fatal(err)
+	}
+	posted := waitDisconnect(t, st)
+	if err := transcribe(ctx, toolResult(confirmed, false), queuedLine(tagText(Source, late)), turnEnd(confirmed)); err != nil {
+		t.Fatal(err)
+	}
+	recoveredFrom(t, st, posted[0].Seq)
+	time.Sleep(20 * interval)
+	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\n"; got != want {
+		t.Fatalf("tmux was called with %q, want no reconnect typed once the tag was heard, %q", got, want)
+	}
+}
+
+func TestADeafSessionPastItsHourlyReconnectsGetsNoneTyped(t *testing.T) {
+	st, _ := newStore(t)
+	ctx := context.Background()
+	tmux, calls := fakeTmux(t, true)
+	register(t, st, window, tmux)
+	for i := range reconnectsPerHour {
+		d := testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Disconnect, To: []string{"communicator"}, Text: fmt.Sprintf("disconnect %d", i)})
+		testutil.Post(t, st, store.Record{Lane: "root", Kind: kinds.Recovered, To: []string{"communicator"}, Resolves: d.Seq, Text: fmt.Sprintf("recovered %d", i)})
+	}
+	_, owe, err := deafened(ctx, st, window, tag{kind: string(kinds.Ask), seq: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	posted := disconnects(t, st)
+	want := fmt.Sprintf("; cci typed no reconnect, since it types at most %d an hour into tmux session release-demo-coordinator", reconnectsPerHour)
+	if owe || len(posted) != reconnectsPerHour+1 || !strings.HasSuffix(posted[len(posted)-1].Text, want) {
+		t.Fatalf("owe = %v, disconnects = %+v; want no reconnect owed and the newest ending %q", owe, posted, want)
+	}
+	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\n"; got != want {
+		t.Fatalf("tmux was called with %q, want %q", got, want)
+	}
+}
+
+func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAtItsTurnEndAndHearingResolvesIt(t *testing.T) {
+	ctx := context.Background()
+	st, sub, calls, sent := deafLedger(t)
 	before := time.Now().Add(-time.Second)
 	first := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Ask, To: []string{"root"}, Text: "first"})
 	second := testutil.Post(t, st, store.Record{Lane: "desk", Kind: kinds.Report, To: []string{"root"}, Text: "second"})
 	tags := []map[string]string{<-sent, <-sent}
+	confirmed := time.Now().Add(deafAfter + time.Second)
 	quiet := func(why string) {
 		t.Helper()
 		time.Sleep(20 * interval)
@@ -1519,49 +1622,53 @@ func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAndHearingResolvesIt(t 
 		t.Fatal(err)
 	}
 	quiet("an answer to a request built before the send and a tool call running on")
-	if err := transcribe(ctx, append(toolRound(time.Now(), true), toolRound(time.Now(), true)...)...); err != nil {
+	if err := transcribe(ctx, streamedRound(confirmed, 4)...); err != nil {
 		t.Fatal(err)
 	}
-	quiet("two tool rounds of a subagent")
+	quiet("one request whose tool results interleave with its streamed tool calls")
 	if err := transcribe(ctx, toolRound(time.Now(), false, queuedLine(tagText(Source, tags[1])))...); err != nil {
 		t.Fatal(err)
 	}
-	quiet("the tool round that folded in the second tag")
-	if err := transcribe(ctx, append(toolRound(time.Now(), false), toolRound(time.Now(), false)...)...); err != nil {
+	quiet("a second request inside the confirm window, which folded in the second tag")
+	if err := transcribe(ctx, append(toolRound(confirmed, true), toolRound(confirmed, true)...)...); err != nil {
 		t.Fatal(err)
 	}
-	var posted []store.Record
-	for deadline := time.Now().Add(5 * time.Second); len(posted) == 0; time.Sleep(interval) {
-		if posted = disconnects(t, st); time.Now().After(deadline) {
-			t.Fatal("a tag missing after a whole tool round posted no disconnect")
-		}
+	quiet("two tool rounds of a subagent")
+	if err := transcribe(ctx, toolRound(confirmed, false)...); err != nil {
+		t.Fatal(err)
 	}
-	if err := transcribe(ctx, toolRound(time.Now(), false)...); err != nil {
+	posted := waitDisconnect(t, st)
+	if err := transcribe(ctx, toolRound(confirmed, false)...); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(20 * interval)
-	want := fmt.Sprintf("root stopped hearing its cci channel in window %d (session s1): #%d is not in its transcript after a tool round that began after the channel sent it, so cci typed %s into tmux session release-demo-coordinator, whose next channel replays from the record it last heard", window.PID, first.Seq, hook.ReconnectCommand)
+	want := fmt.Sprintf("root stopped hearing its cci channel in window %d (session s1): #%d is not in its transcript after two requests that began after the channel sent it, the later one %s after, so cci types %s into tmux session release-demo-coordinator once its turn ends, and its next channel replays from the record it last heard", window.PID, first.Seq, deafAfter, hook.ReconnectCommand)
 	if posted = disconnects(t, st); len(posted) != 1 || posted[0].Lane != "root" || !slices.Equal(posted[0].To, []string{"communicator"}) || posted[0].Text != want {
 		t.Fatalf("disconnects = %+v, want one from root to communicator saying %q", posted, want)
 	}
-	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\nsend-keys -t =release-demo-coordinator: -l "+hook.ReconnectCommand+"\nsend-keys -t =release-demo-coordinator: Enter\n"; got != want {
-		t.Fatalf("tmux was called with %q, want the reconnect typed once, %q", got, want)
+	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\n"; got != want {
+		t.Fatalf("tmux was called with %q while the session works, want only %q", got, want)
+	}
+	if err := transcribe(ctx, turnEnd(confirmed)); err != nil {
+		t.Fatal(err)
+	}
+	typed := "has-session -t =release-demo-coordinator\nsend-keys -t =release-demo-coordinator: -l " + hook.ReconnectCommand + "\nsend-keys -t =release-demo-coordinator: Enter\n"
+	for deadline := time.Now().Add(5 * time.Second); tmuxCalls(t, calls) != typed; time.Sleep(interval) {
+		if time.Now().After(deadline) {
+			t.Fatalf("tmux was called with %q after the turn ended, want the reconnect typed once, %q", tmuxCalls(t, calls), typed)
+		}
+	}
+	if err := transcribe(ctx, append(toolRound(confirmed, false), turnEnd(confirmed))...); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * interval)
+	if got := tmuxCalls(t, calls); got != typed {
+		t.Fatalf("tmux was called with %q after a second turn end, want the reconnect typed once, %q", got, typed)
 	}
 	if err := transcribe(ctx, queuedLine(tagText(Source, tags[0]))); err != nil {
 		t.Fatal(err)
 	}
-	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(interval) {
-		recovered, err := st.Query(ctx, store.Filter{Drive: "d", Kinds: []kinds.Kind{kinds.Recovered}})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(recovered) == 1 && recovered[0].Resolves == posted[0].Seq {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("recovered = %+v; want one resolving #%d once the session heard the tag", recovered, posted[0].Seq)
-		}
-	}
+	recoveredFrom(t, st, posted[0].Seq)
 	cursorReaches(t, st, sub.Cursor, second.Seq)
 }
 

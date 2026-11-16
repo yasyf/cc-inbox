@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/yasyf/cc-inbox/internal/harness"
+	"github.com/yasyf/cc-inbox/internal/hook"
 	"github.com/yasyf/cc-inbox/internal/store"
+	"github.com/yasyf/cc-inbox/internal/supervisor"
 )
 
 var (
@@ -45,6 +47,9 @@ type ledger struct {
 	path    string
 	read    int64
 	asked   time.Time
+	request string
+	ended   time.Time
+	retype  *store.Registration
 	mu      sync.Mutex
 	owed    []owed
 	sent    map[string]int64
@@ -102,6 +107,7 @@ func (l *ledger) hearAll(ctx context.Context, transcript io.Reader) error {
 		case ctx.Err() != nil:
 			return nil
 		default:
+			l.rest(ctx)
 			sleep(ctx, interval)
 		}
 	}
@@ -109,8 +115,10 @@ func (l *ledger) hearAll(ctx context.Context, transcript io.Reader) error {
 
 type event struct {
 	Type        string    `json:"type"`
+	Subtype     string    `json:"subtype"`
 	IsSidechain bool      `json:"isSidechain"`
 	Timestamp   time.Time `json:"timestamp"`
+	RequestID   string    `json:"requestId"`
 	Message     struct {
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -150,16 +158,37 @@ func (l *ledger) hear(ctx context.Context, line []byte) {
 	}
 	switch {
 	case e.Type == "user":
-		l.asked = e.Timestamp
-	case e.Type == "assistant" && !l.asked.IsZero():
+		l.asked, l.ended = e.Timestamp, time.Time{}
+	case e.Type == "system" && e.Subtype == "stop_hook_summary":
+		l.ended = time.Now()
+	case e.Type == "assistant" && e.RequestID != "" && e.RequestID != l.request:
+		l.request, l.ended = e.RequestID, time.Time{}
+		if l.asked.IsZero() {
+			return
+		}
 		t, lost := l.answered(l.asked)
 		l.asked = time.Time{}
 		if !lost {
 			return
 		}
-		if err := deafened(ctx, l.st, l.window, t); err != nil {
+		r, owe, err := deafened(ctx, l.st, l.window, t)
+		if err != nil {
 			slog.Warn("cci channel: tell the session's notify lanes it stopped hearing", "seq", t.seq, "err", err)
 		}
+		if owe {
+			l.retype = &r
+		}
+	}
+}
+
+func (l *ledger) rest(ctx context.Context) {
+	if l.retype == nil || l.ended.IsZero() || time.Since(l.ended) < idle {
+		return
+	}
+	r := *l.retype
+	l.retype = nil
+	if err := supervisor.Type(ctx, r, hook.ReconnectCommand); err != nil {
+		slog.Warn("cci channel: type the reconnect at the session's turn end", "alias", r.Alias, "err", err)
 	}
 }
 
@@ -236,6 +265,9 @@ func (l *ledger) receive(ctx context.Context, t tag) error {
 	l.owed[i].heard = true
 	regained := !l.heard || l.deaf
 	l.heard, l.deaf = true, false
+	if regained {
+		l.retype = nil
+	}
 	err := l.settle(ctx)
 	l.mu.Unlock()
 	if regained {
@@ -250,7 +282,7 @@ func (l *ledger) answered(asked time.Time) (tag, bool) {
 	lost := -1
 	for i := range l.owed {
 		if o := &l.owed[i]; !o.heard && o.sent.Before(asked) {
-			if o.answers++; o.answers == 2 && lost < 0 {
+			if o.answers++; o.answers >= 2 && asked.Sub(o.sent) >= deafAfter && lost < 0 {
 				lost = i
 			}
 		}

@@ -58,6 +58,9 @@ var (
 
 	exitSettle = 5 * time.Second
 
+	deafAfter         = 2 * time.Minute
+	reconnectsPerHour = 3
+
 	batchWindow = 5 * time.Minute
 
 	newerInstall = defaultNewerInstall
@@ -221,6 +224,9 @@ func supervise(ctx context.Context, st *store.Store, sub store.Subscription, r s
 	if err != nil || open {
 		return "", err
 	}
+	if spent, err := reconnectsSpent(ctx, st, sub); err != nil || spent {
+		return unrepaired, err
+	}
 	if err := supervisor.Type(ctx, r, hook.ReconnectCommand); err != nil {
 		return unrepaired, err
 	}
@@ -259,38 +265,48 @@ func openDisconnect(ctx context.Context, st *store.Store, sub store.Subscription
 	return last[0].Seq, len(open) > 0, err
 }
 
-func deafened(ctx context.Context, st *store.Store, window store.Window, t tag) error {
+func deafened(ctx context.Context, st *store.Store, window store.Window, t tag) (store.Registration, bool, error) {
 	sub, ok, err := st.Subscription(ctx, window)
 	if err != nil || !ok {
-		return err
+		return store.Registration{}, false, err
 	}
 	heard, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive)
 	if err != nil {
-		return err
+		return store.Registration{}, false, err
 	}
 	if err := st.MoveCursors(ctx, []store.CursorMove{{Name: sub.SentCursor(), Drive: sub.Drive, Seq: heard, Exact: true}}); err != nil {
-		return err
+		return store.Registration{}, false, err
 	}
 	if _, open, err := openDisconnect(ctx, st, sub); err != nil || open {
-		return err
+		return store.Registration{}, false, err
 	}
 	r, registered, err := registration(ctx, st, sub)
 	if err != nil {
-		return err
+		return store.Registration{}, false, err
 	}
-	lost := fmt.Sprintf("%s stopped hearing its cci channel in window %d (session %s): #%d is not in its transcript after a tool round that began after the channel sent it", sub.Reader, window.PID, sub.Session, t.seq)
+	lost := fmt.Sprintf("%s stopped hearing its cci channel in window %d (session %s): #%d is not in its transcript after two requests that began after the channel sent it, the later one %s after", sub.Reader, window.PID, sub.Session, t.seq, deafAfter)
 	text := lost + fmt.Sprintf(", so records to %s reach it only through its PostToolUse hook until it reconnects with %s", sub.Reader, hook.ReconnectCommand)
-	var typed error
+	owe := false
+	var checked error
 	if registered {
 		up, err := supervisor.Up(ctx, r)
-		if typed = err; up {
-			if typed = supervisor.Type(ctx, r, hook.ReconnectCommand); typed == nil {
-				text = fmt.Sprintf("%s, so cci typed %s into tmux session %s, whose next channel replays from the record it last heard", lost, hook.ReconnectCommand, r.Alias)
-			}
+		spent, counted := reconnectsSpent(ctx, st, sub)
+		checked = errors.Join(err, counted)
+		switch {
+		case up && spent:
+			text += fmt.Sprintf("; cci typed no reconnect, since it types at most %d an hour into tmux session %s", reconnectsPerHour, r.Alias)
+		case up:
+			owe = true
+			text = fmt.Sprintf("%s, so cci types %s into tmux session %s once its turn ends, and its next channel replays from the record it last heard", lost, hook.ReconnectCommand, r.Alias)
 		}
 	}
 	_, _, err = st.Post(ctx, store.Record{Drive: sub.Drive, Lane: sub.Reader, Kind: kinds.Disconnect, To: notified(r), Text: text}, 0)
-	return errors.Join(typed, err)
+	return r, owe && err == nil, errors.Join(checked, err)
+}
+
+func reconnectsSpent(ctx context.Context, st *store.Store, sub store.Subscription) (bool, error) {
+	recent, err := st.Query(ctx, store.Filter{Drive: sub.Drive, Kinds: []kinds.Kind{kinds.Disconnect}, Lanes: []string{sub.Reader}, Since: st.Now().Add(-time.Hour), IncludeExpired: true})
+	return len(recent) >= reconnectsPerHour, err
 }
 
 func reconnected(ctx context.Context, st *store.Store, window store.Window) error {
