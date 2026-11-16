@@ -91,6 +91,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The `cci mcp` tools server moves onto a newer cci install between tool
+  calls, as the channel server already does. A tools server the daemon handed
+  back kept serving on the core it then ran until its session ended, so a fix
+  to a tool, such as the `close` tool's drive-aware addressing, missed every
+  session already running. Once a minute, with no call unanswered and no
+  input read ahead, it now re-executes the newest install as
+  `cci mcp --resumed` on the same stdio, and Claude Code's next call reaches
+  the new core.
 - A channel tag carries the rest of a record addressed to its reader under its
   line when that rest fits 2,000 bytes, whoever the reader is, as it already
   did for a root reader. A drive's communicator, which may not run the `read`
