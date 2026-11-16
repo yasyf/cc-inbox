@@ -6,13 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sync"
 	"time"
 )
 
 // ChangeVersion observes commits through one dedicated read-only connection.
+// Its reads take turns: a read that overlaps another statement on the
+// connection shares that statement's read transaction and misses every commit
+// made since it began.
 type ChangeVersion struct {
 	database   *sql.DB
 	connection *sql.Conn
+	reading    sync.Mutex
 }
 
 // OpenChangeVersion keeps commit observation independent of the Store's pool.
@@ -37,6 +42,8 @@ func (s *Store) OpenChangeVersion(ctx context.Context) (*ChangeVersion, error) {
 
 // Read returns a version comparable only with earlier reads from this observer.
 func (v *ChangeVersion) Read(ctx context.Context) (int64, error) {
+	v.reading.Lock()
+	defer v.reading.Unlock()
 	var version int64
 	if err := v.connection.QueryRowContext(ctx, "PRAGMA data_version").Scan(&version); err != nil {
 		return 0, fmt.Errorf("read change version: %w", err)
