@@ -78,7 +78,7 @@ func (u upgrade) Error() string {
 	return "cci " + u.Version + " is installed at " + u.Path
 }
 
-const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to its reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads; a session ` + "`cci session register`" + ` keeps gets them instead, its owner records one tag each, then the rest as one ` + "`" + batchKind + "`" + ` tag. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. A record's cursor moves once this session's transcript shows its tag, so until then the PostToolUse hook may deliver it too and a restarted channel repeats it: skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
+const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to its reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads; a session ` + "`cci session register`" + ` keeps gets them instead, its owner records one tag each, then the rest as one ` + "`" + batchKind + "`" + ` tag. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. The PostToolUse hook skips each record the channel sent, unless the session stops hearing the channel; a record's cursor moves once this session's transcript shows its tag, so a restarted channel repeats one it sent before then: skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
 
 var (
 	errStale    = errors.New("subscription replaced")
@@ -262,6 +262,13 @@ func openDisconnect(ctx context.Context, st *store.Store, sub store.Subscription
 func deafened(ctx context.Context, st *store.Store, window store.Window, t tag) error {
 	sub, ok, err := st.Subscription(ctx, window)
 	if err != nil || !ok {
+		return err
+	}
+	heard, _, err := st.Cursor(ctx, sub.Cursor, sub.Drive)
+	if err != nil {
+		return err
+	}
+	if err := st.MoveCursors(ctx, []store.CursorMove{{Name: sub.SentCursor(), Drive: sub.Drive, Seq: heard, Exact: true}}); err != nil {
 		return err
 	}
 	if _, open, err := openDisconnect(ctx, st, sub); err != nil || open {
@@ -474,6 +481,9 @@ func replay(ctx context.Context, st *store.Store, sub store.Subscription, channe
 		if err := notify(notifyMethod, map[string]any{"content": content, "meta": tagMeta(r)}); err != nil {
 			return err
 		}
+		if err := l.delivered(ctx, sub, r.Seq); err != nil {
+			return err
+		}
 	}
 	if len(rest) == 0 {
 		return nil
@@ -663,7 +673,10 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 			moves = append(moves, store.CursorMove{Name: mail.cursor, Drive: mail.filter.Drive, Seq: r.Seq})
 		}
 		l.owe(tag{kind: string(r.Kind), seq: r.Seq}, moves...)
-		return notify(notifyMethod, map[string]any{"content": content, "meta": tagMeta(r)})
+		if err := notify(notifyMethod, map[string]any{"content": content, "meta": tagMeta(r)}); err != nil {
+			return err
+		}
+		return l.delivered(watchCtx, sub, r.Seq)
 	})
 	stop()
 	if errors.Is(err, errStale) {

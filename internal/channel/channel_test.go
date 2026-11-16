@@ -481,6 +481,71 @@ func TestAChannelAndTheHookDeliverEachRecordOnce(t *testing.T) {
 	}
 }
 
+func TestTheHookSkipsWhatTheChannelSentBeforeTheTranscriptShowsItUntilTheChannelGoesDeaf(t *testing.T) {
+	st, _ := newStore(t)
+	idle, interval = 10*time.Millisecond, 5*time.Millisecond
+	ctx := context.Background()
+	root := hook.Payload{SessionID: "s1", Event: "PostToolUse"}
+	if err := st.BindLane(ctx, store.PeerKey{Session: root.SessionID}, "d", "root", time.Time{}); err != nil {
+		t.Fatal(err)
+	}
+	subscribe(t, st)
+	sub, _, err := st.Subscription(ctx, window)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := testutil.Post(t, st, store.Record{Kind: kinds.Note, To: []string{"root"}, Text: "before the channel began"})
+	if err := st.MoveCursors(ctx, []store.CursorMove{{Name: sub.FloorCursor(), Drive: "d", Seq: before.Seq, Exact: true}, {Name: store.LaneCursor(store.PeerKey{Session: root.SessionID}), Drive: "d", Seq: before.Seq}}); err != nil {
+		t.Fatal(err)
+	}
+	hookReads := func() string {
+		t.Helper()
+		var out bytes.Buffer
+		if err := hook.PostToolUse(ctx, st, root, func() (store.Window, error) { return window, nil }, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out.String()
+	}
+	l, err := newLedger(ctx, st, sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seqs := make(chan string, 8)
+	followCtx, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		done <- l.listen(followCtx, func(ctx context.Context) error {
+			return follow(ctx, st, sub, true, l, func(_ string, params any) error {
+				seqs <- params.(map[string]any)["meta"].(map[string]string)["seq"]
+				return nil
+			})
+		})
+	}()
+	sent := testutil.Post(t, st, store.Record{Kind: kinds.Ask, To: []string{"root"}, Text: "the channel sent this, unheard yet"})
+	select {
+	case got := <-seqs:
+		if got != fmt.Sprint(sent.Seq) {
+			t.Fatalf("channel delivered #%s, want #%d", got, sent.Seq)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("channel never delivered #%d", sent.Seq)
+	}
+	cursorReaches(t, st, sub.SentCursor(), sent.Seq)
+	if got := hookReads(); strings.Contains(got, sent.Text) {
+		t.Fatalf("hook delivered what the channel sent: %q", got)
+	}
+	stop()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := deafened(ctx, st, window, tag{kind: string(kinds.Ask), seq: sent.Seq}); err != nil {
+		t.Fatal(err)
+	}
+	if got := hookReads(); !strings.Contains(got, sent.Text) {
+		t.Fatalf("hook skipped what a deaf channel sent: %q", got)
+	}
+}
+
 func TestAHookBehindTheChannelsStartLeavesTheChannelWhatItDelivered(t *testing.T) {
 	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond

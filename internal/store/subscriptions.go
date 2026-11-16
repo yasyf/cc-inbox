@@ -68,6 +68,13 @@ func (s Subscription) BatchCursor() string {
 	return s.Cursor + "-batch"
 }
 
+// SentCursor names the last record the channel following s sent the
+// session as a tag of its own, which the session's transcript may not show
+// yet; a deaf channel moves it back to s.Cursor, so the hook delivers again.
+func (s Subscription) SentCursor() string {
+	return s.Cursor + "-sent"
+}
+
 // FloorCursor names where the channel Claude Code started for s's window began
 // following s.Cursor: that channel delivered every record s selects after it.
 func (s Subscription) FloorCursor() string {
@@ -88,8 +95,10 @@ func (s *Store) WindowMail(ctx context.Context, k PeerKey, b Binding) (Filter, e
 
 // ChannelCarried selects what the channel of the window k's thread runs in
 // already delivered: the records its subscription selects after where it
-// started following and through its cursor. ok is false when no channel
-// started following for that window.
+// started following and through its cursor or the last record it sent,
+// whichever is later, so the hook skips a record the channel sent before the
+// session's transcript shows its tag. ok is false when no channel started
+// following for that window.
 func (s *Store) ChannelCarried(ctx context.Context, k PeerKey, b Binding) (Filter, bool, error) {
 	sub, ok, err := s.windowSubscription(ctx, k, b)
 	if err != nil || !ok {
@@ -103,6 +112,11 @@ func (s *Store) ChannelCarried(ctx context.Context, k PeerKey, b Binding) (Filte
 	if err != nil {
 		return Filter{}, false, err
 	}
+	sent, _, err := s.Cursor(ctx, sub.SentCursor(), b.Drive)
+	if err != nil {
+		return Filter{}, false, err
+	}
+	through = max(through, sent)
 	f := sub.Filter()
 	f.After, f.Before = floor, through+1
 	return f, true, nil
