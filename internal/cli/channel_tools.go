@@ -202,7 +202,7 @@ func recordProps() map[string]any {
 		"build":    list("build URLs or ids"),
 		"lane_ref": list("lanes this record is about"),
 		"url":      prop("string", "any other URL"),
-		"outcome":  prop("string", "passed, failed, pending, cancelled"),
+		"outcome":  prop("string", "passed, failed, pending, cancelled; a release also held or converged; github, queue and ejected carry their source's state"),
 		"commit":   prop("string", "full commit sha"),
 		"head":     list("on a head record, <pr>=<sha> or <pr>=<was>..<sha>"),
 	}

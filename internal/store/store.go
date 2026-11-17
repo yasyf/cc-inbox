@@ -755,7 +755,7 @@ func Validate(r Record) error {
 	if spec.NeedsRef && r.Re == 0 && r.Topic == "" && r.Resolves == 0 {
 		return fmt.Errorf("kind %s requires --re, --resolves or --topic", r.Kind)
 	}
-	if err := validateFields(r.Fields); err != nil {
+	if err := validateFields(r.Kind, r.Fields); err != nil {
 		return err
 	}
 	if until, ok := r.Fields.Attrs["until"]; r.Kind == kinds.Blocked && ok {
@@ -789,16 +789,21 @@ func Validate(r Record) error {
 }
 
 var (
-	modes    = []string{"platy", "cli", "manual", "walker"}
-	outcomes = []string{"passed", "failed", "pending", "cancelled"}
+	modes          = []string{"platy", "cli", "manual", "walker"}
+	outcomes       = []string{"passed", "failed", "pending", "cancelled"}
+	kindOutcomes   = map[kinds.Kind][]string{kinds.Release: {"held", "converged"}}
+	sourceOutcomes = []kinds.Kind{kinds.Github, kinds.Queue, kinds.Ejected}
 )
 
-func validateFields(f Fields) error {
+func validateFields(k kinds.Kind, f Fields) error {
 	if f.Mode != "" && !slices.Contains(modes, f.Mode) {
 		return fmt.Errorf("mode %q is not one of %s", f.Mode, strings.Join(modes, ", "))
 	}
-	if f.Outcome != "" && !slices.Contains(outcomes, f.Outcome) {
-		return fmt.Errorf("outcome %q is not one of %s", f.Outcome, strings.Join(outcomes, ", "))
+	if f.Outcome == "" || slices.Contains(sourceOutcomes, k) {
+		return nil
+	}
+	if allowed := slices.Concat(outcomes, kindOutcomes[k]); !slices.Contains(allowed, f.Outcome) {
+		return fmt.Errorf("outcome %q is not one of %s", f.Outcome, strings.Join(allowed, ", "))
 	}
 	return nil
 }
