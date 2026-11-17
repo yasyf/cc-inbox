@@ -168,6 +168,10 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 	if err != nil {
 		return report, err
 	}
+	commitsInstalled, err := projectionInstalled(ctx, s.db, commitPRObjects[:], "commit index")
+	if err != nil {
+		return report, err
+	}
 	mutationsInstalled, err := projectionInstalled(ctx, s.db, recordMutationObjects[:], "record mutation")
 	if err != nil {
 		return report, err
@@ -185,8 +189,8 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 			return report, err
 		}
 	}
-	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !refsInstalled || !mutationsInstalled || !holdChangesInstalled || !incidents {
-		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, refsInstalled, mutationsInstalled, holdChangesInstalled, incidents); err != nil {
+	if !installed || !closersInstalled || !rootInstalled || !holdsInstalled || !refsInstalled || !commitsInstalled || !mutationsInstalled || !holdChangesInstalled || !incidents {
+		if err := s.installProjections(ctx, installed, closersInstalled, rootInstalled, holdsInstalled, refsInstalled, commitsInstalled, mutationsInstalled, holdChangesInstalled, incidents); err != nil {
 			return report, err
 		}
 		if !installed {
@@ -211,6 +215,11 @@ func MaintainIndexes(ctx context.Context, home string) (IndexMaintenanceReport, 
 		}
 		if !refsInstalled {
 			for _, object := range refKeyObjects {
+				report.Memberships = append(report.Memberships, object.name)
+			}
+		}
+		if !commitsInstalled {
+			for _, object := range commitPRObjects {
 				report.Memberships = append(report.Memberships, object.name)
 			}
 		}
@@ -287,7 +296,7 @@ func lockMaintenance(home string) (*os.File, error) {
 	return lock, nil
 }
 
-func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, mutations, holdChanges, incidents bool) error {
+func (s *Store) installProjections(ctx context.Context, memberships, closers, roots, holds, refs, commits, mutations, holdChanges, incidents bool) error {
 	tx, err := s.rw.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin projection maintenance: %w", err)
@@ -315,6 +324,11 @@ func (s *Store) installProjections(ctx context.Context, memberships, closers, ro
 	}
 	if !refs {
 		if err := installProjection(ctx, tx, refKeyObjects[:], "alias index"); err != nil {
+			return err
+		}
+	}
+	if !commits {
+		if err := installProjection(ctx, tx, commitPRObjects[:], "commit index"); err != nil {
 			return err
 		}
 	}

@@ -96,3 +96,30 @@ func TestAWindowedReadModelMatchesTheStore(t *testing.T) {
 		t.Errorf("open = %v; the fixture wants #%d open and #%d, #%d closed", want.Open, open.Seq, closedOld.Seq, closedNew.Seq)
 	}
 }
+
+func TestAWindowedReadModelRoutesAStatusByACommitBelowItsFloor(t *testing.T) {
+	st, _ := openStore(t)
+	ctx := t.Context()
+	opened := selectedPost(t, st, Record{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: "pull_request", Text: "opened", Refs: Refs{PRs: []PR{{Repo: "o/r", Number: 7}}}, Fields: Fields{Outcome: "opened", Commit: "abc123"}})
+	for i := range 40 {
+		selectedPost(t, st, Record{Lane: "filler", Kind: kinds.Note, Text: fmt.Sprint("filler ", i)})
+	}
+	status := selectedPost(t, st, Record{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: "check", Text: "buildkite/test failure", Fields: Fields{Outcome: "failure", Commit: "abc123"}})
+	if _, err := st.Claim(ctx, Claim{Session: "s1", Rel: "opened", Kind: "pr", Key: "o/r#7"}); err != nil {
+		t.Fatal(err)
+	}
+	model, err := st.buildReadModel(ctx, func(context.Context) error { return nil }, ReadModelBytes, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.ServeReadModel(nil); _ = model.Close() })
+	if floor := model.Stats().Floor; floor <= opened.Seq {
+		t.Fatalf("floor = %d, want it above the opened record #%d", floor, opened.Seq)
+	}
+	f := (Subscription{Drive: "d", Session: "s1", Reader: "worker"}).Filter()
+	f.After = status.Seq - 1
+	got, answered, err := model.Answer(ctx, st, f)
+	if err != nil || !answered || len(got) != 1 || got[0].Seq != status.Seq {
+		t.Fatalf("model = %+v, %v, %v; want the status #%d", got, answered, err, status.Seq)
+	}
+}
