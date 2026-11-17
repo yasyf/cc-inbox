@@ -429,6 +429,9 @@ push carry the commit they replaced as `before`, and a check run or status
 carries GitHub's id as `id`, which orders two that finished in the same second.
 An opened, reopened or edited pull request record carries the pull request's
 description as its JSON body `{"body": ...}`, clipped to its first 30,000 bytes.
+A channel subscriber hears each record naming a pull request its session
+claims, with no `--follow`, except a check still running and an edited,
+labeled or unlabeled pull request.
 A redelivery of the same `X-GitHub-Delivery` stays one record, a bad signature
 answers 401, and a relay failure answers 502 for GitHub to mark the delivery
 failed.
@@ -672,7 +675,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
 | `ejected` | None | Trunk took a pull request out of its merge queue (`failed`, `pending_failure` or `cancelled`), with the state in `--outcome`. Requires `--pr`. A channel subscriber hears one on the `trunk` drive for each pull request its session claims. |
-| `github` | 14 days | A GitHub pull request, review or check change, or a push to the default branch, with the action or conclusion in `--outcome` and the commit in `--commit`. A commit status or a push names no pull request. |
+| `github` | 14 days | A GitHub pull request, review or check change, or a push to the default branch, with the action or conclusion in `--outcome` and the commit in `--commit`. A commit status or a push names no pull request. A channel subscriber hears each one naming a pull request its session claims, except a running check and an edited, labeled or unlabeled pull request. |
 | `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |
 | `disconnect` | None | A subscribed session's channel stopped; its channel server posts it to `communicator`. Open until `withdraw` or a resolver, such as the `recovered` record the session's next channel server posts with `--resolves`. |

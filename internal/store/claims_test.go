@@ -209,7 +209,7 @@ func TestClaimsMatchBareAndQualifiedPRs(t *testing.T) {
 	}
 }
 
-func TestASessionHearsTheEjectionsOfThePullRequestsItClaims(t *testing.T) {
+func TestASessionHearsWhatHappensToThePullRequestsItClaims(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := t.Context()
 	ejection := func(kind kinds.Kind, pr store.PR) int64 {
@@ -219,6 +219,15 @@ func TestASessionHearsTheEjectionsOfThePullRequestsItClaims(t *testing.T) {
 	theirs := ejection(kinds.Ejected, store.PR{Repo: "x/y", Number: 7})
 	queued := ejection(kinds.Queue, store.PR{Repo: "o/r", Number: 7})
 	later := ejection(kinds.Ejected, store.PR{Repo: "o/r", Number: 8})
+	github := func(outcome string, prs ...store.PR) int64 {
+		return testutil.Post(t, st, store.Record{Drive: "github", Lane: "github", Kind: kinds.Github, Text: outcome, Refs: store.Refs{PRs: prs}, Fields: store.Fields{Outcome: outcome, Commit: "abc123"}}).Seq
+	}
+	merged := github("merged", store.PR{Repo: "o/r", Number: 7})
+	github("in_progress", store.PR{Repo: "o/r", Number: 7})
+	github("labeled", store.PR{Repo: "o/r", Number: 7})
+	passed := github("success", store.PR{Repo: "o/r", Number: 7})
+	approved := github("approved", store.PR{Repo: "x/y", Number: 7})
+	github("success")
 	for _, c := range []store.Claim{
 		{Session: "repo", Rel: "opened", Kind: "pr", Key: "o/r#7"},
 		{Session: "bare", Rel: "landing", Kind: "pr", Key: "7"},
@@ -274,8 +283,8 @@ func TestASessionHearsTheEjectionsOfThePullRequestsItClaims(t *testing.T) {
 			}
 		}
 	}
-	t.Run("a claim in the repo", func(t *testing.T) { heard(t, filter("repo"), ours) })
-	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs) })
+	t.Run("a claim in the repo", func(t *testing.T) { heard(t, filter("repo"), ours, merged, passed) })
+	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs, merged, passed, approved) })
 	t.Run("a claim on another kind", func(t *testing.T) { heard(t, filter("other")) })
 	t.Run("no claim", func(t *testing.T) { heard(t, filter("none")) })
 	t.Run("a followed queue", func(t *testing.T) {
