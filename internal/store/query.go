@@ -496,8 +496,13 @@ func (f Filter) addressees(lane string) []any {
 
 func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
 	if f.ClaimedBy != "" {
-		var err error
-		if f.commitPRs, err = s.commitPRIndex(ctx); err != nil {
+		held, err := routesClaims(ctx, s.db, f.ClaimedBy)
+		if err != nil {
+			return f, err
+		}
+		if !held {
+			f.ClaimedBy = ""
+		} else if f.commitPRs, err = s.commitPRIndex(ctx); err != nil {
 			return f, err
 		}
 	}
