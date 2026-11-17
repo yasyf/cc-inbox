@@ -666,6 +666,9 @@ func (s *Store) migrate(ctx context.Context) (bool, error) {
 	if err := installProjection(ctx, tx, refKeyObjects[:], "alias index"); err != nil {
 		return false, err
 	}
+	if err := installProjection(ctx, tx, commitPRObjects[:], "commit index"); err != nil {
+		return false, err
+	}
 	if err := installProjection(ctx, tx, recordMutationObjects[:], "record mutation"); err != nil {
 		return false, err
 	}

@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A channel subscriber hears each finished commit status (`success`,
+  `failure`, `error`) on a commit that a `github` pull request record for a
+  claimed pull request carries, so `buildkite/test` reaches the session that
+  owns the pull request. A new `record_commit_prs` index, which
+  `cci maintain-indexes` and the daemon install, maps each commit to its pull
+  requests.
+
 - A channel subscriber hears each `github` record naming a pull request its
   session claims: a merge, close, reopen, push, draft change, review or
   finished check. A running check and an edited, labeled or unlabeled pull

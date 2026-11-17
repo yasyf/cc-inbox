@@ -108,7 +108,7 @@ func countedColumnsStore(t *testing.T, collation string, columns ...string) *Sto
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	definitions, err := production.db.QueryContext(ctx, `SELECT type, tbl_name, sql FROM sqlite_schema
-WHERE (tbl_name IN ('meta', 'records', 'sessions', 'record_recipients', 'record_also_resolves', 'record_json_errors', 'record_closer_keys', 'record_ref_keys', 'record_root_audience_v2', 'members', 'lane_holds', 'claims') OR name GLOB 'incident_*') AND type IN ('table', 'index', 'trigger') AND sql IS NOT NULL
+WHERE (tbl_name IN ('meta', 'records', 'sessions', 'record_recipients', 'record_also_resolves', 'record_json_errors', 'record_closer_keys', 'record_ref_keys', 'record_root_audience_v2', 'members', 'lane_holds', 'claims', 'record_commit_prs') OR name GLOB 'incident_*') AND type IN ('table', 'index', 'trigger') AND sql IS NOT NULL
 ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +119,7 @@ ORDER BY CASE type WHEN 'table' THEN 0 WHEN 'index' THEN 1 ELSE 2 END, name`)
 		if err := definitions.Scan(&kind, &tableName, &definition); err != nil {
 			t.Fatal(err)
 		}
-		if kind == "table" && tableName != "record_root_audience_v2" && tableName != "record_ref_keys" && tableName != "lane_holds" && tableName != "claims" && !strings.HasPrefix(tableName, "incident_") {
+		if kind == "table" && tableName != "record_root_audience_v2" && tableName != "record_ref_keys" && tableName != "lane_holds" && tableName != "claims" && tableName != "record_commit_prs" && !strings.HasPrefix(tableName, "incident_") {
 			for _, column := range columns {
 				definition = strings.Replace(definition, column+" TEXT", column+" TEXT COLLATE "+collation, 1)
 			}

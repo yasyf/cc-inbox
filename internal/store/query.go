@@ -24,9 +24,13 @@ type Follow struct {
 }
 
 var (
-	claimRoutes   = []Follow{{Drive: "trunk", Kinds: []kinds.Kind{kinds.Ejected}}, {Drive: "github", Kinds: []kinds.Kind{kinds.Github}}}
+	ejectedRoute  = claimRoute{drive: "trunk", kind: string(kinds.Ejected)}
+	githubRoute   = claimRoute{drive: "github", kind: string(kinds.Github)}
+	claimRoutes   = []claimRoute{ejectedRoute, githubRoute}
 	quietOutcomes = []string{"queued", "in_progress", "pending", "edited", "labeled", "unlabeled"}
 )
+
+type claimRoute struct{ drive, kind string }
 
 const (
 	sinceFloorStep = 5 * time.Minute
@@ -38,6 +42,7 @@ type Filter struct {
 	Follow         []Follow
 	ClaimedBy      string
 	claimed        []string
+	commitPRs      bool
 	Origin         string
 	Peer           string
 	Kinds          []kinds.Kind
@@ -166,14 +171,23 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		params = append(append(params, follow.Drive), kindArgs(follow.Kinds)...)
 	}
 	if f.ClaimedBy != "" {
-		branches = append(branches, "(((drive = ? AND kind = ?) OR (drive = ? AND kind = ? AND COALESCE(json_extract(fields, '$.outcome'), '') NOT IN ("+placeholders(len(quietOutcomes))+"))) AND EXISTS (SELECT 1 FROM claims, json_each(records.refs, '$.prs') pr WHERE claims.session = ? AND claims.kind = 'pr' AND (claims.key = CAST(pr.value AS TEXT) OR (instr(claims.key, '#') = 0 AND pr.type = 'text' AND substr(pr.value, -length(claims.key) - 1) = '#' || claims.key))))")
-		for _, route := range claimRoutes {
-			params = append(params, route.Drive, string(route.Kinds[0]))
+		claimed := func(pr string) string {
+			return "claims.session = ? AND claims.kind = 'pr' AND (claims.key = " + pr + " OR (instr(claims.key, '#') = 0 AND substr(" + pr + ", -length(claims.key) - 1) = '#' || claims.key))"
 		}
+		named := "EXISTS (SELECT 1 FROM claims, json_each(records.refs, '$.prs') pr WHERE " + claimed("CAST(pr.value AS TEXT)") + ")"
+		github := named
+		if f.commitPRs {
+			github = "(" + named + " OR EXISTS (SELECT 1 FROM record_commit_prs cp, claims WHERE cp.drive = records.drive AND cp.commit_sha = json_extract(records.fields, '$.commit') AND " + claimed("cp.pr") + "))"
+		}
+		branches = append(branches, "((drive = ? AND kind = ? AND "+named+") OR (drive = ? AND kind = ? AND COALESCE(json_extract(fields, '$.outcome'), '') NOT IN ("+placeholders(len(quietOutcomes))+") AND "+github+"))")
+		params = append(params, ejectedRoute.drive, ejectedRoute.kind, f.ClaimedBy, githubRoute.drive, githubRoute.kind)
 		for _, outcome := range quietOutcomes {
 			params = append(params, outcome)
 		}
 		params = append(params, f.ClaimedBy)
+		if f.commitPRs {
+			params = append(params, f.ClaimedBy)
+		}
 	}
 	clauses := []string{"(" + strings.Join(branches, " OR ") + ")"}
 	if f.Origin != "" {
@@ -348,7 +362,7 @@ func (f Filter) candidateArmsAudience(self string, rootAudience bool) ([]string,
 	}
 	if f.ClaimedBy != "" {
 		for _, route := range claimRoutes {
-			params = append(params, route.Drive, string(route.Kinds[0]))
+			params = append(params, route.drive, route.kind)
 			arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ? AND kind = ?"+bounds("seq", f.After))
 		}
 	}
@@ -477,6 +491,12 @@ func (f Filter) addressees(lane string) []any {
 }
 
 func (s *Store) aliased(ctx context.Context, f Filter) (Filter, error) {
+	if f.ClaimedBy != "" {
+		var err error
+		if f.commitPRs, err = s.commitPRIndex(ctx); err != nil {
+			return f, err
+		}
+	}
 	if f.PR.Number != 0 {
 		switch err := s.refIndex(ctx); {
 		case err == nil:

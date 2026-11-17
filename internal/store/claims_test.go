@@ -219,15 +219,17 @@ func TestASessionHearsWhatHappensToThePullRequestsItClaims(t *testing.T) {
 	theirs := ejection(kinds.Ejected, store.PR{Repo: "x/y", Number: 7})
 	queued := ejection(kinds.Queue, store.PR{Repo: "o/r", Number: 7})
 	later := ejection(kinds.Ejected, store.PR{Repo: "o/r", Number: 8})
-	github := func(outcome string, prs ...store.PR) int64 {
-		return testutil.Post(t, st, store.Record{Drive: "github", Lane: "github", Kind: kinds.Github, Text: outcome, Refs: store.Refs{PRs: prs}, Fields: store.Fields{Outcome: outcome, Commit: "abc123"}}).Seq
+	github := func(topic, outcome, commit string, prs ...store.PR) int64 {
+		return testutil.Post(t, st, store.Record{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: topic, Text: outcome, Refs: store.Refs{PRs: prs}, Fields: store.Fields{Outcome: outcome, Commit: commit}}).Seq
 	}
-	merged := github("merged", store.PR{Repo: "o/r", Number: 7})
-	github("in_progress", store.PR{Repo: "o/r", Number: 7})
-	github("labeled", store.PR{Repo: "o/r", Number: 7})
-	passed := github("success", store.PR{Repo: "o/r", Number: 7})
-	approved := github("approved", store.PR{Repo: "x/y", Number: 7})
-	github("success")
+	merged := github("pull_request", "merged", "abc123", store.PR{Repo: "o/r", Number: 7})
+	github("check", "in_progress", "abc123", store.PR{Repo: "o/r", Number: 7})
+	github("pull_request", "labeled", "abc123", store.PR{Repo: "o/r", Number: 7})
+	passed := github("check", "success", "abc123", store.PR{Repo: "o/r", Number: 7})
+	approved := github("review", "approved", "def456", store.PR{Repo: "x/y", Number: 7})
+	status := github("check", "failure", "abc123")
+	github("check", "pending", "abc123")
+	github("check", "success", "fff999")
 	for _, c := range []store.Claim{
 		{Session: "repo", Rel: "opened", Kind: "pr", Key: "o/r#7"},
 		{Session: "bare", Rel: "landing", Kind: "pr", Key: "7"},
@@ -283,8 +285,8 @@ func TestASessionHearsWhatHappensToThePullRequestsItClaims(t *testing.T) {
 			}
 		}
 	}
-	t.Run("a claim in the repo", func(t *testing.T) { heard(t, filter("repo"), ours, merged, passed) })
-	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs, merged, passed, approved) })
+	t.Run("a claim in the repo", func(t *testing.T) { heard(t, filter("repo"), ours, merged, passed, status) })
+	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs, merged, passed, approved, status) })
 	t.Run("a claim on another kind", func(t *testing.T) { heard(t, filter("other")) })
 	t.Run("no claim", func(t *testing.T) { heard(t, filter("none")) })
 	t.Run("a followed queue", func(t *testing.T) {

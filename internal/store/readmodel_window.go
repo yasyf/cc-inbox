@@ -28,6 +28,7 @@ type modelWindow struct {
 	wrong          bool
 	incidents      map[int64]string
 	foreignNumbers map[int64]bool
+	commitPRs      [][3]string
 }
 
 func readModelWindowRows(limit int64) int64 {
@@ -70,6 +71,21 @@ func (s *Store) readModelWindow(ctx context.Context, rows int64) (modelWindow, e
 			w.pinned[o.Seq], w.pinnedDrive[o.Seq] = o, drive
 			w.pinnedBytes += pinnedBytes(o)
 		}
+	}
+	pairs, err := s.db.QueryContext(ctx, "SELECT drive, commit_sha, pr FROM ("+commitPRRows("r.seq < ?")+")", w.floor)
+	if err != nil {
+		return modelWindow{}, fmt.Errorf("read the read model's window: %w", err)
+	}
+	for pairs.Next() {
+		var pair [3]string
+		if err := pairs.Scan(&pair[0], &pair[1], &pair[2]); err != nil {
+			_ = pairs.Close()
+			return modelWindow{}, fmt.Errorf("read the read model's window: %w", err)
+		}
+		w.commitPRs = append(w.commitPRs, pair)
+	}
+	if err := errors.Join(pairs.Err(), pairs.Close()); err != nil {
+		return modelWindow{}, fmt.Errorf("read the read model's window: %w", err)
 	}
 	if err := s.scanPairs(ctx, "SELECT seq, refs FROM records WHERE seq < ? AND refs != '{}' AND kind IN ("+placeholders(len(kinds.Openers()))+")", append([]any{w.floor}, kindArgs(kinds.Openers())...), func(_ int64, refs string) {
 		if parsed := parsedModelRefs(refs); parsed != nil && (parsed.wrong || !fitsRefPool(parsed)) {

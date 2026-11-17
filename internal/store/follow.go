@@ -137,8 +137,8 @@ func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) 
 	if err != nil {
 		return nil, err
 	}
-	var registry, refs bool
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'lane_holds'), EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'record_ref_keys')").Scan(&registry, &refs); err != nil {
+	var registry, refs, commits bool
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'lane_holds'), EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'record_ref_keys'), EXISTS (SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'record_commit_prs')").Scan(&registry, &refs, &commits); err != nil {
 		return nil, fmt.Errorf("look for the follow indexes: %w", err)
 	}
 	if settled {
@@ -150,6 +150,7 @@ func (s *Store) FirstMatches(ctx context.Context, filters []Filter, head int64) 
 	for i, f := range filters {
 		f.Before, f.Limit, f.Descending = head+1, 1, false
 		f.prKeyed = refs && f.PR.Number != 0
+		f.commitPRs = commits && f.ClaimedBy != ""
 		if registry && f.LaneAliases && len(f.Lanes) > 0 {
 			if f.Lanes, err = lanesAnswering(ctx, tx, f.Drive, f.Lanes); err != nil {
 				if ctx.Err() != nil {

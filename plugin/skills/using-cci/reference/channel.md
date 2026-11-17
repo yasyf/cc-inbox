@@ -91,8 +91,11 @@ claim delivers two kinds of record that name the pull request:
   `unlabeled` pull request: a merge, close, reopen, push, draft change, review
   or finished check arrives, so poll neither `gh pr view` nor `gh pr checks`
 
-A commit status names no pull request, so no claim delivers it. Only the
-channel routes by claim, never the `PostToolUse` hook. To hear every record of
+A commit status, such as `buildkite/test`, names a commit rather than a pull
+request. It reaches the session when a `github` pull request record on the same
+drive carries that commit for a claimed pull request, as an opened or pushed
+one does with its head: `success`, `failure` and `error` arrive, and `pending`
+stays off. Only the channel routes by claim, never the `PostToolUse` hook. To hear every record of
 a kind, follow its drive: `cci subscribe --follow trunk=ejected` or
 `--follow github=github`.
 

@@ -171,6 +171,7 @@ type ReadModel struct {
 	byKind      map[uint64][]int32
 	byAddress   map[int32][]int32
 	byPR        map[uint64][]int32
+	commitPRs   map[uint64][]int32
 	closerHead  map[modelCloserKey]int32
 	closerLinks []modelCloser
 	resolvedBy  map[int64]int64
@@ -254,9 +255,12 @@ func (s *Store) buildReadModel(ctx context.Context, pace func(context.Context) e
 	}
 	m := &ReadModel{
 		source: s, observer: observer, build: modelBuilds.Add(1), marks: marks, text: textFile, limit: limit, mutations: tip.Mutations, window: window, head: max(window.floor-1, 0),
-		byDrive: map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{},
+		byDrive: map[int32][]int32{}, byLane: map[uint64][]int32{}, byKind: map[uint64][]int32{}, byAddress: map[int32][]int32{}, byPR: map[uint64][]int32{}, commitPRs: map[uint64][]int32{},
 		closerHead: map[modelCloserKey]int32{}, resolvedBy: map[int64]int64{}, foreign: map[int64][]int32{},
 		ids: map[string]int32{}, addrIDs: map[string]int32{},
+	}
+	for _, pair := range window.commitPRs {
+		m.indexCommitPR(pair[0], pair[1], pair[2])
 	}
 	m.seen.Store(before)
 	m.keepMetas = limit >= readModelMetaFloor
@@ -563,9 +567,33 @@ func (m *ReadModel) ingest(rows *sql.Rows) error {
 	if row.wrong {
 		m.wrong = append(m.wrong, index)
 	}
+	if kind == githubRoute.kind && topic == "pull_request" && refs != nil && !refs.wrong {
+		var fields routedFields
+		if json.Unmarshal([]byte(text.fields), &fields) == nil && fields.Commit != "" {
+			for _, number := range refs.ints {
+				m.indexCommitPR(drive, fields.Commit, strconv.FormatInt(number, 10))
+			}
+			for _, pr := range refs.texts {
+				m.indexCommitPR(drive, fields.Commit, pr)
+			}
+		}
+	}
 	m.indexClosure(&row, kind, refs, also, index)
 	m.held.Store(m.bytes)
 	return nil
+}
+
+func (m *ReadModel) indexCommitPR(drive, commit, pr string) {
+	key := pairKey(m.intern(drive), m.intern(commit))
+	id := m.intern(pr)
+	if slices.Contains(m.commitPRs[key], id) {
+		return
+	}
+	if m.commitPRs[key] == nil {
+		m.bytes += readModelKeyBytes
+	}
+	m.commitPRs[key] = append(m.commitPRs[key], id)
+	m.bytes += 4
 }
 
 func (m *ReadModel) indexClosure(row *modelRow, kind string, refs *parsedRefs, also []int64, index int32) {
@@ -1152,7 +1180,7 @@ func (sel *modelSelection) candidates() [][]int32 {
 	}
 	if len(f.claimed) > 0 {
 		for _, route := range claimRoutes {
-			lists = append(lists, m.byKind[pairKey(m.idOf(route.Drive), m.idOf(string(route.Kinds[0])))])
+			lists = append(lists, m.byKind[pairKey(m.idOf(route.drive), m.idOf(route.kind))])
 		}
 	}
 	return append(lists, m.wrong)
@@ -1388,27 +1416,40 @@ func (sel *modelSelection) followBranch(v *modelView) bool {
 }
 
 func (sel *modelSelection) claimBranch(v *modelView) (selected, proved bool) {
-	if len(sel.f.claimed) == 0 || !slices.ContainsFunc(claimRoutes, func(route Follow) bool { return v.drive == route.Drive && v.kind == string(route.Kinds[0]) }) {
+	if len(sel.f.claimed) == 0 || !slices.Contains(claimRoutes, claimRoute{drive: v.drive, kind: v.kind}) {
 		return false, true
 	}
 	refs, _ := sel.m.refsOf(v.row)
-	if !slices.ContainsFunc(sel.f.claimed, func(key string) bool { return claimNames(key, refs, sel.m.strs) }) {
+	named := slices.ContainsFunc(sel.f.claimed, func(key string) bool { return claimNames(key, refs.ints, refs.texts, sel.m.strs) })
+	if v.kind == ejectedRoute.kind {
+		return named, true
+	}
+	if !named && !sel.f.commitPRs {
 		return false, true
 	}
-	if v.kind != string(kinds.Github) {
-		return true, true
-	}
-	var fields Fields
+	var fields routedFields
 	if err := json.Unmarshal([]byte(sel.m.textOf(v.row).fields), &fields); err != nil {
 		return false, false
 	}
-	return !slices.Contains(quietOutcomes, fields.Outcome), true
+	if slices.Contains(quietOutcomes, fields.Outcome) {
+		return false, true
+	}
+	if named || fields.Commit == "" {
+		return named, true
+	}
+	prs := sel.m.commitPRs[pairKey(v.row.drive, sel.m.idOf(fields.Commit))]
+	return slices.ContainsFunc(sel.f.claimed, func(key string) bool { return claimNames(key, nil, prs, sel.m.strs) }), true
 }
 
-func claimNames(key string, refs modelRefs, strs []string) bool {
+type routedFields struct {
+	Outcome string `json:"outcome"`
+	Commit  string `json:"commit"`
+}
+
+func claimNames(key string, ints, texts []int32, strs []string) bool {
 	bare := !strings.Contains(key, "#")
-	return slices.ContainsFunc(refs.ints, func(n int32) bool { return strconv.Itoa(int(n)) == key }) ||
-		slices.ContainsFunc(refs.texts, func(id int32) bool {
+	return slices.ContainsFunc(ints, func(n int32) bool { return strconv.Itoa(int(n)) == key }) ||
+		slices.ContainsFunc(texts, func(id int32) bool {
 			pr := strs[id]
 			return pr == key || bare && strings.HasSuffix(pr, "#"+key)
 		})
