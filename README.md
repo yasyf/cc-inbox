@@ -384,22 +384,26 @@ Run `cci relay delegate` for the same key again before the delegation expires to
 ### Hear Trunk merge-queue changes as records
 
 A webhook receiver can write records with no local store. Enroll its service
-key for one drive and kind:
+key for one drive and its two kinds:
 
 ```bash
-cci relay enroll --tier service --pub <base64 key> --allow 'trunk|queue' --label trunk
+cci relay enroll --tier service --pub <base64 key> --allow 'trunk|queue,ejected' --label trunk
 ```
 
 The receiver wraps `trunk.Handler` from `github.com/yasyf/cc-inbox/trunk`
 around a `service.Writer` that holds the key `e2e.ParseKey` reads from its
 PEM and the owner public keys it trusts. Each Svix-signed `pull_request.*` delivery from Trunk becomes one
-`queue` record on the `trunk` drive, carrying the pull request, Trunk's state
+record on the `trunk` drive, carrying the pull request, Trunk's state
 as its outcome, the reason, the failing checks, and Trunk's details URL. A
+`failed`, `pending_failure` or `cancelled` state is an `ejected` record, and
+every other state is a `queue` record. A channel subscriber hears each
+`ejected` record about a pull request its session claims, with
+`cci claim --pr <n> --rel <rel>`, and no `--follow`. A
 redelivery of the same message stays one record. A bad signature answers
 401, and a relay failure answers 502 so Svix retries.
 
 ```bash
-cci tail --drive trunk --kind queue --json
+cci tail --drive trunk --kind queue,ejected --json
 ```
 
 ### Hear GitHub pull-request events as records
@@ -667,6 +671,7 @@ matching topic or `--re`. Only a resolver with a later sequence closes the opene
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
+| `ejected` | None | Trunk took a pull request out of its merge queue (`failed`, `pending_failure` or `cancelled`), with the state in `--outcome`. Requires `--pr`. A channel subscriber hears one on the `trunk` drive for each pull request its session claims. |
 | `github` | 14 days | A GitHub pull request, review or check change, or a push to the default branch, with the action or conclusion in `--outcome` and the commit in `--commit`. A commit status or a push names no pull request. |
 | `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict; use `--outcome` for the result. |

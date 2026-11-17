@@ -73,7 +73,17 @@ delivers; its cursor stays. `cci session list` names each alias, its session,
 where it runs and its cursor, and `cci session rm <alias>` ends it.
 
 Every record addressed to the reader arrives, whatever its kind: no kind list
-keeps a lane from a record sent to it, and `cci watch` delivers the same. For
+keeps a lane from a record sent to it, and `cci watch` delivers the same.
+
+Trunk's merge-queue records reach a channel two ways. Each `ejected` record
+on the `trunk` drive about a pull request the session claims arrives with no
+other flag. `cci claim --pr 123 --rel landing` is enough, as is the `opened`
+claim `ccx vcs ship` makes. The channel reads the claims each time it looks,
+so a claim made after subscribing counts and `cci unclaim` stops it. A
+bare number claims that pull request in every repo; `owner/repo#123` claims it
+in one. Only the channel routes by claim, never the `PostToolUse` hook. To hear
+every ejection, or every `queue` change, follow the drive:
+`cci subscribe --follow trunk=ejected` or `--follow trunk=queue,ejected`. For
 `--reader root` (or `main`), `--batch-kinds` defaults to `done` in a window
 launched with `--channels`.
 

@@ -66,6 +66,7 @@ TTL means time to live; `--ttl` overrides defaults.
 | `opened`, `landed` | None | Require `--pr`. |
 | `red` | None | Classifies a pull request's red CI at its head, such as `class=flake owner=<lane>`. Requires `--pr`. |
 | `queue` | None | A merge-queue state change for a pull request, with the state in `--outcome`. Requires `--pr`. |
+| `ejected` | None | Trunk took a pull request out of its merge queue: the queue state change for `failed`, `pending_failure` or `cancelled`, with the state in `--outcome`. Requires `--pr`. A channel subscriber hears one on the `trunk` drive for each pull request its session claims with `cci claim --pr`; anyone else follows them with `cci subscribe --follow trunk=ejected`. |
 | `github` | 14 days | A GitHub pull request, review or check change, or a push to the default branch, with the action or conclusion in `--outcome` and the commit in `--commit`. A commit status or a push names no pull request. |
 | `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict. |

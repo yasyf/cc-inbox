@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- An `ejected` kind for a pull request Trunk took out of its merge queue. The
+  Trunk relay posts `failed`, `pending_failure` and `cancelled` as `ejected`
+  and every other state as `queue`, and a channel subscriber hears each
+  `ejected` record on the `trunk` drive about a pull request its session
+  claims, with no `--follow`. Re-enroll the Trunk receiver's key with
+  `--allow 'trunk|queue,ejected'` before it runs this release.
+
 - The daemon serves cci's tools over MCP Streamable HTTP at
   `127.0.0.1:7377/mcp`, and the plugin's `cci` server is that endpoint, so a
   new session no longer runs a `cci mcp` process. A headers helper sends the

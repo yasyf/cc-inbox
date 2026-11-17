@@ -51,10 +51,11 @@ func DefaultBatch(reader string) []kinds.Kind {
 }
 
 // Filter selects what the channel delivers on arrival: every record addressed
-// to the reader but those of a batch kind, and other lanes' broadcasts of its
-// kinds but those it mutes.
+// to the reader but those of a batch kind, other lanes' broadcasts of its
+// kinds but those it mutes, and ejections of the pull requests its session
+// claims.
 func (s Subscription) Filter() Filter {
-	return Filter{Drive: s.Drive, Follow: s.Follow, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Batch, MuteBroadcasts: s.Mute, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
+	return Filter{Drive: s.Drive, Follow: s.Follow, ClaimedBy: s.Session, Peer: s.Session, For: s.Reader, Kinds: s.Kinds, Mute: s.Batch, MuteBroadcasts: s.Mute, TopicKinds: s.TopicKinds, RepeatWindow: UrgentRepeat}
 }
 
 // BatchFilter selects what the channel delivers together, never on arrival:

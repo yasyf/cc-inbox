@@ -23,6 +23,8 @@ type Follow struct {
 	Kinds []kinds.Kind `json:"kinds"`
 }
 
+const ejectionDrive = "trunk"
+
 const (
 	sinceFloorStep = 5 * time.Minute
 	sinceFloorsMax = 4096
@@ -31,6 +33,8 @@ const (
 type Filter struct {
 	Drive          string
 	Follow         []Follow
+	ClaimedBy      string
+	claimed        []string
 	Origin         string
 	Peer           string
 	Kinds          []kinds.Kind
@@ -157,6 +161,10 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 	for _, follow := range f.Follow {
 		branches = append(branches, "(drive = ? AND kind IN ("+placeholders(len(follow.Kinds))+") AND (recipients = '[]' OR EXISTS (SELECT 1 FROM json_each(recipients) WHERE value = 'all')))")
 		params = append(append(params, follow.Drive), kindArgs(follow.Kinds)...)
+	}
+	if f.ClaimedBy != "" {
+		branches = append(branches, "(drive = ? AND kind = ? AND EXISTS (SELECT 1 FROM claims, json_each(records.refs, '$.prs') pr WHERE claims.session = ? AND claims.kind = 'pr' AND (claims.key = CAST(pr.value AS TEXT) OR (instr(claims.key, '#') = 0 AND pr.type = 'text' AND substr(pr.value, -length(claims.key) - 1) = '#' || claims.key))))")
+		params = append(params, ejectionDrive, string(kinds.Ejected), f.ClaimedBy)
 	}
 	clauses := []string{"(" + strings.Join(branches, " OR ") + ")"}
 	if f.Origin != "" {
@@ -328,6 +336,10 @@ func (f Filter) candidateArmsAudience(self string, rootAudience bool) ([]string,
 			params = append(params, follow.Drive, string(kind))
 			arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ? AND kind = ?"+bounds("seq", f.After))
 		}
+	}
+	if f.ClaimedBy != "" {
+		params = append(params, ejectionDrive, string(kinds.Ejected))
+		arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ? AND kind = ?"+bounds("seq", f.After))
 	}
 	arms = append(arms, "SELECT source_seq FROM record_json_errors WHERE field = 'recipients'"+bounds("source_seq", f.After))
 	return arms, params

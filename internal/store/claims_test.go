@@ -208,3 +208,90 @@ func TestClaimsMatchBareAndQualifiedPRs(t *testing.T) {
 		}
 	}
 }
+
+func TestASessionHearsTheEjectionsOfThePullRequestsItClaims(t *testing.T) {
+	st, _ := testutil.Store(t)
+	ctx := t.Context()
+	ejection := func(kind kinds.Kind, pr store.PR) int64 {
+		return testutil.Post(t, st, store.Record{Drive: "trunk", Lane: "trunk", Kind: kind, Text: pr.String() + " in Trunk's merge queue", Refs: store.Refs{PRs: []store.PR{pr}}}).Seq
+	}
+	ours := ejection(kinds.Ejected, store.PR{Repo: "o/r", Number: 7})
+	theirs := ejection(kinds.Ejected, store.PR{Repo: "x/y", Number: 7})
+	queued := ejection(kinds.Queue, store.PR{Repo: "o/r", Number: 7})
+	later := ejection(kinds.Ejected, store.PR{Repo: "o/r", Number: 8})
+	for _, c := range []store.Claim{
+		{Session: "repo", Rel: "opened", Kind: "pr", Key: "o/r#7"},
+		{Session: "bare", Rel: "landing", Kind: "pr", Key: "7"},
+		{Session: "other", Rel: "opened", Kind: "build", Key: "7"},
+	} {
+		if _, err := st.Claim(ctx, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	model, err := st.BuildReadModel(ctx, noPace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = model.Close() })
+	head, err := st.MaxSeq(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := func(session string, follow ...store.Follow) store.Filter {
+		return store.Subscription{Session: session, Drive: "d", Reader: "worker", Follow: follow}.Filter()
+	}
+	heard := func(t *testing.T, f store.Filter, want ...int64) {
+		t.Helper()
+		got, err := st.Query(ctx, f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seqs := make([]int64, len(got))
+		for i, r := range got {
+			seqs[i] = r.Seq
+		}
+		if !slices.Equal(seqs, want) {
+			t.Fatalf("store = %v, want %v", seqs, want)
+		}
+		answer, answered, err := model.Answer(ctx, st, f)
+		if err != nil || !answered {
+			t.Fatalf("model answered = %v, %v", answered, err)
+		}
+		sameRecords(t, answer, got)
+		var first int64
+		if len(want) > 0 {
+			first = want[0]
+		}
+		for _, served := range []*store.ReadModel{nil, model} {
+			st.ServeReadModel(served)
+			matches, err := st.FirstMatches(ctx, []store.Filter{f}, head)
+			st.ServeReadModel(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if matches[0].Seq != first {
+				t.Fatalf("first match with model %v = %d, want %d", served != nil, matches[0].Seq, first)
+			}
+		}
+	}
+	t.Run("a claim in the repo", func(t *testing.T) { heard(t, filter("repo"), ours) })
+	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs) })
+	t.Run("a claim on another kind", func(t *testing.T) { heard(t, filter("other")) })
+	t.Run("no claim", func(t *testing.T) { heard(t, filter("none")) })
+	t.Run("a followed queue", func(t *testing.T) {
+		heard(t, filter("none", store.Follow{Drive: "trunk", Kinds: []kinds.Kind{kinds.Queue}}), queued)
+	})
+	t.Run("a claim made after the filter", func(t *testing.T) {
+		f := filter("late")
+		heard(t, f)
+		claim := store.Claim{Session: "late", Rel: "landing", Kind: "pr", Key: "o/r#8"}
+		if _, err := st.Claim(ctx, claim); err != nil {
+			t.Fatal(err)
+		}
+		heard(t, f, later)
+		if _, err := st.Unclaim(ctx, claim); err != nil {
+			t.Fatal(err)
+		}
+		heard(t, f)
+	})
+}
