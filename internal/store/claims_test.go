@@ -210,7 +210,7 @@ func TestClaimsMatchBareAndQualifiedPRs(t *testing.T) {
 }
 
 func TestASessionHearsWhatHappensToThePullRequestsAndBuildsItClaims(t *testing.T) {
-	st, _ := testutil.Store(t)
+	st, clock := testutil.Store(t)
 	ctx := t.Context()
 	ejection := func(kind kinds.Kind, pr store.PR) int64 {
 		return testutil.Post(t, st, store.Record{Drive: "trunk", Lane: "trunk", Kind: kind, Text: pr.String() + " in Trunk's merge queue", Refs: store.Refs{PRs: []store.PR{pr}}}).Seq
@@ -219,8 +219,21 @@ func TestASessionHearsWhatHappensToThePullRequestsAndBuildsItClaims(t *testing.T
 	theirs := ejection(kinds.Ejected, store.PR{Repo: "x/y", Number: 7})
 	queued := ejection(kinds.Queue, store.PR{Repo: "o/r", Number: 7})
 	later := ejection(kinds.Ejected, store.PR{Repo: "o/r", Number: 8})
+	var relayed int64
+	relay := func(row store.Row) int64 {
+		relayed++
+		row.Origin, row.OriginSeq, row.At, row.Source = "feedfacefeedface", relayed, clock.Now(), "post"
+		if _, err := st.Apply(ctx, []store.Row{row}, nil); err != nil {
+			t.Fatal(err)
+		}
+		seq, err := st.MaxSeq(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
 	github := func(topic, outcome, commit string, prs ...store.PR) int64 {
-		return testutil.Post(t, st, store.Record{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: topic, Text: outcome, Refs: store.Refs{PRs: prs}, Fields: store.Fields{Outcome: outcome, Commit: commit}}).Seq
+		return relay(store.Row{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: topic, Text: outcome, Refs: store.Refs{PRs: prs}, Fields: store.Fields{Outcome: outcome, Commit: commit}})
 	}
 	merged := github("pull_request", "merged", "abc123", store.PR{Repo: "o/r", Number: 7})
 	github("check", "in_progress", "abc123", store.PR{Repo: "o/r", Number: 7})
@@ -231,7 +244,7 @@ func TestASessionHearsWhatHappensToThePullRequestsAndBuildsItClaims(t *testing.T
 	github("check", "pending", "abc123")
 	github("check", "success", "fff999")
 	release := func(outcome string, builds ...string) int64 {
-		return testutil.Post(t, st, store.Record{Drive: "release", Lane: "platy", Kind: kinds.Release, Text: "release " + outcome, Refs: store.Refs{Builds: builds}, Fields: store.Fields{Outcome: outcome}}).Seq
+		return relay(store.Row{Drive: "release", Lane: "platy", Kind: kinds.Release, Text: "release " + outcome, Refs: store.Refs{Builds: builds}, Fields: store.Fields{Outcome: outcome}})
 	}
 	held := release("held", "https://buildkite.com/forge/release/builds/19053", "https://buildkite.com/forge/release-launcher/builds/88")
 	release("converged", "https://buildkite.com/forge/release/builds/190530")
