@@ -1492,7 +1492,7 @@ func toolRound(at time.Time, sidechain bool, between ...string) []string {
 
 func streamedRound(at time.Time, results int) []string {
 	request := fmt.Sprintf("req_%d", requestIDs.Add(1))
-	var lines []string
+	lines := make([]string, 0, 2*results)
 	for range results {
 		lines = append(lines, toolResult(at, false), toolUse(at, false, request))
 	}
@@ -1637,13 +1637,14 @@ func TestASessionDeafToItsChannelHasItsReconnectTypedOnceAtItsTurnEndAndHearingR
 	if err := transcribe(ctx, toolRound(confirmed, false)...); err != nil {
 		t.Fatal(err)
 	}
-	posted := waitDisconnect(t, st)
+	waitDisconnect(t, st)
 	if err := transcribe(ctx, toolRound(confirmed, false)...); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(20 * interval)
 	want := fmt.Sprintf("root stopped hearing its cci channel in window %d (session s1): #%d is not in its transcript after two requests that began after the channel sent it, the later one %s after, so cci types %s into tmux session release-demo-coordinator once its turn ends, and its next channel replays from the record it last heard", window.PID, first.Seq, deafAfter, hook.ReconnectCommand)
-	if posted = disconnects(t, st); len(posted) != 1 || posted[0].Lane != "root" || !slices.Equal(posted[0].To, []string{"communicator"}) || posted[0].Text != want {
+	posted := disconnects(t, st)
+	if len(posted) != 1 || posted[0].Lane != "root" || !slices.Equal(posted[0].To, []string{"communicator"}) || posted[0].Text != want {
 		t.Fatalf("disconnects = %+v, want one from root to communicator saying %q", posted, want)
 	}
 	if got, want := tmuxCalls(t, calls), "has-session -t =release-demo-coordinator\n"; got != want {
