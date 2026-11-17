@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `service.Record` carries `Builds`, posted as the record's `builds` refs, so
+  a service such as Platy can name a release's build and launcher URLs and
+  reach the session that claims either one.
+
 - A channel subscriber hears each `release` record on the `release` drive
   that names a build its session claims, by number or URL, for every outcome:
   `held`, `converged`, `failed` and `cancelled`. A session that starts a
