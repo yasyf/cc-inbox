@@ -100,11 +100,22 @@ func TestAWindowedReadModelMatchesTheStore(t *testing.T) {
 func TestAWindowedReadModelRoutesAStatusByACommitBelowItsFloor(t *testing.T) {
 	st, _ := openStore(t)
 	ctx := t.Context()
-	opened := selectedPost(t, st, Record{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: "pull_request", Text: "opened", Refs: Refs{PRs: []PR{{Repo: "o/r", Number: 7}}}, Fields: Fields{Outcome: "opened", Commit: "abc123"}})
+	relay := func(originSeq int64, topic, outcome string, prs ...PR) int64 {
+		row := Row{Origin: "feedfacefeedface", OriginSeq: originSeq, Drive: "github", Lane: "github", Kind: kinds.Github, At: st.Now(), Topic: topic, Text: outcome, Refs: Refs{PRs: prs}, Fields: Fields{Outcome: outcome, Commit: "abc123"}, Source: "post"}
+		if _, err := st.Apply(ctx, []Row{row}, nil); err != nil {
+			t.Fatal(err)
+		}
+		seq, err := st.MaxSeq(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	opened := relay(1, "pull_request", "opened", PR{Repo: "o/r", Number: 7})
 	for i := range 40 {
 		selectedPost(t, st, Record{Lane: "filler", Kind: kinds.Note, Text: fmt.Sprint("filler ", i)})
 	}
-	status := selectedPost(t, st, Record{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: "check", Text: "buildkite/test failure", Fields: Fields{Outcome: "failure", Commit: "abc123"}})
+	status := relay(2, "check", "failure")
 	if _, err := st.Claim(ctx, Claim{Session: "s1", Rel: "opened", Kind: "pr", Key: "o/r#7"}); err != nil {
 		t.Fatal(err)
 	}
@@ -113,13 +124,13 @@ func TestAWindowedReadModelRoutesAStatusByACommitBelowItsFloor(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.ServeReadModel(nil); _ = model.Close() })
-	if floor := model.Stats().Floor; floor <= opened.Seq {
-		t.Fatalf("floor = %d, want it above the opened record #%d", floor, opened.Seq)
+	if floor := model.Stats().Floor; floor <= opened {
+		t.Fatalf("floor = %d, want it above the opened record #%d", floor, opened)
 	}
 	f := (Subscription{Drive: "d", Session: "s1", Reader: "worker"}).Filter()
-	f.After = status.Seq - 1
+	f.After = status - 1
 	got, answered, err := model.Answer(ctx, st, f)
-	if err != nil || !answered || len(got) != 1 || got[0].Seq != status.Seq {
-		t.Fatalf("model = %+v, %v, %v; want the status #%d", got, answered, err, status.Seq)
+	if err != nil || !answered || len(got) != 1 || got[0].Seq != status {
+		t.Fatalf("model = %+v, %v, %v; want the status #%d", got, answered, err, status)
 	}
 }
