@@ -76,6 +76,36 @@ func TestPostReachesAnOwnerSealed(t *testing.T) {
 	}
 }
 
+func TestAReleaseReachesTheSessionThatClaimsItsBuild(t *testing.T) {
+	srv := relaytest.NewServer(t)
+	svc := serviceKey(t)
+	st, owner := relaytest.JoinOwner(t, srv, svc)
+	ctx := context.Background()
+	launcher := "https://buildkite.com/forge/release-launcher/builds/88"
+	if _, err := st.Claim(ctx, store.Claim{Session: "starter", Rel: "started", Kind: "build", Key: launcher}); err != nil {
+		t.Fatal(err)
+	}
+	err := writer(srv, svc, owner.Identity.PublicKey()).Post(ctx, service.Record{
+		ID: "release:19053:converged", Drive: "release", Kind: "release", At: time.Now(), Text: "release 19053 converged",
+		Builds: []string{"https://buildkite.com/forge/release/builds/19053", launcher}, Outcome: "converged",
+	})
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	if got, err := owner.Pull(ctx, 0, nil); err != nil || got.Inserted != 1 {
+		t.Fatalf("owner pull = %+v, %v; want 1 inserted", got, err)
+	}
+	for session, want := range map[string]int{"starter": 1, "bystander": 0} {
+		recs, err := st.Query(ctx, store.Subscription{Session: session, Drive: "d", Reader: "worker"}.Filter())
+		if err != nil || len(recs) != want {
+			t.Fatalf("%s heard %d records, %v; want %d", session, len(recs), err, want)
+		}
+		if want == 1 && (recs[0].Kind != kinds.Release || len(recs[0].Refs.Builds) != 2 || recs[0].Fields.Outcome != "converged") {
+			t.Fatalf("%s heard %+v", session, recs[0])
+		}
+	}
+}
+
 func TestPostRefusesAGroupKeyFromAnUnpinnedOwner(t *testing.T) {
 	srv := relaytest.NewServer(t)
 	svc := serviceKey(t)

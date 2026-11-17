@@ -40,6 +40,7 @@ type Record struct {
 	Topic   string
 	To      []string
 	PRs     []string
+	Builds  []string
 	URL     string
 	Outcome string
 	Commit  string
@@ -63,7 +64,7 @@ func (w Writer) Post(ctx context.Context, records ...Record) error {
 		}
 		rec := row{
 			Origin: w.Key.ID(), OriginSeq: now.UnixMicro() + int64(i), ID: r.ID, Drive: r.Drive, Lane: w.Lane, Kind: string(kind), At: r.At.UTC(),
-			Text: r.Text, Topic: r.Topic, To: r.To, Refs: refs{URL: r.URL, PRs: r.PRs},
+			Text: r.Text, Topic: r.Topic, To: r.To, Refs: refs{URL: r.URL, PRs: r.PRs, Builds: r.Builds},
 			Fields: fields{Attrs: r.Attrs, Outcome: r.Outcome, Commit: r.Commit}, Source: "service", Body: r.Body,
 		}
 		pt, err := json.Marshal(rec)
@@ -178,8 +179,9 @@ type row struct {
 }
 
 type refs struct {
-	URL string   `json:"url,omitempty"`
-	PRs []string `json:"prs,omitempty"`
+	URL    string   `json:"url,omitempty"`
+	PRs    []string `json:"prs,omitempty"`
+	Builds []string `json:"builds,omitempty"`
 }
 
 type fields struct {
