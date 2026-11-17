@@ -45,7 +45,7 @@ VALUES ('d','worker','urgent',?,'selected','selected-topic','["root"]','post','u
 			filter := (Subscription{Drive: "d", Session: "reader", Reader: "root", Kinds: []kinds.Kind{kinds.Urgent}}).Filter()
 			filter.After = int64(population)
 			filter.Limit = 500
-			bound := int64(4*bits.Len(uint(population)) + 8)
+			bound := int64((2+len(claimRoutes))*bits.Len(uint(population)) + 8)
 			var baseline []Record
 			for _, index := range []struct {
 				name, sql, planIndex string
