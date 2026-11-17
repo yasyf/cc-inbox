@@ -443,7 +443,7 @@ func postCommand() (*cobra.Command, func(*cobra.Command, *store.Store, []string,
 	f.StringVar(&r.Refs.Board, "board", "", "cc-present board URL")
 	f.StringSliceVar(&r.Fields.Envs, "env", nil, "environments or clusters (repeatable)")
 	f.StringVar(&r.Fields.Mode, "mode", "", "how a release or apply started: platy, cli, manual, walker")
-	f.StringVar(&r.Fields.Outcome, "outcome", "", "passed, failed, pending, cancelled")
+	f.StringVar(&r.Fields.Outcome, "outcome", "", "passed, failed, pending, cancelled; a release also held or converged; github, queue and ejected carry their source's state")
 	f.StringVar(&r.Fields.Commit, "commit", "", "full commit sha")
 	f.Var(&headsFlag{heads: &heads}, "head", "on a head record, one pull request's new head as <pr>=<sha> or <pr>=<was>..<sha>, then an optional note after a space, such as \"45001=4423264..c3b44a3 patch-identical\"; repeated, one record carries every head of a restack: each lands in fields.attrs as head:<pr> = [<was>..]<sha>[ <note>], each PR joins its refs, and its text opens with HEAD <n> PRs: #<pr> <short sha>, ...")
 	f.StringVar(&census, "census", "", `census JSON: {"n":232,"denominator":293,"head":"<sha>","drift":0,"stacks_clean":["<project>/<env>"]}`)

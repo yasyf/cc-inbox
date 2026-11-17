@@ -6,6 +6,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cci post` takes a `release` record's `held` and `converged` outcomes, and
+  a `github`, `queue` or `ejected` record keeps its source's own state, such
+  as `merged` or `pending_failure`, instead of refusing every outcome but
+  `passed`, `failed`, `pending` and `cancelled`.
+
 ### Added
 
 - A channel subscriber hears each `release` record on the `release` drive
