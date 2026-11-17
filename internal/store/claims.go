@@ -66,6 +66,14 @@ func (s *Store) Unclaim(ctx context.Context, c Claim) (bool, error) {
 	return n > 0, nil
 }
 
+func routesClaims(ctx context.Context, q querier, session string) (bool, error) {
+	var held bool
+	if err := q.QueryRowContext(ctx, "SELECT EXISTS (SELECT 1 FROM claims WHERE session = ? AND kind IN ('pr', 'build'))", session).Scan(&held); err != nil {
+		return false, fmt.Errorf("look for claimed pull requests and builds: %w", err)
+	}
+	return held, nil
+}
+
 func (s *Store) claimedKeys(ctx context.Context, session string) (prs, builds []string, err error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT kind, key FROM claims WHERE session = ? AND kind IN ('pr', 'build')", session)
 	if err != nil {
