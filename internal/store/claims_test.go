@@ -209,7 +209,7 @@ func TestClaimsMatchBareAndQualifiedPRs(t *testing.T) {
 	}
 }
 
-func TestASessionHearsWhatHappensToThePullRequestsItClaims(t *testing.T) {
+func TestASessionHearsWhatHappensToThePullRequestsAndBuildsItClaims(t *testing.T) {
 	st, _ := testutil.Store(t)
 	ctx := t.Context()
 	ejection := func(kind kinds.Kind, pr store.PR) int64 {
@@ -230,10 +230,18 @@ func TestASessionHearsWhatHappensToThePullRequestsItClaims(t *testing.T) {
 	status := github("check", "failure", "abc123")
 	github("check", "pending", "abc123")
 	github("check", "success", "fff999")
+	release := func(outcome string, builds ...string) int64 {
+		return testutil.Post(t, st, store.Record{Drive: "release", Lane: "platy", Kind: kinds.Release, Text: "release " + outcome, Refs: store.Refs{Builds: builds}, Fields: store.Fields{Outcome: outcome}}).Seq
+	}
+	held := release("held", "https://buildkite.com/forge/release/builds/19053", "https://buildkite.com/forge/release-launcher/builds/88")
+	release("converged", "https://buildkite.com/forge/release/builds/190530")
+	converged := release("converged", "https://buildkite.com/forge/release/builds/19053")
 	for _, c := range []store.Claim{
 		{Session: "repo", Rel: "opened", Kind: "pr", Key: "o/r#7"},
 		{Session: "bare", Rel: "landing", Kind: "pr", Key: "7"},
 		{Session: "other", Rel: "opened", Kind: "build", Key: "7"},
+		{Session: "number", Rel: "started", Kind: "build", Key: "19053"},
+		{Session: "url", Rel: "started", Kind: "build", Key: "https://buildkite.com/forge/release/builds/19053"},
 	} {
 		if _, err := st.Claim(ctx, c); err != nil {
 			t.Fatal(err)
@@ -289,6 +297,8 @@ func TestASessionHearsWhatHappensToThePullRequestsItClaims(t *testing.T) {
 	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs, merged, passed, approved, status) })
 	t.Run("a claim on another kind", func(t *testing.T) { heard(t, filter("other")) })
 	t.Run("no claim", func(t *testing.T) { heard(t, filter("none")) })
+	t.Run("a release build claimed by number", func(t *testing.T) { heard(t, filter("number"), held, converged) })
+	t.Run("a release build claimed by URL", func(t *testing.T) { heard(t, filter("url"), held, converged) })
 	t.Run("a followed queue", func(t *testing.T) {
 		heard(t, filter("none", store.Follow{Drive: "trunk", Kinds: []kinds.Kind{kinds.Queue}}), queued)
 	})

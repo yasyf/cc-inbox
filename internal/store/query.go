@@ -26,7 +26,8 @@ type Follow struct {
 var (
 	ejectedRoute  = claimRoute{drive: "trunk", kind: string(kinds.Ejected)}
 	githubRoute   = claimRoute{drive: "github", kind: string(kinds.Github)}
-	claimRoutes   = []claimRoute{ejectedRoute, githubRoute}
+	releaseRoute  = claimRoute{drive: "release", kind: string(kinds.Release)}
+	claimRoutes   = []claimRoute{ejectedRoute, githubRoute, releaseRoute}
 	quietOutcomes = []string{"queued", "in_progress", "pending", "edited", "labeled", "unlabeled"}
 )
 
@@ -42,6 +43,7 @@ type Filter struct {
 	Follow         []Follow
 	ClaimedBy      string
 	claimed        []string
+	claimedBuilds  []string
 	commitPRs      bool
 	Origin         string
 	Peer           string
@@ -179,7 +181,8 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		if f.commitPRs {
 			github = "(" + named + " OR EXISTS (SELECT 1 FROM record_commit_prs cp, claims WHERE cp.drive = records.drive AND cp.commit_sha = json_extract(records.fields, '$.commit') AND " + claimed("cp.pr") + "))"
 		}
-		branches = append(branches, "((drive = ? AND kind = ? AND "+named+") OR (drive = ? AND kind = ? AND COALESCE(json_extract(fields, '$.outcome'), '') NOT IN ("+placeholders(len(quietOutcomes))+") AND "+github+"))")
+		build := "EXISTS (SELECT 1 FROM claims, json_each(records.refs, '$.builds') b WHERE claims.session = ? AND claims.kind = 'build' AND (claims.key = CAST(b.value AS TEXT) OR substr(CAST(b.value AS TEXT), -length(claims.key) - 8) = '/builds/' || claims.key))"
+		branches = append(branches, "((drive = ? AND kind = ? AND "+named+") OR (drive = ? AND kind = ? AND COALESCE(json_extract(fields, '$.outcome'), '') NOT IN ("+placeholders(len(quietOutcomes))+") AND "+github+") OR (drive = ? AND kind = ? AND "+build+"))")
 		params = append(params, ejectedRoute.drive, ejectedRoute.kind, f.ClaimedBy, githubRoute.drive, githubRoute.kind)
 		for _, outcome := range quietOutcomes {
 			params = append(params, outcome)
@@ -188,6 +191,7 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		if f.commitPRs {
 			params = append(params, f.ClaimedBy)
 		}
+		params = append(params, releaseRoute.drive, releaseRoute.kind, f.ClaimedBy)
 	}
 	clauses := []string{"(" + strings.Join(branches, " OR ") + ")"}
 	if f.Origin != "" {

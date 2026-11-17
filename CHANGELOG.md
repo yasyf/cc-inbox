@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A channel subscriber hears each `release` record on the `release` drive
+  that names a build its session claims, by number or URL, for every outcome:
+  `held`, `converged`, `failed` and `cancelled`. A session that starts a
+  production release runs `cci claim --build <url> --rel started` and wakes on
+  the release's state instead of waiting attached.
+
 - A channel subscriber hears each finished commit status (`success`,
   `failure`, `error`) on a commit that a `github` pull request record for a
   claimed pull request carries, so `buildkite/test` reaches the session that

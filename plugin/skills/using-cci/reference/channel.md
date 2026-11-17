@@ -95,9 +95,18 @@ A commit status, such as `buildkite/test`, names a commit rather than a pull
 request. It reaches the session when a `github` pull request record on the same
 drive carries that commit for a claimed pull request, as an opened or pushed
 one does with its head: `success`, `failure` and `error` arrive, and `pending`
-stays off. Only the channel routes by claim, never the `PostToolUse` hook. To hear every record of
-a kind, follow its drive: `cci subscribe --follow trunk=ejected` or
-`--follow github=github`.
+stays off.
+
+A build the session claims brings each `release` record on the `release` drive
+that names it, whatever its outcome: `held`, `converged`, `failed` or
+`cancelled`. `cci claim --build 19053 --rel started` and
+`--build https://buildkite.com/forge/release/builds/19053` both claim it, so a
+session that starts a release claims its build and ends its turn instead of
+watching it.
+
+Only the channel routes by claim, never the `PostToolUse` hook. To hear every
+record of a kind, follow its drive: `cci subscribe --follow trunk=ejected`,
+`--follow github=github` or `--follow release=release`.
 
 `--batch-kinds report,note` holds those addressed kinds off a window until one
 tag carries them together, at most every five minutes and at once ahead of any
