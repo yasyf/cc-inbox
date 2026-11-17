@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- A channel subscriber hears each `github` record naming a pull request its
+  session claims: a merge, close, reopen, push, draft change, review or
+  finished check. A running check and an edited, labeled or unlabeled pull
+  request stay off the channel, and a commit status, which names no pull
+  request, is not routed.
+
 - An `ejected` kind for a pull request Trunk took out of its merge queue. The
   Trunk relay posts `failed`, `pending_failure` and `cancelled` as `ejected`
   and every other state as `queue`, and a channel subscriber hears each

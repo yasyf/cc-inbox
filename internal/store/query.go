@@ -23,7 +23,10 @@ type Follow struct {
 	Kinds []kinds.Kind `json:"kinds"`
 }
 
-const ejectionDrive = "trunk"
+var (
+	claimRoutes   = []Follow{{Drive: "trunk", Kinds: []kinds.Kind{kinds.Ejected}}, {Drive: "github", Kinds: []kinds.Kind{kinds.Github}}}
+	quietOutcomes = []string{"queued", "in_progress", "pending", "edited", "labeled", "unlabeled"}
+)
 
 const (
 	sinceFloorStep = 5 * time.Minute
@@ -163,8 +166,14 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 		params = append(append(params, follow.Drive), kindArgs(follow.Kinds)...)
 	}
 	if f.ClaimedBy != "" {
-		branches = append(branches, "(drive = ? AND kind = ? AND EXISTS (SELECT 1 FROM claims, json_each(records.refs, '$.prs') pr WHERE claims.session = ? AND claims.kind = 'pr' AND (claims.key = CAST(pr.value AS TEXT) OR (instr(claims.key, '#') = 0 AND pr.type = 'text' AND substr(pr.value, -length(claims.key) - 1) = '#' || claims.key))))")
-		params = append(params, ejectionDrive, string(kinds.Ejected), f.ClaimedBy)
+		branches = append(branches, "(((drive = ? AND kind = ?) OR (drive = ? AND kind = ? AND COALESCE(json_extract(fields, '$.outcome'), '') NOT IN ("+placeholders(len(quietOutcomes))+"))) AND EXISTS (SELECT 1 FROM claims, json_each(records.refs, '$.prs') pr WHERE claims.session = ? AND claims.kind = 'pr' AND (claims.key = CAST(pr.value AS TEXT) OR (instr(claims.key, '#') = 0 AND pr.type = 'text' AND substr(pr.value, -length(claims.key) - 1) = '#' || claims.key))))")
+		for _, route := range claimRoutes {
+			params = append(params, route.Drive, string(route.Kinds[0]))
+		}
+		for _, outcome := range quietOutcomes {
+			params = append(params, outcome)
+		}
+		params = append(params, f.ClaimedBy)
 	}
 	clauses := []string{"(" + strings.Join(branches, " OR ") + ")"}
 	if f.Origin != "" {
@@ -338,8 +347,10 @@ func (f Filter) candidateArmsAudience(self string, rootAudience bool) ([]string,
 		}
 	}
 	if f.ClaimedBy != "" {
-		params = append(params, ejectionDrive, string(kinds.Ejected))
-		arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ? AND kind = ?"+bounds("seq", f.After))
+		for _, route := range claimRoutes {
+			params = append(params, route.Drive, string(route.Kinds[0]))
+			arms = append(arms, "SELECT seq AS candidate_seq FROM records WHERE drive = ? AND kind = ?"+bounds("seq", f.After))
+		}
 	}
 	arms = append(arms, "SELECT source_seq FROM record_json_errors WHERE field = 'recipients'"+bounds("source_seq", f.After))
 	return arms, params

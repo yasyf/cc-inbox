@@ -1151,7 +1151,9 @@ func (sel *modelSelection) candidates() [][]int32 {
 		}
 	}
 	if len(f.claimed) > 0 {
-		lists = append(lists, m.byKind[pairKey(m.idOf(ejectionDrive), m.idOf(string(kinds.Ejected)))])
+		for _, route := range claimRoutes {
+			lists = append(lists, m.byKind[pairKey(m.idOf(route.Drive), m.idOf(string(route.Kinds[0])))])
+		}
 	}
 	return append(lists, m.wrong)
 }
@@ -1237,8 +1239,10 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 		return false, false
 	}
 	v := sel.m.view(r)
-	if !sel.scoped(&v) && !sel.peerBranch(&v) && !sel.readerBranch(&v) && !sel.followBranch(&v) && !sel.claimBranch(&v) {
-		return false, true
+	if !sel.scoped(&v) && !sel.peerBranch(&v) && !sel.readerBranch(&v) && !sel.followBranch(&v) {
+		if claimed, proved := sel.claimBranch(&v); !claimed || !proved {
+			return false, proved
+		}
 	}
 	if f.Origin != "" && v.from != f.Origin {
 		return false, true
@@ -1383,22 +1387,31 @@ func (sel *modelSelection) followBranch(v *modelView) bool {
 	return false
 }
 
-func (sel *modelSelection) claimBranch(v *modelView) bool {
-	if len(sel.f.claimed) == 0 || v.drive != ejectionDrive || v.kind != string(kinds.Ejected) {
-		return false
+func (sel *modelSelection) claimBranch(v *modelView) (selected, proved bool) {
+	if len(sel.f.claimed) == 0 || !slices.ContainsFunc(claimRoutes, func(route Follow) bool { return v.drive == route.Drive && v.kind == string(route.Kinds[0]) }) {
+		return false, true
 	}
 	refs, _ := sel.m.refsOf(v.row)
-	for _, key := range sel.f.claimed {
-		bare := !strings.Contains(key, "#")
-		if slices.ContainsFunc(refs.ints, func(n int32) bool { return strconv.Itoa(int(n)) == key }) ||
-			slices.ContainsFunc(refs.texts, func(id int32) bool {
-				pr := sel.m.strs[id]
-				return pr == key || bare && strings.HasSuffix(pr, "#"+key)
-			}) {
-			return true
-		}
+	if !slices.ContainsFunc(sel.f.claimed, func(key string) bool { return claimNames(key, refs, sel.m.strs) }) {
+		return false, true
 	}
-	return false
+	if v.kind != string(kinds.Github) {
+		return true, true
+	}
+	var fields Fields
+	if err := json.Unmarshal([]byte(sel.m.textOf(v.row).fields), &fields); err != nil {
+		return false, false
+	}
+	return !slices.Contains(quietOutcomes, fields.Outcome), true
+}
+
+func claimNames(key string, refs modelRefs, strs []string) bool {
+	bare := !strings.Contains(key, "#")
+	return slices.ContainsFunc(refs.ints, func(n int32) bool { return strconv.Itoa(int(n)) == key }) ||
+		slices.ContainsFunc(refs.texts, func(id int32) bool {
+			pr := strs[id]
+			return pr == key || bare && strings.HasSuffix(pr, "#"+key)
+		})
 }
 
 func (sel *modelSelection) namesPR(refs modelRefs) bool {
