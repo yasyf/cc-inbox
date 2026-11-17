@@ -1,5 +1,5 @@
 // Package trunk turns Trunk merge-queue webhooks, which Svix signs, into one
-// queue record per pull request state change.
+// queue or ejected record per pull request state change.
 package trunk
 
 import (
@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -85,7 +86,8 @@ func (e Event) reason() string {
 	return ""
 }
 
-// Record is e as the queue record for delivery id, false for a delivery
+// Record is e as the record for delivery id, of kind ejected when Trunk took
+// the pull request out of its queue and queue otherwise, false for a delivery
 // about no single pull request.
 func (e Event) Record(id, drive string) (service.Record, bool) {
 	if !strings.HasPrefix(e.Type, "pull_request.") || e.PR <= 0 {
@@ -106,8 +108,12 @@ func (e Event) Record(id, drive string) (service.Record, bool) {
 		text += "; failing: " + strings.Join(failing, ", ")
 		attrs["failing"] = strings.Join(failing, ", ")
 	}
+	kind := "queue"
+	if slices.Contains([]string{"failed", "pending_failure", "cancelled"}, e.Action) {
+		kind = "ejected"
+	}
 	return service.Record{
-		ID: "trunk:" + id, Drive: drive, Kind: "queue", At: e.Timestamp, Text: text,
+		ID: "trunk:" + id, Drive: drive, Kind: kind, At: e.Timestamp, Text: text,
 		PRs: []string{pr}, URL: e.URL, Outcome: e.Action, Commit: e.TestSHA, Attrs: attrs,
 	}, true
 }

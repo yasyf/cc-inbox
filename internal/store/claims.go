@@ -66,6 +66,23 @@ func (s *Store) Unclaim(ctx context.Context, c Claim) (bool, error) {
 	return n > 0, nil
 }
 
+func (s *Store) claimedPRs(ctx context.Context, session string) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT key FROM claims WHERE session = ? AND kind = 'pr'", session)
+	if err != nil {
+		return nil, fmt.Errorf("list claimed pull requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan claimed pull request: %w", err)
+		}
+		out = append(out, key)
+	}
+	return out, rows.Err()
+}
+
 // ClaimFilter selects claims; every set field must match. A build key
 // matches a stored build URL ending in /builds/<key> as well as the key itself.
 type ClaimFilter struct {

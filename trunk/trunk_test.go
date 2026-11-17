@@ -97,12 +97,12 @@ func handler(t *testing.T) (trunk.Handler, *store.Store, *relay.Node, *relaytest
 	return trunk.Handler{Secret: secret, Writer: w, Drive: "trunk"}, st, owner, srv
 }
 
-func queue(t *testing.T, st *store.Store, owner *relay.Node) []store.Record {
+func pulled(t *testing.T, st *store.Store, owner *relay.Node, kind kinds.Kind) []store.Record {
 	t.Helper()
 	if _, err := owner.Pull(context.Background(), 0, nil); err != nil {
 		t.Fatal(err)
 	}
-	recs, err := st.Query(context.Background(), store.Filter{Drive: "trunk", Kinds: []kinds.Kind{kinds.Queue}})
+	recs, err := st.Query(context.Background(), store.Filter{Drive: "trunk", Kinds: []kinds.Kind{kind}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,15 +116,36 @@ func TestAFailedPullRequestReachesTheOwnerOnceAcrossRedeliveries(t *testing.T) {
 			t.Fatalf("handle = %d, want 200", code)
 		}
 	}
-	recs := queue(t, st, owner)
+	recs := pulled(t, st, owner, kinds.Ejected)
 	if len(recs) != 1 {
-		t.Fatalf("owner holds %d queue records, want 1", len(recs))
+		t.Fatalf("owner holds %d ejected records, want 1", len(recs))
 	}
 	r := recs[0]
 	want := "acme/app#45700 failed in Trunk's merge queue: TEST_RUN_REQUIRED_STATUS_FAILED; failing: buildkite/test failure https://buildkite.com/acme/test/builds/9"
 	if r.Text != want || r.Fields.Outcome != "failed" || r.Fields.Commit != "abc123" ||
 		r.Refs.URL != "https://app.trunk.io/acme/merge/app/45700" || r.Refs.PRs[0] != (store.PR{Repo: "acme/app", Number: 45700}) {
 		t.Fatalf("owner read %+v", r)
+	}
+}
+
+func TestAnEjectionIsItsOwnKind(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		kind   string
+	}{
+		{"failed", "ejected"},
+		{"pending_failure", "ejected"},
+		{"cancelled", "ejected"},
+		{"submitted", "queue"},
+		{"testing", "queue"},
+		{"merged", "queue"},
+	} {
+		t.Run(tc.action, func(t *testing.T) {
+			r, ok := trunk.Event{Type: "pull_request." + tc.action, Action: tc.action, PR: 7}.Record("msg_1", "trunk")
+			if !ok || r.Kind != tc.kind {
+				t.Fatalf("record = %+v, %v; want kind %s", r, ok, tc.kind)
+			}
+		})
 	}
 }
 

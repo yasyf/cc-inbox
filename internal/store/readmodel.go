@@ -905,6 +905,13 @@ func (m *ReadModel) prepared(ctx context.Context, s *Store, f Filter) (Filter, b
 			}
 		}
 	}
+	if f.ClaimedBy != "" {
+		var err error
+		if f.claimed, err = s.claimedPRs(ctx, f.ClaimedBy); err != nil {
+			m.failures.Add(1)
+			return f, false
+		}
+	}
 	if err := m.catchUp(ctx); err != nil {
 		m.failures.Add(1)
 		return f, false
@@ -1143,6 +1150,9 @@ func (sel *modelSelection) candidates() [][]int32 {
 			lists = append(lists, m.byKind[pairKey(followed, m.idOf(string(k)))])
 		}
 	}
+	if len(f.claimed) > 0 {
+		lists = append(lists, m.byKind[pairKey(m.idOf(ejectionDrive), m.idOf(string(kinds.Ejected)))])
+	}
 	return append(lists, m.wrong)
 }
 
@@ -1227,7 +1237,7 @@ func (sel *modelSelection) matches(r *modelRow) (selected, proved bool) {
 		return false, false
 	}
 	v := sel.m.view(r)
-	if !sel.scoped(&v) && !sel.peerBranch(&v) && !sel.readerBranch(&v) && !sel.followBranch(&v) {
+	if !sel.scoped(&v) && !sel.peerBranch(&v) && !sel.readerBranch(&v) && !sel.followBranch(&v) && !sel.claimBranch(&v) {
 		return false, true
 	}
 	if f.Origin != "" && v.from != f.Origin {
@@ -1367,6 +1377,24 @@ func (sel *modelSelection) readerBranch(v *modelView) bool {
 func (sel *modelSelection) followBranch(v *modelView) bool {
 	for _, follow := range sel.f.Follow {
 		if v.drive == follow.Drive && (v.addressees.raw == "[]" || v.addressees.all) && slices.Contains(follow.Kinds, kinds.Kind(v.kind)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (sel *modelSelection) claimBranch(v *modelView) bool {
+	if len(sel.f.claimed) == 0 || v.drive != ejectionDrive || v.kind != string(kinds.Ejected) {
+		return false
+	}
+	refs, _ := sel.m.refsOf(v.row)
+	for _, key := range sel.f.claimed {
+		bare := !strings.Contains(key, "#")
+		if slices.ContainsFunc(refs.ints, func(n int32) bool { return strconv.Itoa(int(n)) == key }) ||
+			slices.ContainsFunc(refs.texts, func(id int32) bool {
+				pr := sel.m.strs[id]
+				return pr == key || bare && strings.HasSuffix(pr, "#"+key)
+			}) {
 			return true
 		}
 	}
