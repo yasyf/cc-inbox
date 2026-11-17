@@ -71,7 +71,8 @@ TTL means time to live; `--ttl` overrides defaults.
 | `spawn` | None | A lane's start: `--lane-ref <lane> --attr brief=<absolute path> --attr model=<model>`, with `--attr effort=` and `--attr task=` when known. Kept, never expiring; `cci who` lists the lane as spawned until a thread binds it. |
 | `review` | None | A rules-review verdict. |
 | `disconnect` | None | A subscribed session's channel server posts it to `communicator` when its channel stops. Open until `withdraw` or a resolver, such as the `recovered` record the next channel to stream that reader posts with `--resolves`. |
-| `owner`, `mechanism`, `evidence`, `correction`, `release`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
+| `release` | None | A production release's state, with `held`, `converged`, `failed` or `cancelled` in `--outcome` and its release and launcher build URLs in `--build`. A channel subscriber hears each one on the `release` drive naming a build its session claims with `cci claim --build`. |
+| `owner`, `mechanism`, `evidence`, `correction`, `applied`, `handoff`, `head`, `contract` | None | Unpaired. |
 | `retro`, `posted`, `design`, `serving`, `ready`, `duplicate` | None | Unpaired. |
 | `stand-down`, `not-ours`, `stopped`, `refuse`, `fail`, `recovered` | None | Unpaired. |
 | `delete-list`, `skew`, `not-live`, `urgent` | None | Unpaired. |

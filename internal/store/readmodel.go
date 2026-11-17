@@ -935,7 +935,7 @@ func (m *ReadModel) prepared(ctx context.Context, s *Store, f Filter) (Filter, b
 	}
 	if f.ClaimedBy != "" {
 		var err error
-		if f.claimed, err = s.claimedPRs(ctx, f.ClaimedBy); err != nil {
+		if f.claimed, f.claimedBuilds, err = s.claimedKeys(ctx, f.ClaimedBy); err != nil {
 			m.failures.Add(1)
 			return f, false
 		}
@@ -1178,7 +1178,7 @@ func (sel *modelSelection) candidates() [][]int32 {
 			lists = append(lists, m.byKind[pairKey(followed, m.idOf(string(k)))])
 		}
 	}
-	if len(f.claimed) > 0 {
+	if len(f.claimed) > 0 || len(f.claimedBuilds) > 0 {
 		for _, route := range claimRoutes {
 			lists = append(lists, m.byKind[pairKey(m.idOf(route.drive), m.idOf(route.kind))])
 		}
@@ -1416,8 +1416,17 @@ func (sel *modelSelection) followBranch(v *modelView) bool {
 }
 
 func (sel *modelSelection) claimBranch(v *modelView) (selected, proved bool) {
-	if len(sel.f.claimed) == 0 || !slices.Contains(claimRoutes, claimRoute{drive: v.drive, kind: v.kind}) {
+	if len(sel.f.claimed) == 0 && len(sel.f.claimedBuilds) == 0 || !slices.Contains(claimRoutes, claimRoute{drive: v.drive, kind: v.kind}) {
 		return false, true
+	}
+	if v.kind == releaseRoute.kind {
+		var refs Refs
+		if err := json.Unmarshal([]byte(sel.m.textOf(v.row).refs), &refs); err != nil {
+			return false, false
+		}
+		return slices.ContainsFunc(refs.Builds, func(build string) bool {
+			return slices.ContainsFunc(sel.f.claimedBuilds, func(key string) bool { return build == key || strings.HasSuffix(build, "/builds/"+key) })
+		}), true
 	}
 	refs, _ := sel.m.refsOf(v.row)
 	named := slices.ContainsFunc(sel.f.claimed, func(key string) bool { return claimNames(key, refs.ints, refs.texts, sel.m.strs) })

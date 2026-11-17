@@ -66,21 +66,24 @@ func (s *Store) Unclaim(ctx context.Context, c Claim) (bool, error) {
 	return n > 0, nil
 }
 
-func (s *Store) claimedPRs(ctx context.Context, session string) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT key FROM claims WHERE session = ? AND kind = 'pr'", session)
+func (s *Store) claimedKeys(ctx context.Context, session string) (prs, builds []string, err error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT kind, key FROM claims WHERE session = ? AND kind IN ('pr', 'build')", session)
 	if err != nil {
-		return nil, fmt.Errorf("list claimed pull requests: %w", err)
+		return nil, nil, fmt.Errorf("list claimed pull requests and builds: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []string
 	for rows.Next() {
-		var key string
-		if err := rows.Scan(&key); err != nil {
-			return nil, fmt.Errorf("scan claimed pull request: %w", err)
+		var kind, key string
+		if err := rows.Scan(&kind, &key); err != nil {
+			return nil, nil, fmt.Errorf("scan claimed pull request or build: %w", err)
 		}
-		out = append(out, key)
+		if kind == "build" {
+			builds = append(builds, key)
+		} else {
+			prs = append(prs, key)
+		}
 	}
-	return out, rows.Err()
+	return prs, builds, rows.Err()
 }
 
 // ClaimFilter selects claims; every set field must match. A build key
