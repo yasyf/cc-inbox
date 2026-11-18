@@ -468,6 +468,7 @@ type claimFlags struct {
 	targets   []string
 	systems   []string
 	refs      []string
+	wake      bool
 }
 
 func (c *claimFlags) register(cmd *cobra.Command) {
@@ -484,6 +485,7 @@ func (c *claimFlags) register(cmd *cobra.Command) {
 	fl.StringSliceVar(&c.targets, "target", nil, "release targets (repeatable)")
 	fl.StringSliceVar(&c.systems, "subsystem", nil, "subsystems such as sandsql (repeatable)")
 	fl.StringSliceVar(&c.refs, "ref", nil, "any other <kind>:<key> (repeatable)")
+	fl.BoolVar(&c.wake, "wake", false, "exit non-zero when the claiming session has no channel subscription, the only route by which a claimed artifact's records wake it; the claims stay")
 }
 
 func (c *claimFlags) holder(ctx context.Context, st *store.Store) (store.PeerKey, error) {
@@ -633,11 +635,18 @@ func newClaimCmd() *cobra.Command {
 			}
 			switch {
 			case cf.rel == string(kinds.Opened):
-				return postOpened(cmd.Context(), st, holder, cf.prs)
+				err = postOpened(cmd.Context(), st, holder, cf.prs)
 			case cf.rel == relOwns && cf.forLane != "":
-				return postAssigned(cmd.Context(), st, holder, cf.prs)
+				err = postAssigned(cmd.Context(), st, holder, cf.prs)
 			}
-			return nil
+			if err != nil || !cf.wake {
+				return err
+			}
+			_, subscribed, err := st.SessionSubscription(cmd.Context(), holder.Session)
+			if err != nil || subscribed {
+				return err
+			}
+			return fmt.Errorf("session %s has no channel subscription, so these claims wake nothing: run `cci subscribe --drive <drive> --reader <lane>` in that session", holder.Session)
 		}),
 	}
 	cf.register(cmd)

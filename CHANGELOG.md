@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `cci claim --wake` exits non-zero when the claiming session has no channel
+  subscription, and names the `cci subscribe` that fixes it. A claimed
+  artifact's records reach a session only through its channel, so a caller
+  that promises a wake, such as a release start, can stop promising one
+  nothing delivers. The claims stay either way.
+
 - `service.Record` carries `Builds`, posted as the record's `builds` refs, so
   a service such as Platy can name a release's build and launcher URLs and
   reach the session that claims either one.

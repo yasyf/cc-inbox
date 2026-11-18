@@ -1020,6 +1020,36 @@ func TestClaimAndWhoByRef(t *testing.T) {
 	}
 }
 
+func TestClaimWakeRefusesASessionNoChannelReaches(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CCI_HOME", home)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "eeee5555-starter")
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	for _, name := range peers.IdentityEnv {
+		t.Setenv(name, "")
+	}
+	if out, err := run(t, "claim", "--rel", "started", "--build", "19516", "--wake"); err == nil || !strings.Contains(err.Error(), "no channel subscription") || out != "started build:19516\n" {
+		t.Fatalf("claim --wake with no subscription = %q, %v", out, err)
+	}
+	if out, err := run(t, "who", "--all", "--json", "--build", "19516"); err != nil || !strings.Contains(out, `"session":"eeee5555-starter"`) {
+		t.Fatalf("a refused --wake claim still holds the build = %q, %v", out, err)
+	}
+	ctx := context.Background()
+	st, err := store.Open(ctx, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.Subscribe(ctx, store.Subscription{Session: "eeee5555-starter", Window: store.Window{PID: 4242, Started: 1}, Drive: "d", Reader: "starter", Cursor: "channel-eeee5555-starter"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(t, "claim", "--rel", "started", "--build", "19517", "--wake"); err != nil || out != "started build:19517\n" {
+		t.Fatalf("claim --wake from a subscribed session = %q, %v", out, err)
+	}
+}
+
 func TestPostToPeerAcrossDrives(t *testing.T) {
 	t.Setenv("CCI_HOME", t.TempDir())
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
