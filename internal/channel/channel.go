@@ -81,7 +81,7 @@ func (u upgrade) Error() string {
 	return "cci " + u.Version + " is installed at " + u.Path
 }
 
-const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to its reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, and per pull request for head, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads; a session ` + "`cci session register`" + ` keeps gets them instead, its owner records one tag each, then the rest as one ` + "`" + batchKind + "`" + ` tag. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. The PostToolUse hook skips each record the channel sent, unless the session stops hearing the channel; a record's cursor moves once this session's transcript shows its tag, so a restarted channel repeats one it sent before then: skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
+const instructions = `This MCP server is cci's channel. After this session runs ` + "`cci subscribe`" + `, each record for its reader arrives as a <channel source="` + Source + `" seq kind lane> tag whose body is its compact line under an ` + "`@<time>`" + ` line, ` + "`<seq> <kind> <lane> [^<re>] [x<closed>] [<repo>#<pr>] [t:<topic>] [+] <text>`" + `; act on it as on a ` + "`cci tail`" + ` line. A ` + "`+`" + ` marks text or a body the line leaves out, and the read tool prints the record whole; a record addressed to its reader carries that rest under its line when it fits 2,000 bytes, so it needs no read. A ` + "`" + batchKind + "`" + ` tag carries several records, one compact line each: the newest per lane and topic, per pull request for head, and per pull request and check for github, within about 3 KB, ending in a ` + "`+N more`" + ` line naming the cci tail that reads the rest. A ` + "`" + skippedKind + "`" + ` tag counts the records addressed to the reader from before this channel started, which the inbox tool reads; a session ` + "`cci session register`" + ` keeps gets them instead, its owner records one tag each, then the rest as one ` + "`" + batchKind + "`" + ` tag. Answer a record with the post tool's ` + "`re`" + ` or ` + "`cci post --re <seq>`" + `, and close an ask, decide, hold or blocker with ` + "`resolves`" + `, ` + "`--resolves <seq>`" + ` or the close tool; post and close default ` + "`lane`" + ` to this window's. The PostToolUse hook skips each record the channel sent, unless the session stops hearing the channel; a record's cursor moves once this session's transcript shows its tag, so a restarted channel repeats one it sent before then: skip a seq you have already handled. Outside a subscribed session the channel is silent and needs nothing from you.`
 
 var (
 	errStale    = errors.New("subscription replaced")
@@ -604,12 +604,25 @@ func newest(records []store.Record) []store.Record {
 }
 
 type supersede struct {
-	kind        kinds.Kind
-	lane, topic string
-	pr          store.PR
+	kind                       kinds.Kind
+	lane, topic, commit, about string
+	pr                         store.PR
 }
 
 func supersedes(r store.Record) []supersede {
+	if r.Kind == kinds.Github {
+		key := supersede{kind: r.Kind, lane: r.Lane, topic: r.Topic, about: cmp.Or(r.Fields.Attrs["check"], r.Fields.Attrs["reviewer"])}
+		if len(r.Refs.PRs) == 0 {
+			key.commit = r.Fields.Commit
+			return []supersede{key}
+		}
+		keys := make([]supersede, len(r.Refs.PRs))
+		for i, pr := range r.Refs.PRs {
+			keys[i] = key
+			keys[i].pr = pr
+		}
+		return keys
+	}
 	if r.Kind == kinds.Head && len(r.Refs.PRs) > 0 {
 		keys := make([]supersede, len(r.Refs.PRs))
 		for i, pr := range r.Refs.PRs {

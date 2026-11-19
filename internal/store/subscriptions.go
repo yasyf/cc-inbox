@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -59,10 +60,16 @@ func (s Subscription) Filter() Filter {
 }
 
 // BatchFilter selects what the channel delivers together, never on arrival:
-// the records addressed to the reader of a batch kind, whether addressed as
-// the lane or as <reader>@<drive>.
+// the records of a batch kind addressed to the reader, whether addressed as
+// the lane or as <reader>@<drive>, and those its session's claims route to it.
 func (s Subscription) BatchFilter() Filter {
-	return Filter{Drive: s.Drive, Addressed: s.Reader, Kinds: s.Batch, ToKinds: s.Batch}
+	var unbatched []kinds.Kind
+	for _, route := range claimRoutes {
+		if k := kinds.Kind(route.kind); !slices.Contains(s.Batch, k) {
+			unbatched = append(unbatched, k)
+		}
+	}
+	return Filter{Drive: s.Drive, Addressed: s.Reader, ClaimedBy: s.Session, Kinds: s.Batch, ToKinds: s.Batch, Mute: unbatched}
 }
 
 func (s Subscription) BatchCursor() string {

@@ -923,6 +923,65 @@ func TestABatchKeepsTheNewestHeadPerPRWithinItsBudgetAndCountsTheRest(t *testing
 	noTag(t, tags, 3*batchWindow)
 }
 
+func TestABatchCarriesWhatItsSessionsClaimsRouteOfItsKinds(t *testing.T) {
+	st, clock := newStore(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 50*time.Millisecond
+	ctx := context.Background()
+	sub := batched(t, st, kinds.Github)
+	for _, key := range []string{"o/r#7", "o/r#8"} {
+		if _, err := st.Claim(ctx, store.Claim{Session: sub.Session, Rel: "landing", Kind: "pr", Key: key}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var relayed int64
+	relay := func(row store.Row) int64 {
+		relayed++
+		row.Origin, row.OriginSeq, row.At, row.Source = "feedfacefeedface", relayed, clock.Now(), "post"
+		if _, err := st.Apply(ctx, []store.Row{row}, nil); err != nil {
+			t.Fatal(err)
+		}
+		seq, err := st.MaxSeq(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	github := func(pr int, topic, check, outcome string) {
+		relay(store.Row{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: topic, Text: strings.Join(strings.Fields(fmt.Sprintf("o/r#%d %s %s", pr, check, outcome)), " "), Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: pr}}}, Fields: store.Fields{Outcome: outcome, Commit: "abc123", Attrs: map[string]string{"check": check}}})
+	}
+	github(7, "pull_request", "", "merged")
+	github(8, "pull_request", "", "merged")
+	github(7, "check", "build", "failure")
+	github(7, "check", "lint", "success")
+	github(9, "pull_request", "", "merged")
+	ejected := relay(store.Row{Drive: "trunk", Lane: "trunk", Kind: kinds.Ejected, Text: "o/r#7 failed in Trunk's merge queue", Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 7}}}, Fields: store.Fields{Outcome: "failed"}})
+	tags, stop := following(t, st, sub)
+	defer stop()
+	var batch string
+	for range 2 {
+		tag := nextTag(t, tags)
+		switch tag.meta["kind"] {
+		case batchKind:
+			batch = tag.content
+		case string(kinds.Ejected):
+			if tag.meta["seq"] != fmt.Sprint(ejected) {
+				t.Fatalf("ejection tag %+v, want #%d", tag.meta, ejected)
+			}
+		default:
+			t.Fatalf("tag %+v, want the batch and the ejection", tag.meta)
+		}
+	}
+	for _, want := range []string{"o/r#7 merged", "o/r#8 merged", "o/r#7 build failure", "o/r#7 lint success"} {
+		if !strings.Contains(batch, want) {
+			t.Fatalf("batch lacks %q: %q", want, batch)
+		}
+	}
+	if strings.Contains(batch, "o/r#9") || strings.Contains(batch, "Trunk") {
+		t.Fatalf("batch carries a record no claim routes to it as github: %q", batch)
+	}
+	noTag(t, tags, 3*batchWindow)
+}
+
 func TestACutSingleTagPointsAtTheReadToolInsteadOfAPath(t *testing.T) {
 	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond
