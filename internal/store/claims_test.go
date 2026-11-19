@@ -219,6 +219,7 @@ func TestASessionHearsWhatHappensToThePullRequestsAndBuildsItClaims(t *testing.T
 	theirs := ejection(kinds.Ejected, store.PR{Repo: "x/y", Number: 7})
 	queued := ejection(kinds.Queue, store.PR{Repo: "o/r", Number: 7})
 	later := ejection(kinds.Ejected, store.PR{Repo: "o/r", Number: 8})
+	landed := testutil.Post(t, st, store.Record{Drive: "trunk", Lane: "trunk", Kind: kinds.Queue, Text: "o/r#7 merged in Trunk's merge queue", Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 7}}}, Fields: store.Fields{Outcome: "merged"}}).Seq
 	var relayed int64
 	relay := func(row store.Row) int64 {
 		relayed++
@@ -306,14 +307,14 @@ func TestASessionHearsWhatHappensToThePullRequestsAndBuildsItClaims(t *testing.T
 			}
 		}
 	}
-	t.Run("a claim in the repo", func(t *testing.T) { heard(t, filter("repo"), ours, merged, passed, status) })
-	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs, merged, passed, approved, status) })
+	t.Run("a claim in the repo", func(t *testing.T) { heard(t, filter("repo"), ours, landed, merged, passed, status) })
+	t.Run("a bare number claims it in every repo", func(t *testing.T) { heard(t, filter("bare"), ours, theirs, landed, merged, passed, approved, status) })
 	t.Run("a claim on another kind", func(t *testing.T) { heard(t, filter("other")) })
 	t.Run("no claim", func(t *testing.T) { heard(t, filter("none")) })
 	t.Run("a release build claimed by number", func(t *testing.T) { heard(t, filter("number"), held, converged) })
 	t.Run("a release build claimed by URL", func(t *testing.T) { heard(t, filter("url"), held, converged) })
 	t.Run("a followed queue", func(t *testing.T) {
-		heard(t, filter("none", store.Follow{Drive: "trunk", Kinds: []kinds.Kind{kinds.Queue}}), queued)
+		heard(t, filter("none", store.Follow{Drive: "trunk", Kinds: []kinds.Kind{kinds.Queue}}), queued, landed)
 	})
 	t.Run("a claim made after the filter", func(t *testing.T) {
 		f := filter("late")

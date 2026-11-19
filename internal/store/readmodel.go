@@ -1433,12 +1433,15 @@ func (sel *modelSelection) claimBranch(v *modelView) (selected, proved bool) {
 	if v.kind == ejectedRoute.kind {
 		return named, true
 	}
-	if !named && !sel.f.commitPRs {
+	if !named && (v.kind == mergedRoute.kind || !sel.f.commitPRs) {
 		return false, true
 	}
 	var fields routedFields
 	if err := json.Unmarshal([]byte(sel.m.textOf(v.row).fields), &fields); err != nil {
 		return false, false
+	}
+	if v.kind == mergedRoute.kind {
+		return fields.Outcome == "merged", true
 	}
 	if slices.Contains(quietOutcomes, fields.Outcome) {
 		return false, true

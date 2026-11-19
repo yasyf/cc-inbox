@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A channel subscriber hears Trunk merging a pull request its session claims:
+  the `trunk` drive's `queue` record with outcome `merged` now routes to the
+  claimant, as `ejected` records already did. Before, only GitHub's own
+  `merged` record carried the news, and a subscription that batches `github`
+  never delivered it.
+
 - `cci post` takes a `release` record's `held` and `converged` outcomes, and
   a `github`, `queue` or `ejected` record keeps its source's own state, such
   as `merged` or `pending_failure`, instead of refusing every outcome but
