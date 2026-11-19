@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A channel tag no longer prints a `null` line under each github record: a
+  relayed record whose body is JSON `null` renders with no body.
+
 - A channel subscription that batches a kind no longer drops the records of
   that kind its session's claims route to it. With `--batch-kinds github`,
   GitHub's `merged`, check and review records for a claimed pull request

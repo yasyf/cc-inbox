@@ -163,9 +163,10 @@ func Attrs(r store.Record) string {
 
 // WithBody appends the record's JSON body, indented, on the lines after line,
 // or, for a body longer than store.MaxText, its size and the command that
-// prints it, as a long text leaves only its head and blob path.
+// prints it, as a long text leaves only its head and blob path. A JSON null
+// body, which relayed service records carry, is no body.
 func WithBody(line string, r store.Record) string {
-	if len(r.Body) == 0 {
+	if len(r.Body) == 0 || string(r.Body) == "null" {
 		return line
 	}
 	var b bytes.Buffer
