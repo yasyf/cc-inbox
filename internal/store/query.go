@@ -25,9 +25,10 @@ type Follow struct {
 
 var (
 	ejectedRoute  = claimRoute{drive: "trunk", kind: string(kinds.Ejected)}
+	mergedRoute   = claimRoute{drive: "trunk", kind: string(kinds.Queue)}
 	githubRoute   = claimRoute{drive: "github", kind: string(kinds.Github)}
 	releaseRoute  = claimRoute{drive: "release", kind: string(kinds.Release)}
-	claimRoutes   = []claimRoute{ejectedRoute, githubRoute, releaseRoute}
+	claimRoutes   = []claimRoute{ejectedRoute, mergedRoute, githubRoute, releaseRoute}
 	quietOutcomes = []string{"queued", "in_progress", "pending", "edited", "labeled", "unlabeled"}
 )
 
@@ -182,8 +183,8 @@ func (f Filter) where(self string, now time.Time) (string, []any) {
 			github = "(" + named + " OR EXISTS (SELECT 1 FROM record_commit_prs cp, claims WHERE cp.drive = records.drive AND cp.commit_sha = json_extract(records.fields, '$.commit') AND " + claimed("cp.pr") + "))"
 		}
 		build := "EXISTS (SELECT 1 FROM claims, json_each(records.refs, '$.builds') b WHERE claims.session = ? AND claims.kind = 'build' AND (claims.key = CAST(b.value AS TEXT) OR substr(CAST(b.value AS TEXT), -length(claims.key) - 8) = '/builds/' || claims.key))"
-		branches = append(branches, "((drive = ? AND kind = ? AND "+named+") OR (drive = ? AND kind = ? AND COALESCE(json_extract(fields, '$.outcome'), '') NOT IN ("+placeholders(len(quietOutcomes))+") AND "+github+") OR (drive = ? AND kind = ? AND "+build+"))")
-		params = append(params, ejectedRoute.drive, ejectedRoute.kind, f.ClaimedBy, githubRoute.drive, githubRoute.kind)
+		branches = append(branches, "((drive = ? AND kind = ? AND "+named+") OR (drive = ? AND kind = ? AND json_extract(fields, '$.outcome') = 'merged' AND "+named+") OR (drive = ? AND kind = ? AND COALESCE(json_extract(fields, '$.outcome'), '') NOT IN ("+placeholders(len(quietOutcomes))+") AND "+github+") OR (drive = ? AND kind = ? AND "+build+"))")
+		params = append(params, ejectedRoute.drive, ejectedRoute.kind, f.ClaimedBy, mergedRoute.drive, mergedRoute.kind, f.ClaimedBy, githubRoute.drive, githubRoute.kind)
 		for _, outcome := range quietOutcomes {
 			params = append(params, outcome)
 		}
