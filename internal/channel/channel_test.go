@@ -907,7 +907,7 @@ func TestABatchKeepsTheNewestHeadPerPRWithinItsBudgetAndCountsTheRest(t *testing
 		}
 	}
 	lines := strings.Split(tag.content, "\n")
-	more := regexp.MustCompile(`^\+(\d+) more; cci tail --to owner-relay --kind head,note --since (\d+) reads them$`).FindStringSubmatch(lines[len(lines)-1])
+	more := regexp.MustCompile(`^\+(\d+) more; cci tail --to owner-relay --claimed --kind head,note --since (\d+) reads them$`).FindStringSubmatch(lines[len(lines)-1])
 	if more == nil {
 		t.Fatalf("batch ends in %q, want a +N more line", lines[len(lines)-1])
 	}
@@ -947,7 +947,7 @@ func TestABatchCarriesWhatItsSessionsClaimsRouteOfItsKinds(t *testing.T) {
 		return seq
 	}
 	github := func(pr int, topic, check, outcome string) {
-		relay(store.Row{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: topic, Text: strings.Join(strings.Fields(fmt.Sprintf("o/r#%d %s %s", pr, check, outcome)), " "), Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: pr}}}, Fields: store.Fields{Outcome: outcome, Commit: "abc123", Attrs: map[string]string{"check": check}}})
+		relay(store.Row{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: topic, Text: strings.Join(strings.Fields(fmt.Sprintf("o/r#%d %s %s", pr, check, outcome)), " "), Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: pr}}}, Fields: store.Fields{Outcome: outcome, Commit: fmt.Sprintf("head-of-%d", pr), Attrs: map[string]string{"check": check}}})
 	}
 	github(7, "pull_request", "", "merged")
 	github(8, "pull_request", "", "merged")

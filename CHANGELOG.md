@@ -6,7 +6,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `cci tail --claimed` also reads what the session's claims route to it, and
+  a batch tag's `+N more` line names it, so the rest of a batch that carried
+  github records for a claimed pull request is one command away.
+
 ### Fixed
+
+- A channel that goes deaf rewinds its session's hook cursors to the last
+  record the session heard, so the PostToolUse hook delivers what the channel
+  sent unheard instead of skipping it for good.
+- A deaf channel past its hourly reconnects posts its disconnect within the
+  400-character text limit instead of failing the post.
+- A channel stopped by its caller ends without an error, even when the stop
+  cancels a cursor write in flight.
 
 - A channel's batch cursor follows the store's head while its batch is empty,
   so a batch carries only records from after its last flush. Before, a cursor

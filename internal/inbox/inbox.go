@@ -474,6 +474,23 @@ func seedOf(ctx context.Context, st *store.Store, seed, drive string, own int64,
 	return st.MaxSeq(ctx)
 }
 
+// Rewind moves cursor, and the addressed and direct cursors a tail keeps
+// beside it, back to seq wherever they stand past it, so the next tail through
+// cursor reads what came after seq again.
+func Rewind(ctx context.Context, st *store.Store, cursor, drive string, seq int64) error {
+	var moves []store.CursorMove
+	for _, name := range []string{cursor, addressedCursor(cursor), directCursor(cursor)} {
+		at, _, err := st.Cursor(ctx, name, drive)
+		if err != nil {
+			return err
+		}
+		if at > seq {
+			moves = append(moves, store.CursorMove{Name: name, Drive: drive, Seq: seq, Exact: true})
+		}
+	}
+	return st.MoveCursors(ctx, moves)
+}
+
 func addressedCursor(cursor string) string {
 	return cursor + "#addressed"
 }

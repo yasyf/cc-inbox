@@ -277,6 +277,13 @@ func deafened(ctx context.Context, st *store.Store, window store.Window, t tag) 
 	if err := st.MoveCursors(ctx, []store.CursorMove{{Name: sub.SentCursor(), Drive: sub.Drive, Seq: heard, Exact: true}}); err != nil {
 		return store.Registration{}, false, err
 	}
+	floor, _, err := st.Cursor(ctx, sub.FloorCursor(), sub.Drive)
+	if err != nil {
+		return store.Registration{}, false, err
+	}
+	if err := inbox.Rewind(ctx, st, store.LaneCursor(store.PeerKey{Session: sub.Session}), sub.Drive, max(heard, floor)); err != nil {
+		return store.Registration{}, false, err
+	}
 	if _, open, err := openDisconnect(ctx, st, sub); err != nil || open {
 		return store.Registration{}, false, err
 	}
@@ -294,7 +301,7 @@ func deafened(ctx context.Context, st *store.Store, window store.Window, t tag) 
 		checked = errors.Join(err, counted)
 		switch {
 		case up && spent:
-			text += fmt.Sprintf("; cci typed no reconnect, since it types at most %d an hour into tmux session %s", reconnectsPerHour, r.Alias)
+			text = lost + fmt.Sprintf("; cci typed no reconnect, since it types at most %d an hour into tmux session %s", reconnectsPerHour, r.Alias)
 		case up:
 			owe = true
 			text = fmt.Sprintf("%s, so cci types %s into tmux session %s once its turn ends, and its next channel replays from the record it last heard", lost, hook.ReconnectCommand, r.Alias)
@@ -570,7 +577,7 @@ func (b *batch) flush(ctx context.Context) error {
 		names[j] = string(k)
 	}
 	content := batchContent(records, b.st.Now(), func(more int, since int64) string {
-		return fmt.Sprintf("+%d more; cci tail --to %s --kind %s --since %d reads them", more, f.Addressed, strings.Join(names, ","), since)
+		return fmt.Sprintf("+%d more; cci tail --to %s --claimed --kind %s --since %d reads them", more, f.Addressed, strings.Join(names, ","), since)
 	})
 	last := records[len(records)-1].Seq
 	b.sent.owe(tag{kind: batchKind, seq: last}, store.CursorMove{Name: b.cursor, Drive: f.Drive, Seq: last})
@@ -718,10 +725,10 @@ func follow(ctx context.Context, st *store.Store, sub store.Subscription, channe
 		}
 		return l.delivered(watchCtx, sub, r.Seq)
 	})
-	stop()
-	if errors.Is(err, errStale) {
+	if errors.Is(err, errStale) || watchCtx.Err() != nil {
 		err = nil
 	}
+	stop()
 	return errors.Join(err, <-changed, <-batched)
 }
 
