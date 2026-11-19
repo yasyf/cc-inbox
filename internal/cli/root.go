@@ -214,6 +214,7 @@ type readFlags struct {
 	budget       int
 	width        int
 	json         bool
+	claimed      bool
 }
 
 func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, budget int) {
@@ -230,6 +231,7 @@ func (f *readFlags) register(cmd *cobra.Command, since string, filters bool, bud
 		cmd.Flags().StringVar(&f.target, "target", "", "only records about this release target")
 		cmd.Flags().Var((*prFlag)(&f.pr), "pr", "only records about this pull request: a number, owner/repo#N, or URL")
 		cmd.Flags().StringVar(&f.origin, "origin", "", "only records written on this node (cci node prints its id)")
+		cmd.Flags().BoolVar(&f.claimed, "claimed", false, "also read what this session's claims route to it: ejections, merges, github and release records of the pull requests and builds it claims")
 	}
 	cmd.Flags().StringVar(&f.since, "since", since, "a seq (#123 or 123), a duration (2h, 5d, 1w), a Pacific clock time (9:00 AM, 21:30, 12:0x), a date (2026-10-26), or an RFC3339 time")
 	cmd.Flags().Int64Var(&f.sinceSeq, "since-seq", 0, "read after this internal store sequence")
@@ -272,6 +274,12 @@ func (f *readFlags) filterPeer(ctx context.Context, st *store.Store, peer store.
 	out := store.Filter{Drive: drive, Origin: f.origin, Lanes: f.lanes, LaneAliases: true, To: f.to, For: f.reader, Topics: f.topics, Stack: f.stack, Target: f.target, PR: f.pr}
 	if f.to == "" {
 		out.Peer = peer.String()
+	}
+	if f.claimed {
+		if peer.Session == "" {
+			return store.Filter{}, errors.New("--claimed reads a session's claims, and no session runs this command")
+		}
+		out.ClaimedBy = peer.Session
 	}
 	if out.Kinds, err = kinds.ParseAll(f.kinds); err != nil {
 		return store.Filter{}, err

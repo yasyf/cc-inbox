@@ -48,14 +48,15 @@ func TestAPostTheBusCannotStoreTellsItsSenderAndTheNextPostStoresIt(t *testing.T
 	if !errors.As(err, &down) || down.Path == "" || !strings.Contains(err.Error(), "NOT stored yet") {
 		t.Fatalf("a post the bus could not store = %v; want a BusDown naming the kept post", err)
 	}
+	t.Setenv("CLAUDE_LONG_RUNNING_DRIVE", "d1")
 	_, err = run(t, "post", "--lane", "lane-a", "--kind", "note", "--text", "no drive named")
-	if !errors.As(err, &down) || down.Path != "" || !strings.Contains(err.Error(), "repost it with --lane and --drive") {
-		t.Fatalf("a post naming no --drive = %v; want a BusDown that keeps nothing and says to repost", err)
+	if !errors.As(err, &down) || down.Path == "" {
+		t.Fatalf("a post naming no --drive = %v; want a BusDown keeping it on the drive it resolved", err)
 	}
 
 	release()
 	out, err := run(t, "post", "--drive", "d1", "--lane", "root", "--kind", "note", "--text", "after the outage")
-	if err != nil || !strings.Contains(out, "stored 1 post(s) kept while the bus was down") {
+	if err != nil || !strings.Contains(out, "stored 2 post(s) kept while the bus was down") {
 		t.Fatalf("the first post after the outage = %q, %v; want it to store the kept post", out, err)
 	}
 	if kept, _ := filepath.Glob(filepath.Join(home, "unsent", "*")); len(kept) != 0 {
