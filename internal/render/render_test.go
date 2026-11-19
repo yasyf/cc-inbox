@@ -20,6 +20,9 @@ func TestWithBodyIndentsTheBodyUnderTheLine(t *testing.T) {
 	if got := render.WithBody("#4 line", store.Record{Seq: 4}); got != "#4 line" {
 		t.Fatalf("WithBody(no body) = %q", got)
 	}
+	if got := render.WithBody("#5 line", store.Record{Seq: 5, Body: []byte("null")}); got != "#5 line" {
+		t.Fatalf("WithBody(null body) = %q", got)
+	}
 }
 
 // TestWithBodyNamesALongBodyInsteadOfInliningIt: a 20 KB report body reached a
