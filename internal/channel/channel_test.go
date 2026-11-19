@@ -982,6 +982,51 @@ func TestABatchCarriesWhatItsSessionsClaimsRouteOfItsKinds(t *testing.T) {
 	noTag(t, tags, 3*batchWindow)
 }
 
+func TestABatchCarriesNothingFromBeforeItsLastEmptyFlush(t *testing.T) {
+	st, clock := newStore(t)
+	idle, interval, batchWindow = 10*time.Millisecond, 5*time.Millisecond, 20*time.Millisecond
+	ctx := context.Background()
+	sub := batched(t, st, kinds.Github)
+	var relayed int64
+	github := func(outcome string) int64 {
+		relayed++
+		row := store.Row{Drive: "github", Lane: "github", Kind: kinds.Github, Topic: "check", Text: "o/r#7 build " + outcome, Refs: store.Refs{PRs: []store.PR{{Repo: "o/r", Number: 7}}}, Fields: store.Fields{Outcome: outcome, Commit: "abc123", Attrs: map[string]string{"check": "build"}}, Origin: "feedfacefeedface", OriginSeq: relayed, At: clock.Now(), Source: "post"}
+		if _, err := st.Apply(ctx, []store.Row{row}, nil); err != nil {
+			t.Fatal(err)
+		}
+		seq, err := st.MaxSeq(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return seq
+	}
+	old := github("failure")
+	tags, stop := following(t, st, sub)
+	defer stop()
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		at, _, err := st.Cursor(ctx, sub.BatchCursor(), sub.Drive)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if at >= old {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("batch cursor at #%d, want it past #%d once a flush finds nothing", at, old)
+		}
+		time.Sleep(batchWindow)
+	}
+	if _, err := st.Claim(ctx, store.Claim{Session: sub.Session, Rel: "landing", Kind: "pr", Key: "o/r#7"}); err != nil {
+		t.Fatal(err)
+	}
+	fresh := github("success")
+	tag := nextTag(t, tags)
+	if tag.meta["kind"] != batchKind || tag.meta["seq"] != fmt.Sprint(fresh) || !strings.Contains(tag.content, "o/r#7 build success") || strings.Contains(tag.content, "o/r#7 build failure") {
+		t.Fatalf("tag %+v %q, want a batch of #%d alone", tag.meta, tag.content, fresh)
+	}
+	noTag(t, tags, 3*batchWindow)
+}
+
 func TestACutSingleTagPointsAtTheReadToolInsteadOfAPath(t *testing.T) {
 	st, _ := newStore(t)
 	idle, interval = 10*time.Millisecond, 5*time.Millisecond

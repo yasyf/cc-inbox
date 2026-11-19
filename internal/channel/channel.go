@@ -550,9 +550,20 @@ func (b *batch) flush(ctx context.Context) error {
 	if f.After, err = b.sent.position(ctx, b.cursor, f.Drive); err != nil {
 		return err
 	}
-	records, err := b.st.Query(ctx, f)
-	if err != nil || len(records) == 0 {
+	head, err := b.st.MaxSeq(ctx)
+	if err != nil {
 		return err
+	}
+	f.Before = head + 1
+	records, err := b.st.Query(ctx, f)
+	if err != nil {
+		return err
+	}
+	if len(records) == 0 {
+		if head <= f.After {
+			return nil
+		}
+		return b.sent.pass(ctx, store.CursorMove{Name: b.cursor, Drive: f.Drive, Seq: head})
 	}
 	names := make([]string, len(f.Kinds))
 	for j, k := range f.Kinds {

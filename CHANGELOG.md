@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A channel's batch cursor follows the store's head while its batch is empty,
+  so a batch carries only records from after its last flush. Before, a cursor
+  that sat still while nothing matched replayed everything since then the
+  moment something did, such as a new claim or a release that widened the
+  batch: one session got 22 hours of github records in one tag.
+
 - A channel tag no longer prints a `null` line under each github record: a
   relayed record whose body is JSON `null` renders with no body.
 
