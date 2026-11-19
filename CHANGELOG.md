@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A channel subscription that batches a kind no longer drops the records of
+  that kind its session's claims route to it. With `--batch-kinds github`,
+  GitHub's `merged`, check and review records for a claimed pull request
+  reached neither the on-arrival stream nor the batch; the batch tag now
+  carries them, keeping the newest github line per pull request and check
+  instead of one per topic.
+
 - A channel subscriber hears Trunk merging a pull request its session claims:
   the `trunk` drive's `queue` record with outcome `merged` now routes to the
   claimant, as `ejected` records already did. Before, only GitHub's own
