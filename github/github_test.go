@@ -123,6 +123,13 @@ func TestRecordShapes(t *testing.T) {
 			map[string]string{"check": "lint", "id": "7001", "repo": "acme/app"},
 		},
 		{
+			"a held review carries its verdict", "check_run",
+			`{"action":"completed","check_run":{"id":7003,"name":"ai-review","head_sha":"abc1234567890","conclusion":"neutral","details_url":"https://ci/3","completed_at":"2026-11-03T14:42:00Z","output":{"title":"🛑 Held — 1 blocking open"},"pull_requests":[{"number":45700}]},"repository":{"full_name":"acme/app"}}`,
+			"neutral", "abc1234567890", "acme/app abc1234567 ai-review neutral: 🛑 Held — 1 blocking open",
+			[]string{"acme/app#45700"},
+			map[string]string{"check": "ai-review", "id": "7003", "repo": "acme/app", "title": "🛑 Held — 1 blocking open"},
+		},
+		{
 			"a squash landing on the default branch", "push", squashed, "pushed", "def4567890123",
 			"acme/app dev pushed def4567890 over 0987654321", nil,
 			map[string]string{"before": "0987654321abc", "branch": "dev", "repo": "acme/app"},
