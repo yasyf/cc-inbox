@@ -93,14 +93,17 @@ type reviewEvent struct {
 type checkRunEvent struct {
 	Action   string `json:"action"`
 	CheckRun struct {
-		ID           int64     `json:"id"`
-		Name         string    `json:"name"`
-		HeadSHA      string    `json:"head_sha"`
-		Status       string    `json:"status"`
-		Conclusion   string    `json:"conclusion"`
-		DetailsURL   string    `json:"details_url"`
-		StartedAt    time.Time `json:"started_at"`
-		CompletedAt  time.Time `json:"completed_at"`
+		ID          int64     `json:"id"`
+		Name        string    `json:"name"`
+		HeadSHA     string    `json:"head_sha"`
+		Status      string    `json:"status"`
+		Conclusion  string    `json:"conclusion"`
+		DetailsURL  string    `json:"details_url"`
+		StartedAt   time.Time `json:"started_at"`
+		CompletedAt time.Time `json:"completed_at"`
+		Output      struct {
+			Title string `json:"title"`
+		} `json:"output"`
 		PullRequests []struct {
 			Number int `json:"number"`
 		} `json:"pull_requests"`
@@ -224,6 +227,10 @@ func Record(event, id, drive string, body []byte) (service.Record, bool, error) 
 		r.Topic = "check"
 		r.Attrs = map[string]string{"check": c.Name, "id": fmt.Sprint(c.ID), "repo": e.Repository.FullName}
 		r.Text = fmt.Sprintf("%s %s %s %s", e.Repository.FullName, short(c.HeadSHA), c.Name, r.Outcome)
+		if c.Output.Title != "" {
+			r.Attrs["title"] = c.Output.Title
+			r.Text += ": " + c.Output.Title
+		}
 		return r, true, nil
 	case "status":
 		var e statusEvent
